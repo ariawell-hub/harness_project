@@ -1,0 +1,34 @@
+{
+  "item": "merge-queue",
+  "summary": "개인 계정 소유 비공개 리포에서는 merge queue를 쓸 수 없다(GitHub 문서). 설계서 10.3절의 대안(최신 브랜치 필수 + 새 head에서 check 재실행)이 같은 역할을 하므로 2단계 착수에는 영향이 없다. 10.3절의 '확인이 필요하다' 문구는 step6에서 확정 문구로 고친다.",
+  "cases": [
+    {
+      "name": "GitHub 문서의 가용 범위",
+      "expected": "개인 계정 + GitHub Pro 비공개 리포에서 merge queue를 쓸 수 있는지 확인",
+      "observed": "문서 원본의 가용 범위 조각: 'Pull request merge queues are available in any public repository owned by an organization, or in private repositories owned by organizations using GitHub Enterprise Cloud.' 개인 계정 리포는 대상이 아니다. 렌더링된 페이지 본문에는 이 문장이 보이지 않고 frontmatter의 product 항목으로만 들어간다.",
+      "verdict": "fail",
+      "evidence": [
+        "https://raw.githubusercontent.com/github/docs/main/data/reusables/gated-features/merge-queue.md",
+        "https://raw.githubusercontent.com/github/docs/main/content/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue.md",
+        "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue"
+      ]
+    },
+    {
+      "name": "시험 리포 API 상태",
+      "expected": "문서와 일치(소유자가 User이고 merge queue 없음)",
+      "observed": "GraphQL repository(owner: ariawell-hub, name: harness-q20-lab): isPrivate=true, owner.__typename=User, mergeQueue(branch: main)=null. REST rulesets와 rules/branches/main은 빈 배열. 2026-11-11 봇 토큰으로 조회.",
+      "verdict": "fail",
+      "evidence": [
+        "gh api graphql -f query='query { repository(owner:\"ariawell-hub\", name:\"harness-q20-lab\") { isPrivate owner { __typename } mergeQueue(branch:\"main\") { id } } }'",
+        "gh api repos/ariawell-hub/harness-q20-lab/rulesets"
+      ]
+    },
+    {
+      "name": "제작자 설정 화면 확인",
+      "expected": "브랜치 보호나 ruleset 화면에 'Require merge queue'가 없거나 켤 수 없다",
+      "observed": "제작자에게 확인을 요청했다(대화 2026-11-11). 답을 받으면 이 사례를 갱신한다. 문서 근거로 판정은 이미 정해졌다.",
+      "verdict": "n/a",
+      "evidence": []
+    }
+  ]
+}

@@ -50,6 +50,7 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-11: 계획 작성(대화 세션). 시험 리포 초기 상태를 봇 API로 확인했다.
+- 2026-11-11 step0: `lab/q20/deploy.ts`·`report.ts`와 테스트 8개(로컬 bare 원격으로 기본·overlay 모드) 작성. 테스트를 구현과 함께 써서 먼저 실패한 기록은 없다. 기준 배포(시험 리포 PR #1, squash 병합) 완료. merge queue 결과 기록. 제작자 설정 화면 확인은 요청 중.
 
 ## 의사결정 로그
 
@@ -61,6 +62,8 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 ## 발견 사항
 
 - 시험 리포 초기 상태(봇 API, 2026-11-11): 자동 병합 꺼짐, head 브랜치 자동 삭제 꺼짐, 필수 체크 없음, environment 없음. 봇은 admin이 아니라 승인 설정·Actions 권한은 볼 수 없다. → 처리: 해당 없음(열린 질문의 제작자 준비 항목으로 요청)
+- merge queue 가용 범위는 GitHub 문서의 렌더링된 본문에 없고, 문서 원본의 gated-features 조각에만 있다. 개인 계정 리포는 대상이 아니다. → 처리: [lab/q20/results/merge-queue.json](../../../../lab/q20/results/merge-queue.json), 설계서 10.3절 문구는 step6에서 고친다
+- `node scripts/harness.ts run --help`가 도움말을 출력하지 않고 runner를 그대로 시작한다. 알 수 없는 플래그를 무시하기 때문이다. 이 세션에서 실수로 runner가 #4를 선점했다. → 처리: TD-17
 
 ## 열린 질문
 
@@ -78,6 +81,11 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 - 명령: `node lab/q20/report.ts --all`
 - 결과 요약(항목 | 판정 | 근거): step마다 채운다.
 
+| 항목        | 판정 | 근거                                                                               |
+| ----------- | ---- | ---------------------------------------------------------------------------------- |
+| merge-queue | fail | 개인 계정 리포는 대상 아님(GitHub 문서). 10.3절 대안이 있어 2단계 영향 없음(step0) |
+
 ## 다음 할 일
 
-- step0 lab-scaffold
+- step1 patch-id(제작자 준비 없이 가능). 그 전에 제작자에게 시험 리포 설정(자동 병합, head 브랜치 자동 삭제, Actions 권한)과 merge queue 설정 화면 확인을 받는다.
+- step2 전에 environment 4개와 가짜 시크릿을 요청한다.
