@@ -19,6 +19,7 @@
       "Read(./.env)",
       "Read(./.env.*)",
       "Read(~/.config/gh/**)",
+      "Read(~/AppData/Roaming/GitHub CLI/**)",
       "Read(~/.git-credentials)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
