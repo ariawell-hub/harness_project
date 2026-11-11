@@ -4,7 +4,9 @@
     {
       "step": 0,
       "name": "main-sync",
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-11-11T20:49:47+09:00",
+      "summary": "lib/git.ts에 fastForwardMain(mainRoot, remote, branch): MainSync(updated|up-to-date|skipped+reason, 예외 없음) 추가. start.ts는 fetch → fastForwardMain → loadConfig 재로드 → ① → '## ② 정리'(첫 줄 describeMainSync 결과, 다음 worktree 정리 '- 병합된 worktree: 없음') → ③. runner syncMain은 호출만. 테스트 scripts/test/start.test.ts(advanceRemote: bare 원격 별도 clone에 push 후 fetch, runStart: HARNESS_FAKE_GH로 harness.ts start subprocess) — step1은 여기에 claim 해제 테스트를 더하고 ② 절에 결과 줄을 추가하면 된다. TD-17 등록."
     },
     {
       "step": 1,

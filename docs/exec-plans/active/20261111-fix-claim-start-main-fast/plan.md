@@ -69,6 +69,11 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 
 - 2026-11-11 20:47 계획 작성(runner-1 무인 세션). 코드 변경 없음. step 2개로 나눴다. 이 세션에서는 `git ls-remote`(네트워크)가 권한 설정으로 거부되어 실제 원격의 claim 현황은 확인하지 못했다(계획에는 영향 없음).
 - 2026-11-11T20:49:44+09:00 계획 작성 완료
+- 2026-11-11 step0 main-sync(runner-1 무인 세션)
+  - 먼저 실패한 테스트 1: `node --test scripts/test/start.test.ts` → 파일 전체 실패(`lib/git.ts`에 `fastForwardMain` export 없음).
+  - `fastForwardMain`만 구현한 뒤 같은 명령: 단위 6개 통과, `start` 통합 3개 실패. 실패 요지: 로컬 main HEAD ≠ `origin/main`(당기지 않음), 출력에 "harness.config.json github.owner(제작자 계정)가 비어 있어" 경고 재현, `## ② 정리`·`- main:` 줄 없음. Issue #4 증상 재현 확인.
+  - `start.ts`(fetch → fast-forward → 설정 재로드 → ①②③, ② 첫 줄에 main 동기화 결과)와 runner `syncMain`(`fastForwardMain` 호출만) 변경 뒤 `node --test scripts/test/start.test.ts scripts/test/runner.test.ts` 11개 모두 통과.
+  - 문서: `AGENTS.md` 세션 시작 절차 2번, `docs/harness/architecture.md` `lib/git.ts` 행, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md` TD-17 등록.
 
 ## 의사결정 로그
 
@@ -84,7 +89,9 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 ## 발견 사항
 
 - `start`의 ② 정리(`cleanupMerged`)는 이미 `releaseClaim`을 부르지만, 마지막 step의 worktree가 로컬에 남아 깨끗하고 PR이 병합된 경우에만 동작한다. Issue 본문의 "runner에서만 호출"보다 "조건이 좁아 대화형 경로를 놓친다"가 정확한 원인이다 → 처리: 해당 없음(step1에서 닫힌 Issue 기준 정리로 보완)
-- runner는 시작할 때 읽은 `harness.config.json`(`runRunner`의 `cfg`)을 끝까지 쓴다. 매 바퀴 `syncMain`으로 main을 당겨도 설정 변경은 runner를 다시 시작해야 반영된다 → 처리: TD-17 (step0이 tech-debt-tracker에 등록한다. 번호가 이미 쓰였으면 다음 빈 번호로 고친다)
+- runner는 시작할 때 읽은 `harness.config.json`(`runRunner`의 `cfg`)을 끝까지 쓴다. 매 바퀴 `syncMain`으로 main을 당겨도 설정 변경은 runner를 다시 시작해야 반영된다 → 처리: TD-17 (step0에서 등록. 번호는 비어 있었다)
+- 기존 runner `syncMain`은 `isClean`(git 실패 시 예외)을 먼저 불러 git status가 실패하면 runner 바퀴가 예외로 끊길 수 있었다. `fastForwardMain`은 모든 git 실패를 `skipped`로 돌려주므로 이 경우 조용히 넘어간다. 판정 순서도 "브랜치 → 깨끗함"으로 바뀌었지만 결과(당김/안 당김)는 같다 → 처리: 해당 없음
+- `start`는 당긴 뒤 설정을 다시 읽으므로, 원격 main의 `harness.config.json`이 깨져 있으면 재로드에서 `ConfigError`로 끝난다. 사람이 손으로 pull 한 뒤 `start`를 실행한 것과 같은 결과이고, 메시지에 파싱·검증 실패 내용이 나온다 → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -98,7 +105,8 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
   - main fast-forward: step0 `scripts/test/start.test.ts`. 원격이 앞서면 로컬 main HEAD == `origin/main`, 미커밋 변경·다른 브랜치·로컬 전용 커밋이면 HEAD가 그대로이고 출력에 이유가 있다.
   - 설정 재로드: step0 통합 테스트. 로컬 설정의 `github.owner`가 비어 있고 원격 main에서 채워졌을 때 `start` 출력에 owner 경고가 없다.
 - 병합 뒤 실제 리포 확인(대화 세션, 선택): `node scripts/harness.ts start` 출력의 ② 절, `git ls-remote --heads origin 'claim/*'`.
-- 결과: 계획 단계라 아직 없음.
+- 결과
+  - step0: `scripts/test/start.test.ts` — `fastForwardMain` 단위 (a) 당김 (b) 최신 (c) 미커밋 변경 (d) 다른 브랜치·detached (e) 로컬 전용 커밋(앞섬·갈라짐, 커밋 수 표시) + 원격 브랜치 없음, `start` 통합(당김 + owner 경고 없음, 미커밋 변경이면 이유 출력·HEAD 그대로, 최신) 통과. 통합 테스트는 고치기 전 `start.ts`에서 실패함을 확인(진행 로그). `node scripts/harness.ts check` 통과. doc-lint R8 경고(비차단): `docs/harness/architecture.md`는 이번에 갱신했고, `docs/harness/workflow.md`는 `start` 명령만 적고 절차를 풀어 쓰지 않아 갱신할 내용이 없고, ADR-0001·0002·0003·0005는 이 변경과 관계없다.
 
 ## 다음 할 일
 
