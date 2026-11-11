@@ -6,8 +6,8 @@
   "github": {
     "remote": "origin",
     "defaultBranch": "main",
-    "owner": "",
-    "bot": "",
+    "owner": "ariawell-hub",
+    "bot": "ariawell247",
     "priorityLabels": ["priority:high", "priority:medium", "priority:low"],
     "needsHumanLabel": "needs-human"
   },
