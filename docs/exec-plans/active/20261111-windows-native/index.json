@@ -1,0 +1,9 @@
+{
+  "plan": "20261111-windows-native",
+  "steps": [
+    { "step": 0, "name": "windows-design", "status": "pending" },
+    { "step": 1, "name": "windows-runtime", "status": "pending" },
+    { "step": 2, "name": "guard-dialects", "status": "pending" },
+    { "step": 3, "name": "guard-windows-rules", "status": "pending" }
+  ]
+}
