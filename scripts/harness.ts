@@ -234,7 +234,7 @@ async function main(argv: string[]): Promise<number> {
         noWait: flag('no-wait'),
       });
       log(`runner 종료: ${stop}`);
-      return stop === 'error' || stop === 'locked' ? 1 : 0;
+      return stop === 'error' || stop === 'locked' || stop === 'agent-missing' ? 1 : 0;
     }
     case 'init':
       return init(repoInfo(cwd).root, str('profile') ?? '', {

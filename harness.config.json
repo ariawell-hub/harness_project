@@ -89,6 +89,7 @@
     ".codex/**",
     "CODEOWNERS",
     ".gitignore",
+    ".gitattributes",
     "docs/harness/**",
     ".mcp.json",
     ".githooks/**",

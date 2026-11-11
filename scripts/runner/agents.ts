@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { HarnessConfig } from '../lib/config.ts';
-import { run, type ExecResult } from '../lib/exec.ts';
+import { resolveExecutable, run, type ExecResult, type ExecutableProbe } from '../lib/exec.ts';
 import { harnessStateDir, type RepoInfo } from '../lib/git.ts';
 
 export type AgentTool = 'claude' | 'codex' | 'fake';
@@ -22,6 +22,40 @@ export interface SessionResult {
 
 const ENV_FAILURE =
   /usage limit|rate[ _-]?limit|limit reached|hit your (usage )?limit|too many requests|\b429\b|overloaded|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network error|service unavailable|\b503\b|\b529\b/i;
+
+const realProbe = (): ExecutableProbe => ({
+  platform: process.platform,
+  env: process.env,
+  exists: existsSync,
+});
+
+/**
+ * runner가 띄울 에이전트 CLI 실행 파일을 확인한다(ADR-0005).
+ * Windows에서 npm 래퍼(.cmd)뿐이면 셸 없이 실행할 수 없으므로 오류를 돌려준다.
+ */
+export function resolveAgentCommand(
+  tool: AgentTool,
+  cfg: HarnessConfig,
+  probe: ExecutableProbe = realProbe(),
+): { path: string } | { error: string } {
+  if (tool === 'fake') return { path: process.execPath };
+  const def = cfg.agents[tool];
+  if (!def) return { error: `harness.config.json agents.${tool}가 없다` };
+  const r = resolveExecutable(def.cmd, probe);
+  if ('error' in r) {
+    return {
+      error: `${r.error}. harness.config.json agents.${tool}.cmd에 .exe 경로를 적어라(docs/decisions/ADR-0005-windows-native.md)`,
+    };
+  }
+  return r;
+}
+
+/** 세션용 실행 파일 경로. runner 시작 때 확인했으므로 여기서 오류면 시작 확인을 건너뛴 것이다 */
+function agentPath(tool: 'claude' | 'codex', cfg: HarnessConfig): string {
+  const r = resolveAgentCommand(tool, cfg);
+  if ('error' in r) throw new Error(r.error);
+  return r.path;
+}
 
 export function isEnvFailure(r: ExecResult): boolean {
   if (r.timedOut || r.code === 0) return false;
@@ -71,7 +105,7 @@ export async function runSession(
     const def = cfg.agents.claude;
     if (!def) throw new Error('harness.config.json agents.claude가 없다');
     const settings = writeClaudeRunnerSettings(main, cfg);
-    r = await run(def.cmd, [...def.args, '--settings', settings], {
+    r = await run(agentPath('claude', cfg), [...def.args, '--settings', settings], {
       cwd: worktree,
       input: prompt,
       timeoutMs,
@@ -82,7 +116,7 @@ export async function runSession(
     if (!def) throw new Error('harness.config.json agents.codex가 없다');
     // worktree의 git 메타데이터는 공유 git-dir에 있으므로 쓰기 허용 경로에 넣는다
     const roots = `sandbox_workspace_write.writable_roots=[${JSON.stringify(main.commonDir)}]`;
-    r = await run(def.cmd, [...def.args, '-c', roots, '-C', worktree, '-'], {
+    r = await run(agentPath('codex', cfg), [...def.args, '-c', roots, '-C', worktree, '-'], {
       cwd: worktree,
       input: prompt,
       timeoutMs,
