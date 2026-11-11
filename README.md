@@ -21,6 +21,7 @@
    - 에이전트 전용 봇 계정 + 이 리포 한정 토큰(contents·pull requests·issues 쓰기, 90일 이하). GitHub Pro.
    - **에이전트가 실행되는 Mac에서 제작자 계정의 `gh` 로그인을 지운다**(E5): `gh auth logout`. 제작자 승인은 GitHub 웹·모바일에서만.
    - 원격 리포를 만들고 main을 push한 뒤 브랜치 보호: PR 필수, force push·삭제 금지, 관리자 우회 없음, 최신 브랜치 필수, stale 승인 무효화.
+   - 승인 설정: 필수 승인 0, "Require approval of the most recent reviewable push" **끔**. 켜 두면 필수 승인이 0이어도 모든 PR에 사람 승인이 필요해 자동 병합이 멈춘다(설계서 0.2절).
    - Actions: 기본 권한 읽기 전용, "Actions가 PR 승인" 끔, 리포 수준 시크릿 없음. 자동 병합 허용, head 브랜치 자동 삭제.
    - 필수 상태 체크 등록: `check`, `plan-gate`.
    - 라벨: `needs-human`, `priority:high|medium|low`, `size:small|medium|large`, `risk:low|high`, `bug`.
