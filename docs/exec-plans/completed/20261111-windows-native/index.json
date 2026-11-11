@@ -22,7 +22,8 @@
     {
       "step": 3,
       "name": "guard-windows-rules",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-11T19:45:41+09:00"
     }
   ]
 }
