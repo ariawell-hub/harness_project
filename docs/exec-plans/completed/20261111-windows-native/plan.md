@@ -2,7 +2,7 @@
 id: 20261111-windows-native
 issue: 7 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -69,6 +69,8 @@ claimed_at: 2026-11-11T17:57:33+09:00 # new-task가 채운다
 - 2026-11-11 18:35 step1: 먼저 실패한 테스트 기록 — `node --test scripts/test/exec.test.ts scripts/test/task.test.ts` → `does not provide an export named 'findGitBash'`·`'linkFile'`로 2개 파일 실패. 구현 후 9개 통과. `git ls-files --eol`로 CRLF 파일이 없음을 확인하고 `.gitattributes`를 넣었다(다시 정규화할 파일 없음). runner는 시작할 때 에이전트 실행 파일을 확인하고 실패하면 `agent-missing`으로 멈춘다(종료 코드 1, 실패 횟수 미포함). step1 AC와 `check` 통과.
 - 2026-11-11 18:50 step1 PR #9 병합. step2 시작.
 - 2026-11-11 19:10 step2: 먼저 실패한 테스트 기록 — `node --test scripts/test/shell.test.ts scripts/test/guard.test.ts` → `commandName` export 없음과 PowerShell·래퍼·`normalize`·matcher 테스트 4개 실패. 구현 후 22개 통과. 실제 훅 프로세스에 PowerShell 도구 입력(`& "C:\…\git.exe" push --force`)을 넣어 종료 코드 2, 일상 명령은 0을 확인했다. step2 AC와 `check` 통과.
+- 2026-11-11 19:20 step2 PR #10 병합. step3 시작.
+- 2026-11-11 19:40 step3: 먼저 실패한 테스트 기록 — `node --test scripts/test/guard.test.ts` → Windows 차단 규칙(`Remove-Item -Recurse -Force ~` 통과)과 파일 도구 Windows 자격 증명 경로 테스트 2개 실패. 구현 후 24개 통과. 실제 훅 프로세스: PowerShell `$env:GH_TOKEN = "x"`는 종료 코드 2, `echo $env:GH_TOKEN`은 0. step3 AC와 `check` 통과. 계획 완료.
 
 ## 의사결정 로그
 
@@ -87,6 +89,9 @@ claimed_at: 2026-11-11T17:57:33+09:00 # new-task가 채운다
 - step2: runner가 만드는 Claude 설정(`writeClaudeRunnerSettings`)에도 훅 matcher가 따로 하드코딩되어 있었다. step 지시서에 없던 파일이라 함께 고치고 테스트로 묶었다 → 처리: 해당 없음
 - step2: `.env` 판정이 대소문자를 구분해 `cat .ENV`가 통과했다(macOS·Windows 파일 시스템은 같은 파일로 연다) → 처리: 해당 없음(이번 step에서 고치고 테스트 추가)
 - step2: step1 PR(#9)이 보호 경로를 바꾸면서 `CHANGELOG.md` 줄을 빠뜨렸다 → 처리: [CHANGELOG](../../../harness/CHANGELOG.md)에 step1·step2 줄 추가
+- step3: `git credential …` 하위 명령은 이미 막혀 있었지만 `git-credential-manager get`처럼 도우미 실행 파일을 직접 부르는 형태는 빠져 있었다(macOS의 `git-credential-osxkeychain`도 같다) → 처리: 해당 없음(이번 step에서 고치고 테스트 추가)
+- step3: 자격증명 파일 판정이 대소문자를 구분해 `library/keychains/…`처럼 소문자로 적으면 통과했다 → 처리: 해당 없음(이번 step에서 대소문자 무시로 고침)
+- step3: 대화 세션 경로에는 계획 완료 뒤 `claim/<issue>` 해제가 없다(runner만 해제한다). 이 계획의 `claim/7`도 병합 뒤 원격에 남는다 → 처리: #4
 
 ## 열린 질문
 
@@ -94,7 +99,8 @@ claimed_at: 2026-11-11T17:57:33+09:00 # new-task가 채운다
 
 - 각 step의 AC 명령과 `node scripts/harness.ts check`.
 - Windows 실기 검증은 이 Mac에서 할 수 없다. 테스트는 Windows 분기를 주입 가능한 함수(플랫폼·환경·파일 존재 여부)로 나눠 macOS에서 검증한다. 실기 확인은 TD-14.
+- 결과: step0~3 AC와 `check` 모두 통과(PR #8, #9, #10, 이 PR). 새 테스트는 `exec.test.ts` 5개, `task.test.ts` 1개, `shell.test.ts` 4개, `guard.test.ts` 6개. 실제 훅 프로세스로 PowerShell 도구 입력의 차단(종료 코드 2)·허용(0)을 확인했다. Windows 실기는 미확인(TD-14).
 
 ## 다음 할 일
 
-- step0부터 순서대로. 각 step PR이 병합된 뒤 `new-task --plan 20261111-windows-native --step <N>`으로 다음 step을 시작한다.
+- 없음(계획 완료). Windows 머신에서 처음 작업하기 전에 TD-14 실측을 먼저 한다. CI OS 행렬은 TD-15.

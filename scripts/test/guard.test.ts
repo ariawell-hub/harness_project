@@ -144,6 +144,89 @@ test('PowerShell 방언으로도 금지 명령을 막는다(ADR-0005)', () => {
   }
 });
 
+test('Windows 차단 규칙: 재귀 삭제(R14), 자격 증명 저장소·토큰 변수(R20) (ADR-0005)', () => {
+  const wctx = ctx({
+    repo: {
+      root: '/work/repo',
+      gitDir: '/work/.git/worktrees/repo',
+      commonDir: '/work/.git',
+      mainRoot: '/work/main',
+      isMainCheckout: false,
+      branch: 'feat/20261111-x-s0',
+    },
+  });
+  const run = (command: string, dialect: 'posix' | 'powershell') =>
+    evaluate({ kind: 'bash', command, cwd: '/work/repo', dialects: [dialect] }, wctx);
+  const BLOCK_PS: [string, string][] = [
+    ['Remove-Item -Recurse -Force ~', 'R14'],
+    ['Remove-Item -Path ../.. -Recurse', 'R14'],
+    ['ri -r -fo ../other', 'R14'],
+    ['Remove-Item -Recurse $env:TEMP/x', 'R14'],
+    ['Remove-Item -Recurse -Force $env:USERPROFILE', 'R14'],
+    ['Get-ChildItem ../other | Remove-Item -Recurse -Force', 'R14'],
+    ['del /s /q ../other', 'R14'],
+    ['cmdkey /list', 'R20'],
+    ['vaultcmd /listcreds:"Windows Credentials"', 'R20'],
+    ['Get-StoredCredential -Target git:https://github.com', 'R20'],
+    ['git-credential-manager get', 'R20'],
+    ['[Windows.Security.Credentials.PasswordVault]::new().RetrieveAll()', 'R20'],
+    ['Get-Content "$env:APPDATA\\GitHub CLI\\hosts.yml"', 'R20'],
+    ['type "C:\\Users\\me\\AppData\\Roaming\\GitHub CLI\\hosts.yml"', 'R20'],
+    ['Copy-Item C:\\Users\\me\\AppData\\Local\\Microsoft\\Credentials\\ABC x', 'R20'],
+    ['$env:GH_TOKEN = "ghp_x"', 'R20'],
+    ['$env:GH_TOKEN=$null', 'R20'],
+    ['${env:GITHUB_TOKEN} = "x"', 'R20'],
+    ['Remove-Item Env:GH_TOKEN', 'R20'],
+    ['Remove-Item -Path Env:\\GITHUB_TOKEN', 'R20'],
+    ['[Environment]::SetEnvironmentVariable("GH_TOKEN", $null)', 'R20'],
+  ];
+  for (const [c, rule] of BLOCK_PS) {
+    const r = run(c, 'powershell');
+    assert.ok(r?.rule.startsWith(rule), `[powershell] ${c} → ${r?.rule} (기대 ${rule})`);
+  }
+  const BLOCK_POSIX: [string, string][] = [
+    ['cmd /c "rd /s /q %USERPROFILE%"', 'R14'],
+    ['cmd /c "rmdir /S /Q ..\\..\\.."', 'R14'],
+    ['cmd /c "set GH_TOKEN=x && gh pr list"', 'R20'],
+    ['setx GH_TOKEN abc', 'R20'],
+    ['gh_token=x gh pr list', 'R20'],
+    ['cat ~/AppData/Roaming/GitHub\\ CLI/hosts.yml', 'R20'],
+    ['powershell -Command "Remove-Item Env:GH_TOKEN"', 'R20'],
+  ];
+  for (const [c, rule] of BLOCK_POSIX) {
+    const r = run(c, 'posix');
+    assert.ok(r?.rule.startsWith(rule), `[posix] ${c} → ${r?.rule} (기대 ${rule})`);
+  }
+  const ALLOW_PS = [
+    'Remove-Item -Recurse -Force ./build',
+    'Remove-Item -Recurse build, dist',
+    'del file.txt',
+    'rd /s /q build',
+    'echo $env:GH_TOKEN',
+    'Get-Content README.md',
+    'Get-ChildItem Env:',
+    'git status',
+  ];
+  for (const c of ALLOW_PS) {
+    const r = run(c, 'powershell');
+    assert.equal(r, null, `[powershell] 허용되어야 한다: ${c} → ${r?.rule}: ${r?.what}`);
+  }
+  assert.equal(run('rmdir -p a/b', 'posix'), null, 'POSIX rmdir(빈 폴더)는 허용');
+});
+
+test('파일 도구도 Windows 자격 증명 경로를 막는다', () => {
+  for (const f of [
+    'C:\\Users\\me\\AppData\\Roaming\\GitHub CLI\\hosts.yml',
+    'C:\\Users\\me\\AppData\\Local\\Microsoft\\Vault\\x\\Policy.vpol',
+    '/Users/someone/library/keychains/login.keychain-db',
+  ]) {
+    const r = evaluate({ kind: 'read', files: [f], cwd: '/work/repo' }, ctx());
+    assert.ok(r?.rule.startsWith('R20'), `${f} → ${r?.rule}`);
+  }
+  const s = JSON.parse(readFileSync(path.join(HARNESS_ROOT, '.claude/settings.json'), 'utf8'));
+  assert.ok(s.permissions.deny.includes('Read(~/AppData/Roaming/GitHub CLI/**)'));
+});
+
 test('셸 래퍼·대소문자·확장자로 감싸도 막는다', () => {
   const enc = Buffer.from('gh auth token', 'utf16le').toString('base64');
   const block: [string, string][] = [

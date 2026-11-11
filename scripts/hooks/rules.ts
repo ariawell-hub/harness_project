@@ -50,10 +50,14 @@ function tmpRoots(ctx: GuardContext): string[] {
   return ctx.tmpDirs ?? [tmpdir(), '/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
 }
 
+/** 홈 표기를 홈 경로로 바꾼다: ~, $HOME, ${HOME}, PowerShell $env:USERPROFILE, cmd %USERPROFILE% (ADR-0005) */
 function expandHome(p: string, home: string): string {
   if (p === '~') return home;
-  if (p.startsWith('~/')) return path.join(home, p.slice(2));
-  return p.replace(/^\$HOME(?=\/|$)/, home).replace(/^\$\{HOME\}(?=\/|$)/, home);
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(home, p.slice(2));
+  return p.replace(
+    /^(\$HOME|\$\{HOME\}|\$env:USERPROFILE|\$\{env:USERPROFILE\}|%USERPROFILE%)(?=[\\/]|$)/i,
+    home,
+  );
 }
 
 function isEnvFile(p: string): boolean {
@@ -62,11 +66,17 @@ function isEnvFile(p: string): boolean {
   return /^\.env(\..+)?$/.test(b) && !/^\.env\.(example|sample|template)$/.test(b);
 }
 
+// 대소문자 무시: macOS·Windows 파일 시스템은 대소문자를 구분하지 않는다
 const CREDENTIAL_FILES =
-  /(^|\/)(\.config\/gh\/hosts\.yml|\.git-credentials|\.netrc|\.aws\/credentials|\.codex\/auth\.json|\.claude\/\.credentials\.json|\.npmrc-auth|Library\/Keychains\/[^/]+)$/;
+  /(^|\/)(\.config\/gh\/hosts\.yml|\.git-credentials|\.netrc|\.aws\/credentials|\.codex\/auth\.json|\.claude\/\.credentials\.json|\.npmrc-auth|Library\/Keychains\/[^/]+)$/i;
+
+/** Windows: gh 설정(%APPDATA%\GitHub CLI), 자격 증명 관리자·DPAPI 키(Microsoft\Credentials·Protect·Vault) */
+const WIN_CREDENTIAL_FILES =
+  /(^|\/)((appdata\/roaming|\$\{?env:appdata\}?|%appdata%)\/github cli\/hosts\.yml|(appdata\/(roaming|local)|\$\{?env:(local)?appdata\}?|%(local)?appdata%)\/microsoft\/(credentials|protect|vault)(\/.*)?)$/i;
 
 function isCredentialFile(p: string, home: string): boolean {
-  return CREDENTIAL_FILES.test(expandHome(p, home).replace(/\\/g, '/'));
+  const f = expandHome(p, home).replace(/\\/g, '/');
+  return CREDENTIAL_FILES.test(f) || WIN_CREDENTIAL_FILES.test(f);
 }
 
 // ---------- git ----------
@@ -422,17 +432,45 @@ function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
 
 // ---------- 파괴적 명령·운영 작용 (R14) ----------
 
-function rmRule(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | null {
-  if (commandName(c.argv[0]) !== 'rm') return null;
+/** Windows 삭제 명령: PowerShell Remove-Item과 별칭, cmd rd·rmdir·del·erase (ADR-0005) */
+const WIN_RM = new Set(['remove-item', 'ri', 'del', 'erase', 'rd', 'rmdir']);
+
+/** 삭제 명령이면 재귀 여부와 대상을 돌려준다. windows는 대상이 없어도(파이프 입력) 막아야 하는 형태 */
+function rmTargets(
+  c: SimpleCommand,
+): { recursive: boolean; targets: string[]; windows: boolean } | null {
+  const head = commandName(c.argv[0]);
   const args = c.argv.slice(1);
-  const dd = args.indexOf('--');
-  const flags = (dd >= 0 ? args.slice(0, dd) : args).filter((a) => a.startsWith('-'));
-  const recursive = flags.some((f) => f === '--recursive' || /^-[a-zA-Z]*[rR]/.test(f));
-  if (!recursive) return null;
-  const targets =
-    dd >= 0
-      ? [...args.slice(0, dd).filter((a) => !a.startsWith('-')), ...args.slice(dd + 1)]
-      : args.filter((a) => !a.startsWith('-'));
+  if (head === 'rm') {
+    const dd = args.indexOf('--');
+    const flags = (dd >= 0 ? args.slice(0, dd) : args).filter((a) => a.startsWith('-'));
+    return {
+      recursive: flags.some((f) => f === '--recursive' || /^-[a-zA-Z]*[rR]/.test(f)),
+      targets:
+        dd >= 0
+          ? [...args.slice(0, dd).filter((a) => !a.startsWith('-')), ...args.slice(dd + 1)]
+          : args.filter((a) => !a.startsWith('-')),
+      windows: false,
+    };
+  }
+  if (!WIN_RM.has(head)) return null;
+  // PowerShell -Recurse(접두 약어 -r, -rec …) 또는 cmd /s. POSIX rmdir(-p 등)은 재귀가 아니다
+  const isSwitch = (a: string) => a.startsWith('-') || /^\/[a-z]$/i.test(a);
+  return {
+    recursive: args.some((a) => /^-r(e(c(u(r(s(e)?)?)?)?)?)?(:.*)?$/i.test(a) || /^\/s$/i.test(a)),
+    targets: args
+      .filter((a) => !isSwitch(a))
+      .flatMap((a) => a.split(','))
+      .map((a) => a.trim().replace(/\\/g, '/'))
+      .filter(Boolean),
+    windows: true,
+  };
+}
+
+function rmRule(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | null {
+  const rm = rmTargets(c);
+  if (!rm || !rm.recursive) return null;
+  const { targets } = rm;
   const home = ctx.home ?? homedir();
   const root = ctx.repo?.root ?? null;
   const bad = (what: string) =>
@@ -442,10 +480,12 @@ function rmRule(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | nul
       '지울 대상을 worktree 안의 구체적인 경로로 지정하라. 리포 정리는 표준 명령이 한다',
       `${D} R14, 14.4절`,
     );
+  if (rm.windows && targets.length === 0)
+    return bad('재귀 삭제 대상을 경로로 적지 않았다(파이프로 받은 대상은 판정할 수 없다)');
   for (const t of targets) {
-    if (/\$|`|…/.test(t.replace(/^\$HOME|^\$\{HOME\}/, '')))
-      return bad(`재귀 삭제 대상에 해석할 수 없는 변수가 있다: ${t}`);
-    const abs = path.resolve(cwd, expandHome(t, home));
+    const e = expandHome(t, home);
+    if (/\$|`|…|%[^%\s]+%/.test(e)) return bad(`재귀 삭제 대상에 해석할 수 없는 변수가 있다: ${t}`);
+    const abs = path.resolve(cwd, e);
     if (abs === path.parse(abs).root || abs === home || within(home, abs))
       return bad(`루트·홈을 재귀 삭제하려 했다: ${t}`);
     if (root && (within(abs, root) || within(root, abs))) {
@@ -516,11 +556,95 @@ const TOKEN_VARS = [
 ];
 const ENV_READ_EXEMPT = new Set(['ls', 'test', '[', 'git', 'touch', 'stat']);
 
+/** 토큰 변수 이름이면 정식 이름을 돌려준다. Windows 환경 변수는 대소문자를 구분하지 않는다 */
+function tokenVar(name: string): string | undefined {
+  return TOKEN_VARS.find((t) => t.toLowerCase() === name.toLowerCase());
+}
+
+/** PowerShell Env: 드라이브를 바꾸는 명령(Remove-Item Env:GH_TOKEN 등)과 별칭 */
+const PS_ENV_ITEM = new Set([
+  'remove-item',
+  'ri',
+  'rm',
+  'del',
+  'erase',
+  'set-item',
+  'si',
+  'clear-item',
+  'cli',
+  'new-item',
+  'ni',
+  'rename-item',
+  'rni',
+  'move-item',
+  'mi',
+  'mv',
+]);
+
+/**
+ * Windows 형태의 토큰 변수 변경: PowerShell `$env:GH_TOKEN = …`, `Remove-Item Env:GH_TOKEN`,
+ * cmd `set GH_TOKEN=…`, `setx GH_TOKEN …` (ADR-0005). 읽기(`echo $env:GH_TOKEN`)는 막지 않는다.
+ */
+function windowsTokenChange(c: SimpleCommand): string | undefined {
+  const [a0 = '', a1 = ''] = c.argv;
+  const ps = /^\$\{?env:([A-Za-z_]\w*)\}?(\s*\+?=.*)?$/i.exec(a0);
+  if (ps && (ps[2] !== undefined || /^\+?=/.test(a1))) return tokenVar(ps[1]);
+  const head = commandName(a0);
+  if (PS_ENV_ITEM.has(head)) {
+    for (const x of c.argv.slice(1)) {
+      const m = /^env:[\\/]?([A-Za-z_]\w*)$/i.exec(x);
+      const t = m && tokenVar(m[1]);
+      if (t) return t;
+    }
+  }
+  if (head === 'set' || head === 'setx') {
+    for (const x of c.argv.slice(1)) {
+      const t = tokenVar(x.replace(/^"/, '').split('=')[0]);
+      if (t) return t;
+    }
+  }
+  return undefined;
+}
+
+/** OS 자격증명 저장소를 다루는 명령(macOS security는 아래에서 따로) */
+const CREDENTIAL_TOOLS = new Set(['cmdkey', 'vaultcmd', 'get-storedcredential']);
+
+/** 명령 원문에서 찾는 Windows 자격증명 API와 토큰 변수 변경(.NET 호출은 단순 명령으로 나뉘지 않는다) */
+const RAW_WIN_CREDENTIAL =
+  /\b(PasswordVault|CredRead\w*|CredEnumerate\w*|Get-StoredCredential)\b|ProtectedData\]?::Unprotect/i;
+const RAW_SET_ENV = new RegExp(
+  `SetEnvironmentVariable\\s*\\(\\s*['"]?(${TOKEN_VARS.join('|')})\\b`,
+  'i',
+);
+
+function rawRules(command: string): Problem | null {
+  const api = RAW_WIN_CREDENTIAL.exec(command);
+  if (api) {
+    return v(
+      'R20 제작자 권한',
+      `Windows 자격 증명 저장소에 접근하려 했다(${api[0]})`,
+      '에이전트는 OS 자격증명 저장소에 접근하지 않는다. 봇 토큰(GH_TOKEN)만 쓴다',
+      `${D} R20, E5`,
+    );
+  }
+  const env = RAW_SET_ENV.exec(command);
+  if (env) {
+    return v(
+      'R20 제작자 권한',
+      `${env[1]}를 바꾸거나 해제하려 했다(SetEnvironmentVariable)`,
+      '에이전트 세션은 시작할 때 받은 봇 토큰만 쓴다',
+      `${D} R20, E5`,
+    );
+  }
+  return null;
+}
+
 function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
   const home = ctx.home ?? homedir();
   const tokenChange =
-    Object.keys(c.assigns).find((k) => TOKEN_VARS.includes(k)) ??
-    c.unsets.find((k) => TOKEN_VARS.includes(k));
+    Object.keys(c.assigns).map(tokenVar).find(Boolean) ??
+    c.unsets.map(tokenVar).find(Boolean) ??
+    windowsTokenChange(c);
   if (tokenChange) {
     return v(
       'R20 제작자 권한',
@@ -536,6 +660,14 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
       'R20 제작자 권한',
       `macOS 키체인을 조회하려 했다(security ${c.argv[1]})`,
       '에이전트는 키체인에 접근하지 않는다',
+      `${D} R20, E5`,
+    );
+  }
+  if (CREDENTIAL_TOOLS.has(head) || head.startsWith('git-credential')) {
+    return v(
+      'R20 제작자 권한',
+      `OS 자격증명 저장소를 조회·변경하려 했다(${c.argv[0]})`,
+      '에이전트는 Windows 자격 증명 관리자·git 자격증명 도우미에 접근하지 않는다. 봇 토큰(GH_TOKEN)만 쓴다',
       `${D} R20, E5`,
     );
   }
@@ -570,6 +702,8 @@ export function evaluateBash(
   ctx: GuardContext,
   dialect: Dialect = 'posix',
 ): Problem | null {
+  const raw = rawRules(command);
+  if (raw) return raw;
   for (const c of parseShell(command, dialect)) {
     const head = c.argv.length ? commandName(c.argv[0]) : '';
     const r =

@@ -14,6 +14,7 @@ review_cycle: on-change
 - 설계서 v0.7.4: macOS와 Windows 네이티브 병행(ADR-0005). E5·R20을 에이전트가 실행되는 모든 머신 기준으로, AC·표준 명령은 POSIX `sh` 문법(Windows는 Git Bash), 텍스트 파일 LF 고정, L1 훅의 PowerShell·cmd 방언, 작업자 이름의 머신 간 고유성. Windows 실기 검증은 TD-14, CI OS 행렬은 TD-15.
 - Windows 실행 환경(ADR-0005, PR #9): `.gitattributes` LF 고정(보호 경로), `runShell`이 Windows에서 Git Bash로 실행(없으면 cmd.exe로 대신하지 않고 실패, WSL bash 거부), runner가 시작할 때 에이전트 CLI 실행 파일을 확인(`.cmd` 래퍼뿐이면 `agent-missing`), 개발용 `.env`는 심볼릭 링크 → 하드 링크.
 - L1 훅 셸 방언(ADR-0005): PowerShell·cmd 토큰화, `powershell -Command`·`pwsh -c`·`-EncodedCommand`·`cmd /c`·`iex` 재귀, 명령 이름 대소문자·확장자 무시, `.ENV`도 `.env`로 판정. Claude Code `PowerShell` 도구를 훅 matcher에 넣고(대화·runner), runner 권한 프로필은 `PowerShell` 도구를 거부한다.
+- L1 Windows 차단 규칙(ADR-0005): R14 재귀 삭제에 `Remove-Item -Recurse`(별칭 포함)·cmd `rd`·`rmdir`·`del /s`, 대상 없는 PowerShell 재귀 삭제(파이프 입력) 차단, `$env:USERPROFILE`·`%USERPROFILE%`를 홈으로 해석. R20에 `cmdkey`·`vaultcmd`·`Get-StoredCredential`·`git-credential-*`, `PasswordVault`·`CredRead` 등 API, `%APPDATA%\GitHub CLI\hosts.yml`·`Microsoft\Credentials·Protect·Vault`, `$env:GH_TOKEN=`·`Remove-Item Env:GH_TOKEN`·`SetEnvironmentVariable`·`set`·`setx`(이름 대소문자 무시). 자격증명 파일 판정은 대소문자 무시. `Read(~/AppData/Roaming/GitHub CLI/**)` 거부.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
