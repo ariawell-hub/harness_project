@@ -77,7 +77,8 @@ export function writeClaudeRunnerSettings(main: RepoInfo, cfg: HarnessConfig): s
   settings.hooks = {
     PreToolUse: [
       {
-        matcher: 'Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob',
+        // PowerShell은 프로필에서 거부하지만 훅도 함께 건다(ADR-0005)
+        matcher: 'Bash|PowerShell|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob',
         hooks: [{ type: 'command', command: `node ${JSON.stringify(guard)}`, timeout: 30 }],
       },
     ],

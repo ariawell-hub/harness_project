@@ -5,13 +5,15 @@ import path from 'node:path';
 import type { RepoInfo } from '../lib/git.ts';
 import { PLANS_DIR, parseBranch } from '../lib/plan.ts';
 import type { Problem } from '../lib/util.ts';
-import { baseName, parseShell, type SimpleCommand } from './shell.ts';
+import { baseName, commandName, parseShell, type Dialect, type SimpleCommand } from './shell.ts';
 
 export type ToolKind = 'bash' | 'read' | 'write' | 'other';
 
 export interface GuardInput {
   kind: ToolKind;
   command?: string;
+  /** 명령을 해석할 셸 방언들. 하나라도 걸리면 막는다(기본 posix, ADR-0005) */
+  dialects?: Dialect[];
   /** read/write 대상 파일들 */
   files?: string[];
   cwd: string;
@@ -55,7 +57,8 @@ function expandHome(p: string, home: string): string {
 }
 
 function isEnvFile(p: string): boolean {
-  const b = baseName(p.split('=').pop() ?? p);
+  // macOS·Windows 파일 시스템은 대소문자를 구분하지 않으므로 .ENV도 같은 파일이다
+  const b = baseName(p.split('=').pop() ?? p).toLowerCase();
   return /^\.env(\..+)?$/.test(b) && !/^\.env\.(example|sample|template)$/.test(b);
 }
 
@@ -394,11 +397,11 @@ const DB_PATTERNS: RegExp[] = [
 
 function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
   const clients = new Set([...DB_CLIENTS, ...ctx.dbClients]);
-  const hit = c.argv.find((x) => clients.has(baseName(x)));
+  const hit = c.argv.find((x) => clients.has(commandName(x)));
   if (hit) {
     return v(
       'R13 DB 위험 작업',
-      `DB 클라이언트(${baseName(hit)})로 직접 접속하려 했다`,
+      `DB 클라이언트(${commandName(hit)})로 직접 접속하려 했다`,
       '일회용 DB는 표준 명령(setup·test·dev)으로만 쓴다. 공유·운영 DB 작업은 9.1절로 제작자에게 요청하라',
       `${D} R13, 14.3절`,
     );
@@ -420,7 +423,7 @@ function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
 // ---------- 파괴적 명령·운영 작용 (R14) ----------
 
 function rmRule(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | null {
-  if (baseName(c.argv[0]) !== 'rm') return null;
+  if (commandName(c.argv[0]) !== 'rm') return null;
   const args = c.argv.slice(1);
   const dd = args.indexOf('--');
   const flags = (dd >= 0 ? args.slice(0, dd) : args).filter((a) => a.startsWith('-'));
@@ -462,7 +465,7 @@ function rmRule(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | nul
 
 function externalRules(c: SimpleCommand): Problem | null {
   const a = c.argv;
-  const head = baseName(a[0]);
+  const head = commandName(a[0]);
   const has = (x: string) => a.includes(x);
   const deploy = (what: string) =>
     v(
@@ -527,7 +530,7 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
     );
   }
   if (!c.argv.length) return null;
-  const head = baseName(c.argv[0]);
+  const head = commandName(c.argv[0]);
   if (head === 'security' && /^(find-|dump-|export|unlock-keychain)/.test(c.argv[1] ?? '')) {
     return v(
       'R20 제작자 권한',
@@ -561,12 +564,18 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
 
 // ---------- 진입점 ----------
 
-export function evaluateBash(command: string, cwd: string, ctx: GuardContext): Problem | null {
-  for (const c of parseShell(command)) {
+export function evaluateBash(
+  command: string,
+  cwd: string,
+  ctx: GuardContext,
+  dialect: Dialect = 'posix',
+): Problem | null {
+  for (const c of parseShell(command, dialect)) {
+    const head = c.argv.length ? commandName(c.argv[0]) : '';
     const r =
       secretRules(c, ctx) ??
-      (c.argv.length && baseName(c.argv[0]) === 'git' ? gitRules(c, cwd, ctx) : null) ??
-      (c.argv.length && baseName(c.argv[0]) === 'gh' ? ghRules(c) : null) ??
+      (head === 'git' ? gitRules(c, cwd, ctx) : null) ??
+      (head === 'gh' ? ghRules(c) : null) ??
       (c.argv.length ? dbRules(c, ctx) : null) ??
       (c.argv.length ? rmRule(c, cwd, ctx) : null) ??
       (c.argv.length ? externalRules(c) : null);
@@ -647,7 +656,13 @@ export function evaluateFile(
 }
 
 export function evaluate(input: GuardInput, ctx: GuardContext): Problem | null {
-  if (input.kind === 'bash' && input.command) return evaluateBash(input.command, input.cwd, ctx);
+  if (input.kind === 'bash' && input.command) {
+    for (const d of input.dialects ?? ['posix']) {
+      const r = evaluateBash(input.command, input.cwd, ctx, d);
+      if (r) return r;
+    }
+    return null;
+  }
   if ((input.kind === 'read' || input.kind === 'write') && input.files) {
     for (const f of input.files) {
       const r = evaluateFile(input.kind, f, input.cwd, ctx);
