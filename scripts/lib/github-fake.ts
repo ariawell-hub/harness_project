@@ -6,8 +6,14 @@ import path from 'node:path';
 import { runSync } from './exec.ts';
 import type { Comment, GitHubPort, Issue, PullRequest } from './github.ts';
 
-interface FakeIssue extends Issue {
+/** 상태 파일의 Issue. 작성자 필드가 생기기 전 상태 파일은 `author`가 없다 */
+interface FakeIssue extends Omit<Issue, 'author'> {
+  author?: string;
   comments: Comment[];
+}
+
+function fromFakeIssue({ comments: _c, ...i }: FakeIssue): Issue {
+  return { ...i, author: i.author ?? '' };
 }
 
 interface FakePR extends PullRequest {
@@ -42,11 +48,13 @@ export function initFakeState(file: string, s: Partial<FakeState> & { remote: st
   return state;
 }
 
+/** 열린 Issue를 더한다. `author`를 생략하면 제작자(상태의 `owner`)가 만든 것으로 둔다 */
 export function addFakeIssue(
   file: string,
   title: string,
   body: string,
   labels: string[] = [],
+  author?: string,
 ): number {
   const s = JSON.parse(readFileSync(file, 'utf8')) as FakeState;
   const n = s.next++;
@@ -57,6 +65,7 @@ export function addFakeIssue(
     labels,
     state: 'open',
     createdAt: new Date().toISOString(),
+    author: author ?? s.owner,
     comments: [],
   });
   writeFileSync(file, JSON.stringify(s, null, 2));
@@ -95,6 +104,7 @@ export class FakeGitHub implements GitHubPort {
         labels: pr.labels,
         state: 'open',
         createdAt: '',
+        author: '',
         comments: [],
       };
       s.issues.push({ ...shadow, state: 'closed' });
@@ -108,13 +118,10 @@ export class FakeGitHub implements GitHubPort {
   listOpenIssues(): Issue[] {
     const s = this.load();
     const prNums = new Set(s.prs.map((p) => p.number));
-    return s.issues
-      .filter((i) => i.state === 'open' && !prNums.has(i.number))
-      .map(({ comments: _c, ...i }) => i);
+    return s.issues.filter((i) => i.state === 'open' && !prNums.has(i.number)).map(fromFakeIssue);
   }
   getIssue(n: number): Issue {
-    const { comments: _c, ...i } = this.issue(this.load(), n);
-    return i;
+    return fromFakeIssue(this.issue(this.load(), n));
   }
   comments(n: number): Comment[] {
     return this.issue(this.load(), n).comments;

@@ -16,6 +16,8 @@ export interface Issue {
   labels: string[];
   state: 'open' | 'closed';
   createdAt: string;
+  /** 작성자 login. 알 수 없으면(삭제된 계정 등) '' */
+  author: string;
 }
 
 export type ChecksState = 'none' | 'pending' | 'success' | 'failure';
@@ -127,6 +129,32 @@ function toPR(r: RawPR): PullRequest {
   };
 }
 
+const ISSUE_FIELDS = 'number,title,body,labels,state,createdAt,author';
+
+/** `gh issue list|view --json ISSUE_FIELDS`의 원시 형태 */
+export interface RawIssue {
+  number: number;
+  title: string;
+  body?: string | null;
+  labels?: { name: string }[] | null;
+  state: string;
+  createdAt: string;
+  /** 삭제된 계정이면 null */
+  author?: { login?: string | null } | null;
+}
+
+export function toIssue(raw: RawIssue): Issue {
+  return {
+    number: raw.number,
+    title: raw.title,
+    body: raw.body ?? '',
+    labels: (raw.labels ?? []).map((l) => l.name),
+    state: raw.state === 'OPEN' ? 'open' : 'closed',
+    createdAt: raw.createdAt,
+    author: raw.author?.login ?? '',
+  };
+}
+
 export class GhCli implements GitHubPort {
   readonly kind = 'gh' as const;
   private cwd: string;
@@ -140,58 +168,15 @@ export class GhCli implements GitHubPort {
   }
   listOpenIssues(): Issue[] {
     const raw = JSON.parse(
-      gh(
-        [
-          'issue',
-          'list',
-          '--state',
-          'open',
-          '--limit',
-          '200',
-          '--json',
-          'number,title,body,labels,state,createdAt',
-        ],
-        this.cwd,
-      ),
-    ) as {
-      number: number;
-      title: string;
-      body: string;
-      labels: { name: string }[];
-      state: string;
-      createdAt: string;
-    }[];
-    return raw.map((i) => ({
-      number: i.number,
-      title: i.title,
-      body: i.body ?? '',
-      labels: i.labels.map((l) => l.name),
-      state: i.state === 'OPEN' ? 'open' : 'closed',
-      createdAt: i.createdAt,
-    }));
+      gh(['issue', 'list', '--state', 'open', '--limit', '200', '--json', ISSUE_FIELDS], this.cwd),
+    ) as RawIssue[];
+    return raw.map(toIssue);
   }
   getIssue(n: number): Issue {
-    const i = JSON.parse(
-      gh(
-        ['issue', 'view', String(n), '--json', 'number,title,body,labels,state,createdAt'],
-        this.cwd,
-      ),
-    ) as {
-      number: number;
-      title: string;
-      body: string;
-      labels: { name: string }[];
-      state: string;
-      createdAt: string;
-    };
-    return {
-      number: i.number,
-      title: i.title,
-      body: i.body ?? '',
-      labels: i.labels.map((l) => l.name),
-      state: i.state === 'OPEN' ? 'open' : 'closed',
-      createdAt: i.createdAt,
-    };
+    const raw = JSON.parse(
+      gh(['issue', 'view', String(n), '--json', ISSUE_FIELDS], this.cwd),
+    ) as RawIssue;
+    return toIssue(raw);
   }
   comments(n: number): Comment[] {
     const raw = JSON.parse(

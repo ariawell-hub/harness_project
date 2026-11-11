@@ -16,7 +16,7 @@ review_cycle: on-change
 진입점      scripts/harness.ts (CLI)          scripts/hooks/guard.ts (L1 훅)
               │                                     │
 명령·runner  commands/  (표준 명령, check, new-task, complete-step, start, init)
-             runner/    (run: 루프, next: 우선순위, agents: 세션, prompt)
+             runner/    (run: 루프, next: 우선순위·새 Issue 작성자 확인, agents: 세션, prompt)
               │
 게이트       gates/     (plan-gate, doc-lint, bypass-scan, secret-scan)   hooks/rules.ts, hooks/shell.ts
               │

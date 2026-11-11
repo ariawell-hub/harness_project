@@ -15,6 +15,7 @@ review_cycle: on-change
 - Windows 실행 환경(ADR-0005, PR #9): `.gitattributes` LF 고정(보호 경로), `runShell`이 Windows에서 Git Bash로 실행(없으면 cmd.exe로 대신하지 않고 실패, WSL bash 거부), runner가 시작할 때 에이전트 CLI 실행 파일을 확인(`.cmd` 래퍼뿐이면 `agent-missing`), 개발용 `.env`는 심볼릭 링크 → 하드 링크.
 - L1 훅 셸 방언(ADR-0005): PowerShell·cmd 토큰화, `powershell -Command`·`pwsh -c`·`-EncodedCommand`·`cmd /c`·`iex` 재귀, 명령 이름 대소문자·확장자 무시, `.ENV`도 `.env`로 판정. Claude Code `PowerShell` 도구를 훅 matcher에 넣고(대화·runner), runner 권한 프로필은 `PowerShell` 도구를 거부한다.
 - L1 Windows 차단 규칙(ADR-0005): R14 재귀 삭제에 `Remove-Item -Recurse`(별칭 포함)·cmd `rd`·`rmdir`·`del /s`, 대상 없는 PowerShell 재귀 삭제(파이프 입력) 차단, `$env:USERPROFILE`·`%USERPROFILE%`를 홈으로 해석. R20에 `cmdkey`·`vaultcmd`·`Get-StoredCredential`·`git-credential-*`, `PasswordVault`·`CredRead` 등 API, `%APPDATA%\GitHub CLI\hosts.yml`·`Microsoft\Credentials·Protect·Vault`, `$env:GH_TOKEN=`·`Remove-Item Env:GH_TOKEN`·`SetEnvironmentVariable`·`set`·`setx`(이름 대소문자 무시). 자격증명 파일 판정은 대소문자 무시. `Read(~/AppData/Roaming/GitHub CLI/**)` 거부.
+- 설계서 v0.7.5: runner의 새 Issue 후보(4.5절 우선순위 5번)를 제작자(`github.owner`)·외주 개발자(새 설정 `github.collaborators`) 계정이 만든 Issue로 한정. 봇·그 밖의 계정·작성자 불명 Issue는 제외하고 `start`·`next`에 번호와 이유를 보인다. `github.owner`가 비면 새 Issue를 고르지 않는다(fail-closed). Issue 작성 뒤 수정 미확인은 TD-19(Issue #5).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

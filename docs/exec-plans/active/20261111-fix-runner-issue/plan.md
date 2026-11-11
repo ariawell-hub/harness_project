@@ -73,6 +73,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 
 - 2026-11-11 21:02 계획 작성(runner-1 무인 세션). `next.ts`·`github.ts`·`github-fake.ts`·`config.ts`·`run.ts`(`doPlanning`)·`.claude/runner-settings.json`, 설계서 4.5·14.6절을 읽었다. 봇 Issue 처리는 열린 질문으로 남기고, 답이 없어도 마지막 step까지 갈 수 있게 설정 스위치(기본값 `exclude`)로 나눴다(의사결정 로그). 무인 세션은 `gh`가 막혀 있어 Issue에 질문 댓글을 달지 못했다(발견 사항).
 - 2026-11-11T21:05:08+09:00 계획 작성 완료
+- 2026-11-11 step0 issue-author(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'filterTrustedIssues'`(1 fail). 구현: `Issue.author`와 `toIssue`(gh `--json`에 `author`), 가짜 GitHub `addFakeIssue(..., author?)`(생략 시 제작자, 옛 상태·PR 그림자는 `''`), `github.collaborators`(없으면 `[]`, 문자열 배열 아니면 `ConfigError`), `sameLogin`·`filterTrustedIssues`·`Pick.excluded`, idle 이유 끝에 "작성자 확인으로 제외: #N", `start` ③과 `next`(일반·`--json`)에 제외 목록. 일반 `next` 출력에도 제외 줄을 넣었다(수용 기준 4가 `start`·`next`를 함께 요구해서, 출력 형식은 `describeExcluded` 하나로 공유). 그 뒤 `next.test.ts` 13개 통과, `runner.test.ts`는 기대값을 고치지 않고 통과. 설계서 v0.7.5(4.5·14.6절), 절차서 1절, architecture, CHANGELOG, TD-18·TD-19 등록(번호 그대로).
 
 ## 의사결정 로그
 
@@ -109,7 +110,8 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
   - step1: `exclude`면 승인 댓글이 있어도 제외하고 댓글을 조회하지 않음, `owner-approved`면 제작자 `/harness accept` 댓글이 있을 때만 후보, 봇·외주 개발자 댓글이나 인용·문장 속 언급은 불인정, 봇이 아닌 계정의 Issue에는 승인 경로 없음
 - 회귀: 기존 `scripts/test/runner.test.ts`(S6: Issue → 계획 → step 2개 → 자동 병합)가 고치지 않고 통과
 - 실제 환경: runner가 step0·step1 PR 두 개를 사람 개입 없이 병합하고, 마지막 PR이 `Closes #5`로 Issue를 닫는다. 병합 뒤 대화 세션에서 `node scripts/harness.ts next`를 실행해 봇이 만든 열린 Issue가 "작성자 확인으로 제외"에 나오는지 본다.
-- 결과: (step 완료 때 기록)
+- 결과
+  - step0(2026-11-11): AC 전부 통과. `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 15 pass / 0 fail. `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan). doc-lint R8 경고 6건(ADR-0001·0002·0003·0005, architecture.md, workflow.md의 `related_code`가 문서보다 나중에 바뀜)은 경고다. architecture.md·workflow.md는 이 step에서 함께 고쳤고, ADR들은 이 변경(Issue 작성자 확인)과 결정 내용이 무관해 고치지 않았다.
 
 ## 다음 할 일
 

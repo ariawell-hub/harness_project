@@ -16,6 +16,7 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 ```
 
 - 작업은 GitHub Issue로만 접수한다. Issue가 없으면 만들지 말고 제작자에게 묻는다.
+  - runner는 제작자·외주 개발자(`harness.config.json`의 `github.collaborators`) 계정이 만든 Issue만 가져간다. 봇 계정이 대신 등록한 Issue는 runner가 고르지 않는다. 대화 세션의 `new-task --issue`로는 시작할 수 있다.
 - `new-task`가 `claim/<issue>`를 push해 선점한다. 거부되면 다른 작업자가 이미 맡은 것이니 다음 Issue로 간다.
 - 규모(4.3절)는 아래 기준으로 정한다. 애매하면 큰 쪽을 고른다. 동작이 바뀌는 변경은 아무리 작아도 medium 이상이다.
 
