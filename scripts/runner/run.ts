@@ -38,7 +38,7 @@ import {
   slugFor,
 } from '../commands/task.ts';
 import { planGate } from '../gates/plan-gate.ts';
-import { runSession, type AgentTool } from './agents.ts';
+import { resolveAgentCommand, runSession, type AgentTool } from './agents.ts';
 import { pickNext, readLocalPlans, type LocalPlan, type Pick } from './next.ts';
 import { planningPrompt, stepPrompt } from './prompt.ts';
 
@@ -56,7 +56,15 @@ export interface RunnerOptions {
 }
 
 export type StopReason =
-  'idle' | 'human' | 'time-limit' | 'usage-limit' | 'max-iterations' | 'once' | 'locked' | 'error';
+  | 'idle'
+  | 'human'
+  | 'time-limit'
+  | 'usage-limit'
+  | 'max-iterations'
+  | 'once'
+  | 'locked'
+  | 'agent-missing'
+  | 'error';
 
 interface Ctx {
   o: RunnerOptions;
@@ -559,6 +567,13 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
     logFile: path.join(harnessStateDir(main, 'common'), 'runner.jsonl'),
     envWaitMs: 0,
   };
+  // 에이전트 CLI를 셸 없이 띄울 수 있는지 먼저 확인한다(Windows의 .cmd 래퍼, ADR-0005).
+  // 설정 문제이므로 실패 횟수에 넣지 않고 시작하지 않는다.
+  const agent = resolveAgentCommand(o.tool, cfg);
+  if ('error' in agent) {
+    warn(`runner를 시작하지 않는다: ${agent.error}`);
+    return 'agent-missing';
+  }
   const lock = acquireLock(main, o.worker);
   if (!lock) {
     warn(`작업자 ${o.worker}의 runner가 이미 실행 중이다`);

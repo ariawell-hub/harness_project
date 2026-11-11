@@ -65,6 +65,8 @@ claimed_at: 2026-11-11T17:57:33+09:00 # new-task가 채운다
 
 - 2026-11-11 18:00 계획 작성. Issue #7 선점(owner: session).
 - 2026-11-11 18:40 step0 구현: ADR-0005, 설계서 v0.7.4, 절차서·README·SECURITY, TD-14~16, CHANGELOG. step1에 에이전트 CLI `.exe` 확인을 추가했다(발견 사항). step0 AC와 `check` 통과.
+- 2026-11-11 18:20 step0 PR #8 병합. step1 시작.
+- 2026-11-11 18:35 step1: 먼저 실패한 테스트 기록 — `node --test scripts/test/exec.test.ts scripts/test/task.test.ts` → `does not provide an export named 'findGitBash'`·`'linkFile'`로 2개 파일 실패. 구현 후 9개 통과. `git ls-files --eol`로 CRLF 파일이 없음을 확인하고 `.gitattributes`를 넣었다(다시 정규화할 파일 없음). runner는 시작할 때 에이전트 실행 파일을 확인하고 실패하면 `agent-missing`으로 멈춘다(종료 코드 1, 실패 횟수 미포함). step1 AC와 `check` 통과.
 
 ## 의사결정 로그
 

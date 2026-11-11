@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "windows-runtime",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-11T18:34:26+09:00"
     },
     {
       "step": 2,

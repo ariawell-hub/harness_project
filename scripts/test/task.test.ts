@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ClaimError, claimHeartbeat, completeStep, newTask } from '../commands/task.ts';
+import { ClaimError, claimHeartbeat, completeStep, linkFile, newTask } from '../commands/task.ts';
 import { loadConfig } from '../lib/config.ts';
 import { parseDoc } from '../lib/plan.ts';
-import { commitAll, makeFixture, sh, write } from './helpers.ts';
+import { commitAll, makeFixture, sh, tmp, write } from './helpers.ts';
+
+test('linkFile: 심볼릭 링크 → 하드 링크 순으로 연결하고 복사하지 않는다(ADR-0005)', () => {
+  const d = tmp('harness-link-');
+  const src = path.join(d, 'dev-env');
+  writeFileSync(src, 'A=1\n');
+  assert.equal(linkFile(src, path.join(d, 'a')), 'symlink');
+  assert.ok(lstatSync(path.join(d, 'a')).isSymbolicLink());
+  const fail = (): never => {
+    throw new Error('EPERM: 심볼릭 링크 권한 없음');
+  };
+  assert.equal(linkFile(src, path.join(d, 'b'), { symlink: fail, hardlink: linkSync }), 'hardlink');
+  assert.equal(statSync(path.join(d, 'b')).ino, statSync(src).ino);
+  assert.equal(readFileSync(path.join(d, 'b'), 'utf8'), 'A=1\n');
+  assert.equal(linkFile(src, path.join(d, 'c'), { symlink: fail, hardlink: fail }), null);
+  assert.equal(existsSync(path.join(d, 'c')), false);
+});
 
 test('new-task: claim 브랜치로 선점하고 브랜치·worktree·계획 골격을 만든다', async () => {
   const fx = makeFixture();

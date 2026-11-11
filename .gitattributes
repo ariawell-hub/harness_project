@@ -1,0 +1,4 @@
+# 텍스트 파일은 OS와 무관하게 LF로 둔다(docs/decisions/ADR-0005-windows-native.md, 설계서 6절).
+# Windows Git 기본값(core.autocrlf=true)으로 받아도 작업 트리가 LF라서
+# fmt --check(Prettier LF), patch-id 결속, 작업 트리 해시가 Mac·Windows에서 같다.
+* text=auto eol=lf

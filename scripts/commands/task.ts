@@ -4,7 +4,7 @@
 //   claim-heartbeat: claim 브랜치에 빈 커밋(생존 확인)
 //   complete-step  : 계획 전용 커밋(step completed, 마지막 step이면 completed/로 이동)
 //   reopen-step    : 완료 커밋 뒤 다시 고쳐야 할 때 step을 in_progress로 되돌림
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadConfig, resolveConfigPath, type HarnessConfig } from '../lib/config.ts';
 import { getGitHub } from '../lib/github.ts';
@@ -24,7 +24,7 @@ import {
   writeIndex,
   type PlanRef,
 } from '../lib/plan.ts';
-import { nowIso, warn } from '../lib/util.ts';
+import { log, nowIso, warn } from '../lib/util.ts';
 import { runStandard } from './standard.ts';
 
 export class TaskError extends Error {}
@@ -133,15 +133,47 @@ export function worktreePath(main: string, cfg: HarnessConfig, branch: string): 
   return path.join(resolveConfigPath(cfg.paths.worktreeRoot, main), ...branch.split('/'));
 }
 
+export interface LinkOps {
+  symlink: (src: string, dst: string) => void;
+  hardlink: (src: string, dst: string) => void;
+}
+
+/**
+ * 파일을 연결한다: 심볼릭 링크 → 실패하면 하드 링크(14.2절, ADR-0005).
+ * Windows는 개발자 모드·관리자 권한 없이 심볼릭 링크를 못 만들지만, 같은 볼륨이면 하드 링크는 된다.
+ * 복사하지 않는다: 키를 교체해도 복사본이 남기 때문이다.
+ */
+export function linkFile(
+  src: string,
+  dst: string,
+  ops: LinkOps = { symlink: (s, d) => symlinkSync(s, d), hardlink: (s, d) => linkSync(s, d) },
+): 'symlink' | 'hardlink' | null {
+  try {
+    ops.symlink(src, dst);
+    return 'symlink';
+  } catch {
+    // 아래 하드 링크로 대신한다
+  }
+  try {
+    ops.hardlink(src, dst);
+    return 'hardlink';
+  } catch {
+    return null;
+  }
+}
+
 function linkDevEnv(main: string, cfg: HarnessConfig, wt: string): void {
   const src = resolveConfigPath(cfg.paths.devEnvFile, main);
   const dst = path.join(wt, '.env');
-  if (existsSync(src) && !existsSync(dst)) {
-    try {
-      symlinkSync(src, dst);
-    } catch (e) {
-      warn(`개발용 .env 연결 실패(무시): ${(e as Error).message}`);
-    }
+  if (!existsSync(src) || existsSync(dst)) return;
+  const how = linkFile(src, dst);
+  if (how === 'hardlink') {
+    log('개발용 .env: 심볼릭 링크 권한이 없어 하드 링크로 연결했다');
+  } else if (how === null) {
+    warn(
+      '개발용 .env 연결 실패(무시): 심볼릭 링크·하드 링크 모두 안 된다. ' +
+        'Windows는 개발자 모드를 켜거나, worktree와 개발용 .env를 같은 드라이브에 두라(14.2절)',
+    );
   }
 }
 
