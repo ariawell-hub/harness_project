@@ -72,6 +72,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-11 21:02 계획 작성(runner-1 무인 세션). `next.ts`·`github.ts`·`github-fake.ts`·`config.ts`·`run.ts`(`doPlanning`)·`.claude/runner-settings.json`, 설계서 4.5·14.6절을 읽었다. 봇 Issue 처리는 열린 질문으로 남기고, 답이 없어도 마지막 step까지 갈 수 있게 설정 스위치(기본값 `exclude`)로 나눴다(의사결정 로그). 무인 세션은 `gh`가 막혀 있어 Issue에 질문 댓글을 달지 못했다(발견 사항).
+- 2026-11-11T21:05:08+09:00 계획 작성 완료
 
 ## 의사결정 로그
 
