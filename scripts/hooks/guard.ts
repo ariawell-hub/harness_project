@@ -8,18 +8,29 @@ import { hasCommits, tryRepoInfo } from '../lib/git.ts';
 import { findPlan } from '../lib/plan.ts';
 import { formatProblem } from '../lib/util.ts';
 import { evaluate, type GuardContext, type GuardInput } from './rules.ts';
-import { baseName } from './shell.ts';
+import { commandName, type Dialect } from './shell.ts';
 
 type Json = Record<string, unknown>;
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash']);
+
+/**
+ * 셸 도구 명령을 해석할 방언(ADR-0005, 설계서 13.1절).
+ * Claude Code `PowerShell` 도구는 PowerShell, `Bash` 도구는 POSIX(Windows에서는 Git Bash).
+ * Windows에서 형식을 실측하지 않은 그 밖의 셸 도구(Codex 등)는 두 방식으로 모두 판정한다(fail-closed).
+ */
+function shellDialects(tool: string, platform: NodeJS.Platform): Dialect[] {
+  if (/^powershell$/i.test(tool)) return ['powershell'];
+  if (/^bash$/i.test(tool)) return ['posix'];
+  return platform === 'win32' ? ['posix', 'powershell'] : ['posix'];
+}
 
 function quote(a: string): string {
   return /^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`;
 }
 
 function argvToScript(argv: string[]): string {
-  if (argv.length >= 3 && SHELLS.has(baseName(argv[0])) && /^-[a-z]*c$/.test(argv[1]))
+  if (argv.length >= 3 && SHELLS.has(commandName(argv[0])) && /^-[a-z]*c$/.test(argv[1]))
     return argv[2];
   return argv.map(quote).join(' ');
 }
@@ -34,7 +45,10 @@ export function patchFiles(patch: string): string[] {
   return out;
 }
 
-export function normalize(payload: Json): GuardInput | null {
+export function normalize(
+  payload: Json,
+  platform: NodeJS.Platform = process.platform,
+): GuardInput | null {
   const tool = String(payload.tool_name ?? payload.toolName ?? '');
   const ti = (payload.tool_input ?? payload.toolInput ?? payload.input ?? {}) as Json;
   const cwd = String(ti.workdir ?? ti.cwd ?? payload.cwd ?? process.cwd());
@@ -61,13 +75,15 @@ export function normalize(payload: Json): GuardInput | null {
   }
   const cmd = ti.command ?? ti.cmd;
   if (
-    /^(Bash|shell|exec_command|local_shell|unified_exec|run_shell_command|container\.exec)$/i.test(
+    /^(Bash|PowerShell|shell|exec_command|local_shell|unified_exec|run_shell_command|container\.exec)$/i.test(
       tool,
     ) ||
     cmd !== undefined
   ) {
-    if (Array.isArray(cmd)) return { kind: 'bash', command: argvToScript(cmd.map(String)), cwd };
-    if (typeof cmd === 'string') return { kind: 'bash', command: cmd, cwd };
+    const dialects = shellDialects(tool, platform);
+    if (Array.isArray(cmd))
+      return { kind: 'bash', command: argvToScript(cmd.map(String)), cwd, dialects };
+    if (typeof cmd === 'string') return { kind: 'bash', command: cmd, cwd, dialects };
   }
   return null;
 }

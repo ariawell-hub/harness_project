@@ -44,7 +44,8 @@
       "Bash(curl:*)",
       "Bash(wget:*)",
       "WebFetch",
-      "WebSearch"
+      "WebSearch",
+      "PowerShell"
     ]
   },
   "disableBypassPermissionsMode": "disable",

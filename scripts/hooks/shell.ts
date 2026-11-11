@@ -1,6 +1,12 @@
 // 셸 명령 문자열을 단순 명령 목록으로 분해한다(L1 훅용 휴리스틱).
 // 복합 연산자, 따옴표, $(...)·백틱, heredoc, `bash -c`·`eval` 재귀, env/sudo 같은 접두어를 처리한다.
+// Windows 네이티브의 PowerShell·cmd 방언과 `powershell -Command`·`-EncodedCommand`·`cmd /c` 재귀도 다룬다(ADR-0005).
 // 완벽한 셸 파서가 아니다. L1은 빠른 피드백이며, 보장은 권한·L3가 한다(13.2절). R20만 예외다.
+
+export type Dialect = 'posix' | 'powershell' | 'cmd';
+
+/** 방언별 이스케이프 문자: POSIX `\`, PowerShell 백틱, cmd `^` */
+const ESCAPE: Record<Dialect, string> = { posix: '\\', powershell: '`', cmd: '^' };
 
 export interface SimpleCommand {
   argv: string[];
@@ -22,6 +28,7 @@ const WRAPPERS = new Set([
   'doas',
 ]);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
+const POWERSHELLS = new Set(['powershell', 'pwsh']);
 const MAX_DEPTH = 6;
 
 interface Token {
@@ -30,7 +37,9 @@ interface Token {
 }
 
 /** 단어·연산자 토큰화. 치환($(...)·백틱)의 내용은 subs로 따로 모은다 */
-function tokenize(src: string, subs: string[]): Token[] {
+function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
+  const posix = dialect === 'posix';
+  const esc = ESCAPE[dialect];
   const tokens: Token[] = [];
   let word = '';
   let inWord = false;
@@ -58,9 +67,10 @@ function tokenize(src: string, subs: string[]): Token[] {
       i = j;
       continue;
     }
-    if (c === '\\' && i + 1 < src.length) {
-      if (src[i + 1] === '\n') {
-        i += 2;
+    if (c === esc && i + 1 < src.length) {
+      // 줄 잇기(이스케이프 + 줄바꿈)
+      if (src[i + 1] === '\n' || (src[i + 1] === '\r' && src[i + 2] === '\n')) {
+        i += src[i + 1] === '\r' ? 3 : 2;
         continue;
       }
       word += src[i + 1];
@@ -68,7 +78,15 @@ function tokenize(src: string, subs: string[]): Token[] {
       i += 2;
       continue;
     }
-    if (c === "'") {
+    // PowerShell 블록 주석 <# … #>
+    if (dialect === 'powershell' && c === '<' && src[i + 1] === '#') {
+      push();
+      const end = src.indexOf('#>', i + 2);
+      i = end < 0 ? src.length : end + 2;
+      continue;
+    }
+    // cmd에서 작은따옴표는 따옴표가 아니다
+    if (c === "'" && dialect !== 'cmd') {
       const end = src.indexOf("'", i + 1);
       const stop = end < 0 ? src.length : end;
       word += src.slice(i + 1, stop);
@@ -80,19 +98,24 @@ function tokenize(src: string, subs: string[]): Token[] {
       let j = i + 1;
       let buf = '';
       while (j < src.length && src[j] !== '"') {
-        if (src[j] === '\\' && j + 1 < src.length && '"\\$`\n'.includes(src[j + 1])) {
+        if (posix && src[j] === '\\' && j + 1 < src.length && '"\\$`\n'.includes(src[j + 1])) {
           buf += src[j + 1];
           j += 2;
           continue;
         }
-        if (src[j] === '$' && src[j + 1] === '(') {
+        if (dialect === 'powershell' && src[j] === '`' && j + 1 < src.length) {
+          buf += src[j + 1];
+          j += 2;
+          continue;
+        }
+        if (dialect !== 'cmd' && src[j] === '$' && src[j + 1] === '(') {
           const [inner, next] = readParen(src, j + 2);
           subs.push(inner);
           buf += '$(…)';
           j = next;
           continue;
         }
-        if (src[j] === '`') {
+        if (posix && src[j] === '`') {
           const end = src.indexOf('`', j + 1);
           const stop = end < 0 ? src.length : end;
           subs.push(src.slice(j + 1, stop));
@@ -108,7 +131,7 @@ function tokenize(src: string, subs: string[]): Token[] {
       i = j + 1;
       continue;
     }
-    if (c === '$' && src[i + 1] === '(') {
+    if (dialect !== 'cmd' && c === '$' && src[i + 1] === '(') {
       const [inner, next] = readParen(src, i + 2);
       subs.push(inner);
       word += '$(…)';
@@ -116,7 +139,7 @@ function tokenize(src: string, subs: string[]): Token[] {
       i = next;
       continue;
     }
-    if (c === '`') {
+    if (posix && c === '`') {
       const end = src.indexOf('`', i + 1);
       const stop = end < 0 ? src.length : end;
       subs.push(src.slice(i + 1, stop));
@@ -125,13 +148,13 @@ function tokenize(src: string, subs: string[]): Token[] {
       i = stop + 1;
       continue;
     }
-    if (c === '#' && !inWord) {
+    if (c === '#' && !inWord && dialect !== 'cmd') {
       // 주석: 줄 끝까지
       const end = src.indexOf('\n', i);
       i = end < 0 ? src.length : end;
       continue;
     }
-    if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
+    if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
       push();
       let j = i + 2;
       if (src[j] === '-') j++;
@@ -207,20 +230,69 @@ function readParen(src: string, start: number): [string, number] {
 
 const ASSIGN_RE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
 
-function normalize(words: string[], out: SimpleCommand[], depth: number): void {
+/** PowerShell 실행 파일 옵션 가운데 값을 받는 것(-ExecutionPolicy Bypass 등). 소문자, 접두 약어 포함 */
+const PS_VALUE_OPTS = new Set([
+  'executionpolicy',
+  'ex',
+  'ep',
+  'windowstyle',
+  'w',
+  'version',
+  'v',
+  'psconsolefile',
+  'configurationname',
+  'outputformat',
+  'o',
+  'of',
+  'inputformat',
+  'if',
+  'inf',
+  'workingdirectory',
+  'wd',
+  'custompipename',
+  'settingsfile',
+  'encodedarguments',
+  'ea',
+]);
+
+/** `powershell`·`pwsh` 인자에서 실행할 스크립트를 꺼낸다. -File이면 내용을 볼 수 없으므로 null */
+function powershellScript(args: string[]): string | null {
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (!/^[-/]/.test(a)) return args.slice(k).join(' ');
+    const name = a.replace(/^[-/]+/, '').toLowerCase();
+    if (!name) continue;
+    if (
+      (name[0] === 'c' && 'command'.startsWith(name)) ||
+      name === 'cwa' ||
+      name.startsWith('commandwith')
+    )
+      return args.slice(k + 1).join(' ');
+    if (name === 'e' || name === 'ec' || (name.length >= 3 && 'encodedcommand'.startsWith(name))) {
+      const b64 = args[k + 1];
+      return b64 === undefined ? null : Buffer.from(b64, 'base64').toString('utf16le');
+    }
+    if (name[0] === 'f' && 'file'.startsWith(name)) return null;
+    if (PS_VALUE_OPTS.has(name)) k++;
+  }
+  return null;
+}
+
+function normalize(words: string[], out: SimpleCommand[], depth: number, dialect: Dialect): void {
   const assigns: Record<string, string> = {};
   const unsets: string[] = [];
   let i = 0;
   // 앞의 할당과 래퍼를 벗긴다
   for (;;) {
-    const w = words[i];
-    if (w === undefined) break;
-    const m = ASSIGN_RE.exec(w);
+    const raw = words[i];
+    if (raw === undefined) break;
+    const m = ASSIGN_RE.exec(raw);
     if (m) {
       assigns[m[1]] = m[2];
       i++;
       continue;
     }
+    const w = commandName(raw);
     if (w === 'env') {
       i++;
       while (i < words.length) {
@@ -270,7 +342,7 @@ function normalize(words: string[], out: SimpleCommand[], depth: number): void {
     if (Object.keys(assigns).length) out.push({ argv: [], assigns, unsets });
     return;
   }
-  const head = baseName(argv[0]);
+  const head = commandName(argv[0]);
   if (head === 'unset') {
     out.push({
       argv,
@@ -296,41 +368,60 @@ function normalize(words: string[], out: SimpleCommand[], depth: number): void {
   }
   out.push({ argv, assigns, unsets });
   if (depth >= MAX_DEPTH) return;
-  // 재귀: bash -c "...", eval ...
+  // 재귀: bash -c "...", eval ..., powershell -Command ..., cmd /c ..., iex ...
   if (SHELLS.has(head)) {
     for (let k = 1; k < argv.length; k++) {
       const x = argv[k];
       if (x === '-c' || (/^-[a-z]+$/.test(x) && x.includes('c'))) {
-        if (argv[k + 1] !== undefined) parseInto(argv[k + 1], out, depth + 1);
+        if (argv[k + 1] !== undefined) parseInto(argv[k + 1], out, depth + 1, 'posix');
         break;
       }
     }
   } else if (head === 'eval') {
-    parseInto(argv.slice(1).join(' '), out, depth + 1);
+    parseInto(argv.slice(1).join(' '), out, depth + 1, dialect);
+  } else if (POWERSHELLS.has(head)) {
+    const script = powershellScript(argv.slice(1));
+    if (script !== null) parseInto(script, out, depth + 1, 'powershell');
+  } else if (head === 'cmd') {
+    const k = argv.findIndex((x, idx) => idx > 0 && /^\/[ck]$/i.test(x));
+    if (k > 0) parseInto(argv.slice(k + 1).join(' '), out, depth + 1, 'cmd');
+  } else if (head === 'iex' || head === 'invoke-expression') {
+    const rest = argv.slice(1).filter((x) => !/^-c(o(m(m(a(n(d)?)?)?)?)?)?$/i.test(x));
+    parseInto(rest.join(' '), out, depth + 1, 'powershell');
   }
 }
 
-function parseInto(src: string, out: SimpleCommand[], depth: number): void {
+function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Dialect): void {
   const subs: string[] = [];
-  const tokens = tokenize(src, subs);
+  const tokens = tokenize(src, subs, dialect);
   let cur: string[] = [];
   for (const t of tokens) {
     if (t.kind === 'op') {
-      if (cur.length) normalize(cur, out, depth);
+      if (cur.length) normalize(cur, out, depth, dialect);
       cur = [];
     } else cur.push(t.value);
   }
-  if (cur.length) normalize(cur, out, depth);
-  if (depth < MAX_DEPTH) for (const s of subs) parseInto(s, out, depth + 1);
+  if (cur.length) normalize(cur, out, depth, dialect);
+  if (depth < MAX_DEPTH) for (const s of subs) parseInto(s, out, depth + 1, dialect);
 }
 
-export function parseShell(src: string): SimpleCommand[] {
+export function parseShell(src: string, dialect: Dialect = 'posix'): SimpleCommand[] {
   const out: SimpleCommand[] = [];
-  parseInto(src, out, 0);
+  parseInto(src, out, 0, dialect);
   return out;
 }
 
 export function baseName(cmd: string): string {
   const parts = cmd.split(/[\\/]/);
   return parts[parts.length - 1];
+}
+
+/**
+ * 명령 이름 비교용: 경로를 떼고 소문자로 바꾸고 실행 확장자(.exe·.cmd·.bat·.com)를 뗀다.
+ * Windows와 macOS 기본 파일 시스템은 대소문자를 구분하지 않아 `GIT`, `git.exe`도 git으로 실행된다.
+ */
+export function commandName(cmd: string): string {
+  return baseName(cmd)
+    .toLowerCase()
+    .replace(/\.(exe|cmd|bat|com)$/, '');
 }

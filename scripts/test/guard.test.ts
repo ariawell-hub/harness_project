@@ -6,7 +6,9 @@ import { runSync } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { findPlan } from '../lib/plan.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
+import { normalize } from '../hooks/guard.ts';
 import { HARNESS_ROOT, commitAll, gitInit, sh, tmp, write } from './helpers.ts';
+import { readFileSync } from 'node:fs';
 
 const HOME = '/Users/someone';
 const ctx = (over: Partial<GuardContext> = {}): GuardContext => ({
@@ -121,6 +123,70 @@ test('일상 명령은 허용된다', () => {
     const r = bash(cmd);
     assert.equal(r, null, `허용되어야 한다: ${cmd} → ${r?.rule}: ${r?.what}`);
   }
+});
+
+test('PowerShell 방언으로도 금지 명령을 막는다(ADR-0005)', () => {
+  const psb = (command: string) =>
+    evaluate({ kind: 'bash', command, cwd: '/work/repo', dialects: ['powershell'] }, ctx());
+  const block: [string, string][] = [
+    ['git push --force origin feat/x', 'R14'],
+    ['gh pr review 3 --approve', 'R20'],
+    ['git.exe push origin main', 'R2'],
+    ['& "C:\\Program Files\\Git\\cmd\\git.exe" reset --hard', 'R14'],
+    ['Get-Content .env', 'R10'],
+  ];
+  for (const [c, rule] of block) {
+    const r = psb(c);
+    assert.ok(r?.rule.startsWith(rule), `${c} → ${r?.rule} (기대 ${rule})`);
+  }
+  for (const c of ['git status', 'node scripts/harness.ts check', 'Get-ChildItem -Force']) {
+    assert.equal(psb(c), null, c);
+  }
+});
+
+test('셸 래퍼·대소문자·확장자로 감싸도 막는다', () => {
+  const enc = Buffer.from('gh auth token', 'utf16le').toString('base64');
+  const block: [string, string][] = [
+    ['powershell -Command "gh pr review 1 --approve"', 'R20'],
+    ['pwsh -c "git push -f origin x"', 'R14'],
+    ['cmd /c "git push --force origin x"', 'R14'],
+    [`powershell -enc ${enc}`, 'R20'],
+    ['git.exe push --force origin x', 'R14'],
+    ['GIT push origin main', 'R2'],
+    ['/usr/local/bin/GH.EXE auth token', 'R20'],
+    ['cat .ENV', 'R10'],
+  ];
+  for (const [c, rule] of block) {
+    const r = bash(c);
+    assert.ok(r?.rule.startsWith(rule), `${c} → ${r?.rule} (기대 ${rule})`);
+  }
+});
+
+test('normalize: 도구·플랫폼별로 셸 방언을 고른다', () => {
+  const n = (tool: string, platform: NodeJS.Platform) =>
+    normalize({ tool_name: tool, tool_input: { command: 'git status' }, cwd: '/w' }, platform)
+      ?.dialects;
+  assert.deepEqual(n('PowerShell', 'win32'), ['powershell']);
+  assert.deepEqual(n('Bash', 'win32'), ['posix']);
+  assert.deepEqual(n('shell', 'win32'), ['posix', 'powershell']);
+  assert.deepEqual(n('exec_command', 'darwin'), ['posix']);
+  assert.deepEqual(n('Bash', 'darwin'), ['posix']);
+});
+
+test('훅 matcher가 Claude Code PowerShell 도구를 포함한다', () => {
+  const s = JSON.parse(readFileSync(path.join(HARNESS_ROOT, '.claude/settings.json'), 'utf8'));
+  assert.match(s.hooks.PreToolUse[0].matcher, /(^|\|)PowerShell(\||$)/);
+  const runner = JSON.parse(
+    readFileSync(path.join(HARNESS_ROOT, '.claude/runner-settings.json'), 'utf8'),
+  );
+  assert.ok(
+    runner.permissions.deny.includes('PowerShell'),
+    'runner는 PowerShell 도구를 쓰지 않는다',
+  );
+  assert.match(
+    readFileSync(path.join(HARNESS_ROOT, 'scripts/runner/agents.ts'), 'utf8'),
+    /matcher: '[^']*PowerShell/,
+  );
 });
 
 test('main 체크아웃에 있으면 인자 없는 git push도 막는다', () => {
