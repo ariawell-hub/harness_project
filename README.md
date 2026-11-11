@@ -6,8 +6,11 @@
 
 ## 요구 사항
 
-- Node 22.18 이상, pnpm 10, git, gh, gitleaks (`brew install gitleaks`)
-- 에이전트 CLI: Claude Code(`claude`), 선택적으로 Codex(`codex`)
+- Node 22.18 이상, pnpm 10, git, gh, gitleaks
+  - macOS: `brew install gitleaks`
+  - Windows(네이티브, WSL 아님): **Git for Windows(Git Bash) 필수**. 하네스가 step AC와 표준 명령을 Git Bash로 실행한다. gitleaks는 `winget install Gitleaks.Gitleaks` 또는 [릴리스](https://github.com/gitleaks/gitleaks/releases) 바이너리
+- 에이전트 CLI: Claude Code(`claude`), 선택적으로 Codex(`codex`). Windows에서 runner로 돌릴 도구는 셸 없이 실행되는 `.exe`가 필요하다. npm 설치본(`.cmd`)뿐이면 `harness.config.json`의 `agents.<도구>.cmd`에 `.exe` 경로를 적는다([ADR-0005](docs/decisions/ADR-0005-windows-native.md))
+- Mac과 Windows를 함께 쓰면 머신마다 작업자 이름을 다르게 정한다: 대화 세션은 `HARNESS_WORKER`, runner는 `--worker`(예: `mac-runner-1`, `win-runner-1`)
 
 ## 새 프로젝트에 적용하기
 
@@ -19,7 +22,7 @@
    ```
 2. **0단계(제작자가 직접)**: 설계서 0절의 전제 조건과 리포 설정.
    - 에이전트 전용 봇 계정 + 이 리포 한정 토큰(contents·pull requests·issues 쓰기, 90일 이하). GitHub Pro.
-   - **에이전트가 실행되는 Mac에서 제작자 계정의 `gh` 로그인을 지운다**(E5): `gh auth logout`. 제작자 승인은 GitHub 웹·모바일에서만.
+   - **에이전트가 실행되는 모든 머신(macOS·Windows)에서 제작자 계정의 GitHub 토큰을 지운다**(E5): `gh auth logout`, git 자격증명 도우미에 저장된 제작자 토큰도 지운다(macOS 키체인의 `github.com` 항목, Windows 자격 증명 관리자의 `git:https://github.com` 항목). 제작자 승인은 GitHub 웹·모바일에서만.
    - 원격 리포를 만들고 main을 push한 뒤 브랜치 보호: PR 필수, force push·삭제 금지, 관리자 우회 없음, 최신 브랜치 필수, stale 승인 무효화.
    - 승인 설정: 필수 승인 0, "Require approval of the most recent reviewable push" **끔**. 켜 두면 필수 승인이 0이어도 모든 PR에 사람 승인이 필요해 자동 병합이 멈춘다(설계서 0.2절).
    - Actions: 기본 권한 읽기 전용, "Actions가 PR 승인" 끔, 리포 수준 시크릿 없음. 자동 병합 허용, head 브랜치 자동 삭제.
