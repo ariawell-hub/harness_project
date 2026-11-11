@@ -8,6 +8,10 @@ review_cycle: on-change
 
 보호 경로(10.4절)를 바꾸는 PR은 여기에 한 줄을 남긴다.
 
+## 다음 버전 (미배포)
+
+- 설계서 v0.7.3: main의 "Require approval of the most recent reviewable push"를 구축·운영 단계 모두 끈다(0.2절). Q20 시험 리포 운영 방식(ADR-0004). 대화 세션 MCP 도구가 L1 훅 밖인 문제를 TD-13으로 등록.
+
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
 - 설계서 v0.7.1을 `docs/harness/design.md`로 이관(Q8). 참조 자료·검토 의견은 `docs/harness/background/`로, 기존 Next.js 문서 3개는 `profiles/web/templates/`로 이동.
