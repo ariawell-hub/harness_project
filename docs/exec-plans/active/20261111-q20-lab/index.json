@@ -1,0 +1,12 @@
+{
+  "plan": "20261111-q20-lab",
+  "steps": [
+    { "step": 0, "name": "lab-scaffold", "status": "pending" },
+    { "step": 1, "name": "patch-id", "status": "pending" },
+    { "step": 2, "name": "env-ref", "status": "pending" },
+    { "step": 3, "name": "check-source", "status": "pending" },
+    { "step": 4, "name": "judge-claude", "status": "pending" },
+    { "step": 5, "name": "judge-codex", "status": "pending" },
+    { "step": 6, "name": "wrap-up", "status": "pending" }
+  ]
+}
