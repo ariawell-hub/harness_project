@@ -1,0 +1,11 @@
+# Codex 프로젝트 설정 (보호 경로). 지침은 AGENTS.md를 기본으로 읽는다.
+# runner는 이 값 대신 harness.config.json agents.codex 인자를 명시적으로 넘긴다.
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[features]
+memories = false
+hooks = true
+
+[sandbox_workspace_write]
+network_access = false

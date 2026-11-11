@@ -1,0 +1,53 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "description": "웹 프로파일(초안). pnpm + Prettier + ESLint + Vitest + 프로덕션 빌드. 제품의 실제 스크립트는 app:* 이름으로 둔다(하네스 별칭과 재귀를 피하려고)",
+  "config": {
+    "commands": {
+      "setup": { "run": "pnpm install --frozen-lockfile", "timeoutSec": 900 },
+      "fmt": {
+        "run": "pnpm exec prettier --write .",
+        "check": "pnpm exec prettier --check .",
+        "timeoutSec": 300
+      },
+      "lint": { "run": "pnpm exec eslint . --max-warnings=0", "timeoutSec": 600 },
+      "test": { "run": "pnpm run app:test", "timeoutSec": 1200 },
+      "build": { "run": "pnpm run app:build", "timeoutSec": 1200 },
+      "dev": { "run": "pnpm run app:dev", "timeoutSec": 3600 },
+      "verify": null
+    },
+    "riskPaths": [
+      { "glob": "docs/**", "risk": "low" },
+      { "glob": "src/**", "risk": "normal" },
+      { "glob": "pnpm-lock.yaml", "risk": "normal" },
+      { "glob": "**/auth/**", "risk": "high" },
+      { "glob": "**/migrations/**", "risk": "high" },
+      { "glob": "prisma/**", "risk": "high" },
+      { "glob": "drizzle/**", "risk": "high" },
+      { "glob": "scripts/data/**", "risk": "high" }
+    ],
+    "guard": {
+      "dbPatterns": [
+        "\\btypeorm\\s+schema:(drop|sync)\\b",
+        "\\bsequelize\\s+db:drop\\b",
+        "\\bknex\\s+migrate:rollback\\b.*--all",
+        "\\bsupabase\\s+db\\s+reset\\b"
+      ],
+      "dbClients": ["supabase-db"]
+    },
+    "bypass": {
+      "extraPatterns": ["\\btest\\.fixme\\b"],
+      "excludeExtensions": [".md"]
+    },
+    "golden": {
+      "fileMaxLines": 400,
+      "naming": "파일은 kebab-case, React 컴포넌트는 PascalCase export"
+    },
+    "architecture": "도메인마다 Types → Config → Repo → Service → Runtime → UI. 횡단 관심사(인증, 텔레메트리, 기능 플래그)는 Providers로만 들어온다"
+  },
+  "templates": [
+    { "from": "templates/PRD.md", "to": "docs/product/TEMPLATE.md" },
+    { "from": "templates/ADR.md", "to": "docs/decisions/TEMPLATE.md" },
+    { "from": "templates/ARCHITECTURE.md", "to": "ARCHITECTURE.md", "replacePlaceholder": true }
+  ]
+}

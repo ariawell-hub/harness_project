@@ -1,0 +1,25 @@
+---
+status: active
+related_code: [scripts/, .claude/, .codex/, .github/, harness.config.json]
+review_cycle: on-change
+---
+
+# 하네스 변경 이력
+
+보호 경로(10.4절)를 바꾸는 PR은 여기에 한 줄을 남긴다.
+
+## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
+
+- 설계서 v0.7.1을 `docs/harness/design.md`로 이관(Q8). 참조 자료·검토 의견은 `docs/harness/background/`로, 기존 Next.js 문서 3개는 `profiles/web/templates/`로 이동.
+- 스크립트 언어 결정: TypeScript + Node 22 빌드 없이 실행(ADR-0001, Q3).
+- `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `docs/` 구조, 작업 절차서, 계획·step 템플릿.
+- 표준 명령(시간 제한·프로세스 그룹 정리), `check`(캐시, doc-lint, bypass-scan, secret-scan).
+- `new-task`(claim 브랜치 선점, step별 브랜치·worktree), `complete-step`, `claim-heartbeat`, `start`, `next`.
+- L1 금지 훅(R1~R4, R10, R13, R14, R20): Claude Code·Codex 공통 `scripts/hooks/guard.ts`.
+- 무인 권한 프로필(`.claude/runner-settings.json`), runner 최소형(작업자 1개, step 실행·AC 판정·재시도·세션 시간 제한, 3회/5회·총량 상한).
+- CI: `check`(pull_request), `plan-gate`(pull_request_target, main 정의만 실행).
+- 프로파일: `core`(이 템플릿 자신), `web`(초안), `game`(README 초안).
+- R3 부트스트랩 예외: 커밋이 하나도 없는 리포에서만 main 체크아웃 수정을 허용한다. `git worktree add`에는 기준 커밋이 필요해서 첫 커밋 전에는 `new-task`를 쓸 수 없기 때문이다. 첫 커밋 뒤에는 이 예외가 적용되지 않는다.
+- 검증: 이 템플릿을 만든 Claude Code 세션 자신이 훅에 막혔다(R3 main 체크아웃 수정, R14 변수 경로 재귀 삭제, R2 main push). 실제 `claude -p` 세션에서 권한이 `Bash(gh:*)`로 열린 상태에서도 `gh pr review --approve`가 R20으로 차단됨을 확인했다.
+- 스모크 테스트(실제 `claude -p`, sonnet, 로컬 bare 원격 + 가짜 GitHub): runner가 Issue 하나를 선점 → 계획(step 2개) → step0 PR 병합 → step1 PR 병합(`Closes`) → Issue 종료 → claim 해제 → worktree 정리까지 사람 개입 없이 약 1분 30초에 마쳤다. 새 세션이 `AGENTS.md`만 읽고 `start`와 같은 다음 Issue를 골랐다(S1).
+- 1단계에서 미룬 항목은 `docs/exec-plans/tech-debt-tracker.md` TD-1~TD-12.

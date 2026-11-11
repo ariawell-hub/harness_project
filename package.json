@@ -1,0 +1,26 @@
+{
+  "name": "harness-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "범용 하네스 템플릿 (코어 + 웹·게임 프로파일)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "setup": "node scripts/harness.ts setup",
+    "fmt": "node scripts/harness.ts fmt",
+    "lint": "node scripts/harness.ts lint",
+    "test": "node scripts/harness.ts test",
+    "build": "node scripts/harness.ts build",
+    "check": "node scripts/harness.ts check",
+    "dev": "node scripts/harness.ts dev",
+    "verify": "node scripts/harness.ts verify"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  }
+}

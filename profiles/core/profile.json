@@ -1,0 +1,28 @@
+{
+  "name": "core",
+  "version": "0.1.0",
+  "description": "하네스 템플릿 자신(TypeScript 스크립트)을 개발할 때의 프로파일",
+  "config": {
+    "commands": {
+      "setup": { "run": "pnpm install --frozen-lockfile", "timeoutSec": 600 },
+      "fmt": {
+        "run": "pnpm exec prettier --write .",
+        "check": "pnpm exec prettier --check .",
+        "timeoutSec": 300
+      },
+      "lint": { "run": "pnpm exec tsc -p tsconfig.json", "timeoutSec": 300 },
+      "test": { "run": "node --test \"scripts/test/*.test.ts\"", "timeoutSec": 900 },
+      "build": null,
+      "dev": null,
+      "verify": null
+    },
+    "riskPaths": [
+      { "glob": "docs/**", "risk": "low" },
+      { "glob": "scripts/**", "risk": "normal" },
+      { "glob": "pnpm-lock.yaml", "risk": "normal" }
+    ],
+    "guard": { "dbPatterns": [], "dbClients": [] },
+    "bypass": { "extraPatterns": [], "excludeExtensions": [".md"] }
+  },
+  "templates": []
+}

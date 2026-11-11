@@ -1,0 +1,9 @@
+# 시크릿 (R10). 이 항목을 지우면 secret-scan이 실패한다.
+.env
+.env.*
+!.env.example
+
+# 의존성·생성물
+node_modules/
+*.log
+.DS_Store
