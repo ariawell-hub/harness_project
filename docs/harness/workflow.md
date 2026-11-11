@@ -27,6 +27,8 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 
 - 위험도(`risk`)는 규모와 별개다: low(문서·소규모), normal(일반 코드·lockfile), high(보안·인증·마이그레이션·데이터 스크립트).
 - 진행 로그를 갱신할 때 `node scripts/harness.ts claim-heartbeat --issue <N>`로 선점이 살아 있음을 알린다(24시간 무응답이면 만료).
+- **여러 머신(Mac·Windows)에서 일하면 작업자 이름을 머신마다 고유하게 정한다**: 대화 세션은 환경 변수 `HARNESS_WORKER`(예: `mac-session`), runner는 `--worker`(예: `win-runner-1`). 계획의 `owner`가 이 이름이라, 같은 이름이면 서로의 계획을 자기 것으로 본다.
+- Windows는 네이티브로 작업한다(WSL 아님). Git for Windows(Git Bash)가 필요하고, 하네스는 셸 명령을 Git Bash로 실행한다([ADR-0005](../decisions/ADR-0005-windows-native.md)).
 
 ## 2. 계획 작성 (코드보다 먼저)
 
@@ -42,7 +44,7 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 2. **자기완결성**: 새 세션이 그 step 파일만 읽고 작업한다. "앞에서 논의한 대로"를 쓰지 않는다.
 3. **읽을 파일 명시**: 관련 문서와 앞 step이 만든·바꾼 파일의 경로.
 4. **시그니처 수준 지시**: 인터페이스만 주고 구현은 맡긴다. 꼭 지킬 규칙(멱등성, 보안)은 적는다.
-5. **AC는 실행 가능한 명령**: ` ```bash ` 블록에 runner가 그대로 실행할 명령을 쓴다.
+5. **AC는 실행 가능한 명령**: ` ```bash ` 블록에 runner가 그대로 실행할 명령을 쓴다. POSIX `sh` 문법으로 쓴다. Windows runner도 Git Bash로 같은 명령을 실행하므로, 한 OS에만 있는 명령(`pbcopy`, `open`, `Remove-Item` 같은 PowerShell cmdlet)은 쓰지 않는다.
 6. **금지사항은 구체적으로**: "X를 하지 마라. 이유: Y".
 7. **이름**: kebab-case 한두 단어.
 

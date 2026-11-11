@@ -11,6 +11,7 @@ review_cycle: on-change
 ## 다음 버전 (미배포)
 
 - 설계서 v0.7.3: main의 "Require approval of the most recent reviewable push"를 구축·운영 단계 모두 끈다(0.2절). Q20 시험 리포 운영 방식(ADR-0004). 대화 세션 MCP 도구가 L1 훅 밖인 문제를 TD-13으로 등록.
+- 설계서 v0.7.4: macOS와 Windows 네이티브 병행(ADR-0005). E5·R20을 에이전트가 실행되는 모든 머신 기준으로, AC·표준 명령은 POSIX `sh` 문법(Windows는 Git Bash), 텍스트 파일 LF 고정, L1 훅의 PowerShell·cmd 방언, 작업자 이름의 머신 간 고유성. Windows 실기 검증은 TD-14, CI OS 행렬은 TD-15.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
