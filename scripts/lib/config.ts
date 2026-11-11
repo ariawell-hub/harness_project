@@ -36,6 +36,8 @@ export interface HarnessConfig {
     defaultBranch: string;
     owner: string;
     bot: string;
+    /** 외주 개발자 계정(14.6절). 이 계정이 만든 Issue도 runner 작업 후보가 된다 */
+    collaborators: string[];
     priorityLabels: string[];
     needsHumanLabel: string;
   };
@@ -104,9 +106,16 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   ] as const) {
     if (!cfg[key]) problems.push(`${key} 항목이 없다`);
   }
+  const collaborators: unknown = cfg.github?.collaborators;
+  if (
+    collaborators !== undefined &&
+    !(Array.isArray(collaborators) && collaborators.every((c) => typeof c === 'string'))
+  )
+    problems.push('github.collaborators는 계정 이름 문자열 배열이어야 한다');
   if (problems.length) {
     throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- ${problems.join('\n- ')}`);
   }
+  cfg.github.collaborators ??= [];
   cfg.agents ??= {};
   cfg.riskPaths ??= [];
   cfg.protectedPaths ??= [];

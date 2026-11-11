@@ -8,6 +8,7 @@
     "defaultBranch": "main",
     "owner": "ariawell-hub",
     "bot": "ariawell247",
+    "collaborators": [],
     "priorityLabels": ["priority:high", "priority:medium", "priority:low"],
     "needsHumanLabel": "needs-human"
   },

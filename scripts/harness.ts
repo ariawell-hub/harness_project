@@ -8,7 +8,7 @@ import { formatProblem, log } from './lib/util.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
-import { describeTask, start } from './commands/start.ts';
+import { describeExcluded, describeTask, start } from './commands/start.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
 import { docLint, printDocLint } from './gates/doc-lint.ts';
@@ -218,9 +218,17 @@ async function main(argv: string[]): Promise<number> {
             reason: pick.reason,
             waiting: pick.waiting,
             summary: describeTask(pick.task),
+            excluded: pick.excluded,
           }),
         );
-      else log(`${describeTask(pick.task)}\n이유: ${pick.reason}`);
+      else
+        log(
+          [
+            describeTask(pick.task),
+            `이유: ${pick.reason}`,
+            ...pick.excluded.map(describeExcluded),
+          ].join('\n'),
+        );
       return 0;
     }
     case 'run': {

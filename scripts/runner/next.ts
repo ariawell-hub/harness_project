@@ -3,7 +3,8 @@
 //   2. 내 PR 중 조치가 필요한 것(체크 실패, main에 뒤처짐)
 //   3. 내가 맡은 계획의 진행 중인 step (계획 작성 포함)
 //   4. 앞 step이 병합된 계획의 다음 step
-//   5. 선점되지 않은 Issue (우선순위 라벨 순, WIP 상한 안에서)
+//   5. 선점되지 않은 Issue 중 제작자·외주 개발자가 만든 것 (우선순위 라벨 순, WIP 상한 안에서).
+//      봇 계정 등 그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절)
 //   6. 없으면 idle (CI·사람 대기 수 포함)
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -47,10 +48,20 @@ export type Task =
   | { kind: 'new-issue'; issue: Issue }
   | { kind: 'idle' };
 
+/** 작성자 확인으로 새 Issue 후보에서 뺀 Issue (4.5절 5번, 14.6절) */
+export interface ExcludedIssue {
+  number: number;
+  title: string;
+  author: string;
+  reason: string;
+}
+
 export interface Pick {
   task: Task;
   reason: string;
   waiting: { ci: number; human: number };
+  /** 작성자 때문에 새 Issue 후보에서 뺀 것. 5번까지 가지 않았으면 [] */
+  excluded: ExcludedIssue[];
 }
 
 export interface NextEnv {
@@ -117,6 +128,38 @@ function priorityOf(issue: Issue, labels: string[]): number {
   return i < 0 ? labels.length : i;
 }
 
+/** GitHub login 비교. 대소문자를 무시하고, 빈 문자열은 어떤 계정과도 같지 않다 */
+export function sameLogin(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * 새 Issue 후보를 작성자로 거른다(14.6절). 제작자(`github.owner`)·외주 개발자(`github.collaborators`)가
+ * 만든 Issue만 `trusted`다. `github.owner`가 비면 모두 뺀다(fail-closed). 입력 순서를 지킨다.
+ */
+export function filterTrustedIssues(
+  issues: Issue[],
+  cfg: HarnessConfig,
+): { trusted: Issue[]; excluded: ExcludedIssue[] } {
+  const { owner, bot } = cfg.github;
+  const allowed = [owner, ...(cfg.github.collaborators ?? [])];
+  const trusted: Issue[] = [];
+  const excluded: ExcludedIssue[] = [];
+  for (const i of issues) {
+    let reason: string;
+    if (!owner) reason = 'github.owner가 비어 있다(설정 누락 시 새 Issue를 고르지 않는다)';
+    else if (allowed.some((a) => sameLogin(i.author, a))) {
+      trusted.push(i);
+      continue;
+    } else if (sameLogin(i.author, bot)) reason = '봇 계정이 만든 Issue';
+    else if (!i.author) reason = '작성자 불명';
+    else reason = '허용 계정(github.owner·github.collaborators)이 아닌 작성자';
+    excluded.push({ number: i.number, title: i.title, author: i.author, reason });
+  }
+  return { trusted, excluded };
+}
+
 export function pickNext(env: NextEnv): Pick {
   const { cfg, gh, worker } = env;
   const label = cfg.github.needsHumanLabel;
@@ -134,6 +177,7 @@ export function pickNext(env: NextEnv): Pick {
         task: { kind: 'answered', issue: issue.number, answer, local },
         reason: `#${issue.number}에 제작자 답변이 있다`,
         waiting: { ci: 0, human: 0 },
+        excluded: [],
       };
     }
     humanIssues.add(issue.number);
@@ -150,12 +194,14 @@ export function pickNext(env: NextEnv): Pick {
         task: { kind: 'fix-pr', local: l, pr },
         reason: `PR #${pr.number} 체크 실패: ${pr.failingChecks.join(', ')}`,
         waiting: { ci, human: humanIssues.size },
+        excluded: [],
       };
     if (pr.mergeState === 'BEHIND')
       return {
         task: { kind: 'rebase', local: l, pr },
         reason: `PR #${pr.number}가 main에 뒤처졌다`,
         waiting: { ci, human: humanIssues.size },
+        excluded: [],
       };
     ci++;
   }
@@ -172,12 +218,14 @@ export function pickNext(env: NextEnv): Pick {
         task: { kind: 'plan', local: l },
         reason: `계획 ${l.id} 작성이 필요하다`,
         waiting: { ci, human: humanIssues.size },
+        excluded: [],
       };
     if (l.stepStatus !== 'completed')
       return {
         task: { kind: 'step', local: l },
         reason: `계획 ${l.id} step${l.step ?? ''} 진행 중`,
         waiting: { ci, human: humanIssues.size },
+        excluded: [],
       };
   }
 
@@ -209,11 +257,14 @@ export function pickNext(env: NextEnv): Pick {
         task: { kind: 'next-step', id, step: next, issue: Number(fm.issue) },
         reason: `계획 ${id}의 step${next} 시작 가능(앞 step 병합됨)`,
         waiting: { ci, human: humanIssues.size },
+        excluded: [],
       };
     }
   }
 
-  // 5. 선점되지 않은 Issue (WIP 상한)
+  // 5. 선점되지 않은 Issue (WIP 상한). 작성자 확인(14.6절)은 이 단계에만 적용한다:
+  //    이미 선점한 작업(1~4번)은 선점 때 판단이 끝났다
+  let excluded: ExcludedIssue[] = [];
   const openMine = mine.filter((l) => l.pr?.state === 'open').length;
   if (openMine < cfg.limits.wipPerWorker) {
     const claims = new Set(
@@ -223,34 +274,40 @@ export function pickNext(env: NextEnv): Pick {
         .filter(Boolean)
         .map(Number),
     );
-    const candidates = issues
-      .filter(
-        (i) =>
-          !i.labels.includes(label) &&
-          !claims.has(i.number) &&
-          !locals.some((l) => l.issue === i.number),
-      )
-      .sort(
-        (a, b) =>
-          priorityOf(a, cfg.github.priorityLabels) - priorityOf(b, cfg.github.priorityLabels) ||
-          a.number - b.number,
-      );
+    const open = issues.filter(
+      (i) =>
+        !i.labels.includes(label) &&
+        !claims.has(i.number) &&
+        !locals.some((l) => l.issue === i.number),
+    );
+    const filtered = filterTrustedIssues(open, cfg);
+    excluded = filtered.excluded;
+    const candidates = filtered.trusted.sort(
+      (a, b) =>
+        priorityOf(a, cfg.github.priorityLabels) - priorityOf(b, cfg.github.priorityLabels) ||
+        a.number - b.number,
+    );
     if (candidates.length) {
       return {
         task: { kind: 'new-issue', issue: candidates[0] },
         reason: `선점되지 않은 Issue #${candidates[0].number}`,
         waiting: { ci, human: humanIssues.size },
+        excluded,
       };
     }
   }
 
+  const idle = ci
+    ? `CI·병합 대기 ${ci}건`
+    : humanIssues.size
+      ? `사람 대기 ${humanIssues.size}건`
+      : '할 일 없음';
   return {
     task: { kind: 'idle' },
-    reason: ci
-      ? `CI·병합 대기 ${ci}건`
-      : humanIssues.size
-        ? `사람 대기 ${humanIssues.size}건`
-        : '할 일 없음',
+    reason: excluded.length
+      ? `${idle} (작성자 확인으로 제외: ${excluded.map((e) => `#${e.number}`).join(', ')})`
+      : idle,
     waiting: { ci, human: humanIssues.size },
+    excluded,
   };
 }

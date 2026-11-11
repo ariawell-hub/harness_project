@@ -4,7 +4,7 @@ import { getGitHub } from '../lib/github.ts';
 import { repoInfo } from '../lib/git.ts';
 import { log, warn } from '../lib/util.ts';
 import { cleanupMerged } from '../runner/run.ts';
-import { pickNext, readLocalPlans } from '../runner/next.ts';
+import { pickNext, readLocalPlans, type ExcludedIssue } from '../runner/next.ts';
 import { fetchRemote } from './task.ts';
 
 export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
@@ -26,6 +26,11 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
     case 'idle':
       return '할 일 없음';
   }
+}
+
+/** 작성자 확인으로 새 Issue 후보에서 뺀 Issue 한 줄(4.5절 5번, 14.6절) */
+export function describeExcluded(e: ExcludedIssue): string {
+  return `후보 제외: #${e.number} "${e.title}" (작성자 ${e.author || '불명'}) — ${e.reason}`;
 }
 
 export function start(cwd: string, worker: string): number {
@@ -68,6 +73,7 @@ export function start(cwd: string, worker: string): number {
   const pick = pickNext({ main, cfg, gh, worker });
   log(`- ${describeTask(pick.task)}`);
   log(`- 이유: ${pick.reason}`);
+  for (const e of pick.excluded) log(`- ${describeExcluded(e)}`);
   if (info.isMainCheckout && pick.task.kind !== 'idle') {
     log('- 주의: 지금은 main 체크아웃이다. 코드는 worktree 안에서만 고친다(R3).');
   }
