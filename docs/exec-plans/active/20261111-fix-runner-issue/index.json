@@ -1,0 +1,15 @@
+{
+  "plan": "20261111-fix-runner-issue",
+  "steps": [
+    {
+      "step": 0,
+      "name": "issue-author",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "bot-approval",
+      "status": "pending"
+    }
+  ]
+}
