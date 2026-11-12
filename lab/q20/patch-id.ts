@@ -169,6 +169,26 @@ async function mergePR(cwd: string, n: number, head: string, tries = 20): Promis
   throw new Error(`PR #${n} 병합 실패(head 동기화 대기 초과): ${last}`);
 }
 
+/**
+ * push 직후에는 `refs/pull/<n>/head`가 늦게 갱신된다(2차 실행에서 관찰: 옛 head로 재면 측정이 틀린다).
+ * PR ref가 expected가 될 때까지 기다린 뒤 그때의 main 기준으로 patch-id를 잰다.
+ */
+async function patchIdAt(
+  cwd: string,
+  pr: number,
+  expected: string,
+  timeoutMs = 120_000,
+): Promise<PatchIdResult & { pr: number; main: string }> {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const { main, head } = fetchLab(cwd, pr);
+    if (head === expected) return { pr, main, ...patchIdOf(cwd, main, head) };
+    if (Date.now() > end)
+      throw new Error(`PR #${pr} ref가 ${timeoutMs}ms 안에 ${expected.slice(0, 12)}가 되지 않았다`);
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+
 async function waitHead(cwd: string, pr: number, not: string, timeoutMs = 90_000): Promise<string> {
   const end = Date.now() + timeoutMs;
   for (;;) {
@@ -202,8 +222,8 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   const a2c = commitFiles(cwd, m0, { 'a2.txt': 'A2: PR이 바꾼 줄\n' }, 'pid: A2 a2.txt');
   push(cwd, a2c, br('a2'));
   const a2 = openPR(cwd, br('a2'), `pid A2 (${tag})`);
-  const a1Before = prPatchId(cwd, a1.number);
-  const a2Before = prPatchId(cwd, a2.number);
+  const a1Before = await patchIdAt(cwd, a1.number, a1c);
+  const a2Before = await patchIdAt(cwd, a2.number, a2c);
   const bc = commitFiles(cwd, m0, { 'b.txt': 'B: main이 바꾼 다른 파일\n' }, 'pid: B b.txt');
   push(cwd, bc, br('b'));
   const b = openPR(cwd, br('b'), `pid B (${tag})`);
@@ -213,7 +233,7 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   // 2-(1). A1: main 병합 커밋 + 일반 push(ADR-0006)
   const a1m = mergeCommit(cwd, a1c, m1, `Merge main into ${br('a1')}`);
   push(cwd, a1m.commit, br('a1'));
-  const a1After = prPatchId(cwd, a1.number);
+  const a1After = await patchIdAt(cwd, a1.number, a1m.commit);
   cases.push({
     name: '겹치지 않는 main 변경 뒤 main 병합 + 일반 push(ADR-0006)',
     expected: 'patch-id가 같다(승인 이어받기 가능)',
@@ -234,8 +254,8 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
     ],
     cwd,
   );
-  await waitHead(cwd, a2.number, a2c);
-  const a2After = prPatchId(cwd, a2.number);
+  const a2Updated = await waitHead(cwd, a2.number, a2c);
+  const a2After = await patchIdAt(cwd, a2.number, a2Updated);
   cases.push({
     name: '겹치지 않는 main 변경 뒤 GitHub Update branch(merge)',
     expected: 'patch-id가 같다',
@@ -255,7 +275,7 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
     'a.txt': 'A1: PR이 바꾼 줄\n',
   });
   push(cwd, a1Conf.commit, br('a1'));
-  const a1Resolved = prPatchId(cwd, a1.number);
+  const a1Resolved = await patchIdAt(cwd, a1.number, a1Conf.commit);
   cases.push({
     name: '같은 파일을 바꾼 main 변경 뒤 main 병합(충돌 해결)',
     expected: 'PR이 main에 더하는 변경이 달라지므로 patch-id가 달라진다(다시 검증)',
@@ -266,9 +286,9 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   });
 
   // 4. 최신 PR의 squash 결과 트리 == PR head 트리
-  const latest = fetchLab(cwd, a1.number);
-  const upToDate = gitTry(['merge-base', '--is-ancestor', latest.main, latest.head!], cwd).ok;
-  await mergePR(cwd, a1.number, latest.head!);
+  const latest = { main: fetchLab(cwd).main, head: a1Resolved.head };
+  const upToDate = gitTry(['merge-base', '--is-ancestor', latest.main, latest.head], cwd).ok;
+  await mergePR(cwd, a1.number, latest.head);
   const m3 = fetchLab(cwd).main;
   const headTree = git(['rev-parse', `${latest.head}^{tree}`], cwd);
   const squashTree = git(['rev-parse', `${m3}^{tree}`], cwd);
@@ -276,7 +296,7 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
     name: 'main 최신 PR의 squash 병합 결과 트리',
     expected:
       'squash 커밋 트리가 PR head 트리와 같다(10.3절 전제: 새 head의 check가 병합 대상 검증)',
-    observed: `병합 직전 main ${short(latest.main)}이 head ${short(latest.head!)}의 조상: ${upToDate}. head 트리 ${short(headTree)}, squash 커밋 ${short(m3)} 트리 ${short(squashTree)}. 시험 리포의 "최신 브랜치 필수" 설정은 바꾸지 않았다(R20)`,
+    observed: `병합 직전 main ${short(latest.main)}이 head ${short(latest.head)}의 조상: ${upToDate}. head 트리 ${short(headTree)}, squash 커밋 ${short(m3)} 트리 ${short(squashTree)}. 시험 리포의 "최신 브랜치 필수" 설정은 바꾸지 않았다(R20)`,
     verdict: upToDate && headTree === squashTree ? 'pass' : 'fail',
     evidence: [a1.url],
   });
