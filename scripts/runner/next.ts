@@ -8,6 +8,7 @@
 //   6. 없으면 idle (CI·사람 대기 수 포함)
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { listRemoteClaims } from '../commands/task.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import type { GitHubPort, Issue, PullRequest } from '../lib/github.ts';
 import { gitTry, listWorktrees, showFile } from '../lib/git.ts';
@@ -274,13 +275,12 @@ export function pickNext(env: NextEnv): Pick {
   let excluded: ExcludedIssue[] = [];
   const openMine = mine.filter((l) => l.pr?.state === 'open').length;
   if (openMine < cfg.limits.wipPerWorker) {
-    const claims = new Set(
-      gitTry(['ls-remote', '--heads', cfg.github.remote, 'claim/*'], env.main)
-        .stdout.split('\n')
-        .map((l) => /refs\/heads\/claim\/(\d+)/.exec(l)?.[1])
-        .filter(Boolean)
-        .map(Number),
-    );
+    let claims = new Set<number>();
+    try {
+      claims = new Set(listRemoteClaims(env.main, cfg));
+    } catch {
+      // 조회 실패는 선점 없음으로 본다(기존 동작). push 거부가 실제 선점을 지킨다(8.3절)
+    }
     const open = issues.filter(
       (i) =>
         !i.labels.includes(label) &&

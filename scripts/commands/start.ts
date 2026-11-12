@@ -1,12 +1,13 @@
 // 세션 시작 절차 (7.1절, S1): fetch → main 체크아웃 fast-forward(안 되면 이유만) → 설정 다시 읽기 →
-// ① 열린 needs-human 먼저 보고 ② 정리(main 동기화 결과, 병합된 worktree) ③ 다음 할 일 고르기.
+// ① 열린 needs-human 먼저 보고 ② 정리(main 동기화 결과, 병합된 worktree, 닫힌 Issue의 claim/<N> 선점 해제)
+// ③ 다음 할 일 고르기. 선점 해제는 GitHub에서 닫혔음을 확인한 Issue만 한다(8.3절).
 import { loadConfig } from '../lib/config.ts';
-import { getGitHub } from '../lib/github.ts';
+import { getGitHub, type Issue } from '../lib/github.ts';
 import { fastForwardMain, repoInfo, type MainSync } from '../lib/git.ts';
 import { log, warn } from '../lib/util.ts';
 import { cleanupMerged } from '../runner/run.ts';
 import { pickNext, readLocalPlans, type ExcludedIssue } from '../runner/next.ts';
-import { fetchRemote } from './task.ts';
+import { TaskError, fetchRemote, releaseClosedClaims, type ClaimCleanup } from './task.ts';
 
 export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
   switch (t.kind) {
@@ -45,6 +46,15 @@ export function describeMainSync(r: MainSync, upstream: string): string {
   }
 }
 
+/** ② 정리 절의 선점 해제 줄. 해제·확인 실패가 없으면 "없음" 한 줄 */
+export function describeClaimCleanup(r: ClaimCleanup): string[] {
+  const lines = [
+    ...r.released.map((n) => `- 선점 해제: claim/${n} (Issue #${n} 닫힘)`),
+    ...r.failed.map((f) => `- 선점 유지(확인 실패): claim/${f.issue} — ${f.reason}`),
+  ];
+  return lines.length ? lines : ['- 닫힌 Issue의 선점: 없음'];
+}
+
 export function start(cwd: string, worker: string): number {
   const info = repoInfo(cwd);
   const main = info.mainRoot;
@@ -63,7 +73,7 @@ export function start(cwd: string, worker: string): number {
   const label = cfg.github.needsHumanLabel;
 
   log('## ① 사람의 답을 기다리는 항목 (needs-human)');
-  let issues;
+  let issues: Issue[];
   try {
     issues = gh.listOpenIssues();
   } catch (e) {
@@ -86,6 +96,12 @@ export function start(cwd: string, worker: string): number {
   const locals = readLocalPlans({ main, cfg, gh, worker });
   const removed = cleanupMerged(main, cfg, locals);
   log(removed.length ? removed.map((r) => `- 삭제: ${r}`).join('\n') : '- 병합된 worktree: 없음');
+  try {
+    log(describeClaimCleanup(releaseClosedClaims(main, cfg, gh, issues)).join('\n'));
+  } catch (e) {
+    if (!(e instanceof TaskError)) throw e;
+    warn(`선점 정리 건너뜀: ${e.message.split('\n')[0]}`);
+  }
 
   log('\n## ③ 다음 할 일 (4.5절 우선순위)');
   const pick = pickNext({ main, cfg, gh, worker });

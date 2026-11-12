@@ -349,3 +349,35 @@ test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 계획을 �
     t.fx.cleanup();
   }
 });
+
+test('runner: step 완료 push가 거부되고 원격 브랜치가 갈라졌으면 덮어쓰지 않고 멈춰 보고한다 (Issue #27)', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Diverge demo', '원격 브랜치 갈라짐');
+    const task = await newTask(t.fx.root, {
+      issue: 1,
+      slug: 'diverge',
+      size: 'medium',
+      owner: 'runner-1',
+      github: false,
+      date: '20261112',
+    });
+    // 다른 곳에서 같은 브랜치에 커밋이 올라간 상태를 만든다
+    sh('git', ['push', '-q', '-u', 'origin', task.branch], task.worktree);
+    const other = advanceRemote(t.fx, 'other.txt', 'o\n', { branch: task.branch });
+
+    assert.equal(await run(t.fx.root), 'human', '사람 답변만 기다리면 멈춘다');
+    const remoteHead = sh(
+      'git',
+      ['ls-remote', t.fx.remote, `refs/heads/${task.branch}`],
+      t.fx.root,
+    ).split(/\s+/)[0];
+    assert.equal(remoteHead, other, '원격 브랜치를 덮어쓰지 않았다');
+    const s = t.gh();
+    assert.ok(s.issues[0].labels.includes('needs-human'), 'Issue에 needs-human');
+    assert.match(s.issues[0].comments.at(-1)!.body, /로컬에 없는 커밋/);
+    assert.equal(s.prs.length, 0, 'PR을 만들지 않았다');
+  } finally {
+    t.fx.cleanup();
+  }
+});

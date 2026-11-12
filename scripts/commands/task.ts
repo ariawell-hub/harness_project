@@ -2,12 +2,13 @@
 //   new-task       : claim/<issue> 선점 → 브랜치 + worktree + 계획 골격 → setup
 //   new-task --plan: 다음 step의 브랜치·worktree
 //   claim-heartbeat: claim 브랜치에 빈 커밋(생존 확인)
+//   (start ②)      : 닫힌 Issue의 claim/<N> 해제(releaseClosedClaims)
 //   complete-step  : 계획 전용 커밋(step completed, 마지막 step이면 completed/로 이동)
 //   reopen-step    : 완료 커밋 뒤 다시 고쳐야 할 때 step을 in_progress로 되돌림
 import { existsSync, linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadConfig, resolveConfigPath, type HarnessConfig } from '../lib/config.ts';
-import { getGitHub } from '../lib/github.ts';
+import { getGitHub, type GitHubPort, type Issue } from '../lib/github.ts';
 import { git, gitTry, repoInfo, revParse, showFile, type RepoInfo } from '../lib/git.ts';
 import {
   PLANS_DIR,
@@ -98,8 +99,82 @@ export function claimHeartbeat(
   if (!r.ok) throw new TaskError(`claim/${issue} 생존 확인 push 실패: ${r.stderr.trim()}`);
 }
 
-export function releaseClaim(main: string, cfg: HarnessConfig, issue: number): void {
-  gitTry(['push', '--quiet', cfg.github.remote, '--delete', `claim/${issue}`], main);
+const CLAIM_REF_RE = /^refs\/heads\/claim\/([1-9]\d*)$/;
+
+/** 원격의 claim/<숫자> 브랜치 번호(오름차순). 조회 실패는 TaskError */
+export function listRemoteClaims(main: string, cfg: HarnessConfig): number[] {
+  const r = gitTry(['ls-remote', '--heads', cfg.github.remote, 'claim/*'], main);
+  if (!r.ok)
+    throw new TaskError(
+      `원격(${cfg.github.remote}) claim 목록 조회 실패: ${firstLine(r.stderr) || `종료 코드 ${r.code}`}`,
+    );
+  // `claim/*` 패턴은 꼬리 일치라 feat/claim/5·claim/1/x도 온다. 정확히 claim/<숫자>만 남긴다
+  const nums = new Set<number>();
+  for (const line of r.stdout.split('\n')) {
+    const m = CLAIM_REF_RE.exec(line.split('\t')[1]?.trim() ?? '');
+    if (m) nums.add(Number(m[1]));
+  }
+  return [...nums].sort((a, b) => a - b);
+}
+
+function deleteClaim(main: string, cfg: HarnessConfig, issue: number) {
+  return gitTry(['push', '--quiet', cfg.github.remote, '--delete', `claim/${issue}`], main);
+}
+
+/** 원격 claim/<issue>를 지운다. 성공하면 true */
+export function releaseClaim(main: string, cfg: HarnessConfig, issue: number): boolean {
+  return deleteClaim(main, cfg, issue).ok;
+}
+
+export interface ClaimCleanup {
+  released: number[];
+  kept: number[];
+  failed: { issue: number; reason: string }[];
+}
+
+/**
+ * 닫힌 Issue의 claim 브랜치를 원격에서 지운다(세션 시작 절차 ②, 8.3절).
+ * 기준은 로컬 worktree가 아니라 GitHub Issue 상태다(마지막 step PR의 `Closes #N`으로 닫힌다).
+ * `openIssues`에 있으면 다시 묻지 않고 남긴다. 닫혔음을 확인하지 못하면(조회 실패, 없는 번호) 지우지 않는다.
+ * 목록 조회 실패는 TaskError. 멱등이다.
+ */
+export function releaseClosedClaims(
+  main: string,
+  cfg: HarnessConfig,
+  gh: GitHubPort,
+  openIssues: Issue[],
+): ClaimCleanup {
+  const open = new Set(openIssues.map((i) => i.number));
+  const out: ClaimCleanup = { released: [], kept: [], failed: [] };
+  for (const n of listRemoteClaims(main, cfg)) {
+    if (open.has(n)) {
+      out.kept.push(n);
+      continue;
+    }
+    let state: Issue['state'];
+    try {
+      state = gh.getIssue(n).state;
+    } catch (e) {
+      out.failed.push({ issue: n, reason: `Issue 조회 실패: ${firstLine((e as Error).message)}` });
+      continue;
+    }
+    if (state !== 'closed') {
+      out.kept.push(n);
+      continue;
+    }
+    const r = deleteClaim(main, cfg, n);
+    if (r.ok) out.released.push(n);
+    else
+      out.failed.push({
+        issue: n,
+        reason: `삭제 실패: ${firstLine(r.stderr) || `종료 코드 ${r.code}`}`,
+      });
+  }
+  return out;
+}
+
+function firstLine(s: string): string {
+  return s.trim().split('\n')[0] ?? '';
 }
 
 // ---------- new-task ----------

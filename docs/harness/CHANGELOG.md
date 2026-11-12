@@ -25,6 +25,8 @@ review_cycle: on-change
 - 설계서 v0.7.8 · PR 갱신 방식(ADR-0006, Issue #22 step0): main에 뒤처지거나 충돌한 PR은 rebase가 아니라 `origin/main` 병합 + 일반 push로 갱신한다. R14(에이전트 force push 금지)는 유지. 절차서 5절에 세션 절차(이미 rebase했으면 `merge -s ours`, 막히면 `needs-human`)를 더했다. runner 구현은 step1, runner step 완료 push의 lease 폴백은 TD-22, 다른 작업자 worktree 인계는 TD-23.
 - runner PR 갱신(ADR-0006, Issue #22 step1): `doRebase`(rebase + `--force-with-lease`)를 `doUpdate`로 바꿨다. `lib/git.ts`의 `updateBranchFromBase`가 `origin/main`을 병합하고 일반 push한다. 충돌하면 병합을 취소하고 계획을 `blocked` + `needs-human`으로, 원격 PR 브랜치에 로컬에 없는 커밋이 있거나 push가 거부되면 실패로 기록한다(반복되면 5회에 멈춤). GitHub은 갱신이 필요하다는데 브랜치가 이미 최신이면 환경 대기로 처리해 헛돌지 않는다. `pickNext`는 `BEHIND`뿐 아니라 `DIRTY`(충돌)도 갱신 대상으로 보고, 계획이 `blocked`인 PR은 다시 고르지 않는다. 작업 종류 `rebase` → `update`, 실패 키 `pr:rebase-conflict` → `pr:update`.
 - Codex 설정(Issue #25, 보호 경로): `.codex/config.toml`에 `approvals_reviewer = "auto_review"`. 대화형 Codex 세션의 승인 요청을 사람 대신 Codex 자동 검토자가 판단한다(제작자 결정, ADR-0002). 샌드박스·L1 훅은 그대로이고 runner(`approval_policy="never"`)는 영향 없음. 실제 동작 확인은 TD-8. Codex용 new-task 스킬 `.agents/skills/new-task/SKILL.md`(`.claude` 쪽과 같은 내용) 추가.
+- 설계서 v0.7.9 · runner force push 제거(Issue #27, TD-22 해결): step 완료 push가 거부되면 `--force-with-lease`로 덮어쓰지 않는다. 원격 브랜치에 로컬에 없는 커밋이 있으면(`lib/git.ts`의 `remoteBranchDiverged`) 계획을 `blocked` + `needs-human`으로 보고하고, 확인하지 못하면 환경 대기한다. 이제 runner 어디에도 force push가 없다(14.4절).
+- 닫힌 Issue의 선점 해제(Issue #4 step1): `start`가 ② 정리 절에서 GitHub에서 닫힌 Issue의 `claim/<N>`을 원격에서 지운다(로컬 worktree가 없어도). 열린 Issue와 닫혔음을 확인 못 한 claim(조회 실패, 없는 번호)은 남기고 이유를 출력한다. `next`의 claim 목록 파싱을 `listRemoteClaims`로 공용화(정확히 `claim/<숫자>`만 센다).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

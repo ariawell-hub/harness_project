@@ -22,6 +22,7 @@ import {
   gitTry,
   harnessStateDir,
   isClean,
+  remoteBranchDiverged,
   repoInfo,
   updateBranchFromBase,
   type RepoInfo,
@@ -458,22 +459,25 @@ async function doStep(
     l.worktree,
   );
   if (!push.ok) {
-    // runner 자신의 작업 브랜치에서만 lease로 덮어쓴다(에이전트에게는 금지, R14)
-    const forced = gitTry(
-      [
-        'push',
-        '--quiet',
-        '--force-with-lease',
-        '-u',
-        ctx.cfg.github.remote,
-        `HEAD:refs/heads/${l.branch}`,
-      ],
-      l.worktree,
-    );
-    if (!forced.ok) {
-      event(ctx, 'push-fail', { plan: l.id, detail: forced.stderr });
-      return 'env';
+    // runner도 force push하지 않는다(14.4절, ADR-0006). 원격과 갈라졌으면 어느 쪽을 남길지 사람이 판단한다
+    if (remoteBranchDiverged(l.worktree, ctx.cfg.github.remote, l.branch)) {
+      recordAttempt(info, {
+        plan: l.id,
+        step: l.step,
+        key: 'pr:push',
+        ok: false,
+        kind: 'pr',
+        detail: tail(push.stderr, 5),
+      });
+      await blockPlan(
+        ctx,
+        l,
+        `원격 브랜치 ${l.branch}에 로컬에 없는 커밋이 있어 push가 거부됐다. 덮어쓰지 않는다(R14). 절차서 5절대로 원격 이력을 확인해 병합하거나 정리한다`,
+      );
+      return 'blocked';
     }
+    event(ctx, 'push-fail', { plan: l.id, detail: push.stderr });
+    return 'env';
   }
   let pr = ctx.gh.findPRByBranch(l.branch);
   if (!pr || pr.state !== 'open') {
