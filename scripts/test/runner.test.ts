@@ -4,12 +4,13 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { newTask } from '../commands/task.ts';
 import { readAttempts } from '../lib/attempts.ts';
-import { repoInfo, listWorktrees } from '../lib/git.ts';
+import { gitTry, repoInfo, listWorktrees } from '../lib/git.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
 import { parseSessionSummary } from '../runner/agents.ts';
 import { runRunner } from '../runner/run.ts';
-import { HARNESS_ROOT, makeFixture, sh } from './helpers.ts';
+import { HARNESS_ROOT, advanceRemote, commitAll, makeFixture, sh, write } from './helpers.ts';
 
 function setup(configOver: Record<string, unknown> = {}) {
   const fx = makeFixture(configOver);
@@ -238,6 +239,112 @@ test('runner: 사용량 한도로 끝난 세션도 session-end를 남긴다', as
       .find((e) => e.event === 'session-end');
     assert.ok(end, 'env 장애여도 기록한다');
     assert.match(readFileSync(String(end.log), 'utf8'), /usage limit/);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+/**
+ * runner-1 계획의 step0을 끝내고 PR을 연 상태를 만든다. PR 브랜치는 shared.txt를 'pr'로 바꾼다.
+ * `mainShared`가 있으면 원격 main의 shared.txt를 그 내용으로 바꿔 충돌시킨다. 가짜 PR의 mergeState를 정한다.
+ */
+async function openPR(t: ReturnType<typeof setup>, mergeState: string, mainShared?: string) {
+  addFakeIssue(t.state, 'Demo feature', '데모 기능을 만든다');
+  const task = await newTask(t.fx.root, {
+    issue: 1,
+    slug: 'demo',
+    size: 'medium',
+    owner: 'runner-1',
+    github: false,
+    date: '20261112',
+  });
+  const plan = path.join(task.worktree, task.planFile);
+  writeFileSync(plan, readFileSync(plan, 'utf8').replace(/^status: \w+/m, 'status: active'));
+  write(
+    task.worktree,
+    path.join(path.dirname(task.planFile), 'index.json'),
+    JSON.stringify({
+      plan: '20261112-demo',
+      steps: [{ step: 0, name: 'demo', status: 'completed' }],
+    }),
+  );
+  write(task.worktree, 'shared.txt', 'pr\n');
+  commitAll(task.worktree, 'pr: shared');
+  sh('git', ['push', '-q', '-u', 'origin', task.branch], task.worktree);
+  if (mainShared !== undefined) advanceRemote(t.fx, 'shared.txt', mainShared);
+  const pr = new FakeGitHub(t.state).createPR({
+    head: task.branch,
+    base: 'main',
+    title: 'demo',
+    body: 'Refs #1',
+  });
+  const s = t.gh();
+  s.prs.find((p) => p.number === pr.number)!.mergeState = mergeState;
+  writeFileSync(t.state, JSON.stringify(s));
+  return task;
+}
+
+const runnerEvents = (root: string) =>
+  readFileSync(path.join(repoInfo(root).commonDir, 'harness', 'runner.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+
+test('runner: GitHub이 DIRTY라 해도 브랜치가 이미 최신이면 실패로 세지 않고 기다린다(헛도는 반복 방지)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY');
+    const stop = await runRunner({
+      cwd: t.fx.root,
+      worker: 'runner-1',
+      tool: 'fake',
+      maxIterations: 3,
+      noWait: true,
+    });
+    assert.equal(stop, 'max-iterations');
+    assert.equal(
+      runnerEvents(t.fx.root).filter((e) => e.event === 'wait-env').length,
+      3,
+      '바퀴마다 환경 대기로 처리',
+    );
+    assert.equal(
+      readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:update' && !a.ok).length,
+      0,
+      '실패로 세지 않는다',
+    );
+    assert.ok(!t.gh().issues[0].labels.includes('needs-human'));
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 계획을 멈춰 needs-human으로 한 번만 보고한다 (ADR-0006)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY', 'main\n');
+    assert.equal(await run(t.fx.root), 'human', '사람 답변만 기다리면 멈춘다');
+    const issue = t.gh().issues[0];
+    assert.ok(issue.labels.includes('needs-human'), 'Issue에 needs-human');
+    assert.equal(
+      issue.comments.filter((c) => /중단 보고/.test(c.body)).length,
+      1,
+      '같은 중단 보고를 반복하지 않는다',
+    );
+    assert.match(issue.comments.at(-1)!.body, /shared\.txt/);
+    assert.equal(
+      gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
+      false,
+      '병합을 취소했다',
+    );
+    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
+    assert.equal(
+      gitTry(['merge-base', '--is-ancestor', 'origin/main', `origin/${task.branch}`], t.fx.root).ok,
+      false,
+      '충돌한 병합을 원격에 올리지 않았다',
+    );
+    const fails = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:update');
+    assert.equal(fails.length, 1);
+    assert.equal(fails[0].ok, false);
   } finally {
     t.fx.cleanup();
   }

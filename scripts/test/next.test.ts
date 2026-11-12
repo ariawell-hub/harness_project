@@ -1,12 +1,13 @@
-// runner 새 Issue 후보의 작성자 확인(설계서 4.5절 우선순위 5번, 14.6절).
-// 가짜 GitHub + 로컬 bare 원격. 실제 gh는 부르지 않는다.
+// runner 다음 할 일 고르기: 새 Issue 후보의 작성자 확인(설계서 4.5절 우선순위 5번, 14.6절)과
+// 내 PR 갱신 대상 판정(우선순위 2번, ADR-0006). 가짜 GitHub + 로컬 bare 원격. 실제 gh는 부르지 않는다.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { newTask } from '../commands/task.ts';
 import { ConfigError, loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { getGitHub, toIssue, type Issue } from '../lib/github.ts';
-import { FakeGitHub, addFakeIssue, initFakeState } from '../lib/github-fake.ts';
+import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
 import { filterTrustedIssues, pickNext, sameLogin, type Pick } from '../runner/next.ts';
 import { fixtureConfig, makeFixture, tmp } from './helpers.ts';
 
@@ -274,4 +275,72 @@ test('loadConfig: github.collaborators는 없으면 []이고, 문자열 배열�
         /github\.collaborators는 계정 이름 문자열 배열이어야 한다/.test(e.message),
     );
   }
+});
+
+// ---------- 내 PR 갱신(4.5절 우선순위 2번, ADR-0006) ----------
+
+/** runner-1 소유 계획 worktree와 열린 PR(mergeState)을 만들고 pickNext 결과를 돌려준다 */
+async function pickWithPR(mergeState: string, planStatus?: string): Promise<Pick> {
+  const fx = makeFixture({ github: GITHUB });
+  const prev = process.env.HARNESS_FAKE_GH;
+  try {
+    const state = path.join(fx.dir, 'gh.json');
+    initFakeState(state, { remote: fx.remote, owner: 'maker' });
+    process.env.HARNESS_FAKE_GH = state;
+    const t = await newTask(fx.root, {
+      issue: 3,
+      slug: 'demo',
+      size: 'medium',
+      owner: 'runner-1',
+      github: false,
+      date: '20261112',
+    });
+    if (planStatus) {
+      const f = path.join(t.worktree, t.planFile);
+      writeFileSync(f, readFileSync(f, 'utf8').replace(/^status: \w+/m, `status: ${planStatus}`));
+    }
+    const pr = new FakeGitHub(state).createPR({
+      head: t.branch,
+      base: 'main',
+      title: 'demo',
+      body: 'Refs #3',
+    });
+    const s = JSON.parse(readFileSync(state, 'utf8')) as FakeState;
+    s.prs.find((p) => p.number === pr.number)!.mergeState = mergeState;
+    writeFileSync(state, JSON.stringify(s));
+    return pickNext({
+      main: fx.root,
+      cfg: loadConfig(fx.root),
+      gh: getGitHub(fx.root),
+      worker: 'runner-1',
+    });
+  } finally {
+    if (prev === undefined) delete process.env.HARNESS_FAKE_GH;
+    else process.env.HARNESS_FAKE_GH = prev;
+    fx.cleanup();
+  }
+}
+
+test('pickNext: main에 뒤처진(BEHIND) 내 PR은 update 작업이다', async () => {
+  const pick = await pickWithPR('BEHIND');
+  assert.equal(pick.task.kind, 'update');
+  assert.match(pick.reason, /BEHIND/);
+});
+
+test('pickNext: main과 충돌한(DIRTY) 내 PR은 update 작업이다', async () => {
+  const pick = await pickWithPR('DIRTY');
+  assert.equal(pick.task.kind, 'update');
+  assert.match(pick.reason, /DIRTY/);
+});
+
+test('pickNext: 계획이 blocked인 PR은 BEHIND·DIRTY여도 다시 고르지 않는다(같은 중단 보고 반복 방지)', async () => {
+  for (const state of ['BEHIND', 'DIRTY']) {
+    const pick = await pickWithPR(state, 'blocked');
+    assert.equal(pick.task.kind, 'idle', state);
+  }
+});
+
+test('pickNext: CLEAN PR은 갱신하지 않는다', async () => {
+  const pick = await pickWithPR('CLEAN');
+  assert.notEqual(pick.task.kind, 'update');
 });

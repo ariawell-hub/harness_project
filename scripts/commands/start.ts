@@ -14,8 +14,8 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
       return `답을 받은 #${t.issue} 이어 가기${t.local ? ` (worktree ${t.local.worktree})` : ''}`;
     case 'fix-pr':
       return `PR #${t.pr.number} 체크 실패 수정 (worktree ${t.local.worktree})`;
-    case 'rebase':
-      return `PR #${t.pr.number}를 main 위로 rebase (worktree ${t.local.worktree})`;
+    case 'update':
+      return `PR #${t.pr.number}를 origin/main 병합으로 갱신 (rebase·force push 없이, worktree ${t.local.worktree}, 절차서 5절)`;
     case 'plan':
       return `계획 ${t.local.id} 작성 (worktree ${t.local.worktree}, 파일 ${t.local.ref.file})`;
     case 'step':

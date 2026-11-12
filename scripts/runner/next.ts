@@ -41,7 +41,8 @@ export interface LocalPlan {
 export type Task =
   | { kind: 'answered'; issue: number; answer: string; local: LocalPlan | null }
   | { kind: 'fix-pr'; local: LocalPlan; pr: PullRequest }
-  | { kind: 'rebase'; local: LocalPlan; pr: PullRequest }
+  /** main에 뒤처지거나 충돌한 PR을 origin/main 병합으로 갱신(ADR-0006) */
+  | { kind: 'update'; local: LocalPlan; pr: PullRequest }
   | { kind: 'plan'; local: LocalPlan }
   | { kind: 'step'; local: LocalPlan }
   | { kind: 'next-step'; id: string; step: number; issue: number }
@@ -189,6 +190,8 @@ export function pickNext(env: NextEnv): Pick {
     const pr = l.pr;
     if (!pr || pr.state !== 'open') continue;
     if (pr.labels.includes(label)) continue;
+    // 멈춘 계획은 사람의 답을 기다린다(needs-human은 Issue에 달린다). 다시 고르면 같은 중단 보고를 반복한다
+    if (l.fm.status === 'blocked') continue;
     if (pr.checks === 'failure')
       return {
         task: { kind: 'fix-pr', local: l, pr },
@@ -196,10 +199,14 @@ export function pickNext(env: NextEnv): Pick {
         waiting: { ci, human: humanIssues.size },
         excluded: [],
       };
-    if (pr.mergeState === 'BEHIND')
+    // BEHIND는 "main 최신 필수" 브랜치 보호에서만 나온다. 충돌은 DIRTY로 온다
+    if (pr.mergeState === 'BEHIND' || pr.mergeState === 'DIRTY')
       return {
-        task: { kind: 'rebase', local: l, pr },
-        reason: `PR #${pr.number}가 main에 뒤처졌다`,
+        task: { kind: 'update', local: l, pr },
+        reason:
+          pr.mergeState === 'DIRTY'
+            ? `PR #${pr.number}가 main과 충돌한다(DIRTY)`
+            : `PR #${pr.number}가 main에 뒤처졌다(BEHIND)`,
         waiting: { ci, human: humanIssues.size },
         excluded: [],
       };
