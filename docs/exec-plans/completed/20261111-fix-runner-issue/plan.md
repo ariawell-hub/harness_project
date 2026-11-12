@@ -80,7 +80,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 2026-11-12T15:35:09+09:00 step1 재작업: CI 체크 실패: plan-gate
 - 2026-11-12 step1 재작업 세션(runner-1 무인 세션, 2번째 시도). 제작자 답변("origin/main을 병합해 충돌을 풀고 계속 진행, botIssues는 exclude")을 따르려 했으나 **병합하지 못했다**. `git fetch origin`·`git merge origin/main`이 세션 권한 프로필(`.claude/runner-settings.json`, main도 같음)에 없어 거부됐다. `.git` 내부 파일(`MERGE_HEAD`)을 직접 써서 병합 커밋을 흉내 내거나 `node`로 git을 감싸 부르는 것은 권한 경계 우회이자 R3(worktree 밖 수정) 위반이라 하지 않았다. CI plan-gate 실패 원인: runner의 `blockPlan`이 `completed/`에 있는 계획을 `status: blocked`로 바꿔 push했고(7486ad0), plan-gate는 마지막 step PR의 계획이 `completed`가 아니라서 실패했다. 지금 로컬에서는 step1이 `in_progress`라 `plan-gate`가 "완료 처리 전"으로 실패하고, runner의 완료 처리가 이것을 고친다. 한 일: 로컬의 `origin/main`(f82dec8) 기준으로 충돌 5개 파일을 분석해 병합 지침을 "열린 질문"에 적었다. main이 이미 TD-20~23을 등록해 이 step의 TD-20을 TD-26으로 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석). 병합 경로가 없는 문제는 TD-27로 등록했다. 코드 동작은 바꾸지 않았다.
 - 2026-11-12T15:42:43+09:00 중단: origin/main 병합이 충돌한다(docs/exec-plans/tech-debt-tracker.md, docs/harness/CHANGELOG.md, docs/harness/design.md, scripts/commands/start.ts, scripts/test/next.test.ts). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다
-- 2026-11-12 origin/main(7c3d632) 병합(제작자 결정 A안, 열린 질문 "origin/main 병합을 누가 할까"). 대화 세션이 병합 지침대로 충돌 5개 파일의 해결안을 만들어 리포 밖 사본에서 검증했고, runner-1 worktree는 대화 세션이 고칠 수 없어(L1 R3, TD-23) 제작자가 터미널에서 병합·적용·push했다. 해결: tech-debt-tracker는 main 표에 이 계획의 두 행을 붙임, 설계서·CHANGELOG는 v0.7.11 줄을 새로 붙임, `start.ts`·`next.test.ts`는 양쪽 import·함수·테스트를 모두 둠. 그사이 main이 설계서 v0.7.10(Issue #33)과 TD-24·TD-25(#34, #38)를 먼저 써서 이 계획의 TD-24·TD-25를 TD-26·TD-27로 다시 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석. 이 계획 안의 옛 번호도 모두 새 번호로 고쳤다). 계획·step1 상태는 `blocked`에서 `completed`로 되돌렸다(runner `blockPlan`이 바꾼 것이 plan-gate 실패 원인이었다).
+- 2026-11-12 origin/main(7c3d632, 이어서 c947315) 병합(제작자 결정 A안, 열린 질문 "origin/main 병합을 누가 할까"). 대화 세션이 병합 지침대로 충돌 5개 파일의 해결안을 만들어 리포 밖 사본에서 검증했고, runner-1 worktree는 대화 세션이 고칠 수 없어(L1 R3, TD-23) 제작자가 터미널에서 병합·적용·push했다. 해결: tech-debt-tracker는 main 표에 이 계획의 두 행을 붙임, 설계서·CHANGELOG는 v0.7.12 줄을 새로 붙임, `start.ts`·`next.test.ts`는 양쪽 import·함수·테스트를 모두 둠. 그사이 main이 설계서 v0.7.10·v0.7.11(Issue #33·#39)과 TD-24·TD-25(#34, #38)를 먼저 써서 이 계획의 TD-24·TD-25를 TD-26·TD-27로 다시 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석. 이 계획 안의 옛 번호도 모두 새 번호로 고쳤다). 계획·step1 상태는 `blocked`에서 `completed`로 되돌렸다(runner `blockPlan`이 바꾼 것이 plan-gate 실패 원인이었다).
 
 ## 의사결정 로그
 
@@ -93,7 +93,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 결정: `risk: normal`을 유지한다. 이유: 작업 접수 범위를 좁히는 변경이다. 넓히는 경로(B안)는 기본으로 꺼져 있고 켜려면 보호 경로(`harness.config.json`)를 바꿔야 한다. 자격 증명·인증 코드는 건드리지 않는다. 제작자가 high로 보면 바꿀 수 있다.
 - 결정: step을 2개로 나누고 각 step이 자기 문서를 함께 고친다. 이유: PR마다 문서와 동작이 맞는 상태로 병합된다. step0만 병합돼도 A안이 완성된다.
 - 결정: origin/main 병합은 제작자가 직접 한다(열린 질문 A안, 제작자 결정 2026-11-12). 이유: runner 세션은 병합 권한이 없고(TD-27) 대화 세션은 runner-1 worktree를 고칠 수 없다(TD-23). 버린 대안: runner 권한에 `git fetch`·`git merge` 추가(B, 권한 확대), 병합 명령을 먼저 구현(C, #5가 늦어진다. TD-27로 남김).
-- 결정: 설계서 버전은 v0.7.11로 올린다. 이유: step 지시의 "v0.7.5 유지"는 main이 v0.7.6 이후를 올리기 전 전제였고, 병합 지침이 추천한 v0.7.10은 그사이 main(Issue #33)이 썼다. main의 v0.7.5 이력 줄은 그대로 두고 v0.7.11 줄을 새로 붙였고, CHANGELOG의 "설계서 v0.7.5(이어서)"도 "설계서 v0.7.11"로 바꿨다.
+- 결정: 설계서 버전은 v0.7.12로 올린다. 이유: step 지시의 "v0.7.5 유지"는 main이 v0.7.6 이후를 올리기 전 전제였고, 병합 지침이 추천한 v0.7.10과 그다음 v0.7.11은 그사이 main(Issue #33, #39)이 썼다. main의 v0.7.5 이력 줄은 그대로 두고 v0.7.12 줄을 새로 붙였고, CHANGELOG의 "설계서 v0.7.5(이어서)"도 "설계서 v0.7.12"로 바꿨다.
 
 ## 발견 사항
 
@@ -123,7 +123,7 @@ runner 세션은 `git fetch`·`git merge` 권한이 없어 제작자 답변("ori
 - B) `.claude/runner-settings.json`에 `Bash(git fetch:*)`·`Bash(git merge:*)`를 더한 뒤 다시 답한다 — 영향: 보호 경로이자 runner 권한 확대라 제작자 결정이고 PR 하나가 더 든다. runner 세션이 임의 브랜치를 병합할 수 있게 된다(push는 여전히 막힘).
 - C) runner에 "충돌을 worktree에 남기는 병합 명령"(`harness.ts`, push 없음)을 만들고 충돌 답변을 그 세션으로 넘긴다(TD-27) — 영향: 근본 해결이지만 별도 Issue·계획이 필요해 #5가 그만큼 늦어진다.
 - 추천: A로 지금 #5를 끝내고, C를 TD-27 후속 Issue로 한다. 이유: B는 일반 권한을 넓히는데 C가 같은 일을 좁게 한다.
-- 답(2026-11-12, 제작자): A. 제작자가 아래 병합 지침대로 병합해 push했다. 설계서는 v0.7.11(v0.7.10은 main이 먼저 씀), 이 계획의 TD는 TD-26·TD-27.
+- 답(2026-11-12, 제작자): A. 제작자가 아래 병합 지침대로 병합해 push했다. 설계서는 v0.7.12(v0.7.10·v0.7.11은 main이 먼저 씀), 이 계획의 TD는 TD-26·TD-27.
 
 병합 지침(로컬 `origin/main` f82dec8 기준, 충돌 5개 파일. 나머지는 자동 병합):
 
@@ -149,7 +149,7 @@ runner 세션은 `git fetch`·`git merge` 권한이 없어 제작자 답변("ori
   - step0(2026-11-11): AC 전부 통과. `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 15 pass / 0 fail. `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan). doc-lint R8 경고 6건(ADR-0001·0002·0003·0005, architecture.md, workflow.md의 `related_code`가 문서보다 나중에 바뀜)은 경고다. architecture.md·workflow.md는 이 step에서 함께 고쳤고, ADR들은 이 변경(Issue 작성자 확인)과 결정 내용이 무관해 고치지 않았다.
   - step1(2026-11-12): `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 30 pass / 0 fail(next 28: step0 13 + step1 15, runner 2). AC grep 6개 통과. `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan). doc-lint R8 경고 4건(ADR-0001·0002·0003·0005)은 step0과 같은 경고이고, ADR 결정 내용과 무관해 고치지 않았다.
   - step1 재작업(2026-11-12, **origin/main 병합 전**): AC grep 6개 통과, `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 30 pass / 0 fail, `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan, R8 경고 6건: ADR 4건 + architecture.md·workflow.md. 둘은 이 세션의 `next.ts` 주석 번호 변경과 계획 파일 수정 때문이고 문서 내용과 무관). `node scripts/harness.ts plan-gate`는 step1이 `in_progress`라 "완료 처리 전"·"completed/로 옮겨지지 않음"으로 실패한다(runner 완료 처리가 고친다). **병합 뒤 결과는 아직 없다.** main 병합 뒤 다시 돌려야 한다(열린 질문의 병합 지침 8번).
-  - main 병합 뒤(2026-11-12, origin/main 7c3d632, 리포 밖 사본에서 대화 세션이 검증): `node --test "scripts/test/*.test.ts"` 127 pass / 0 fail(next·runner·start 57개 포함), `tsc -p tsconfig.json` 통과, Prettier 검사 통과, 충돌 표시 없음. worktree에서 `check`·`plan-gate`가 통과해야 push한다.
+  - main 병합 뒤(2026-11-12, origin/main 7c3d632와 c947315 병합 결과 각각, 리포 밖 사본에서 대화 세션이 검증): `node --test "scripts/test/*.test.ts"` 127 pass / 0 fail(next·runner·start 57개 포함), `tsc -p tsconfig.json` 통과, Prettier 검사 통과, 충돌 표시 없음. worktree에서 `check`·`plan-gate`가 통과해야 push한다.
 
 ## 다음 할 일
 

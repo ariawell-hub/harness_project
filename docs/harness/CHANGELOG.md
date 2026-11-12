@@ -28,7 +28,8 @@ review_cycle: on-change
 - 설계서 v0.7.9 · runner force push 제거(Issue #27, TD-22 해결): step 완료 push가 거부되면 `--force-with-lease`로 덮어쓰지 않는다. 원격 브랜치에 로컬에 없는 커밋이 있으면(`lib/git.ts`의 `remoteBranchDiverged`) 계획을 `blocked` + `needs-human`으로 보고하고, 확인하지 못하면 환경 대기한다. 이제 runner 어디에도 force push가 없다(14.4절).
 - 닫힌 Issue의 선점 해제(Issue #4 step1): `start`가 ② 정리 절에서 GitHub에서 닫힌 Issue의 `claim/<N>`을 원격에서 지운다(로컬 worktree가 없어도). 열린 Issue와 닫혔음을 확인 못 한 claim(조회 실패, 없는 번호)은 남기고 이유를 출력한다. `next`의 claim 목록 파싱을 `listRemoteClaims`로 공용화(정확히 `claim/<숫자>`만 센다).
 - 설계서 v0.7.10 · runner 계획 작성 질문(Issue #33, TD-18 해결): 계획 작성 세션이 "열린 질문"에 `### 질문:`(절차서 7절 형식)을 남기면 runner가 계획을 `blocked`로 커밋·push하고 Issue에 `needs-human` + 제작자 멘션으로 질문 전문을 올린다. 올린 질문은 worktree 하네스 상태의 `questions.json`에 남겨 다시 올리지 않는다. 제작자 답을 받으면 계획을 `draft`로 되돌리고 답을 넣어 계획 작성 세션을 다시 띄운다. 계획 작성 프롬프트에 질문 형식 안내를 더했다. `lib/plan.ts`에 `openQuestions`. step 세션의 질문 감지는 TD-24.
-- 설계서 v0.7.11: 새 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`). `owner-approved`면 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue도 runner 후보가 된다(봇·외주 개발자 댓글, 인용·문장 속 언급·코드 블록은 불인정). `harness.config.json`은 `exclude`로 명시하고, 승인 대기 Issue가 있으면 `start`가 승인 방법을 안내한다. 쓰기 권한 계정이 고친 댓글을 가려내지 못하는 한계는 TD-26(Issue #5).
+- 설계서 v0.7.11 · `related_code` 작성 기준(Issue #39, TD-25 해결): 7.2절에 "문서의 내용이 기대는 파일만, 폴더 전체·계획 폴더는 넣지 않는다"를 적었다. ADR-0001 `[package.json, tsconfig.json]`, ADR-0005 `[lib/exec.ts, hooks/shell.ts, .gitattributes]`, ADR-0006 `[lib/git.ts]`, `workflow.md`는 `docs/exec-plans/` 대신 `docs/exec-plans/TEMPLATE*.md`. R8 검토 경고가 무관한 코드 변경·계획 파일 추가마다 반복되던 문제를 줄인다.
+- 설계서 v0.7.12: 새 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`). `owner-approved`면 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue도 runner 후보가 된다(봇·외주 개발자 댓글, 인용·문장 속 언급·코드 블록은 불인정). `harness.config.json`은 `exclude`로 명시하고, 승인 대기 Issue가 있으면 `start`가 승인 방법을 안내한다. 쓰기 권한 계정이 고친 댓글을 가려내지 못하는 한계는 TD-26(Issue #5).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

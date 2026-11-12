@@ -1,6 +1,6 @@
 ---
 status: active
-related_code: [scripts/runner/, scripts/lib/git.ts, scripts/hooks/rules.ts]
+related_code: [scripts/lib/git.ts]
 review_cycle: on-change
 ---
 
