@@ -11,8 +11,9 @@
     {
       "step": 1,
       "name": "step-questions",
-      "status": "pending",
-      "summary": "doStep이 판정 전에 새 ### 질문:을 보고 askQuestions(stage step)로 blocked+needs-human, 실패로 세지 않음. doAnswered가 stage step이면 계획 active·step in_progress로 답을 넣어 재실행. stepPrompt에 질문 안내. 설계서 v0.7.15"
+      "status": "completed",
+      "summary": "doStep이 판정 전에 새 ### 질문:을 보고 askQuestions(stage step)로 blocked+needs-human, 실패로 세지 않음. doAnswered가 stage step이면 계획 active·step in_progress로 답을 넣어 재실행. stepPrompt에 질문 안내. 설계서 v0.7.15",
+      "completed_at": "2026-11-12T22:40:20+09:00"
     }
   ]
 }
