@@ -569,3 +569,54 @@ test('runner: 해결 세션이 충돌을 풀지 못하면 병합을 취소하고
     t.fx.cleanup();
   }
 });
+
+test('runner: step 세션이 열린 질문을 남기면 판정 전에 needs-human·멘션으로 한 번 올리고 멈췄다가, 답을 넣어 그 step을 이어 간다 (TD-24)', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Epsilon feature', '스텝 질문이 필요한 기능');
+    writeFileSync(
+      t.behavior,
+      JSON.stringify({ 'epsilon-feature': { '0': ['question', 'ok'], steps: 1 } }),
+    );
+    assert.equal(await run(t.fx.root), 'human', '답을 기다리면 멈춘다');
+    let issue = t.gh().issues[0];
+    assert.ok(issue.labels.includes('needs-human'));
+    const asked = issue.comments.filter((c) => c.body.includes('스텝 질문'));
+    assert.equal(asked.length, 1, '질문을 한 번 올린다');
+    assert.match(asked[0].body, /@maker/);
+    assert.match(asked[0].body, /step 0/);
+    assert.match(asked[0].body, /추천: A/, '질문 블록 전문');
+    const wt = listWorktrees(t.fx.root).find((w) => w.branch?.includes('epsilon-feature'))!;
+    assert.equal(
+      readAttempts(repoInfo(wt.path)).filter((a) => a.kind === 'ac').length,
+      0,
+      'AC로 판정하지 않았다',
+    );
+    assert.equal(t.gh().prs.length, 0, 'PR을 만들지 않았다');
+
+    assert.equal(await run(t.fx.root), 'human');
+    assert.equal(
+      t.gh().issues[0].comments.filter((c) => c.body.includes('스텝 질문')).length,
+      1,
+      '다시 돌려도 같은 질문을 또 올리지 않는다',
+    );
+
+    new FakeGitHub(t.state).ownerComment(1, 'A로 하라');
+    assert.equal(await run(t.fx.root), 'idle');
+    issue = t.gh().issues[0];
+    assert.equal(issue.state, 'closed', '답을 받은 뒤 끝까지 간다');
+    assert.ok(!issue.labels.includes('needs-human'));
+    const steps = t.prompts().filter((p) => p.slug === 'epsilon-feature' && p.step === '0');
+    assert.equal(steps.length, 2, '같은 step을 다시 띄운다');
+    assert.doesNotMatch(steps[0].prompt, /제작자 답변/);
+    assert.match(steps[1].prompt, /제작자 답변[\s\S]*A로 하라/);
+    assert.match(steps[0].prompt, /### 질문:/, 'step 프롬프트가 질문 형식을 안내한다');
+    assert.equal(
+      t.prompts().filter((p) => p.slug === 'epsilon-feature' && p.step === 'plan').length,
+      1,
+      '계획을 다시 쓰지 않는다',
+    );
+  } finally {
+    t.fx.cleanup();
+  }
+});

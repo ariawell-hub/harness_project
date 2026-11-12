@@ -55,6 +55,8 @@ runner가 사람에게 넘긴 뒤 답을 받아도 이어 가지 못하는 경�
 - 2026-11-12 대화 세션. 제작자 지시("우선순위를 파악해서 문제되는 사항들 먼저 해결해달라")의 2순위로 Issue #43을 봇이 등록하고 계획을 썼다(1순위 #41은 PR #42로 병합).
 - 2026-11-12 step0 테스트 먼저: `branch-update.test.ts`(keepConflict), `next.test.ts`(답을 기다리는 충돌 계획은 고르지 않음, 상태 파일), `runner.test.ts`(충돌 중단이 계획 파일을 안 바꿈, 답 뒤 해결 성공·실패)와 가짜 에이전트 충돌 해결 동작을 더하고 실패를 확인했다(next.test.ts는 `readConflictState` export 없음으로 불러오기 실패, 나머지 24개 중 5개 실패).
 - 2026-11-12 step0 구현: `updateBranchFromBase`의 `keepConflict`, `next.ts` `ConflictState`·`readConflictState`·`writeConflictState`·`LocalPlan.conflictWaiting`·`pickNext` 2번, `prompt.ts` `conflictPrompt`, `run.ts` `reportConflict`·`judgeResolution`·`doResolveConflict`와 `doUpdate`·`doAnswered` 분기. 문서(설계서 v0.7.14 4.5절·10.3절, ADR-0006, 절차서 5절, CHANGELOG, architecture.md, TD-27 해결).
+- 2026-11-12 step0 PR #44 병합. step1 테스트 먼저: `runner.test.ts`에 step 세션 질문 시나리오(질문 → `human` → 같은 질문 재보고 없음 → 답 → 같은 step 재실행 → 끝까지)와 가짜 에이전트 step `question` 동작을 더하고 실패를 확인했다(1개 중 1 실패).
+- 2026-11-12 step1 구현: `QuestionState.stage`(plan | step), `askQuestions`의 단계별 문구, `doStep`이 판정 전에 새 질문을 보고 `blocked` 반환, `doAnswered`가 step 질문이면 계획 `active`·step `in_progress`, step 프롬프트 질문 안내와 답 반영 지시. 문서(설계서 v0.7.15 4.5절·9.1절, 절차서 7절, CHANGELOG, TD-24 해결).
 
 ## 의사결정 로그
 
@@ -86,7 +88,9 @@ runner가 사람에게 넘긴 뒤 답을 받아도 이어 가지 못하는 경�
 - 각 step: `node scripts/harness.ts check`
 - 결과
   - step0(2026-11-12): AC 5개 통과. 전체 `node --test "scripts/test/*.test.ts"` 142 pass / 0 fail, `tsc` 통과, `node scripts/harness.ts check` 통과(R8 경고 1건: ADR-0003의 `harness.config.json`, 이 변경과 무관).
+  - step1(2026-11-12): AC 4개 통과. 전체 `node --test "scripts/test/*.test.ts"` 143 pass / 0 fail, `tsc` 통과, `node scripts/harness.ts check` 통과.
 
 ## 다음 할 일
 
-- step0 PR 병합 뒤 `node scripts/harness.ts new-task --plan 20261112-runner-stop-paths --step 1`로 step1(step-questions, TD-24)
+- (끝남) step0 conflict-resolve(PR #44), step1 step-questions. step1 PR이 병합되면 Issue #43이 닫힌다.
+- 남은 판단: TD-23(다른 작업자 worktree 인계)은 TD-27로 사람이 직접 병합할 일이 줄어 급하지 않다. 대화 세션과 runner를 함께 운영하는 일이 잦아지면 다시 본다.
