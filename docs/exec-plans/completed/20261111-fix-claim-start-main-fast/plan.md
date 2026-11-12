@@ -83,6 +83,8 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 
 - 2026-11-12 11:35 (KST) 최종 `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan; 기존 R8 경고 5건). 확인한 원격 head `ef78279`를 lease에 고정해 PR branch 갱신을 시도했으나, PreToolUse L1 hook이 `[R14 파괴적 git]`로 명령을 차단했다. Git push는 실행되지 않았고 원격 ref는 그대로다. hook을 우회하지 않는다.
 
+- 2026-11-12 12:10 (KST) 제작자가 merge 방식 갱신을 승인했다. PR #14 OPEN, 원격 head `ef78279`, `origin/main` `913c9d6`을 재확인했다. `git merge -s ours`로 병합 커밋 `22ba806`(부모 `e6d9418`·`ef78279`, 트리는 `e6d9418`과 같음)을 만들고, `check`·`plan-gate` 통과 뒤 일반 push로 갱신했다. (2026-11-12 Issue #35로 옮겨 적음. 원래 기록은 Issue #4 댓글이다. 그때는 계획 owner가 `runner-1`이라 L1 훅 R3가 대화 세션의 계획 수정을 막았다.)
+
 - 2026-11-12 13:41 (KST) step1 claim-release(runner-1 무인 세션). 브랜치 `feat/20261111-fix-claim-start-main-fast-s1`.
   - 먼저 실패한 테스트 1: `node --test scripts/test/start.test.ts` → 파일 전체 실패(`SyntaxError: ... '../commands/task.ts' does not provide an export named 'listRemoteClaims'`).
   - `task.ts`(`listRemoteClaims`, `releaseClaim` 반환값, `releaseClosedClaims`)만 구현하고 `start.ts`는 그대로 둔 뒤 같은 명령: 24개 중 단위 14개 통과, `start` 통합 2개 실패. 실패 요지: (1) `start` 뒤에도 원격에 `claim/2`가 남음(`deepEqual` actual에 `'claim/2'`), 출력에 `## ② 정리`가 `- 병합된 worktree: 없음`에서 끝나 선점 해제 줄 없음 — Issue #4 증상 재현 (2) claim 목록 조회 실패 경고 없음.
@@ -104,6 +106,8 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 - 결정: runner 설정 캐시 부채를 TD-21로 등록한다. / 이유: origin/main에서 TD-17은 Issue #16 step4로 이미 사용·해결되어 있고, step0 계획의 조건부 지침은 다음 빈 번호 사용을 허용한다. / 버린 대안: TD-17을 중복 등록한다.
 
 - 시도: 제작자의 후속 지시에 따라 PR #14 branch만, 예상 head `ef78279`를 고정한 `--force-with-lease`로 갱신하려 했다. / 이유: 로컬 rebase 결과를 원격 PR에 반영하려면 이력이 바뀌어야 한다. / 결과: L1 hook이 R14 파괴적 git으로 차단했고 push 명령은 실행되지 않았다. / 금지한 대안: hook 우회.
+
+- 결정: rebase 결과 위에 이전 PR head를 `-s ours`로 병합해 일반 push로 PR #14를 갱신한다. / 이유: 이력을 덮어쓰지 않아 R2·R14 안에서 끝나고, 트리가 `check`를 통과한 `e6d9418`과 같으며, squash 병합이라 main 이력에는 차이가 없다. / 버린 대안: 새 브랜치로 새 PR(로컬·PR 브랜치 이름이 갈라진다), 제작자 직접 force push. (Issue #4 댓글에서 옮겨 적음, Issue #35. 이 방식은 뒤에 ADR-0006과 절차서 5절의 표준이 됐다.)
 
 - 결정(step1): `listRemoteClaims`는 ref 이름 전체가 정확히 `refs/heads/claim/<1 이상 정수, 앞자리 0 없음>`인 것만 센다. 이유: `ls-remote` 패턴은 꼬리 일치라 `feat/claim/5`·`claim/1/x`도 돌아오고, `claim/04`를 4로 읽으면 `releaseClaim`이 다른 이름(`claim/4`)을 지우려 한다. `claimIssue`는 항상 `claim/${정수}`로 만들므로 잃는 것이 없다. 버린 대안: 기존 `next.ts` 정규식(앵커 없음) 재사용.
 - 결정(step1): `releaseClaim`은 지정대로 `boolean`만 돌려주고, `releaseClosedClaims`는 같은 내부 함수(`deleteClaim`)의 stderr 첫 줄을 `failed.reason`에 쓴다. 이유: 시그니처를 지키면서 실패 이유를 출력하기 위해서. `cleanupMerged`는 그대로(반환값 무시).
