@@ -1,0 +1,11 @@
+{
+  "plan": "20261112-no-force-push",
+  "steps": [
+    {
+      "step": 0,
+      "name": "no-force-push",
+      "status": "in_progress",
+      "started_at": "2026-11-12T13:31:12+09:00"
+    }
+  ]
+}
