@@ -15,3 +15,4 @@ review_cycle: on-change
 | [ADR-0003](ADR-0003-bot-token-classic-pat.md) | 봇 토큰은 클래식 PAT, 리포 범위는 봇 초대 범위로 제한 (E1 예외)                 | 채택      |
 | [ADR-0004](ADR-0004-q20-lab-repo.md)          | Q20 시험 리포에는 시험 기간에만 봇을 초대하고 끝나면 철회 (ADR-0003 예외)       | 채택      |
 | [ADR-0005](ADR-0005-windows-native.md)        | macOS와 Windows 네이티브를 함께 쓴다(실행 셸, 줄바꿈, L1 셸 방언, E5 범위)      | 채택      |
+| [ADR-0006](ADR-0006-pr-update-merge.md)       | 뒤처진 PR은 rebase가 아니라 `origin/main` 병합 + 일반 push로 갱신 (R14 유지)    | 채택      |

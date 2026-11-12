@@ -56,6 +56,7 @@ claimed_at: 2026-11-12T12:24:49+09:00 # new-task가 채운다
 
 - 2026-11-12 12:25 (KST) `new-task --issue 22 --slug pr-update-merge --size medium --type fix`로 선점·worktree 생성. `start` 결과 `needs-human` 없음. 같은 세션에서 PR #14를 `-s ours` 병합으로 갱신해 병합했다(Issue #4 댓글).
 - 2026-11-12 12:40 (KST) 계획 작성. 관련 코드 확인: `doRebase`(`scripts/runner/run.ts`)는 rebase 뒤 `--force-with-lease`로 push하고 push 결과를 확인하지 않는다. `pickNext`(`scripts/runner/next.ts`)는 `mergeState === 'BEHIND'`만 갱신 대상으로 보고, 충돌(`DIRTY`) PR은 CI 대기로 센다. 갱신·rebase 경로에 테스트가 없다.
+- 2026-11-12 13:00 (KST) step0 구현: ADR-0006 작성·색인, 절차서 5절 "main에 뒤처지거나 충돌한 PR 갱신"(병합 명령, rebase 금지 이유, `merge -s ours` 복구, `needs-human` 보고), 설계서 v0.7.8(4.5절·10.3절 결속 설명·절차 4번·14.4절·로드맵·시험 항목의 rebase 표현), AGENTS.md 작업 루프 6번, TD-9 문구, TD-22·TD-23 등록, CHANGELOG. step0 AC 12개 모두 통과.
 
 ## 의사결정 로그
 
@@ -78,7 +79,7 @@ claimed_at: 2026-11-12T12:24:49+09:00 # new-task가 채운다
 
 ## 검증 방법과 결과
 
-- step0: `node scripts/harness.ts doc-lint`와 step0의 grep AC. 결과: (작성 예정)
+- step0: `node scripts/harness.ts doc-lint`와 step0의 grep AC. 결과: AC 12개 통과, `check` 통과(아래 진행 로그).
 - step1: `node --test scripts/test/branch-update.test.ts scripts/test/next.test.ts scripts/test/start.test.ts scripts/test/runner.test.ts`, `node scripts/harness.ts check`. 결과: (작성 예정)
 
 ## 다음 할 일

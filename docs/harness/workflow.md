@@ -96,6 +96,26 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 // harness-quarantine: TD-12 until=2026-12-01 reason="네트워크 타이밍 의존"
 ```
 
+### main에 뒤처지거나 충돌한 PR 갱신
+
+PR 브랜치는 `origin/main`을 병합해 갱신하고 일반 push로 올린다([ADR-0006](../decisions/ADR-0006-pr-update-merge.md)).
+
+```bash
+git -C <worktree> fetch origin
+git -C <worktree> merge origin/main        # 충돌이면 파일을 고치고 git add 후 git commit
+node scripts/harness.ts check              # worktree 안에서
+git -C <worktree> push origin <브랜치>
+```
+
+- **rebase하지 않는다.** 이미 push한 브랜치를 rebase하면 원격 갱신에 force push가 필요하고, R14가 막는다. squash 병합이라 PR의 병합 커밋은 main 이력에 남지 않는다.
+- 이미 로컬에서 rebase했다면 원격 이력을 부모로 연결한 뒤 일반 push한다. 트리는 rebase 결과 그대로다.
+  ```bash
+  git -C <worktree> merge -s ours origin/<브랜치>
+  git -C <worktree> push origin <브랜치>
+  ```
+- 완료 커밋 뒤에 충돌 해결로 코드가 바뀌면 4절대로 그 step을 `in_progress`로 되돌리고 진행 로그에 남긴다.
+- 충돌을 풀 수 없거나 push가 막히면 우회하지 말고 7절 형식으로 Issue에 `needs-human` 라벨과 질문을 남긴다. 댓글만 남기면 `start`의 ①에 나오지 않는다.
+
 ## 6. 실패와 방법 전환 (3회 / 5회)
 
 실패 횟수는 `check`·runner가 실패 키(`계획 id + 검사 이름`)별로 자동으로 센다. 손으로 세거나 고치지 않는다.
