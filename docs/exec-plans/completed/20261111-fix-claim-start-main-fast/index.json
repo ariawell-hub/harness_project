@@ -12,9 +12,10 @@
     {
       "step": 1,
       "name": "claim-release",
-      "status": "in_progress",
+      "status": "completed",
       "started_at": "2026-11-12T13:36:57+09:00",
-      "summary": "task.ts에 listRemoteClaims(정확히 refs/heads/claim/<숫자>만, 조회 실패는 TaskError), releaseClaim(→boolean), releaseClosedClaims(main, cfg, gh, openIssues): ClaimCleanup{released,kept,failed} 추가. 열린 목록에 있으면 kept(재조회 없음), 그 밖은 getIssue로 closed일 때만 push --delete, 조회·삭제 실패는 failed(지우지 않음). start.ts ② 절이 cleanupMerged 다음에 호출(describeClaimCleanup: '- 선점 해제: claim/N (Issue #N 닫힘)', '- 선점 유지(확인 실패): …', 없으면 '- 닫힌 Issue의 선점: 없음'; TaskError는 경고 후 계속). next.ts 5번 우선순위는 listRemoteClaims(try/catch → 빈 집합). runner 루프에는 넣지 않음. 테스트 scripts/test/start.test.ts(setupClaims: 가짜 PR 병합 Closes #2, claim/1·2·99). 마지막 step, PR 본문 첫 줄 Closes #4."
+      "summary": "task.ts에 listRemoteClaims(정확히 refs/heads/claim/<숫자>만, 조회 실패는 TaskError), releaseClaim(→boolean), releaseClosedClaims(main, cfg, gh, openIssues): ClaimCleanup{released,kept,failed} 추가. 열린 목록에 있으면 kept(재조회 없음), 그 밖은 getIssue로 closed일 때만 push --delete, 조회·삭제 실패는 failed(지우지 않음). start.ts ② 절이 cleanupMerged 다음에 호출(describeClaimCleanup: '- 선점 해제: claim/N (Issue #N 닫힘)', '- 선점 유지(확인 실패): …', 없으면 '- 닫힌 Issue의 선점: 없음'; TaskError는 경고 후 계속). next.ts 5번 우선순위는 listRemoteClaims(try/catch → 빈 집합). runner 루프에는 넣지 않음. 테스트 scripts/test/start.test.ts(setupClaims: 가짜 PR 병합 Closes #2, claim/1·2·99). 마지막 step, PR 본문 첫 줄 Closes #4.",
+      "completed_at": "2026-11-12T14:58:32+09:00"
     }
   ]
 }
