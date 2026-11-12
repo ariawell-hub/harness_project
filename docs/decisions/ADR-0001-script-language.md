@@ -1,6 +1,6 @@
 ---
 status: active
-related_code: [scripts/, package.json, tsconfig.json]
+related_code: [package.json, tsconfig.json]
 review_cycle: on-change
 ---
 

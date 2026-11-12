@@ -1,6 +1,6 @@
 ---
 status: active
-related_code: [scripts/commands/, scripts/runner/, docs/exec-plans/]
+related_code: [scripts/commands/, scripts/runner/, docs/exec-plans/TEMPLATE*.md]
 review_cycle: on-change
 ---
 

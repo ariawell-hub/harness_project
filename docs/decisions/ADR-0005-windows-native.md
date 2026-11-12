@@ -1,6 +1,6 @@
 ---
 status: active
-related_code: [scripts/lib/exec.ts, scripts/hooks/, scripts/runner/, scripts/commands/task.ts]
+related_code: [scripts/lib/exec.ts, scripts/hooks/shell.ts, .gitattributes]
 review_cycle: on-change
 ---
 
