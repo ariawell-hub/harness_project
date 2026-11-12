@@ -1,0 +1,31 @@
+{
+  "plan": "20261112-stop-friction",
+  "steps": [
+    {
+      "step": 0,
+      "name": "guard-own-worktree",
+      "status": "completed",
+      "completed_at": "2026-11-12T10:12:29+09:00"
+    },
+    {
+      "step": 1,
+      "name": "keep-current-worktree",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "ask-rules",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "runner-session-log",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "cli-help-messages",
+      "status": "pending"
+    }
+  ]
+}

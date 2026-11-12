@@ -1,5 +1,6 @@
 // L1 금지 규칙(5절 R1~R4, R10, R13, R14, R20). guard.ts가 도구 실행 직전에 호출한다.
 // 반환값이 있으면 차단한다. 메시지는 "무엇이 틀렸나 + 고치는 법 + 근거"(5.1절).
+import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { RepoInfo } from '../lib/git.ts';
@@ -29,6 +30,12 @@ export interface GuardContext {
   dbClients: string[];
   home?: string;
   tmpDirs?: string[];
+  /** 경로가 속한 리포(worktree). 없으면 쓰기 대상을 세션의 리포 기준으로만 판정한다 */
+  repoOf?: (abs: string) => RepoInfo | null;
+  /** worktree에 있는 계획 id의 frontmatter owner */
+  planOwner?: (root: string, id: string) => string | null;
+  /** 현재 작업자 이름(HARNESS_WORKER, 없으면 session) */
+  worker?: string;
 }
 
 const D = 'docs/harness/design.md';
@@ -44,6 +51,18 @@ const v = (rule: string, what: string, how: string, doc: string): Problem => ({
 function within(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/** 심볼릭 링크(macOS /var → /private/var)를 풀어 비교한다 */
+function samePath(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
 }
 
 function tmpRoots(ctx: GuardContext): string[] {
@@ -718,6 +737,37 @@ export function evaluateBash(
   return null;
 }
 
+/**
+ * 같은 리포의 다른 worktree에 쓸 때의 R3 판정. 허용하면 null(이후 그 worktree 기준으로 R1을 본다).
+ * - 대상이 main 체크아웃: null을 돌려 main 체크아웃 판정에 맡긴다
+ * - 세션이 작업 worktree 안: 다른 worktree는 막는다(작업 간 간섭 방지)
+ * - 세션이 main 체크아웃: 대상 계획의 owner가 현재 작업자일 때만 허용. 모르면 막는다(fail-closed)
+ */
+function otherWorktreeProblem(cur: RepoInfo, target: RepoInfo, ctx: GuardContext): Problem | null {
+  if (target.isMainCheckout) return null;
+  if (!cur.isMainCheckout) {
+    return v(
+      'R3 worktree',
+      `다른 작업 worktree의 파일을 수정하려 했다: ${target.root}`,
+      '지금 worktree의 작업만 한다. 다른 작업은 그 worktree에서 한다',
+      `${D} R3`,
+    );
+  }
+  const b = parseBranch(target.branch);
+  const owner = b ? (ctx.planOwner?.(target.root, b.id) ?? null) : null;
+  const worker = ctx.worker ?? 'session';
+  if (owner === worker) return null;
+  return v(
+    'R3 worktree',
+    owner
+      ? `${owner}의 작업 worktree 파일을 수정하려 했다: ${target.root}`
+      : `계획(owner)을 확인할 수 없는 worktree의 파일을 수정하려 했다: ${target.root}`,
+    `main 체크아웃의 대화 세션은 자기 계획(owner가 ${worker})의 worktree만 고친다. ` +
+      '`new-task`로 만든 worktree인지 확인하고, 다른 작업자의 것을 넘겨받으려면 제작자에게 묻는다',
+    `${D} R3`,
+  );
+}
+
 export function evaluateFile(
   kind: 'read' | 'write',
   file: string,
@@ -743,9 +793,17 @@ export function evaluateFile(
     );
   }
   if (kind === 'read') return null;
-  const repo = ctx.repo;
-  if (!repo) return null;
-  if (!within(abs, repo.root)) {
+  const cur = ctx.repo;
+  if (!cur) return null;
+  // 쓰기 대상이 같은 리포의 다른 worktree면 그 worktree 기준으로 판정한다(Issue #16).
+  // main 체크아웃에서 시작한 대화 세션이 EnterWorktree(사람 승인) 없이 자기 작업 worktree를 고치게 한다.
+  let repo = cur;
+  const target = ctx.repoOf?.(abs) ?? null;
+  if (target && samePath(target.commonDir, cur.commonDir) && !samePath(target.root, cur.root)) {
+    const p = otherWorktreeProblem(cur, target, ctx);
+    if (p) return p;
+    repo = target;
+  } else if (!within(abs, cur.root)) {
     // 리포 밖이라도 임시 폴더와 Claude 계획 파일은 허용한다
     if (tmpRoots(ctx).some((d) => within(abs, d))) return null;
     if (within(abs, path.join(home, '.claude', 'plans'))) return null;
