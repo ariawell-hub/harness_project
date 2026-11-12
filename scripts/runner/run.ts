@@ -27,7 +27,16 @@ import {
   updateBranchFromBase,
   type RepoInfo,
 } from '../lib/git.ts';
-import { acceptanceCommands, findPlan, parseDoc, readIndex, section } from '../lib/plan.ts';
+import {
+  acceptanceCommands,
+  findPlan,
+  openQuestions,
+  parseDoc,
+  readIndex,
+  section,
+  type OpenQuestion,
+  type PlanRef,
+} from '../lib/plan.ts';
 import { log, nowIso, warn } from '../lib/util.ts';
 import { runCheck } from '../commands/check.ts';
 import {
@@ -208,6 +217,73 @@ ${attempts.map((a) => `  - ${a.ts} [${a.key}] ${(a.detail ?? '').split('\n').fil
   event(ctx, 'blocked', { plan: l.id, step: l.step, reason });
 }
 
+// ---------- 열린 질문 (TD-18) ----------
+
+/** 올린 질문 제목과 답 대기 여부. worktree 하네스 상태 폴더의 questions.json(answer.md 옆) */
+interface QuestionState {
+  reported: string[];
+  waiting: boolean;
+}
+
+function questionFile(info: RepoInfo): string {
+  return path.join(harnessStateDir(info, 'worktree'), 'questions.json');
+}
+
+function readQuestionState(info: RepoInfo): QuestionState {
+  try {
+    const raw = JSON.parse(readFileSync(questionFile(info), 'utf8')) as Partial<QuestionState>;
+    return {
+      reported: Array.isArray(raw.reported) ? raw.reported.map(String) : [],
+      waiting: raw.waiting === true,
+    };
+  } catch {
+    return { reported: [], waiting: false };
+  }
+}
+
+function writeQuestionState(info: RepoInfo, s: QuestionState): void {
+  writeFileSync(questionFile(info), JSON.stringify(s, null, 2) + '\n');
+}
+
+/** 계획을 멈추고(blocked, push) Issue에 needs-human + 제작자 멘션으로 질문을 올린다(9.1절) */
+async function askQuestions(
+  ctx: Ctx,
+  l: LocalPlan,
+  ref: PlanRef,
+  fresh: OpenQuestion[],
+  prev: QuestionState,
+): Promise<void> {
+  const info = repoInfo(l.worktree);
+  setPlanStatus(
+    l.worktree,
+    'blocked',
+    `열린 질문 ${fresh.length}건: 제작자 답변 대기(#${l.issue})`,
+  );
+  const push = gitTry(['push', '--quiet', '-u', ctx.cfg.github.remote, l.branch], l.worktree);
+  if (!push.ok) warn(`계획 브랜치 push 실패(질문은 올린다): ${tail(push.stderr, 3)}`);
+  writeQuestionState(info, {
+    reported: [...prev.reported, ...fresh.map((q) => q.title)],
+    waiting: true,
+  });
+  const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
+  const body = `${mention}runner의 계획 작성 세션이 질문 ${fresh.length}건을 남겼다. 답을 받을 때까지 계획 \`${l.id}\`를 멈춘다.
+
+- 계획: \`${ref.file}\` (브랜치 \`${l.branch}\`)
+- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. runner가 답을 넣어 계획을 다시 작성하고 이어 간다.
+
+${fresh.map((q) => q.text).join('\n\n')}`;
+  try {
+    ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
+    ctx.gh.comment(l.issue, body);
+  } catch (e) {
+    warn(`GitHub 알림 실패: ${(e as Error).message}`);
+  }
+  event(ctx, 'questions', {
+    plan: l.id,
+    reason: `열린 질문 ${fresh.length}건: ${fresh.map((q) => q.title).join(' / ')}`,
+  });
+}
+
 // ---------- 계획 작성 세션 ----------
 
 async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'> {
@@ -220,7 +296,9 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
   }
   const issue = ctx.gh.getIssue(l.issue);
   const n = (keyFailures(all, l.id).get('plan:structure') ?? 0) + 1;
-  const prompt = planningPrompt(l.worktree, l.ref, l.id, issue, all, n);
+  const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
+  const answer = existsSync(answerFile) ? readFileSync(answerFile, 'utf8') : undefined;
+  const prompt = planningPrompt(l.worktree, l.ref, l.id, issue, all, n, answer);
   event(ctx, 'session-start', { plan: l.id, kind: 'planning', attempt: n });
   const s = await runSession(
     ctx.o.tool,
@@ -275,6 +353,19 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
   }
   recordAttempt(info, { plan: l.id, step: null, key: 'plan:structure', ok: true, kind: 'plan' });
   const text = readFileSync(path.join(l.worktree, ref.file), 'utf8');
+  // 열린 질문(TD-18): 새 질문이 있으면 Issue에 올리고 답을 받을 때까지 이 계획을 멈춘다
+  const questions = openQuestions(parseDoc(text).body);
+  const qs = readQuestionState(info);
+  const fresh = questions.filter((q) => !qs.reported.includes(q.title));
+  if (fresh.length) {
+    await askQuestions(ctx, l, ref, fresh, qs);
+    return 'ok';
+  }
+  if (questions.length)
+    event(ctx, 'questions-kept', {
+      plan: l.id,
+      reason: `이미 올려 답을 받은 질문 ${questions.length}건이 열린 질문에 남아 있다`,
+    });
   if (parseDoc(text).frontmatter?.status === 'draft')
     setPlanStatus(l.worktree, 'active', '계획 작성 완료');
   else {
@@ -520,6 +611,14 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
       kind: 'plan',
       detail: '제작자 답변으로 실패 횟수 초기화',
     });
+    const qs = readQuestionState(info);
+    if (qs.waiting) {
+      // 계획 작성 단계의 질문(TD-18): 답을 넣어 계획을 다시 작성한다. step 상태는 그대로 둔다
+      writeQuestionState(info, { ...qs, waiting: false });
+      setPlanStatus(t.local.worktree, 'draft', `제작자 답변 받음(#${t.issue}): 계획에 반영한다`);
+      event(ctx, 'answered', { issue: t.issue, replan: true });
+      return;
+    }
     setPlanStatus(t.local.worktree, 'active', `제작자 답변 받음(#${t.issue})`);
     if (t.local.ref.kind === 'multi') {
       setStepStatus(t.local.worktree, 'in_progress');

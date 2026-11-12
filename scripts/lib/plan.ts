@@ -136,6 +136,38 @@ export function isBlank(content: string | null): boolean {
   return stripHtmlComments(content).trim() === '';
 }
 
+export interface OpenQuestion {
+  /** `### 질문:` 뒤의 한 줄 */
+  title: string;
+  /** 제목 줄부터 다음 `###` 제목(또는 섹션 끝)까지 */
+  text: string;
+}
+
+/**
+ * 계획 본문 "열린 질문" 섹션의 `### 질문: <한 줄>` 블록(절차서 7절 형식). runner가 Issue에 올린다(TD-18).
+ * 주석·"없음"·`### 질문:`이 아닌 목록은 질문이 아니다
+ */
+export function openQuestions(body: string): OpenQuestion[] {
+  const content = section(body, '열린 질문');
+  if (content === null) return [];
+  const out: OpenQuestion[] = [];
+  let cur: string[] | null = null;
+  const flush = () => {
+    if (!cur) return;
+    const title = /^###\s*질문:(.*)$/.exec(cur[0])![1].trim();
+    if (title) out.push({ title, text: cur.join('\n').replace(/\s+$/, '') });
+    cur = null;
+  };
+  for (const line of stripHtmlComments(content).split('\n')) {
+    if (/^###\s/.test(line)) {
+      flush();
+      if (/^###\s*질문:/.test(line)) cur = [line];
+    } else if (cur) cur.push(line);
+  }
+  flush();
+  return out;
+}
+
 export function hashText(s: string): string {
   return createHash('sha256').update(s.replace(/\r\n/g, '\n').trim()).digest('hex').slice(0, 16);
 }
