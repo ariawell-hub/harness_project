@@ -10,7 +10,9 @@
     {
       "step": 1,
       "name": "patch-id",
-      "status": "pending"
+      "status": "completed",
+      "summary": "lab/q20/patch-id.ts(PR patch-id 계산, 작업 트리 없이 commitFiles·mergeCommit, --experiment), 결과 results/patch-id.json 4사례 pass(시험 리포 PR #14~#17). push 직후 GitHub PR head 반영 지연: 측정·병합 전 PR ref가 기대 커밋이 될 때까지 대기해야 한다(2단계 기록 job 참고).",
+      "completed_at": "2026-11-12T15:05:44+09:00"
     },
     {
       "step": 2,
