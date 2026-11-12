@@ -18,6 +18,9 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 - 작업은 GitHub Issue로만 접수한다. Issue가 없으면 만들지 말고 제작자에게 묻는다.
   - runner는 제작자·외주 개발자(`harness.config.json`의 `github.collaborators`) 계정이 만든 Issue만 가져간다. 봇 계정이 대신 등록한 Issue는 runner가 고르지 않는다. 대화 세션의 `new-task --issue`로는 시작할 수 있다.
 - `new-task`가 `claim/<issue>`를 push해 선점한다. 거부되면 다른 작업자가 이미 맡은 것이니 다음 Issue로 간다.
+- **대화 세션은 main 체크아웃에 머문 채** `new-task`가 출력한 worktree 경로의 파일을 고친다. 자기 계획(`owner`가 현재 작업자)의 worktree면 L1 훅이 허용하므로 `EnterWorktree`(사람 승인 필요)로 옮겨 갈 필요가 없다. 다른 작업자(runner 등)의 worktree는 막힌다.
+  - 셸 명령은 `git -C <worktree> …` 또는 `cd <worktree> && …`로 실행한다.
+  - push는 브랜치 이름을 적는다: `git -C <worktree> push -u origin <브랜치>`. 인자 없는 `git push`는 세션 위치(main) 기준으로 판정되어 R2로 막힌다.
 - 규모(4.3절)는 아래 기준으로 정한다. 애매하면 큰 쪽을 고른다. 동작이 바뀌는 변경은 아무리 작아도 medium 이상이다.
 
 | 규모   | 예                       | 계획 형태                                                            |

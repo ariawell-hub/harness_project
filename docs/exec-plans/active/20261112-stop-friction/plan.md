@@ -55,6 +55,7 @@ claimed_at: 2026-11-12T09:50:06+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-12 09:55 계획 작성. Issue #16 선점(owner: session). step0 수정 전이라 이 세션은 `EnterWorktree`로 s0 worktree에 들어가 작업한다.
+- 2026-11-12 10:15 step0: 먼저 실패한 테스트 기록 — `node --test scripts/test/guard.test.ts` → `does not provide an export named 'buildContext'`로 실패. 구현 후 15개 통과(새 테스트 2개: 판정 표, 실제 훅 프로세스). 훅 프로세스로 main 체크아웃 `cwd` + 자기 worktree `Write`는 0, 임시 폴더 안의 worktree 간 `Write`는 2를 확인(수정 전에는 임시 폴더 허용 때문에 통과했다). step0 AC와 `check` 통과.
 
 ## 의사결정 로그
 
@@ -63,6 +64,8 @@ claimed_at: 2026-11-12T09:50:06+09:00 # new-task가 채운다
 - 결정: 정리 보호는 `cleanupMerged` 안에서 `process.cwd()`가 그 worktree 안이면 건너뛰는 방식으로 하고 `start.ts`는 건드리지 않는다. 이유: 열린 PR #14(Issue #4)가 `start.ts` ② 절을 고치고 있어 충돌을 피한다.
 
 ## 발견 사항
+
+- step0: 임시 폴더 허용(리포 밖이라도 임시 폴더면 허용)이 같은 리포의 다른 worktree에도 적용되어, 임시 폴더 안에 만든 리포에서는 worktree 간 수정이 막히지 않았다 → 처리: 해당 없음(이번 step에서 같은 리포 판정을 임시 폴더 허용보다 먼저 하도록 고치고 테스트 추가)
 
 ## 열린 질문
 
