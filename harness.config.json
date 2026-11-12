@@ -9,6 +9,7 @@
     "owner": "ariawell-hub",
     "bot": "ariawell247",
     "collaborators": [],
+    "botIssues": "exclude",
     "priorityLabels": ["priority:high", "priority:medium", "priority:low"],
     "needsHumanLabel": "needs-human"
   },

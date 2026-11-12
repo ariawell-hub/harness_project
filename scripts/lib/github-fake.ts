@@ -137,6 +137,12 @@ export class FakeGitHub implements GitHubPort {
     this.issue(s, n).comments.push({ author: s.owner, body, createdAt: new Date().toISOString() });
     this.save(s);
   }
+  /** 테스트용: 임의 계정(외주 개발자, 대소문자가 다른 제작자 등)의 댓글 */
+  commentAs(n: number, author: string, body: string): void {
+    const s = this.load();
+    this.issue(s, n).comments.push({ author, body, createdAt: new Date().toISOString() });
+    this.save(s);
+  }
   addLabel(n: number, label: string): void {
     const s = this.load();
     const i = this.issue(s, n);

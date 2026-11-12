@@ -4,12 +4,13 @@
 //   3. 내가 맡은 계획의 진행 중인 step (계획 작성 포함)
 //   4. 앞 step이 병합된 계획의 다음 step
 //   5. 선점되지 않은 Issue 중 제작자·외주 개발자가 만든 것 (우선순위 라벨 순, WIP 상한 안에서).
-//      봇 계정 등 그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절)
+//      `github.botIssues`가 owner-approved면 제작자가 `/harness accept` 댓글을 단 봇 Issue도.
+//      그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절)
 //   6. 없으면 idle (CI·사람 대기 수 포함)
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { HarnessConfig } from '../lib/config.ts';
-import type { GitHubPort, Issue, PullRequest } from '../lib/github.ts';
+import type { Comment, GitHubPort, Issue, PullRequest } from '../lib/github.ts';
 import { gitTry, listWorktrees, showFile } from '../lib/git.ts';
 import {
   PLANS_DIR,
@@ -134,16 +135,62 @@ export function sameLogin(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
+/** 봇 Issue 승인 표시(`github.botIssues: owner-approved`). 제작자 계정 댓글의 한 줄 */
+export const BOT_ISSUE_ACCEPT = '/harness accept';
+
+/** 승인 경로가 켜져 있고 제작자 승인을 기다리는 봇 Issue의 제외 사유 */
+export const BOT_ISSUE_WAITING_REASON = `봇 계정이 만든 Issue: 제작자 계정의 \`${BOT_ISSUE_ACCEPT}\` 댓글 대기`;
+
+/** 펜스 코드 블록(``` 또는 ~~~, 3칸까지 들여쓰기) 여닫는 줄 */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * 댓글 본문에 승인 줄이 있는지 본다. 앞뒤 공백을 뺀 줄이 정확히 `/harness accept`여야 한다.
+ * 인용(`> ...`)·문장 속 언급·인라인 코드는 줄 전체가 일치하지 않아 빠지고, 펜스 코드 블록 안의 줄은 건너뛴다.
+ * 닫히지 않은 펜스는 끝까지 코드로 본다(fail-closed).
+ */
+function hasAcceptLine(body: string): boolean {
+  let fence: string | null = null;
+  for (const line of body.split('\n')) {
+    const m = FENCE.exec(line.replace(/\r$/, ''));
+    if (fence) {
+      // 닫는 펜스: 같은 문자, 여는 펜스 이상 길이, 뒤에 공백만
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !m[2].trim()) fence = null;
+      continue;
+    }
+    if (m) {
+      fence = m[1];
+      continue;
+    }
+    if (line.trim() === BOT_ISSUE_ACCEPT) return true;
+  }
+  return false;
+}
+
+/**
+ * 제작자(`owner`) 계정이 쓴 댓글 가운데 `/harness accept` 한 줄이 있는지 본다(9.1절 답변 인정과 같은 근거:
+ * 댓글 작성자는 봇이 흉내 낼 수 없다). 봇·외주 개발자 등 다른 계정의 댓글은 보지 않는다.
+ * 한계: 마지막 편집자는 보지 않는다. 쓰기 권한 계정이 제작자 댓글을 고친 경우를 가려내지 못한다(TD-20).
+ */
+export function ownerAccepted(comments: Comment[], owner: string): boolean {
+  return comments.some((c) => sameLogin(c.author, owner) && hasAcceptLine(c.body));
+}
+
 /**
  * 새 Issue 후보를 작성자로 거른다(14.6절). 제작자(`github.owner`)·외주 개발자(`github.collaborators`)가
- * 만든 Issue만 `trusted`다. `github.owner`가 비면 모두 뺀다(fail-closed). 입력 순서를 지킨다.
+ * 만든 Issue만 `trusted`다. `github.botIssues`가 `owner-approved`면 봇 계정 Issue 가운데 제작자 승인
+ * 댓글(`ownerAccepted`)이 있는 것도 `trusted`다. 댓글은 이때만 `comments(n)`으로 조회한다.
+ * `github.owner`가 비면 모두 뺀다(fail-closed). 입력 순서를 지킨다.
  */
 export function filterTrustedIssues(
   issues: Issue[],
   cfg: HarnessConfig,
+  comments: (issue: number) => Comment[],
 ): { trusted: Issue[]; excluded: ExcludedIssue[] } {
   const { owner, bot } = cfg.github;
   const allowed = [owner, ...(cfg.github.collaborators ?? [])];
+  // 설정을 거치지 않은 값(undefined 등)은 exclude로 본다(fail-closed)
+  const approvalOpen = cfg.github.botIssues === 'owner-approved';
   const trusted: Issue[] = [];
   const excluded: ExcludedIssue[] = [];
   for (const i of issues) {
@@ -152,8 +199,21 @@ export function filterTrustedIssues(
     else if (allowed.some((a) => sameLogin(i.author, a))) {
       trusted.push(i);
       continue;
-    } else if (sameLogin(i.author, bot)) reason = '봇 계정이 만든 Issue';
-    else if (!i.author) reason = '작성자 불명';
+    } else if (sameLogin(i.author, bot)) {
+      if (!approvalOpen) reason = '봇 계정이 만든 Issue';
+      else {
+        try {
+          if (ownerAccepted(comments(i.number), owner)) {
+            trusted.push(i);
+            continue;
+          }
+          reason = BOT_ISSUE_WAITING_REASON;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          reason = `댓글 조회 실패: ${msg.split('\n')[0]}`;
+        }
+      }
+    } else if (!i.author) reason = '작성자 불명';
     else reason = '허용 계정(github.owner·github.collaborators)이 아닌 작성자';
     excluded.push({ number: i.number, title: i.title, author: i.author, reason });
   }
@@ -280,7 +340,8 @@ export function pickNext(env: NextEnv): Pick {
         !claims.has(i.number) &&
         !locals.some((l) => l.issue === i.number),
     );
-    const filtered = filterTrustedIssues(open, cfg);
+    // 앞 조건으로 먼저 거른 뒤 적용한다(봇 Issue 댓글 조회 횟수를 줄인다)
+    const filtered = filterTrustedIssues(open, cfg, (n) => gh.comments(n));
     excluded = filtered.excluded;
     const candidates = filtered.trusted.sort(
       (a, b) =>

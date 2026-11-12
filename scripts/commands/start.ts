@@ -1,10 +1,16 @@
 // 세션 시작 절차 (7.1절, S1): ① 열린 needs-human 먼저 보고 ② 병합된 worktree 정리 ③ 다음 할 일 고르기.
-import { loadConfig } from '../lib/config.ts';
+import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { getGitHub } from '../lib/github.ts';
 import { repoInfo } from '../lib/git.ts';
 import { log, warn } from '../lib/util.ts';
 import { cleanupMerged } from '../runner/run.ts';
-import { pickNext, readLocalPlans, type ExcludedIssue } from '../runner/next.ts';
+import {
+  BOT_ISSUE_ACCEPT,
+  BOT_ISSUE_WAITING_REASON,
+  pickNext,
+  readLocalPlans,
+  type ExcludedIssue,
+} from '../runner/next.ts';
 import { fetchRemote } from './task.ts';
 
 export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
@@ -31,6 +37,18 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
 /** 작성자 확인으로 새 Issue 후보에서 뺀 Issue 한 줄(4.5절 5번, 14.6절) */
 export function describeExcluded(e: ExcludedIssue): string {
   return `후보 제외: #${e.number} "${e.title}" (작성자 ${e.author || '불명'}) — ${e.reason}`;
+}
+
+/**
+ * `github.botIssues`가 owner-approved이고 제작자 승인을 기다리는 봇 Issue가 있으면 승인 방법 한 줄.
+ * exclude면 승인 경로가 없으므로 안내하지 않는다(null)
+ */
+export function acceptHint(cfg: HarnessConfig, excluded: ExcludedIssue[]): string | null {
+  if (cfg.github.botIssues !== 'owner-approved') return null;
+  const waiting = excluded.filter((e) => e.reason === BOT_ISSUE_WAITING_REASON);
+  if (!waiting.length) return null;
+  const nums = waiting.map((e) => `#${e.number}`).join(', ');
+  return `안내: ${nums}에 제작자 계정(${cfg.github.owner})으로 \`${BOT_ISSUE_ACCEPT}\` 한 줄 댓글을 달면 runner 작업 후보가 된다`;
 }
 
 export function start(cwd: string, worker: string): number {
@@ -74,6 +92,8 @@ export function start(cwd: string, worker: string): number {
   log(`- ${describeTask(pick.task)}`);
   log(`- 이유: ${pick.reason}`);
   for (const e of pick.excluded) log(`- ${describeExcluded(e)}`);
+  const hint = acceptHint(cfg, pick.excluded);
+  if (hint) log(`- ${hint}`);
   if (info.isMainCheckout && pick.task.kind !== 'idle') {
     log('- 주의: 지금은 main 체크아웃이다. 코드는 worktree 안에서만 고친다(R3).');
   }
