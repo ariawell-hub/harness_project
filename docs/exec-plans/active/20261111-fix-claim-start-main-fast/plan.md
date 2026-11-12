@@ -79,6 +79,8 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 - `origin/main` (`913c9d6`) 위로 rebase했다. `scripts/commands/start.ts`, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`의 충돌을 해결했고, main의 Issue 후보 제외 및 병합 worktree 보호 변경을 보존했다. main에서 TD-17이 Issue #16 step4로 이미 사용·해결되어, step0의 조건부 지침에 따라 runner 설정 캐시 부채를 TD-21로 옮기고 계획·index 참조를 맞췄다. rebase 결과의 작업 커밋은 `bf5e977`, 계획 전용 커밋은 `000e728`이다.
 - 원격 PR branch는 여전히 이전 커밋 `ef78279`를 가리킨다. rebase 결과를 반영하려면 non-fast-forward 갱신이 필요하지만 R2가 force push를 금지하므로 수행하지 않았다. PR #14의 GitHub 상태는 아직 갱신되지 않았다.
 
+- 2026-11-12 11:29 (KST) 제작자가 PR #14 갱신을 추가 지시했다. 재확인 결과 PR은 OPEN이고 원격 head는 예상한 `ef78279`, `origin/main`은 `913c9d6` 그대로다. 포맷 수정 뒤 `node scripts/harness.ts check`가 통과했다. 이 PR branch에 한해 `--force-with-lease`로 로컬 rebase를 반영한다.
+
 ## 의사결정 로그
 
 - 결정: 선점 해제 기준을 로컬 worktree 상태가 아니라 "GitHub Issue가 닫혔는가"로 한다. 이유: Issue는 마지막 step PR의 `Closes #N`으로 닫히므로 8.3절의 "마지막 step 병합"과 같은 뜻이고, worktree를 손으로 지웠거나 다른 머신에서 병합한 경우도 잡는다. 버린 대안: `complete-step`에서 해제(PR 병합 전이라 다른 작업자가 같은 Issue를 선점할 수 있다), PR 병합 감시(대화 세션은 병합을 기다리지 않는다), `cleanupMerged` 조건 완화(로컬에 worktree가 없으면 여전히 못 본다).
@@ -91,6 +93,8 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 - 결정: step 2개(main-sync, claim-release)로 나눈다. 이유: 두 동작이 독립적이고 각각 PR 하나(400줄 안팎)에 든다. main-sync를 먼저 하는 이유는 claim-release 통합 테스트가 PR 병합으로 원격 main을 앞서게 만들어 `start`의 동기화를 함께 거치기 때문이다.
 
 - 결정: runner 설정 캐시 부채를 TD-21로 등록한다. / 이유: origin/main에서 TD-17은 Issue #16 step4로 이미 사용·해결되어 있고, step0 계획의 조건부 지침은 다음 빈 번호 사용을 허용한다. / 버린 대안: TD-17을 중복 등록한다.
+
+- 결정: 제작자의 후속 지시에 따라 PR #14 branch에 한해 `--force-with-lease`로 rebase 결과를 반영한다. / 이유: PR head가 확인한 `ef78279` 그대로이고, lease는 다른 변경이 먼저 올라오면 갱신을 거부한다. / 버린 대안: 일반 push(비-fast-forward로 거부됨), merge 업데이트(rebase 요구와 다름).
 
 ## 발견 사항
 
