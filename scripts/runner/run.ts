@@ -4,6 +4,7 @@ import {
   appendFileSync,
   existsSync,
   readFileSync,
+  realpathSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -534,12 +535,41 @@ async function doFixPR(
   );
 }
 
-/** 병합된 브랜치의 깨끗한 worktree를 정리한다(7.1절 세션 시작 절차 ②) */
-export function cleanupMerged(main: string, cfg: HarnessConfig, locals: LocalPlan[]): string[] {
+/** 심볼릭 링크(macOS /var → /private/var)를 풀어 child가 parent 안(같거나 하위)인지 본다 */
+function insideDir(child: string, parent: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const rel = path.relative(real(parent), real(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * 병합된 브랜치의 깨끗한 worktree를 정리한다(7.1절 세션 시작 절차 ②).
+ * `here`(기본: 이 프로세스의 현재 폴더)가 들어 있는 worktree는 지우지 않는다.
+ * 지우면 그 안에서 `start`를 부른 세션의 현재 폴더가 사라져 이후 명령이 모두 실패한다(Issue #16).
+ */
+export function cleanupMerged(
+  main: string,
+  cfg: HarnessConfig,
+  locals: LocalPlan[],
+  here: string = process.cwd(),
+): string[] {
   const removed: string[] = [];
   for (const l of locals) {
     if (l.pr?.state !== 'merged') continue;
     if (!isClean(l.worktree)) continue;
+    if (insideDir(here, l.worktree)) {
+      log(
+        `- 남김: ${l.worktree} — 지금 이 프로세스가 그 worktree 안에서 실행 중이다. ` +
+          'main 체크아웃으로 나간 뒤(ExitWorktree 또는 cd) start를 다시 실행하면 정리된다',
+      );
+      continue;
+    }
     // 마지막 step이 병합됐으면 선점도 푼다(10.3절 절차 5)
     if (l.ref.where === 'completed' && l.issue > 0) releaseClaim(main, cfg, l.issue);
     const r = gitTry(['worktree', 'remove', l.worktree], main);
