@@ -1,0 +1,16 @@
+{
+  "plan": "20261112-pr-update-merge",
+  "steps": [
+    {
+      "step": 0,
+      "name": "merge-procedure",
+      "status": "in_progress",
+      "started_at": "2026-11-12T12:45:00+09:00"
+    },
+    {
+      "step": 1,
+      "name": "runner-update",
+      "status": "pending"
+    }
+  ]
+}
