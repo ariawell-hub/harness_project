@@ -4,7 +4,9 @@
 //   fail    : 아무것도 하지 않고 "완료했다"고만 말한다(세션 주장은 판정 근거가 아님을 확인)
 //   timeout : 오래 멈춘다(세션 시간 제한 확인)
 //   limit   : 사용량 한도 메시지로 실패한다(환경 장애, 실패로 세지 않음)
+//   question: (계획 작성만) ok처럼 계획을 채우고 "열린 질문"에 `### 질문: 데모 질문` 블록을 남긴다
 // FAKE_LOG: 받은 프롬프트를 JSON 줄로 남긴다.
+// FAKE_RESULT_JSON=1: 끝에 Claude `-p --output-format json` 형식의 결과 객체(권한 거부 포함)를 출력한다.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -45,6 +47,11 @@ if (action === 'timeout') {
     '## 검증 방법과 결과': '- AC 명령(test -f)',
   };
   for (const [h, line] of Object.entries(fill)) text = text.replace(h, `${h}\n${line}`);
+  if (action === 'question')
+    text = text.replace(
+      '## 열린 질문',
+      '## 열린 질문\n\n### 질문: 데모 질문\n\n- A) 하나 — 영향: 작다\n- B) 둘 — 영향: 크다\n- 추천: A. 이유: 단순하다\n',
+    );
   writeFileSync(planFile, text);
   const dir = path.dirname(planFile);
   const list = Array.from({ length: steps }, (_, i) => ({
@@ -71,4 +78,23 @@ if (action === 'timeout') {
   }
   git('add', '-A');
   git('commit', '-q', '-m', `feat: ${slug} step ${step}`);
+}
+
+if (process.env.FAKE_RESULT_JSON && action !== 'timeout') {
+  process.stdout.write(
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      num_turns: 7,
+      terminal_reason: 'completed',
+      session_id: `fake-${slug}-${step}`,
+      result: '끝났습니다',
+      permission_denials: [
+        { tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'sed -n 1,20p a.ts' } },
+        { tool_name: 'Bash', tool_use_id: 't2', tool_input: { command: 'find . -name x' } },
+        { tool_name: 'WebFetch', tool_use_id: 't3', tool_input: { url: 'https://example.com' } },
+      ],
+    }) + '\n',
+  );
 }

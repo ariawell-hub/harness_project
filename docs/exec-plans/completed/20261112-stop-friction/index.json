@@ -1,0 +1,35 @@
+{
+  "plan": "20261112-stop-friction",
+  "steps": [
+    {
+      "step": 0,
+      "name": "guard-own-worktree",
+      "status": "completed",
+      "completed_at": "2026-11-12T10:12:29+09:00"
+    },
+    {
+      "step": 1,
+      "name": "keep-current-worktree",
+      "status": "completed",
+      "completed_at": "2026-11-12T10:16:39+09:00"
+    },
+    {
+      "step": 2,
+      "name": "ask-rules",
+      "status": "completed",
+      "completed_at": "2026-11-12T10:20:40+09:00"
+    },
+    {
+      "step": 3,
+      "name": "runner-session-log",
+      "status": "completed",
+      "completed_at": "2026-11-12T10:28:04+09:00"
+    },
+    {
+      "step": 4,
+      "name": "cli-help-messages",
+      "status": "completed",
+      "completed_at": "2026-11-12T10:32:00+09:00"
+    }
+  ]
+}

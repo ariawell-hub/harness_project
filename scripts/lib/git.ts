@@ -136,6 +136,146 @@ export function isClean(cwd: string): boolean {
   return git(['status', '--porcelain'], cwd).trim() === '';
 }
 
+export type MainSync =
+  | { status: 'updated'; from: string; to: string }
+  | { status: 'up-to-date'; head: string }
+  | { status: 'skipped'; reason: string };
+
+/**
+ * main 체크아웃을 <remote>/<branch>로 fast-forward 한다. fetch는 호출자가 먼저 한다.
+ * 사람의 로컬 커밋·미커밋 작업을 지키려고 `merge --ff-only`만 쓴다(R14). 예외를 던지지 않는다.
+ */
+export function fastForwardMain(mainRoot: string, remote: string, branch: string): MainSync {
+  const upstream = `${remote}/${branch}`;
+  const skip = (reason: string): MainSync => ({ status: 'skipped', reason });
+  try {
+    const sym = gitTry(['symbolic-ref', '--short', '-q', 'HEAD'], mainRoot);
+    const current = sym.ok ? sym.stdout.trim() : '';
+    if (current !== branch) {
+      return skip(
+        `체크아웃된 브랜치가 ${branch} 브랜치가 아니다(지금: ${current || 'detached HEAD'}). 고치는 법: main 체크아웃을 ${branch} 브랜치로 되돌리고 작업은 worktree에서 한다`,
+      );
+    }
+    const status = gitTry(['status', '--porcelain'], mainRoot);
+    if (!status.ok) return skip(`git status 실패: ${firstLine(status.stderr)}`);
+    if (status.stdout.trim() !== '') {
+      return skip(
+        '미커밋 변경이나 추적 안 된 파일이 있다. 고치는 법: git status로 확인해 커밋하거나 치운 뒤 다시 실행한다',
+      );
+    }
+    const target = revParse(upstream, mainRoot);
+    if (!target) {
+      return skip(`${upstream} 브랜치가 없다. 고치는 법: 원격 설정을 확인하고 fetch가 되는지 본다`);
+    }
+    const from = revParse('HEAD', mainRoot);
+    if (!from) return skip(`${branch} 브랜치에 커밋이 없다`);
+    if (from === target) return { status: 'up-to-date', head: from };
+    if (!gitTry(['merge-base', '--is-ancestor', 'HEAD', upstream], mainRoot).ok) {
+      const n = gitTry(['rev-list', '--count', `${upstream}..HEAD`], mainRoot).stdout.trim() || '?';
+      return skip(
+        `로컬 ${branch} 브랜치에만 있는 커밋이 ${n}개 있다(${upstream}보다 앞섰거나 갈라졌다). 고치는 법: 그 커밋을 다른 브랜치로 옮겨 PR로 올린 뒤 로컬 ${branch} 브랜치를 ${upstream}에 맞춘다`,
+      );
+    }
+    const m = gitTry(['merge', '--ff-only', '--quiet', upstream], mainRoot);
+    if (!m.ok) {
+      return skip(
+        `fast-forward 실패: ${firstLine(m.stderr)}. 고치는 법: git status로 main 체크아웃을 확인한다`,
+      );
+    }
+    return { status: 'updated', from, to: revParse('HEAD', mainRoot) ?? target };
+  } catch (e) {
+    return skip(`git 실행 실패: ${firstLine((e as Error).message)}`);
+  }
+}
+
+export type BranchUpdate =
+  | { status: 'up-to-date'; head: string }
+  | { status: 'updated'; from: string; to: string }
+  | { status: 'conflict'; files: string[] }
+  | { status: 'failed'; stage: 'precheck' | 'fetch' | 'merge' | 'push'; reason: string };
+
+/**
+ * 원격 브랜치에 로컬 HEAD에 없는 커밋이 있는가(다른 곳에서 push됐거나 로컬 이력을 고쳐 갈라짐).
+ * `<remote> <branch>`를 fetch해 판정한다. fetch 실패나 원격 브랜치 없음은 false(확인하지 못함). 예외를 던지지 않는다.
+ */
+export function remoteBranchDiverged(worktree: string, remote: string, branch: string): boolean {
+  try {
+    if (!gitTry(['fetch', '--quiet', remote, branch], worktree).ok) return false;
+    const ref = `${remote}/${branch}`;
+    if (!revParse(ref, worktree)) return false;
+    return !gitTry(['merge-base', '--is-ancestor', ref, 'HEAD'], worktree).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PR 브랜치(worktree의 HEAD)에 <remote>/<base>를 병합하고 일반 push로 <remote>/<branch>를 갱신한다(ADR-0006).
+ * rebase·force push는 하지 않는다. 충돌하면 병합을 취소해 worktree와 HEAD를 호출 전으로 둔다.
+ * 원격 PR 브랜치에 로컬에 없는 커밋이 있으면(다른 곳에서 push됨) 병합하지 않는다. 예외를 던지지 않는다.
+ * `updated.from`은 갱신 전 원격 PR 브랜치 head다. push가 실패하면 로컬 병합 커밋은 남고 다음 호출이 push만 다시 한다.
+ */
+export function updateBranchFromBase(
+  worktree: string,
+  remote: string,
+  base: string,
+  branch: string,
+): BranchUpdate {
+  const fail = (stage: 'precheck' | 'fetch' | 'merge' | 'push', reason: string): BranchUpdate => ({
+    status: 'failed',
+    stage,
+    reason,
+  });
+  const baseRef = `${remote}/${base}`;
+  const branchRef = `${remote}/${branch}`;
+  try {
+    const status = gitTry(['status', '--porcelain'], worktree);
+    if (!status.ok) return fail('precheck', `git status 실패: ${firstLine(status.stderr)}`);
+    if (status.stdout.trim() !== '') {
+      return fail(
+        'precheck',
+        '미커밋 변경이나 추적 안 된 파일이 있다. 커밋하거나 치운 뒤 다시 갱신한다',
+      );
+    }
+    const fetched = gitTry(['fetch', '--quiet', remote, base, branch], worktree);
+    if (!fetched.ok) return fail('fetch', `git fetch 실패: ${firstLine(fetched.stderr)}`);
+    const remoteHead = revParse(branchRef, worktree);
+    if (!remoteHead || !revParse(baseRef, worktree)) {
+      return fail('fetch', `${baseRef} 또는 ${branchRef}가 없다`);
+    }
+    if (!gitTry(['merge-base', '--is-ancestor', branchRef, 'HEAD'], worktree).ok) {
+      return fail(
+        'precheck',
+        `${branchRef}에 로컬에 없는 커밋이 있다(다른 곳에서 push됐다). 덮어쓰지 않는다. 고치는 법: 절차서 5절대로 원격 이력을 병합한 뒤 갱신한다`,
+      );
+    }
+    if (!gitTry(['merge-base', '--is-ancestor', baseRef, 'HEAD'], worktree).ok) {
+      const m = gitTry(['merge', '--no-edit', '--quiet', baseRef], worktree);
+      if (!m.ok) {
+        const unmerged = gitTry(['diff', '--name-only', '--diff-filter=U'], worktree);
+        const files = unmerged.ok ? unmerged.stdout.split('\n').filter(Boolean) : [];
+        if (gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], worktree).ok) {
+          gitTry(['merge', '--abort'], worktree);
+        }
+        if (files.length) return { status: 'conflict', files };
+        return fail('merge', `git merge 실패: ${firstLine(m.stderr || m.stdout)}`);
+      }
+    }
+    const head = revParse('HEAD', worktree);
+    if (!head) return fail('merge', 'HEAD를 읽지 못했다');
+    if (head === remoteHead) return { status: 'up-to-date', head };
+    const pushed = gitTry(['push', '--quiet', remote, `HEAD:refs/heads/${branch}`], worktree);
+    if (!pushed.ok) return fail('push', `git push 실패: ${firstLine(pushed.stderr)}`);
+    return { status: 'updated', from: remoteHead, to: head };
+  } catch (e) {
+    return fail('precheck', `git 실행 실패: ${firstLine((e as Error).message)}`);
+  }
+}
+
+function firstLine(s: string): string {
+  return s.trim().split('\n')[0] || '(출력 없음)';
+}
+
 export function remoteBranchExists(cwd: string, remote: string, branch: string): boolean {
   const r = gitTry(['ls-remote', '--exit-code', '--heads', remote, branch], cwd);
   return r.ok && r.stdout.trim() !== '';

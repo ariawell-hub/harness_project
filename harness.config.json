@@ -124,8 +124,7 @@
         "dontAsk",
         "--setting-sources",
         "user",
-        "--strict-mcp-config",
-        "--no-session-persistence"
+        "--strict-mcp-config"
       ],
       "permissionProfile": ".claude/runner-settings.json"
     },

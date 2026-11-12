@@ -6,7 +6,7 @@ import { runSync } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { findPlan } from '../lib/plan.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
-import { normalize } from '../hooks/guard.ts';
+import { buildContext, normalize } from '../hooks/guard.ts';
 import { HARNESS_ROOT, commitAll, gitInit, sh, tmp, write } from './helpers.ts';
 import { readFileSync } from 'node:fs';
 
@@ -346,6 +346,72 @@ test('파일 도구: main 체크아웃·worktree 밖·계획 없음·.env·자�
   );
 });
 
+test('파일 도구: main 체크아웃의 대화 세션은 자기 소유 작업 worktree만 고친다 (Issue #16)', () => {
+  const dir = tmp();
+  const main = path.join(dir, 'repo');
+  gitInit(main);
+  write(main, 'README.md', 'x');
+  commitAll(main);
+  const wtRoot = path.join(dir, 'repo.worktrees');
+  const mk = (branch: string, owner: string | null): string => {
+    const wt = path.join(wtRoot, ...branch.split('/'));
+    sh('git', ['worktree', 'add', '-q', '-b', branch, wt], main);
+    const id = /\/(\d{8}-[a-z0-9-]+?)(?:-s\d+)?$/.exec(branch)?.[1];
+    if (owner !== null && id)
+      write(
+        wt,
+        `docs/exec-plans/active/${id}/plan.md`,
+        `---\nid: ${id}\nowner: ${owner} # 주석\n---\n`,
+      );
+    return wt;
+  };
+  const mine = mk('fix/20261112-mine-s0', 'session');
+  const runner = mk('feat/20261112-other-s0', 'runner-1');
+  const noPlan = mk('feat/20261112-noplan-s0', null);
+  const odd = mk('random-branch', null);
+  // 테스트 폴더가 임시 폴더 안이라 임시 폴더 허용을 끈다
+  const at = (cwd: string, worker = 'session'): GuardContext => ({
+    ...buildContext(cwd, worker),
+    tmpDirs: [],
+    home: HOME,
+  });
+  const w = (file: string, cwd: string, worker?: string) =>
+    evaluate({ kind: 'write', files: [file], cwd }, at(cwd, worker));
+
+  // main 체크아웃 세션 → 자기 소유 worktree: 코드·계획 모두 허용 (EnterWorktree 불필요)
+  assert.equal(w(path.join(mine, 'src/a.ts'), main), null);
+  assert.equal(w(path.join(mine, 'docs/exec-plans/active/20261112-mine/step0.md'), main), null);
+  // 작업자 이름이 다르면 자기 것이 아니다
+  assert.match(w(path.join(mine, 'src/a.ts'), main, 'mac-session')!.rule, /^R3/);
+  // 다른 작업자(runner) worktree는 막는다
+  const r = w(path.join(runner, 'src/a.ts'), main)!;
+  assert.match(r.rule, /^R3/);
+  assert.match(r.what, /runner-1/);
+  // 계획(owner)을 알 수 없거나 규칙 밖 브랜치면 막는다(fail-closed)
+  assert.match(w(path.join(noPlan, 'src/a.ts'), main)!.rule, /^R3/);
+  assert.match(w(path.join(noPlan, 'docs/exec-plans/active/x.md'), main)!.rule, /^R3/);
+  assert.match(w(path.join(odd, 'a.ts'), main)!.rule, /^R3/);
+  // main 체크아웃 자체는 여전히 막는다
+  assert.match(w(path.join(main, 'src/a.ts'), main)!.rule, /^R3/);
+  // worktree 안의 세션: 자기 worktree는 허용, 다른 worktree·main 체크아웃은 막는다
+  assert.equal(w(path.join(mine, 'src/a.ts'), mine), null);
+  const cross = w(path.join(runner, 'src/a.ts'), mine)!;
+  assert.match(cross.rule, /^R3/);
+  assert.match(cross.what, /다른 작업 worktree/);
+  assert.match(w(path.join(main, 'src/a.ts'), mine)!.what, /main 체크아웃/);
+  // 다른 리포와 리포 밖 경로는 지금처럼 막는다
+  const elsewhere = path.join(dir, 'elsewhere');
+  gitInit(elsewhere);
+  assert.match(w(path.join(elsewhere, 'a.ts'), main)!.rule, /^R3/);
+  assert.match(w(path.join(dir, 'loose', 'a.ts'), main)!.rule, /^R3/);
+  // 사용자 환경 파일은 "리포 밖"이라고 알리고 사용자가 직접 실행할 명령을 안내하게 한다(step4)
+  const zshrc = w(`${HOME}/.zshrc`, main)!;
+  assert.match(zshrc.rule, /^R3/);
+  assert.match(zshrc.what, /리포 밖 파일/);
+  assert.match(zshrc.how, /! <명령>/);
+  assert.doesNotMatch(zshrc.how, /현재 worktree 안의 파일만/);
+});
+
 // ---- 실제 프로세스: stdin JSON → 종료 코드 2 (13.1절: 경고만 하고 통과시키지 않는지) ----
 
 function runGuard(payload: unknown): { code: number; stderr: string } {
@@ -371,6 +437,31 @@ test('guard 프로세스: Claude Code 형식에서 차단은 종료 코드 2, �
     runGuard({ tool_name: 'Read', tool_input: { file_path: path.join(cwd, '.env') }, cwd }).code,
     2,
   );
+});
+
+test('guard 프로세스: main 체크아웃 세션이 자기 worktree에 쓰면 0, 다른 worktree 세션이 쓰면 2', () => {
+  const dir = tmp();
+  const main = path.join(dir, 'repo');
+  gitInit(main);
+  write(main, 'README.md', 'x');
+  commitAll(main);
+  const mine = path.join(dir, 'wt', 'mine');
+  const other = path.join(dir, 'wt', 'other');
+  sh('git', ['worktree', 'add', '-q', '-b', 'fix/20261112-mine-s0', mine], main);
+  sh('git', ['worktree', 'add', '-q', '-b', 'fix/20261112-other-s0', other], main);
+  write(mine, 'docs/exec-plans/active/20261112-mine/plan.md', '---\nowner: session\n---\n');
+  write(other, 'docs/exec-plans/active/20261112-other/plan.md', '---\nowner: session\n---\n');
+  const env = { ...process.env };
+  delete env.HARNESS_WORKER;
+  const run = (cwd: string, file: string) =>
+    runSync(process.execPath, [path.join(HARNESS_ROOT, 'scripts/hooks/guard.ts')], {
+      input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: file }, cwd }),
+      env,
+    });
+  assert.equal(run(main, path.join(mine, 'src/a.ts')).code, 0);
+  const cross = run(mine, path.join(other, 'src/a.ts'));
+  assert.equal(cross.code, 2, '임시 폴더 안이어도 같은 리포의 다른 worktree는 막는다');
+  assert.match(cross.stderr, /R3/);
 });
 
 test('guard 프로세스: Codex 형식(command 배열, apply_patch)도 처리한다', () => {

@@ -1,7 +1,10 @@
-// 세션 시작 절차 (7.1절, S1): ① 열린 needs-human 먼저 보고 ② 병합된 worktree 정리 ③ 다음 할 일 고르기.
+// 세션 시작 절차 (7.1절, S1): fetch → main 체크아웃 fast-forward(안 되면 이유만) → 설정 다시 읽기 →
+// ① 열린 needs-human 먼저 보고 ② 정리(main 동기화 결과, 병합된 worktree, 닫힌 Issue의 claim/<N> 선점 해제)
+// ③ 다음 할 일 고르기(승인 대기 봇 Issue가 있으면 승인 방법 안내).
+// 선점 해제는 GitHub에서 닫혔음을 확인한 Issue만 한다(8.3절).
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { getGitHub } from '../lib/github.ts';
-import { repoInfo } from '../lib/git.ts';
+import { getGitHub, type Issue } from '../lib/github.ts';
+import { fastForwardMain, repoInfo, type MainSync } from '../lib/git.ts';
 import { log, warn } from '../lib/util.ts';
 import { cleanupMerged } from '../runner/run.ts';
 import {
@@ -11,7 +14,7 @@ import {
   readLocalPlans,
   type ExcludedIssue,
 } from '../runner/next.ts';
-import { fetchRemote } from './task.ts';
+import { TaskError, fetchRemote, releaseClosedClaims, type ClaimCleanup } from './task.ts';
 
 export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
   switch (t.kind) {
@@ -19,8 +22,8 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
       return `답을 받은 #${t.issue} 이어 가기${t.local ? ` (worktree ${t.local.worktree})` : ''}`;
     case 'fix-pr':
       return `PR #${t.pr.number} 체크 실패 수정 (worktree ${t.local.worktree})`;
-    case 'rebase':
-      return `PR #${t.pr.number}를 main 위로 rebase (worktree ${t.local.worktree})`;
+    case 'update':
+      return `PR #${t.pr.number}를 origin/main 병합으로 갱신 (rebase·force push 없이, worktree ${t.local.worktree}, 절차서 5절)`;
     case 'plan':
       return `계획 ${t.local.id} 작성 (worktree ${t.local.worktree}, 파일 ${t.local.ref.file})`;
     case 'step':
@@ -39,6 +42,26 @@ export function describeExcluded(e: ExcludedIssue): string {
   return `후보 제외: #${e.number} "${e.title}" (작성자 ${e.author || '불명'}) — ${e.reason}`;
 }
 
+export function describeMainSync(r: MainSync, upstream: string): string {
+  switch (r.status) {
+    case 'updated':
+      return `- main: ${upstream}으로 당겼다 (${r.from.slice(0, 7)} → ${r.to.slice(0, 7)})`;
+    case 'up-to-date':
+      return `- main: 최신(${upstream}과 같다)`;
+    case 'skipped':
+      return `- main: 당기지 않았다 — ${r.reason}`;
+  }
+}
+
+/** ② 정리 절의 선점 해제 줄. 해제·확인 실패가 없으면 "없음" 한 줄 */
+export function describeClaimCleanup(r: ClaimCleanup): string[] {
+  const lines = [
+    ...r.released.map((n) => `- 선점 해제: claim/${n} (Issue #${n} 닫힘)`),
+    ...r.failed.map((f) => `- 선점 유지(확인 실패): claim/${f.issue} — ${f.reason}`),
+  ];
+  return lines.length ? lines : ['- 닫힌 Issue의 선점: 없음'];
+}
+
 /**
  * `github.botIssues`가 owner-approved이고 제작자 승인을 기다리는 봇 Issue가 있으면 승인 방법 한 줄.
  * exclude면 승인 경로가 없으므로 안내하지 않는다(null)
@@ -54,17 +77,22 @@ export function acceptHint(cfg: HarnessConfig, excluded: ExcludedIssue[]): strin
 export function start(cwd: string, worker: string): number {
   const info = repoInfo(cwd);
   const main = info.mainRoot;
-  const cfg = loadConfig(main);
+  const before = loadConfig(main);
   try {
-    fetchRemote(main, cfg);
+    fetchRemote(main, before);
   } catch (e) {
     warn(`원격 fetch 실패(로컬 상태로 진행): ${(e as Error).message.split('\n')[0]}`);
   }
+  // fetch가 실패해도 로컬에 있는 마지막 원격 상태 기준으로 시도한다
+  const { remote, defaultBranch } = before.github;
+  const sync = fastForwardMain(main, remote, defaultBranch);
+  // 당긴 main의 설정을 같은 실행에서 쓴다(Issue #4). ①부터는 이 설정만 쓴다
+  const cfg = loadConfig(main);
   const gh = getGitHub(main);
   const label = cfg.github.needsHumanLabel;
 
   log('## ① 사람의 답을 기다리는 항목 (needs-human)');
-  let issues;
+  let issues: Issue[];
   try {
     issues = gh.listOpenIssues();
   } catch (e) {
@@ -82,10 +110,17 @@ export function start(cwd: string, worker: string): number {
     log(`- #${i.number} ${i.title} — ${answered ? '제작자 답변 있음' : '답변 대기'}`);
   }
 
-  log('\n## ② 병합된 worktree 정리');
+  log('\n## ② 정리');
+  log(describeMainSync(sync, `${remote}/${defaultBranch}`));
   const locals = readLocalPlans({ main, cfg, gh, worker });
   const removed = cleanupMerged(main, cfg, locals);
-  log(removed.length ? removed.map((r) => `- 삭제: ${r}`).join('\n') : '- 없음');
+  log(removed.length ? removed.map((r) => `- 삭제: ${r}`).join('\n') : '- 병합된 worktree: 없음');
+  try {
+    log(describeClaimCleanup(releaseClosedClaims(main, cfg, gh, issues)).join('\n'));
+  } catch (e) {
+    if (!(e instanceof TaskError)) throw e;
+    warn(`선점 정리 건너뜀: ${e.message.split('\n')[0]}`);
+  }
 
   log('\n## ③ 다음 할 일 (4.5절 우선순위)');
   const pick = pickNext({ main, cfg, gh, worker });

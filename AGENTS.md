@@ -9,7 +9,7 @@ node scripts/harness.ts start
 ```
 
 1. 열린 `needs-human` 항목을 **가장 먼저** 사용자에게 보고한다. 답변은 제작자 계정의 댓글만 인정한다.
-2. 병합된 브랜치의 worktree를 정리한다(스크립트가 한다).
+2. main 체크아웃이 깨끗하고 fast-forward가 되면 `origin/main`까지 당기고(안 되면 이유를 출력한다), 병합된 브랜치의 worktree를 정리하고, 닫힌 Issue의 `claim/<N>` 브랜치를 지운다(스크립트가 한다).
 3. 출력된 "다음 할 일"부터 시작한다. 우선순위: 답을 받은 항목 → 내 PR 조치 → 진행 중인 step → 다음 step → 선점되지 않은 Issue.
 
 ## 작업 루프
@@ -21,12 +21,14 @@ node scripts/harness.ts start
 4. **자체 검증**: step의 AC 명령 + `check` + [자체 리뷰 체크리스트](scripts/cross-review/checklist.md)
 5. **완료 처리**: `node scripts/harness.ts complete-step` (계획 전용 커밋)
 6. **PR**: push → PR(`Refs #N`, 마지막 step만 `Closes #N`) → `gh pr merge --auto --squash`
+   - main에 뒤처지거나 충돌한 PR은 rebase하지 않고 `origin/main`을 병합해 일반 push로 갱신한다([workflow.md](docs/harness/workflow.md) 5절, ADR-0006).
 7. 남은 step은 병합 뒤 `new-task --plan <id> --step <N>`으로 새 브랜치에서 이어 간다.
 
 무인 실행은 runner가 위 루프를 step마다 새 세션으로 돌린다: `node scripts/harness.ts run --worker runner-1`
 
 - step 하나 = 세션 하나 = PR 하나.
-- 판단이 필요하면 혼자 추측하지 말고 묻는다. 형식은 [workflow.md](docs/harness/workflow.md)의 "에스컬레이션"을 따른다.
+- 판단이 필요하면 혼자 추측하지 말고 묻는다. 단, "반드시 묻는 것"이 아니면 추천안으로 진행하고 의사결정 로그에 남긴다. 질문은 작업 시작 때 모은다. 기준과 형식은 [workflow.md](docs/harness/workflow.md) 7절 "에스컬레이션".
+- 제작자가 대화로 직접 지시한 일은 묻지 않고 봇이 Issue를 등록해 시작한다([workflow.md](docs/harness/workflow.md) 1절).
 
 ## 표준 명령
 

@@ -15,10 +15,17 @@ node scripts/harness.ts start                                   # 세션 시작 
 node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size medium
 ```
 
-- 작업은 GitHub Issue로만 접수한다. Issue가 없으면 만들지 말고 제작자에게 묻는다.
+- 작업은 GitHub Issue로만 접수한다.
+  - **제작자가 대화에서 직접 지시한 일**은 묻지 않고 봇이 Issue를 등록한 뒤 그 세션이 바로 `new-task`로 시작한다. 본문 첫 줄에 `> 출처: 제작자 대화 지시(<날짜>). 봇이 대신 등록했다.`를 적는다.
+  - 지시 없이 에이전트가 스스로 떠올린 일(발견 사항, 개선 아이디어)은 Issue를 만들지 않는다. 제작자에게 제안하거나 TD·발견 사항으로 남긴다.
   - runner는 제작자·외주 개발자(`harness.config.json`의 `github.collaborators`) 계정이 만든 Issue만 가져간다. 봇 계정이 대신 등록한 Issue는 runner가 고르지 않는다. 대화 세션의 `new-task --issue`로는 시작할 수 있다.
   - 봇이 대신 등록한 Issue를 runner에 맡기려면 `harness.config.json`의 `github.botIssues`가 `"owner-approved"`여야 한다(기본값 `"exclude"`). 그 상태에서 제작자 계정으로 그 Issue에 `/harness accept` 한 줄 댓글을 달면 후보가 된다. 봇·외주 개발자 계정의 댓글, 인용, 문장 속 언급, 코드 블록 안의 줄은 승인이 아니다. 취소하려면 Issue를 닫거나 `needs-human` 라벨을 붙인다.
 - `new-task`가 `claim/<issue>`를 push해 선점한다. 거부되면 다른 작업자가 이미 맡은 것이니 다음 Issue로 간다.
+  - 선점은 마지막 step이 병합되어 Issue가 닫힌 뒤 다음 `start`가 지운다(닫혔음을 확인 못 하면 남긴다). 손으로 지우지 않는다. 만료된 선점 정리는 아직 없다(TD-11).
+- **대화 세션은 main 체크아웃에 머문 채** `new-task`가 출력한 worktree 경로의 파일을 고친다. 자기 계획(`owner`가 현재 작업자)의 worktree면 L1 훅이 허용하므로 `EnterWorktree`(사람 승인 필요)로 옮겨 갈 필요가 없다. 다른 작업자(runner 등)의 worktree는 막힌다.
+  - 셸 명령은 `git -C <worktree> …` 또는 `cd <worktree> && …`로 실행한다.
+  - push는 브랜치 이름을 적는다: `git -C <worktree> push -u origin <브랜치>`. 인자 없는 `git push`는 세션 위치(main) 기준으로 판정되어 R2로 막힌다.
+  - `start`는 병합된 worktree를 지우지만, 실행한 프로세스가 들어 있는 worktree는 "남김"으로 두고 이유를 출력한다. 다른 세션이 정리해서 세션이 있던 worktree가 사라졌다면(명령마다 "Working directory … was deleted") `ExitWorktree` 또는 main 체크아웃으로 `cd`해서 돌아온다.
 - 규모(4.3절)는 아래 기준으로 정한다. 애매하면 큰 쪽을 고른다. 동작이 바뀌는 변경은 아무리 작아도 medium 이상이다.
 
 | 규모   | 예                       | 계획 형태                                                            |
@@ -91,6 +98,26 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 // harness-quarantine: TD-12 until=2026-12-01 reason="네트워크 타이밍 의존"
 ```
 
+### main에 뒤처지거나 충돌한 PR 갱신
+
+PR 브랜치는 `origin/main`을 병합해 갱신하고 일반 push로 올린다([ADR-0006](../decisions/ADR-0006-pr-update-merge.md)).
+
+```bash
+git -C <worktree> fetch origin
+git -C <worktree> merge origin/main        # 충돌이면 파일을 고치고 git add 후 git commit
+node scripts/harness.ts check              # worktree 안에서
+git -C <worktree> push origin <브랜치>
+```
+
+- **rebase하지 않는다.** 이미 push한 브랜치를 rebase하면 원격 갱신에 force push가 필요하고, R14가 막는다. squash 병합이라 PR의 병합 커밋은 main 이력에 남지 않는다.
+- 이미 로컬에서 rebase했다면 원격 이력을 부모로 연결한 뒤 일반 push한다. 트리는 rebase 결과 그대로다.
+  ```bash
+  git -C <worktree> merge -s ours origin/<브랜치>
+  git -C <worktree> push origin <브랜치>
+  ```
+- 완료 커밋 뒤에 충돌 해결로 코드가 바뀌면 4절대로 그 step을 `in_progress`로 되돌리고 진행 로그에 남긴다.
+- 충돌을 풀 수 없거나 push가 막히면 우회하지 말고 7절 형식으로 Issue에 `needs-human` 라벨과 질문을 남긴다. 댓글만 남기면 `start`의 ①에 나오지 않는다.
+
 ## 6. 실패와 방법 전환 (3회 / 5회)
 
 실패 횟수는 `check`·runner가 실패 키(`계획 id + 검사 이름`)별로 자동으로 센다. 손으로 세거나 고치지 않는다.
@@ -125,7 +152,13 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 ## 7. 에스컬레이션 (사람에게 묻기)
 
 **반드시 묻는다**: 요구사항이 모호해 결과가 크게 갈릴 때, 제품·UX 방향, 되돌릴 수 없는 작업(DB 파괴적 변경, 데이터 삭제, 외부 발송, 운영 배포, 비용), 보안·권한 결정, 하네스 원칙·규칙 변경, 5회 실패, 교착.
-**묻지 않고 진행한다**(의사결정 로그에 기록): 구현 방식, 내부 구조, 테스트 설계, 리팩터 범위, 라이브러리 선택(새 직접 의존성은 ADR 필요).
+**묻지 않고 진행한다**(의사결정 로그에 기록): 구현 방식, 내부 구조, 테스트 설계, 리팩터 범위, 라이브러리 선택(새 직접 의존성은 ADR 필요), 추천안이 분명한 운영 판단(제작자가 지시한 일의 Issue 등록, 작업·step 순서, 문서 위치).
+
+**언제 묻나**: 작업 중간에 물으면 제작자가 자리에 없는 동안 세션 전체가 멈춘다(2026-11-11에 두 세션이 동시에 46분 대기).
+
+- 질문은 작업 시작 때(계획 작성 중) 한 번에 모은다.
+- 작업 중에 생긴 질문은 막히지 않은 일을 먼저 끝내고 모아서 묻는다.
+- 대화로 정한 결정은 그 자리에서 ADR이나 계획의 의사결정 로그에 남긴다. 리포에 없는 합의는 다음 세션이 모르고 다시 묻는다(B1).
 
 형식(계획의 "열린 질문"에 적고, Issue에 `needs-human` 라벨 + 제작자 멘션):
 
@@ -138,6 +171,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 ```
 
 - 대화 중인 세션이면 그 대화에서 바로 묻는다.
+- runner의 계획 작성 세션이 "열린 질문"에 남긴 `### 질문:`은 runner가 Issue에 `needs-human` + 제작자 멘션으로 올리고, 답을 받을 때까지 그 계획을 멈춘다. 답을 받으면 답을 넣어 계획을 다시 작성한다. 그래서 추천안으로 진행할 판단은 `### 질문:`으로 적지 않고 의사결정 로그에 남긴다.
 - 답은 **제작자 계정의 댓글**이나 대화 중인 제작자의 답만 인정한다.
 - 기다리는 동안 막히지 않은 일은 계속한다.
 

@@ -41,6 +41,68 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
 `;
 
+type OptionKind = 'string' | 'boolean';
+
+/**
+ * `--` 앞 인자를 훑어 도움말 요청과 모르는 옵션을 찾는다(TD-17).
+ * parseArgs가 strict: false라 모르는 플래그를 조용히 무시해서, `run --help`가 runner를 실제로 시작했다.
+ * 문자열 옵션의 값 자리(`--title -h`)는 건너뛴다.
+ */
+function scanArgs(
+  args: string[],
+  options: Record<string, { type: OptionKind }>,
+): { help: boolean; unknown: string[] } {
+  const unknown: string[] = [];
+  let help = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--help' || a === '-h') {
+      help = true;
+      continue;
+    }
+    if (!a.startsWith('--') || a === '--') continue;
+    const name = a.slice(2).split('=')[0];
+    const def = options[name];
+    if (!def) unknown.push(`--${name}`);
+    else if (def.type === 'string' && !a.includes('=')) i++;
+  }
+  return { help, unknown };
+}
+
+const OPTIONS: Record<string, { type: OptionKind }> = {
+  check: { type: 'boolean' },
+  ci: { type: 'boolean' },
+  'no-cache': { type: 'boolean' },
+  base: { type: 'string' },
+  only: { type: 'string' },
+  repo: { type: 'string' },
+  'config-root': { type: 'string' },
+  'head-ref': { type: 'string' },
+  mode: { type: 'string' },
+  issue: { type: 'string' },
+  slug: { type: 'string' },
+  type: { type: 'string' },
+  size: { type: 'string' },
+  risk: { type: 'string' },
+  owner: { type: 'string' },
+  author: { type: 'string' },
+  title: { type: 'string' },
+  date: { type: 'string' },
+  plan: { type: 'string' },
+  step: { type: 'string' },
+  'no-claim': { type: 'boolean' },
+  'no-setup': { type: 'boolean' },
+  'no-github': { type: 'boolean' },
+  worker: { type: 'string' },
+  tool: { type: 'string' },
+  once: { type: 'boolean' },
+  'max-iterations': { type: 'string' },
+  'no-wait': { type: 'boolean' },
+  json: { type: 'boolean' },
+  profile: { type: 'string' },
+  bot: { type: 'string' },
+};
+
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
@@ -50,44 +112,16 @@ async function main(argv: string[]): Promise<number> {
   const dd = rest.indexOf('--');
   const extra = dd >= 0 ? rest.slice(dd + 1) : [];
   const args = dd >= 0 ? rest.slice(0, dd) : rest;
-  const { values } = parseArgs({
-    args,
-    allowPositionals: true,
-    strict: false,
-    options: {
-      check: { type: 'boolean' },
-      ci: { type: 'boolean' },
-      'no-cache': { type: 'boolean' },
-      base: { type: 'string' },
-      only: { type: 'string' },
-      repo: { type: 'string' },
-      'config-root': { type: 'string' },
-      'head-ref': { type: 'string' },
-      mode: { type: 'string' },
-      issue: { type: 'string' },
-      slug: { type: 'string' },
-      type: { type: 'string' },
-      size: { type: 'string' },
-      risk: { type: 'string' },
-      owner: { type: 'string' },
-      author: { type: 'string' },
-      title: { type: 'string' },
-      date: { type: 'string' },
-      plan: { type: 'string' },
-      step: { type: 'string' },
-      'no-claim': { type: 'boolean' },
-      'no-setup': { type: 'boolean' },
-      'no-github': { type: 'boolean' },
-      worker: { type: 'string' },
-      tool: { type: 'string' },
-      once: { type: 'boolean' },
-      'max-iterations': { type: 'string' },
-      'no-wait': { type: 'boolean' },
-      json: { type: 'boolean' },
-      profile: { type: 'string' },
-      bot: { type: 'string' },
-    },
-  });
+  const scan = scanArgs(args, OPTIONS);
+  if (scan.help) {
+    log(HELP);
+    return 0;
+  }
+  if (scan.unknown.length) {
+    process.stderr.write(`알 수 없는 옵션: ${scan.unknown.join(', ')}\n\n${HELP}`);
+    return 2;
+  }
+  const { values } = parseArgs({ args, allowPositionals: true, strict: false, options: OPTIONS });
   const str = (k: string) => (typeof values[k] === 'string' ? (values[k] as string) : undefined);
   const flag = (k: string) => values[k] === true;
   const cwd = process.cwd();

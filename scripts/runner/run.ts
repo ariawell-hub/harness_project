@@ -3,7 +3,9 @@
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -15,14 +17,26 @@ import { runShell, tail } from '../lib/exec.ts';
 import { getGitHub, type GitHubPort } from '../lib/github.ts';
 import {
   defaultBase,
+  fastForwardMain,
   git,
   gitTry,
   harnessStateDir,
   isClean,
+  remoteBranchDiverged,
   repoInfo,
+  updateBranchFromBase,
   type RepoInfo,
 } from '../lib/git.ts';
-import { acceptanceCommands, findPlan, parseDoc, readIndex, section } from '../lib/plan.ts';
+import {
+  acceptanceCommands,
+  findPlan,
+  openQuestions,
+  parseDoc,
+  readIndex,
+  section,
+  type OpenQuestion,
+  type PlanRef,
+} from '../lib/plan.ts';
 import { log, nowIso, warn } from '../lib/util.ts';
 import { runCheck } from '../commands/check.ts';
 import {
@@ -38,7 +52,7 @@ import {
   slugFor,
 } from '../commands/task.ts';
 import { planGate } from '../gates/plan-gate.ts';
-import { resolveAgentCommand, runSession, type AgentTool } from './agents.ts';
+import { resolveAgentCommand, runSession, type AgentTool, type SessionResult } from './agents.ts';
 import { pickNext, readLocalPlans, type LocalPlan, type Pick } from './next.ts';
 import { planningPrompt, stepPrompt } from './prompt.ts';
 
@@ -83,6 +97,51 @@ function event(ctx: Ctx, ev: string, data: Record<string, unknown> = {}): void {
   );
 }
 
+/**
+ * 세션 원본 출력을 공유 git-dir의 harness/sessions/에 남기고 session-end 이벤트를 쓴다(Issue #16).
+ * 무인 세션이 왜 멈췄는지(권한 거부, 종료 이유)를 나중에 볼 수 있게 한다. 기록 실패는 작업을 막지 않는다.
+ */
+function recordSession(
+  ctx: Ctx,
+  l: LocalPlan,
+  kind: 'planning' | 'step',
+  attempt: number,
+  s: SessionResult,
+): void {
+  let file: string | undefined;
+  try {
+    const dir = path.join(harnessStateDir(ctx.main, 'common'), 'sessions');
+    mkdirSync(dir, { recursive: true });
+    const stamp = nowIso().replace(/[:+]/g, '-');
+    const part = kind === 'planning' ? 'plan' : `s${l.step ?? 0}`;
+    // 환경 장애 재시도는 시도 번호가 같고 같은 초에 끝날 수 있다. 덮어쓰지 않게 번호를 붙인다
+    const base = path.join(dir, `${stamp}-${l.id}-${part}-${attempt}`);
+    file = `${base}.log`;
+    for (let i = 2; existsSync(file); i++) file = `${base}-${i}.log`;
+    writeFileSync(file, s.raw, { flag: 'wx' });
+  } catch (e) {
+    warn(`세션 출력 저장 실패: ${(e as Error).message}`);
+  }
+  const sum = s.summary;
+  const tools = [...new Set((sum?.denials ?? []).map((d) => d.tool))];
+  event(ctx, 'session-end', {
+    plan: l.id,
+    step: l.step,
+    kind,
+    attempt,
+    code: s.code,
+    timedOut: s.timedOut,
+    durationMs: s.durationMs,
+    sessionId: sum?.sessionId,
+    turns: sum?.numTurns,
+    terminalReason: sum?.terminalReason,
+    denials: sum?.denials.length ?? 0,
+    deniedTools: tools,
+    log: file,
+    ...(tools.length ? { reason: `권한 거부 ${sum!.denials.length}건: ${tools.join(', ')}` } : {}),
+  });
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function acquireLock(main: RepoInfo, worker: string): string | null {
@@ -102,16 +161,10 @@ function acquireLock(main: RepoInfo, worker: string): string | null {
   return f;
 }
 
-/** main 체크아웃을 origin/main으로 빨리 감는다(깨끗할 때만). runner는 main의 훅·프로필을 쓴다 */
+/** main 체크아웃을 origin/main으로 빨리 감는다(깨끗할 때만). runner는 main의 훅·프로필을 쓴다.
+ * 결과는 무시한다(매 바퀴 반복되므로 출력하지 않는다). 이유 출력은 `start`가 한다 */
 function syncMain(ctx: Ctx): void {
-  const m = ctx.main.mainRoot;
-  if (!isClean(m)) return;
-  const branch = gitTry(['symbolic-ref', '--short', '-q', 'HEAD'], m).stdout.trim();
-  if (branch !== ctx.cfg.github.defaultBranch) return;
-  gitTry(
-    ['merge', '--ff-only', '--quiet', `${ctx.cfg.github.remote}/${ctx.cfg.github.defaultBranch}`],
-    m,
-  );
+  fastForwardMain(ctx.main.mainRoot, ctx.cfg.github.remote, ctx.cfg.github.defaultBranch);
 }
 
 function limitsOf(cfg: HarnessConfig) {
@@ -164,6 +217,73 @@ ${attempts.map((a) => `  - ${a.ts} [${a.key}] ${(a.detail ?? '').split('\n').fil
   event(ctx, 'blocked', { plan: l.id, step: l.step, reason });
 }
 
+// ---------- 열린 질문 (TD-18) ----------
+
+/** 올린 질문 제목과 답 대기 여부. worktree 하네스 상태 폴더의 questions.json(answer.md 옆) */
+interface QuestionState {
+  reported: string[];
+  waiting: boolean;
+}
+
+function questionFile(info: RepoInfo): string {
+  return path.join(harnessStateDir(info, 'worktree'), 'questions.json');
+}
+
+function readQuestionState(info: RepoInfo): QuestionState {
+  try {
+    const raw = JSON.parse(readFileSync(questionFile(info), 'utf8')) as Partial<QuestionState>;
+    return {
+      reported: Array.isArray(raw.reported) ? raw.reported.map(String) : [],
+      waiting: raw.waiting === true,
+    };
+  } catch {
+    return { reported: [], waiting: false };
+  }
+}
+
+function writeQuestionState(info: RepoInfo, s: QuestionState): void {
+  writeFileSync(questionFile(info), JSON.stringify(s, null, 2) + '\n');
+}
+
+/** 계획을 멈추고(blocked, push) Issue에 needs-human + 제작자 멘션으로 질문을 올린다(9.1절) */
+async function askQuestions(
+  ctx: Ctx,
+  l: LocalPlan,
+  ref: PlanRef,
+  fresh: OpenQuestion[],
+  prev: QuestionState,
+): Promise<void> {
+  const info = repoInfo(l.worktree);
+  setPlanStatus(
+    l.worktree,
+    'blocked',
+    `열린 질문 ${fresh.length}건: 제작자 답변 대기(#${l.issue})`,
+  );
+  const push = gitTry(['push', '--quiet', '-u', ctx.cfg.github.remote, l.branch], l.worktree);
+  if (!push.ok) warn(`계획 브랜치 push 실패(질문은 올린다): ${tail(push.stderr, 3)}`);
+  writeQuestionState(info, {
+    reported: [...prev.reported, ...fresh.map((q) => q.title)],
+    waiting: true,
+  });
+  const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
+  const body = `${mention}runner의 계획 작성 세션이 질문 ${fresh.length}건을 남겼다. 답을 받을 때까지 계획 \`${l.id}\`를 멈춘다.
+
+- 계획: \`${ref.file}\` (브랜치 \`${l.branch}\`)
+- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. runner가 답을 넣어 계획을 다시 작성하고 이어 간다.
+
+${fresh.map((q) => q.text).join('\n\n')}`;
+  try {
+    ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
+    ctx.gh.comment(l.issue, body);
+  } catch (e) {
+    warn(`GitHub 알림 실패: ${(e as Error).message}`);
+  }
+  event(ctx, 'questions', {
+    plan: l.id,
+    reason: `열린 질문 ${fresh.length}건: ${fresh.map((q) => q.title).join(' / ')}`,
+  });
+}
+
 // ---------- 계획 작성 세션 ----------
 
 async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'> {
@@ -176,7 +296,9 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
   }
   const issue = ctx.gh.getIssue(l.issue);
   const n = (keyFailures(all, l.id).get('plan:structure') ?? 0) + 1;
-  const prompt = planningPrompt(l.worktree, l.ref, l.id, issue, all, n);
+  const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
+  const answer = existsSync(answerFile) ? readFileSync(answerFile, 'utf8') : undefined;
+  const prompt = planningPrompt(l.worktree, l.ref, l.id, issue, all, n, answer);
   event(ctx, 'session-start', { plan: l.id, kind: 'planning', attempt: n });
   const s = await runSession(
     ctx.o.tool,
@@ -186,6 +308,7 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
     ctx.cfg,
     ctx.cfg.limits.sessionTimeoutMin * 60_000,
   );
+  recordSession(ctx, l, 'planning', n, s);
   if (s.envFailure) {
     recordAttempt(info, {
       plan: l.id,
@@ -230,6 +353,19 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
   }
   recordAttempt(info, { plan: l.id, step: null, key: 'plan:structure', ok: true, kind: 'plan' });
   const text = readFileSync(path.join(l.worktree, ref.file), 'utf8');
+  // 열린 질문(TD-18): 새 질문이 있으면 Issue에 올리고 답을 받을 때까지 이 계획을 멈춘다
+  const questions = openQuestions(parseDoc(text).body);
+  const qs = readQuestionState(info);
+  const fresh = questions.filter((q) => !qs.reported.includes(q.title));
+  if (fresh.length) {
+    await askQuestions(ctx, l, ref, fresh, qs);
+    return 'ok';
+  }
+  if (questions.length)
+    event(ctx, 'questions-kept', {
+      plan: l.id,
+      reason: `이미 올려 답을 받은 질문 ${questions.length}건이 열린 질문에 남아 있다`,
+    });
   if (parseDoc(text).frontmatter?.status === 'draft')
     setPlanStatus(l.worktree, 'active', '계획 작성 완료');
   else {
@@ -295,6 +431,7 @@ async function doStep(
     ctx.cfg,
     ctx.cfg.limits.sessionTimeoutMin * 60_000,
   );
+  recordSession(ctx, l, 'step', sessions + 1, s);
   if (s.envFailure) {
     recordAttempt(info, {
       plan: l.id,
@@ -413,22 +550,25 @@ async function doStep(
     l.worktree,
   );
   if (!push.ok) {
-    // runner 자신의 작업 브랜치에서만 lease로 덮어쓴다(에이전트에게는 금지, R14)
-    const forced = gitTry(
-      [
-        'push',
-        '--quiet',
-        '--force-with-lease',
-        '-u',
-        ctx.cfg.github.remote,
-        `HEAD:refs/heads/${l.branch}`,
-      ],
-      l.worktree,
-    );
-    if (!forced.ok) {
-      event(ctx, 'push-fail', { plan: l.id, detail: forced.stderr });
-      return 'env';
+    // runner도 force push하지 않는다(14.4절, ADR-0006). 원격과 갈라졌으면 어느 쪽을 남길지 사람이 판단한다
+    if (remoteBranchDiverged(l.worktree, ctx.cfg.github.remote, l.branch)) {
+      recordAttempt(info, {
+        plan: l.id,
+        step: l.step,
+        key: 'pr:push',
+        ok: false,
+        kind: 'pr',
+        detail: tail(push.stderr, 5),
+      });
+      await blockPlan(
+        ctx,
+        l,
+        `원격 브랜치 ${l.branch}에 로컬에 없는 커밋이 있어 push가 거부됐다. 덮어쓰지 않는다(R14). 절차서 5절대로 원격 이력을 확인해 병합하거나 정리한다`,
+      );
+      return 'blocked';
     }
+    event(ctx, 'push-fail', { plan: l.id, detail: push.stderr });
+    return 'env';
   }
   let pr = ctx.gh.findPRByBranch(l.branch);
   if (!pr || pr.state !== 'open') {
@@ -471,6 +611,14 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
       kind: 'plan',
       detail: '제작자 답변으로 실패 횟수 초기화',
     });
+    const qs = readQuestionState(info);
+    if (qs.waiting) {
+      // 계획 작성 단계의 질문(TD-18): 답을 넣어 계획을 다시 작성한다. step 상태는 그대로 둔다
+      writeQuestionState(info, { ...qs, waiting: false });
+      setPlanStatus(t.local.worktree, 'draft', `제작자 답변 받음(#${t.issue}): 계획에 반영한다`);
+      event(ctx, 'answered', { issue: t.issue, replan: true });
+      return;
+    }
     setPlanStatus(t.local.worktree, 'active', `제작자 답변 받음(#${t.issue})`);
     if (t.local.ref.kind === 'multi') {
       setStepStatus(t.local.worktree, 'in_progress');
@@ -479,36 +627,38 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
   event(ctx, 'answered', { issue: t.issue });
 }
 
-async function doRebase(ctx: Ctx, l: LocalPlan): Promise<void> {
-  const target = `${ctx.cfg.github.remote}/${ctx.cfg.github.defaultBranch}`;
-  const r = gitTry(['rebase', '--quiet', target], l.worktree);
+/** main에 뒤처지거나 충돌한 PR을 origin/main 병합 + 일반 push로 갱신한다(ADR-0006). force push는 없다 */
+async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env'> {
+  const { remote, defaultBranch } = ctx.cfg.github;
+  const r = updateBranchFromBase(l.worktree, remote, defaultBranch, l.branch);
   const info = repoInfo(l.worktree);
-  if (!r.ok) {
-    gitTry(['rebase', '--abort'], l.worktree);
-    recordAttempt(info, {
-      plan: l.id,
-      step: l.step,
-      key: 'pr:rebase-conflict',
-      ok: false,
-      kind: 'pr',
-      detail: tail(r.stderr, 20),
-    });
-    // 1단계: 충돌 해결 세션은 아직 없다. 사람에게 넘긴다(2단계에서 자동 대응)
-    await blockPlan(ctx, l, `main과 충돌해 자동 rebase를 할 수 없다: ${tail(r.stderr, 3)}`);
-    return;
+  const record = (ok: boolean, detail?: string) =>
+    recordAttempt(info, { plan: l.id, step: l.step, key: 'pr:update', ok, kind: 'pr', detail });
+  if (r.status === 'updated') {
+    record(true);
+    event(ctx, 'updated', { plan: l.id, pr: l.pr?.number, from: r.from, to: r.to });
+    return 'ok';
   }
-  gitTry(
-    ['push', '--quiet', '--force-with-lease', ctx.cfg.github.remote, `HEAD:refs/heads/${l.branch}`],
-    l.worktree,
-  );
-  recordAttempt(info, {
-    plan: l.id,
-    step: l.step,
-    key: 'pr:rebase-conflict',
-    ok: true,
-    kind: 'pr',
-  });
-  event(ctx, 'rebased', { plan: l.id, pr: l.pr?.number });
+  if (r.status === 'up-to-date') {
+    // GitHub의 병합 상태 계산이 늦은 것이다. 실패로 세지 않고 환경 대기로 넘긴다(바로 다시 고르면 헛돈다)
+    event(ctx, 'update-noop', { plan: l.id, pr: l.pr?.number, head: r.head });
+    return 'env';
+  }
+  if (r.status === 'conflict') {
+    record(false, `main 병합 충돌: ${r.files.join(', ')}`);
+    // 1단계: 충돌 해결 세션은 아직 없다. 사람에게 넘긴다(2단계에서 자동 대응, TD-9)
+    await blockPlan(
+      ctx,
+      l,
+      `${remote}/${defaultBranch} 병합이 충돌한다(${r.files.join(', ')}). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다`,
+    );
+    return 'ok';
+  }
+  record(false, `PR 갱신 실패(${r.stage}): ${r.reason}`);
+  event(ctx, 'update-fail', { plan: l.id, pr: l.pr?.number, stage: r.stage, reason: r.reason });
+  const v = judge(readAttempts(info), l.id, l.step, limitsOf(ctx.cfg));
+  if (v.action === 'stop') await blockPlan(ctx, l, v.reason ?? `PR 갱신 반복 실패: ${r.reason}`);
+  return 'ok';
 }
 
 async function doFixPR(
@@ -534,12 +684,41 @@ async function doFixPR(
   );
 }
 
-/** 병합된 브랜치의 깨끗한 worktree를 정리한다(7.1절 세션 시작 절차 ②) */
-export function cleanupMerged(main: string, cfg: HarnessConfig, locals: LocalPlan[]): string[] {
+/** 심볼릭 링크(macOS /var → /private/var)를 풀어 child가 parent 안(같거나 하위)인지 본다 */
+function insideDir(child: string, parent: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const rel = path.relative(real(parent), real(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * 병합된 브랜치의 깨끗한 worktree를 정리한다(7.1절 세션 시작 절차 ②).
+ * `here`(기본: 이 프로세스의 현재 폴더)가 들어 있는 worktree는 지우지 않는다.
+ * 지우면 그 안에서 `start`를 부른 세션의 현재 폴더가 사라져 이후 명령이 모두 실패한다(Issue #16).
+ */
+export function cleanupMerged(
+  main: string,
+  cfg: HarnessConfig,
+  locals: LocalPlan[],
+  here: string = process.cwd(),
+): string[] {
   const removed: string[] = [];
   for (const l of locals) {
     if (l.pr?.state !== 'merged') continue;
     if (!isClean(l.worktree)) continue;
+    if (insideDir(here, l.worktree)) {
+      log(
+        `- 남김: ${l.worktree} — 지금 이 프로세스가 그 worktree 안에서 실행 중이다. ` +
+          'main 체크아웃으로 나간 뒤(ExitWorktree 또는 cd) start를 다시 실행하면 정리된다',
+      );
+      continue;
+    }
     // 마지막 step이 병합됐으면 선점도 푼다(10.3절 절차 5)
     if (l.ref.where === 'completed' && l.issue > 0) releaseClaim(main, cfg, l.issue);
     const r = gitTry(['worktree', 'remove', l.worktree], main);
@@ -610,8 +789,8 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
           case 'fix-pr':
             outcome = await doFixPR(ctx, t.local, t.pr.failingChecks);
             break;
-          case 'rebase':
-            await doRebase(ctx, t.local);
+          case 'update':
+            outcome = await doUpdate(ctx, t.local);
             break;
           case 'plan':
             outcome = await doPlanning(ctx, t.local);

@@ -2,7 +2,7 @@
 id: 20261111-fix-runner-issue
 issue: 5 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: blocked   # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -74,12 +74,13 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 2026-11-11 21:02 계획 작성(runner-1 무인 세션). `next.ts`·`github.ts`·`github-fake.ts`·`config.ts`·`run.ts`(`doPlanning`)·`.claude/runner-settings.json`, 설계서 4.5·14.6절을 읽었다. 봇 Issue 처리는 열린 질문으로 남기고, 답이 없어도 마지막 step까지 갈 수 있게 설정 스위치(기본값 `exclude`)로 나눴다(의사결정 로그). 무인 세션은 `gh`가 막혀 있어 Issue에 질문 댓글을 달지 못했다(발견 사항).
 - 2026-11-11T21:05:08+09:00 계획 작성 완료
 - 2026-11-11 step0 issue-author(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'filterTrustedIssues'`(1 fail). 구현: `Issue.author`와 `toIssue`(gh `--json`에 `author`), 가짜 GitHub `addFakeIssue(..., author?)`(생략 시 제작자, 옛 상태·PR 그림자는 `''`), `github.collaborators`(없으면 `[]`, 문자열 배열 아니면 `ConfigError`), `sameLogin`·`filterTrustedIssues`·`Pick.excluded`, idle 이유 끝에 "작성자 확인으로 제외: #N", `start` ③과 `next`(일반·`--json`)에 제외 목록. 일반 `next` 출력에도 제외 줄을 넣었다(수용 기준 4가 `start`·`next`를 함께 요구해서, 출력 형식은 `describeExcluded` 하나로 공유). 그 뒤 `next.test.ts` 13개 통과, `runner.test.ts`는 기대값을 고치지 않고 통과. 설계서 v0.7.5(4.5·14.6절), 절차서 1절, architecture, CHANGELOG, TD-18·TD-19 등록(번호 그대로).
-- 2026-11-12 step1 bot-approval(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'BOT_ISSUE_ACCEPT'`(1 fail). 구현: `github.botIssues`(`BotIssuesMode`, 없으면 `exclude`, 두 값이 아니면 `ConfigError`), `harness.config.json`에 `"botIssues": "exclude"` 명시, `BOT_ISSUE_ACCEPT`·`BOT_ISSUE_WAITING_REASON`·`ownerAccepted`(제작자 댓글만, 줄 단위 정확히 일치, 펜스 코드 블록 안은 건너뜀), `filterTrustedIssues(issues, cfg, comments)`(owner-approved이고 봇 Issue일 때만 댓글 조회, 조회 예외는 그 Issue만 "댓글 조회 실패: <첫 줄>"로 제외), `pickNext` 5번은 `(n) => gh.comments(n)`, `start` ③에 승인 안내 한 줄(`acceptHint`, exclude면 없음), 가짜 GitHub `commentAs`. 그 뒤 `next.test.ts` 28개 통과(새 15개), `runner.test.ts`는 기대값을 고치지 않고 통과. 펜스 판정은 CommonMark 규칙 일부(같은 문자·여는 펜스 이상 길이·3칸까지 들여쓰기·정보 문자열이 붙은 줄은 닫지 않음)를 따랐다. 4칸 들여 쓴 ` ``` `이 펜스를 닫는 것으로 잘못 보면 코드 블록 안의 줄이 승인으로 인정되기 때문이다. 설계서 14.6절(v0.7.5 유지)·4.5절 5번, 절차서 1절, CHANGELOG, TD-20 등록(발견 사항. 뒤에 main 번호와 겹쳐 TD-24로 바꿈).
+- 2026-11-12 step1 bot-approval(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'BOT_ISSUE_ACCEPT'`(1 fail). 구현: `github.botIssues`(`BotIssuesMode`, 없으면 `exclude`, 두 값이 아니면 `ConfigError`), `harness.config.json`에 `"botIssues": "exclude"` 명시, `BOT_ISSUE_ACCEPT`·`BOT_ISSUE_WAITING_REASON`·`ownerAccepted`(제작자 댓글만, 줄 단위 정확히 일치, 펜스 코드 블록 안은 건너뜀), `filterTrustedIssues(issues, cfg, comments)`(owner-approved이고 봇 Issue일 때만 댓글 조회, 조회 예외는 그 Issue만 "댓글 조회 실패: <첫 줄>"로 제외), `pickNext` 5번은 `(n) => gh.comments(n)`, `start` ③에 승인 안내 한 줄(`acceptHint`, exclude면 없음), 가짜 GitHub `commentAs`. 그 뒤 `next.test.ts` 28개 통과(새 15개), `runner.test.ts`는 기대값을 고치지 않고 통과. 펜스 판정은 CommonMark 규칙 일부(같은 문자·여는 펜스 이상 길이·3칸까지 들여쓰기·정보 문자열이 붙은 줄은 닫지 않음)를 따랐다. 4칸 들여 쓴 ` ``` `이 펜스를 닫는 것으로 잘못 보면 코드 블록 안의 줄이 승인으로 인정되기 때문이다. 설계서 14.6절(v0.7.5 유지)·4.5절 5번, 절차서 1절, CHANGELOG, TD-20 등록(발견 사항. 뒤에 main 번호와 겹쳐 TD-26으로 바꿈).
 - 2026-11-12T13:36:44+09:00 중단: origin/main 병합이 충돌한다(docs/exec-plans/tech-debt-tracker.md, docs/harness/CHANGELOG.md, docs/harness/design.md, scripts/commands/start.ts, scripts/test/next.test.ts). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다
 - 2026-11-12T15:35:07+09:00 제작자 답변 받음(#5)
 - 2026-11-12T15:35:09+09:00 step1 재작업: CI 체크 실패: plan-gate
-- 2026-11-12 step1 재작업 세션(runner-1 무인 세션, 2번째 시도). 제작자 답변("origin/main을 병합해 충돌을 풀고 계속 진행, botIssues는 exclude")을 따르려 했으나 **병합하지 못했다**. `git fetch origin`·`git merge origin/main`이 세션 권한 프로필(`.claude/runner-settings.json`, main도 같음)에 없어 거부됐다. `.git` 내부 파일(`MERGE_HEAD`)을 직접 써서 병합 커밋을 흉내 내거나 `node`로 git을 감싸 부르는 것은 권한 경계 우회이자 R3(worktree 밖 수정) 위반이라 하지 않았다. CI plan-gate 실패 원인: runner의 `blockPlan`이 `completed/`에 있는 계획을 `status: blocked`로 바꿔 push했고(7486ad0), plan-gate는 마지막 step PR의 계획이 `completed`가 아니라서 실패했다. 지금 로컬에서는 step1이 `in_progress`라 `plan-gate`가 "완료 처리 전"으로 실패하고, runner의 완료 처리가 이것을 고친다. 한 일: 로컬의 `origin/main`(f82dec8) 기준으로 충돌 5개 파일을 분석해 병합 지침을 "열린 질문"에 적었다. main이 이미 TD-20~23을 등록해 이 step의 TD-20을 TD-24로 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석). 병합 경로가 없는 문제는 TD-25로 등록했다. 코드 동작은 바꾸지 않았다.
+- 2026-11-12 step1 재작업 세션(runner-1 무인 세션, 2번째 시도). 제작자 답변("origin/main을 병합해 충돌을 풀고 계속 진행, botIssues는 exclude")을 따르려 했으나 **병합하지 못했다**. `git fetch origin`·`git merge origin/main`이 세션 권한 프로필(`.claude/runner-settings.json`, main도 같음)에 없어 거부됐다. `.git` 내부 파일(`MERGE_HEAD`)을 직접 써서 병합 커밋을 흉내 내거나 `node`로 git을 감싸 부르는 것은 권한 경계 우회이자 R3(worktree 밖 수정) 위반이라 하지 않았다. CI plan-gate 실패 원인: runner의 `blockPlan`이 `completed/`에 있는 계획을 `status: blocked`로 바꿔 push했고(7486ad0), plan-gate는 마지막 step PR의 계획이 `completed`가 아니라서 실패했다. 지금 로컬에서는 step1이 `in_progress`라 `plan-gate`가 "완료 처리 전"으로 실패하고, runner의 완료 처리가 이것을 고친다. 한 일: 로컬의 `origin/main`(f82dec8) 기준으로 충돌 5개 파일을 분석해 병합 지침을 "열린 질문"에 적었다. main이 이미 TD-20~23을 등록해 이 step의 TD-20을 TD-26으로 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석). 병합 경로가 없는 문제는 TD-27로 등록했다. 코드 동작은 바꾸지 않았다.
 - 2026-11-12T15:42:43+09:00 중단: origin/main 병합이 충돌한다(docs/exec-plans/tech-debt-tracker.md, docs/harness/CHANGELOG.md, docs/harness/design.md, scripts/commands/start.ts, scripts/test/next.test.ts). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다
+- 2026-11-12 origin/main(7c3d632) 병합(제작자 결정 A안, 열린 질문 "origin/main 병합을 누가 할까"). 대화 세션이 병합 지침대로 충돌 5개 파일의 해결안을 만들어 리포 밖 사본에서 검증했고, runner-1 worktree는 대화 세션이 고칠 수 없어(L1 R3, TD-23) 제작자가 터미널에서 병합·적용·push했다. 해결: tech-debt-tracker는 main 표에 이 계획의 두 행을 붙임, 설계서·CHANGELOG는 v0.7.11 줄을 새로 붙임, `start.ts`·`next.test.ts`는 양쪽 import·함수·테스트를 모두 둠. 그사이 main이 설계서 v0.7.10(Issue #33)과 TD-24·TD-25(#34, #38)를 먼저 써서 이 계획의 TD-24·TD-25를 TD-26·TD-27로 다시 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석. 이 계획 안의 옛 번호도 모두 새 번호로 고쳤다). 계획·step1 상태는 `blocked`에서 `completed`로 되돌렸다(runner `blockPlan`이 바꾼 것이 plan-gate 실패 원인이었다).
 
 ## 의사결정 로그
 
@@ -91,22 +92,24 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 결정: 계정 비교는 소문자로 바꿔 비교하고, 빈 문자열은 어떤 계정과도 같지 않다. 이유: 설정은 사람이 적고 API는 GitHub 표기로 준다. 삭제된 계정(`author: null`)은 `''`이 되어 항상 제외된다.
 - 결정: `risk: normal`을 유지한다. 이유: 작업 접수 범위를 좁히는 변경이다. 넓히는 경로(B안)는 기본으로 꺼져 있고 켜려면 보호 경로(`harness.config.json`)를 바꿔야 한다. 자격 증명·인증 코드는 건드리지 않는다. 제작자가 high로 보면 바꿀 수 있다.
 - 결정: step을 2개로 나누고 각 step이 자기 문서를 함께 고친다. 이유: PR마다 문서와 동작이 맞는 상태로 병합된다. step0만 병합돼도 A안이 완성된다.
+- 결정: origin/main 병합은 제작자가 직접 한다(열린 질문 A안, 제작자 결정 2026-11-12). 이유: runner 세션은 병합 권한이 없고(TD-27) 대화 세션은 runner-1 worktree를 고칠 수 없다(TD-23). 버린 대안: runner 권한에 `git fetch`·`git merge` 추가(B, 권한 확대), 병합 명령을 먼저 구현(C, #5가 늦어진다. TD-27로 남김).
+- 결정: 설계서 버전은 v0.7.11로 올린다. 이유: step 지시의 "v0.7.5 유지"는 main이 v0.7.6 이후를 올리기 전 전제였고, 병합 지침이 추천한 v0.7.10은 그사이 main(Issue #33)이 썼다. main의 v0.7.5 이력 줄은 그대로 두고 v0.7.11 줄을 새로 붙였고, CHANGELOG의 "설계서 v0.7.5(이어서)"도 "설계서 v0.7.11"로 바꿨다.
 
 ## 발견 사항
 
 - runner의 계획 작성 처리(`scripts/runner/run.ts` `doPlanning`)는 plan-gate만 통과하면 계획을 `active`로 바꾸고 step으로 넘어간다. 계획 작성 세션이 "열린 질문"을 적어도 needs-human 라벨과 제작자 멘션이 붙지 않는다. runner 세션은 `gh`가 막혀 있어(`.claude/runner-settings.json`) 세션이 직접 물을 수도 없다. 무인 세션 규칙의 "열린 질문에 적고 멈춰라"는 실제로 멈추지 않는다. 이 계획은 답 없이 끝까지 가도록 짰다(의사결정 로그). → 처리: TD-18
 - 작성자 확인은 Issue를 만든 계정만 본다. 봇 계정은 리포 쓰기 권한으로 제작자가 만든 Issue의 제목·본문도 고칠 수 있다. 만든 뒤 고쳐서 지시를 바꾸는 경로는 이 계획으로 막히지 않는다. 막으려면 GraphQL `lastEditedAt`·`editor`(또는 `userContentEdits`)로 마지막 편집자를 확인해야 한다. B안의 승인 댓글 뒤 수정도 같은 문제다. → 처리: TD-19
-- (step1) 댓글 수정도 같은 문제다. GitHub 문서상 쓰기 권한 계정은 다른 사람의 Issue 댓글을 고칠 수 있다(실제 리포에서는 시험하지 않음). 그러면 봇이 제작자의 아무 댓글이나 `/harness accept`로 바꿀 수 있고, 댓글 작성자만 보는 `ownerAccepted`는 이를 막지 못한다. 기존 9.1절 답변 인정(`latestOwnerAnswer`)도 같다. 그래서 "댓글 작성자는 봇이 흉내 낼 수 없다"는 근거는 TD-24가 풀릴 때까지 완전하지 않다. REST 댓글의 `updated_at`으로 고친 댓글을 거부하는 방법도 있지만, 보안 판정 규칙을 바꾸는 결정이고(9.1절) step 지시 범위 밖이라 구현하지 않았다. 기본값 `exclude`에서는 승인 경로가 꺼져 있어 지금은 영향이 없다. TD-19(Issue 본문 수정)와 원인은 같지만 대상(댓글)과 영향 범위(9.1절 답변 인정 포함)가 달라 따로 등록했다. 설계서 14.6절 "한계"와 열린 질문 B의 영향에 적었다. → 처리: TD-24
+- (step1) 댓글 수정도 같은 문제다. GitHub 문서상 쓰기 권한 계정은 다른 사람의 Issue 댓글을 고칠 수 있다(실제 리포에서는 시험하지 않음). 그러면 봇이 제작자의 아무 댓글이나 `/harness accept`로 바꿀 수 있고, 댓글 작성자만 보는 `ownerAccepted`는 이를 막지 못한다. 기존 9.1절 답변 인정(`latestOwnerAnswer`)도 같다. 그래서 "댓글 작성자는 봇이 흉내 낼 수 없다"는 근거는 TD-26이 풀릴 때까지 완전하지 않다. REST 댓글의 `updated_at`으로 고친 댓글을 거부하는 방법도 있지만, 보안 판정 규칙을 바꾸는 결정이고(9.1절) step 지시 범위 밖이라 구현하지 않았다. 기본값 `exclude`에서는 승인 경로가 꺼져 있어 지금은 영향이 없다. TD-19(Issue 본문 수정)와 원인은 같지만 대상(댓글)과 영향 범위(9.1절 답변 인정 포함)가 달라 따로 등록했다. 설계서 14.6절 "한계"와 열린 질문 B의 영향에 적었다. → 처리: TD-26
 - (step1) 마크다운 렌더링과 판정이 다른 경계 사례가 남는다. 인용 바로 다음 줄에 빈 줄 없이 쓴 `/harness accept`(인용의 이어지는 줄로 렌더링)와 4칸 들여쓰기 코드 블록 안의 줄은 승인으로 인정된다. step 지시(앞뒤 공백을 뺀 한 줄, 펜스 안만 건너뜀)대로다. 제작자 계정 댓글만 보므로 봇이 이 경로를 쓸 수는 없고, 제작자가 의도하지 않은 승인이 될 수 있는 정도다. → 처리: 해당 없음
-- (step1 재작업) 충돌로 멈춘 계획에 제작자가 "병합해 풀어라"라고 답하면 runner는 step 세션을 다시 띄우지만, 그 세션은 권한 프로필에 `git fetch`·`git merge`가 없어 병합할 수 없다. 세션이 끝나면 runner는 옛 base 기준 AC·check가 통과하므로 완료 처리·push하고, PR은 여전히 DIRTY라 다음 바퀴 `doUpdate`가 같은 충돌로 다시 `blocked` + `needs-human`을 단다. 중단 보고의 "답을 달면 runner가 이어 간다"는 충돌 중단에는 맞지 않는다. TD-9(2단계 충돌 자동 대응)는 장기 해결이고, 이 고리는 1단계에도 생긴다. → 처리: TD-25
-- (step1 재작업) step1이 등록한 TD-20은 main이 그사이 TD-20~23을 등록해 번호가 겹쳤다. 병합 때 같은 번호 두 개가 남지 않도록 미리 TD-24로 바꿨다. TD 번호는 병합된 표 기준으로 정해지므로, 오래 열린 브랜치가 TD를 등록하면 또 겹칠 수 있다. → 처리: 해당 없음
+- (step1 재작업) 충돌로 멈춘 계획에 제작자가 "병합해 풀어라"라고 답하면 runner는 step 세션을 다시 띄우지만, 그 세션은 권한 프로필에 `git fetch`·`git merge`가 없어 병합할 수 없다. 세션이 끝나면 runner는 옛 base 기준 AC·check가 통과하므로 완료 처리·push하고, PR은 여전히 DIRTY라 다음 바퀴 `doUpdate`가 같은 충돌로 다시 `blocked` + `needs-human`을 단다. 중단 보고의 "답을 달면 runner가 이어 간다"는 충돌 중단에는 맞지 않는다. TD-9(2단계 충돌 자동 대응)는 장기 해결이고, 이 고리는 1단계에도 생긴다. → 처리: TD-27
+- (step1 재작업) step1이 등록한 TD-20은 main이 그사이 TD-20~23을 등록해 번호가 겹쳤다. 병합 때 같은 번호 두 개가 남지 않도록 미리 TD-26으로 바꿨다. TD 번호는 병합된 표 기준으로 정해지므로, 오래 열린 브랜치가 TD를 등록하면 또 겹칠 수 있다. → 처리: 해당 없음
 
 ## 열린 질문
 
 ### 질문: 봇 계정이 만든 Issue를 runner 작업 후보로 받을까
 
 - A) 제외한다 — 설정 `github.botIssues: "exclude"`(이 계획의 기본값). 영향: runner는 제작자가 GitHub 웹·모바일에서 직접 만든 Issue(와 외주 개발자 Issue)만 가져간다. 대화에서 봇이 대신 등록한 Issue(이 #5처럼)는 대화 세션의 `new-task --issue`로만 시작된다. 추가 작업은 없다.
-- B) 제작자 표시가 있으면 받는다 — 설정 `"owner-approved"`. 제작자 계정이 그 Issue에 `/harness accept` 한 줄 댓글을 달면 후보가 된다. 영향: "대화 → 봇 등록 → 제작자 한 줄 확인 → runner" 흐름이 유지된다. 확인은 댓글 작성자로 하므로 봇이 흉내 낼 수 없다(9.1절 답변 인정과 같은 근거). step1이 구현해 두므로 `harness.config.json` 한 줄 PR(보호 경로)이면 켜진다. 취소하려면 Issue를 닫거나 `needs-human` 라벨을 붙인다. 추가 영향(step1에서 발견): 쓰기 권한 계정은 다른 사람의 댓글을 고칠 수 있어, TD-24가 풀리기 전에는 봇이 제작자의 기존 댓글을 `/harness accept`로 바꾸는 경로가 남는다(9.1절 답변 인정도 같다). B를 켜기 전에 TD-24를 먼저 할지도 함께 정해 달라.
+- B) 제작자 표시가 있으면 받는다 — 설정 `"owner-approved"`. 제작자 계정이 그 Issue에 `/harness accept` 한 줄 댓글을 달면 후보가 된다. 영향: "대화 → 봇 등록 → 제작자 한 줄 확인 → runner" 흐름이 유지된다. 확인은 댓글 작성자로 하므로 봇이 흉내 낼 수 없다(9.1절 답변 인정과 같은 근거). step1이 구현해 두므로 `harness.config.json` 한 줄 PR(보호 경로)이면 켜진다. 취소하려면 Issue를 닫거나 `needs-human` 라벨을 붙인다. 추가 영향(step1에서 발견): 쓰기 권한 계정은 다른 사람의 댓글을 고칠 수 있어, TD-26이 풀리기 전에는 봇이 제작자의 기존 댓글을 `/harness accept`로 바꾸는 경로가 남는다(9.1절 답변 인정도 같다). B를 켜기 전에 TD-26을 먼저 할지도 함께 정해 달라.
 - C) 제작자가 붙인 라벨(예: `accepted`)이 있으면 받는다 — 영향: 모바일에서 라벨 하나로 끝난다. 봇도 라벨을 붙일 수 있으므로 라벨을 붙인 계정을 timeline API로 확인해야 한다(Issue마다 조회 1회 추가). 이 계획에서는 구현하지 않는다. 고르면 후속 Issue로 한다.
 - 추천: B. 이유: 지금 제작자는 대화로 지시하고 봇이 Issue를 대신 등록한다(#5). A는 이 흐름을 끊고, C는 확인 비용이 더 들고 B보다 나은 보안 근거가 없다. B는 제작자 계정의 행동 하나를 요구하므로 14.6절("작업 지시는 제작자 Issue에서만")의 취지를 지킨다.
 - 진행: runner가 답을 기다리지 않도록 이 계획은 A를 기본값으로 두고 B를 꺼진 스위치로 구현한다. 답은 Issue #5에 제작자 계정 댓글로 달면 된다.
@@ -114,17 +117,18 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 
 ### 질문: origin/main 병합을 누가 할까 (step1 재작업 세션, 2026-11-12)
 
-runner 세션은 `git fetch`·`git merge` 권한이 없어 제작자 답변("origin/main을 병합해 충돌을 풀어라")을 실행하지 못했다(진행 로그, TD-25). 이대로 두면 runner가 완료·push한 뒤 다음 바퀴에 같은 충돌로 다시 멈춘다.
+runner 세션은 `git fetch`·`git merge` 권한이 없어 제작자 답변("origin/main을 병합해 충돌을 풀어라")을 실행하지 못했다(진행 로그, TD-27). 이대로 두면 runner가 완료·push한 뒤 다음 바퀴에 같은 충돌로 다시 멈춘다.
 
 - A) 제작자가 터미널에서 직접 병합한다 — 영향: 몇 분이면 끝나고 Issue #5가 바로 진행된다. 대화 세션은 runner-1의 worktree를 고칠 수 없으므로(L1 R3, TD-23) 사람이 직접 하거나 `!` 명령으로 실행한다. 아래 "병합 지침"을 따른다.
 - B) `.claude/runner-settings.json`에 `Bash(git fetch:*)`·`Bash(git merge:*)`를 더한 뒤 다시 답한다 — 영향: 보호 경로이자 runner 권한 확대라 제작자 결정이고 PR 하나가 더 든다. runner 세션이 임의 브랜치를 병합할 수 있게 된다(push는 여전히 막힘).
-- C) runner에 "충돌을 worktree에 남기는 병합 명령"(`harness.ts`, push 없음)을 만들고 충돌 답변을 그 세션으로 넘긴다(TD-25) — 영향: 근본 해결이지만 별도 Issue·계획이 필요해 #5가 그만큼 늦어진다.
-- 추천: A로 지금 #5를 끝내고, C를 TD-25 후속 Issue로 한다. 이유: B는 일반 권한을 넓히는데 C가 같은 일을 좁게 한다.
+- C) runner에 "충돌을 worktree에 남기는 병합 명령"(`harness.ts`, push 없음)을 만들고 충돌 답변을 그 세션으로 넘긴다(TD-27) — 영향: 근본 해결이지만 별도 Issue·계획이 필요해 #5가 그만큼 늦어진다.
+- 추천: A로 지금 #5를 끝내고, C를 TD-27 후속 Issue로 한다. 이유: B는 일반 권한을 넓히는데 C가 같은 일을 좁게 한다.
+- 답(2026-11-12, 제작자): A. 제작자가 아래 병합 지침대로 병합해 push했다. 설계서는 v0.7.11(v0.7.10은 main이 먼저 씀), 이 계획의 TD는 TD-26·TD-27.
 
 병합 지침(로컬 `origin/main` f82dec8 기준, 충돌 5개 파일. 나머지는 자동 병합):
 
 1. `git -C <이 worktree> fetch origin && git -C <이 worktree> merge origin/main`
-2. `docs/exec-plans/tech-debt-tracker.md`: main 표(TD-17·TD-22 해결 표시, TD-20~23)를 그대로 두고 이 브랜치의 TD-24·TD-25 행을 끝에 붙인다. main에 TD-24 이상이 새로 생겼으면 두 행과 그 참조(아래 7번 grep 대상 파일)를 다음 번호로 바꾼다. 양쪽 모두 Prettier가 표 전체를 다시 정렬해 표 전체가 충돌로 보인다. main 표를 고른 뒤 두 행을 붙이고 `node scripts/harness.ts fmt`로 다시 정렬한다.
+2. `docs/exec-plans/tech-debt-tracker.md`: main 표(TD-17·TD-22 해결 표시, TD-20~23)를 그대로 두고 이 브랜치의 TD-26·TD-27 행을 끝에 붙인다. main에 TD-24 이상이 새로 생겼으면 두 행과 그 참조(아래 7번 grep 대상 파일)를 다음 번호로 바꾼다. 양쪽 모두 Prettier가 표 전체를 다시 정렬해 표 전체가 충돌로 보인다. main 표를 고른 뒤 두 행을 붙이고 `node scripts/harness.ts fmt`로 다시 정렬한다.
 3. `docs/harness/design.md`: 머리 버전과 이력은 main(v0.7.9)을 따른다. step1 내용은 main의 v0.7.5 이력 줄에 덧붙이지 말고 `v0.7.10 (2026-11-12): 설정 github.botIssues(exclude 기본 | owner-approved)로 제작자 /harness accept 댓글이 있는 봇 Issue를 받을 수 있게 함(4.5절, 14.6절, Issue #5)` 줄을 새로 붙이고 머리 버전을 v0.7.10으로 올리는 것을 추천한다. step 지시의 "v0.7.5 유지(같은 미배포 버전)"는 main이 v0.7.6~0.7.9를 올리기 전 전제였다. 의사결정 로그에 남긴다. 4.5절은 main의 2번·WIP 줄 변경과 이 브랜치의 5번 줄 변경을 둘 다 둔다. 14.6절은 이 브랜치 쪽이다(main은 안 고쳤다).
 4. `docs/harness/CHANGELOG.md` "다음 버전": main의 줄을 모두 두고 이 브랜치의 `github.botIssues` 줄을 끝에 붙인다. 3번에서 v0.7.10을 고르면 그 줄의 "설계서 v0.7.5(이어서)"를 "설계서 v0.7.10"으로 바꾼다.
 5. `scripts/commands/start.ts`: 머리 주석과 import는 main 쪽(`type Issue`, `fastForwardMain`, `type MainSync`, `TaskError`, `releaseClosedClaims`, `type ClaimCleanup`)에 이 브랜치의 `type HarnessConfig`와 `BOT_ISSUE_ACCEPT`·`BOT_ISSUE_WAITING_REASON`을 더한다. `acceptHint`는 `describeExcluded` 뒤에 둔다(main의 `describeMainSync`·`describeClaimCleanup`과 함께). 호출부 `acceptHint(cfg, pick.excluded)`의 `cfg`는 main이 fast-forward 뒤 다시 읽은 `cfg`다.
@@ -145,11 +149,12 @@ runner 세션은 `git fetch`·`git merge` 권한이 없어 제작자 답변("ori
   - step0(2026-11-11): AC 전부 통과. `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 15 pass / 0 fail. `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan). doc-lint R8 경고 6건(ADR-0001·0002·0003·0005, architecture.md, workflow.md의 `related_code`가 문서보다 나중에 바뀜)은 경고다. architecture.md·workflow.md는 이 step에서 함께 고쳤고, ADR들은 이 변경(Issue 작성자 확인)과 결정 내용이 무관해 고치지 않았다.
   - step1(2026-11-12): `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 30 pass / 0 fail(next 28: step0 13 + step1 15, runner 2). AC grep 6개 통과. `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan). doc-lint R8 경고 4건(ADR-0001·0002·0003·0005)은 step0과 같은 경고이고, ADR 결정 내용과 무관해 고치지 않았다.
   - step1 재작업(2026-11-12, **origin/main 병합 전**): AC grep 6개 통과, `node --test scripts/test/next.test.ts scripts/test/runner.test.ts` 30 pass / 0 fail, `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan, R8 경고 6건: ADR 4건 + architecture.md·workflow.md. 둘은 이 세션의 `next.ts` 주석 번호 변경과 계획 파일 수정 때문이고 문서 내용과 무관). `node scripts/harness.ts plan-gate`는 step1이 `in_progress`라 "완료 처리 전"·"completed/로 옮겨지지 않음"으로 실패한다(runner 완료 처리가 고친다). **병합 뒤 결과는 아직 없다.** main 병합 뒤 다시 돌려야 한다(열린 질문의 병합 지침 8번).
+  - main 병합 뒤(2026-11-12, origin/main 7c3d632, 리포 밖 사본에서 대화 세션이 검증): `node --test "scripts/test/*.test.ts"` 127 pass / 0 fail(next·runner·start 57개 포함), `tsc -p tsconfig.json` 통과, Prettier 검사 통과, 충돌 표시 없음. worktree에서 `check`·`plan-gate`가 통과해야 push한다.
 
 ## 다음 할 일
 
-- 제작자: **step1 PR이 main과 충돌한다.** runner 세션은 병합할 수 없다. "열린 질문"의 "origin/main 병합을 누가 할까"에 답하거나, A안대로 "병합 지침"을 따라 직접 병합해 push한다. 병합 뒤 남은 일은 runner의 AC·check 판정과 자동 병합이다.
-- 제작자: TD-25(충돌 답변 경로) 후속 Issue를 만들지 정한다.
-- (끝남) step0 issue-author 병합. step1 bot-approval 구현은 끝났고 main 병합만 남았다.
-- 제작자: 봇 Issue 질문은 답을 받았다(`exclude`). 나중에 B로 바꾸려면 `harness.config.json`의 `github.botIssues`를 `"owner-approved"`로 바꾸는 PR을 승인한다. 그 전에 TD-24(고친 댓글 미확인)을 먼저 처리할지 정한다.
+- (끝남) step1 PR의 main 충돌: 제작자가 A안대로 병합해 push했다. 남은 일은 CI(`check`·`plan-gate`)와 자동 병합이다.
+- 제작자: TD-27(충돌 답변 경로) 후속 Issue를 만들지 정한다.
+- (끝남) step0 issue-author 병합, step1 bot-approval 구현과 main 병합.
+- 제작자: 봇 Issue 질문은 답을 받았다(`exclude`). 나중에 B로 바꾸려면 `harness.config.json`의 `github.botIssues`를 `"owner-approved"`로 바꾸는 PR을 승인한다. 그 전에 TD-26(고친 댓글 미확인)을 먼저 처리할지 정한다.
 - 제작자: 외주 개발자 계정이 생기면 `harness.config.json`의 `github.collaborators`에 넣는다.

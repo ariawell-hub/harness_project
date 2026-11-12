@@ -1,14 +1,16 @@
 // runner 통합 테스트(12.4절 4.5절 시나리오, 1단계 완료 기준 S6).
 // 가짜 에이전트 + 가짜 GitHub(즉시 squash merge) + 로컬 bare 원격.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { newTask } from '../commands/task.ts';
 import { readAttempts } from '../lib/attempts.ts';
-import { repoInfo, listWorktrees } from '../lib/git.ts';
+import { gitTry, repoInfo, listWorktrees } from '../lib/git.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
+import { parseSessionSummary } from '../runner/agents.ts';
 import { runRunner } from '../runner/run.ts';
-import { HARNESS_ROOT, makeFixture, sh } from './helpers.ts';
+import { HARNESS_ROOT, advanceRemote, commitAll, makeFixture, sh, write } from './helpers.ts';
 
 function setup(configOver: Record<string, unknown> = {}) {
   const fx = makeFixture(configOver);
@@ -146,3 +148,296 @@ function baseLimits() {
     pollSec: 0,
   };
 }
+
+// ---- 세션 기록(Issue #16 step3): 무인 세션이 왜 멈췄는지 남긴다 ----
+
+test('parseSessionSummary: Claude 결과 JSON에서 세션 id·턴·종료 이유·권한 거부를 뽑는다', () => {
+  const result = {
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    num_turns: 3,
+    terminal_reason: 'api_error',
+    session_id: 'abc-123',
+    result: 'x'.repeat(2000),
+    permission_denials: [
+      { tool_name: 'Bash', tool_input: { command: 'sed -n 1,9p ' + 'a'.repeat(400) } },
+      { tool_name: 'Bash', tool_input: { command: 'find .' } },
+    ],
+  };
+  const s = parseSessionSummary(JSON.stringify(result, null, 2))!;
+  assert.equal(s.sessionId, 'abc-123');
+  assert.equal(s.numTurns, 3);
+  assert.equal(s.terminalReason, 'api_error');
+  assert.equal(s.isError, true);
+  assert.equal(s.denials.length, 2);
+  assert.equal(s.denials[0].tool, 'Bash');
+  assert.ok(s.denials[0].input.length <= 200, '입력은 200자로 자른다');
+  assert.ok((s.result ?? '').length <= 500, '결과 문구도 자른다');
+  // 여러 줄 출력(stream-json 등)이면 마지막 result 객체를 쓴다
+  const lines = [
+    '{"type":"system","session_id":"old"}',
+    'not json',
+    JSON.stringify({ ...result, session_id: 'last', permission_denials: [] }),
+  ].join('\n');
+  assert.equal(parseSessionSummary(lines)!.sessionId, 'last');
+  assert.equal(parseSessionSummary('완료했습니다!'), null);
+  assert.equal(parseSessionSummary(''), null);
+});
+
+test('runner: 세션마다 원본 출력과 session-end(세션 id·권한 거부 도구)를 남긴다', async () => {
+  const t = setup();
+  process.env.FAKE_RESULT_JSON = '1';
+  try {
+    addFakeIssue(t.state, 'Log demo', '세션 기록 확인');
+    assert.equal(await run(t.fx.root), 'idle');
+    const dir = path.join(repoInfo(t.fx.root).commonDir, 'harness');
+    const ends = readFileSync(path.join(dir, 'runner.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.event === 'session-end');
+    // 계획 작성 1 + step 2(기본 behavior)
+    assert.equal(ends.length, 3, '세션마다 session-end');
+    const planning = ends.find((e) => e.kind === 'planning')!;
+    assert.match(String(planning.sessionId), /^fake-log-demo-plan$/);
+    assert.equal(planning.denials, 3);
+    assert.deepEqual(planning.deniedTools, ['Bash', 'WebFetch'], '도구 이름은 중복 없이');
+    assert.equal(planning.turns, 7);
+    const step0 = ends.find((e) => e.kind === 'step' && e.step === 0)!;
+    assert.equal(step0.sessionId, 'fake-log-demo-0');
+    for (const e of ends) {
+      assert.ok(existsSync(String(e.log)), `원본 출력 파일: ${e.log}`);
+      assert.match(readFileSync(String(e.log), 'utf8'), /permission_denials/);
+    }
+    assert.equal(readdirSync(path.join(dir, 'sessions')).length, 3);
+  } finally {
+    delete process.env.FAKE_RESULT_JSON;
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 사용량 한도로 끝난 세션도 session-end를 남긴다', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Limit demo', '환경 장애 기록');
+    writeFileSync(t.behavior, JSON.stringify({ 'limit-demo': { plan: ['limit'] } }));
+    // 선점 → 계획 작성 세션(사용량 한도) → 대기 없이 종료
+    await runRunner({
+      cwd: t.fx.root,
+      worker: 'runner-1',
+      tool: 'fake',
+      maxIterations: 4,
+      noWait: true,
+    });
+    const dir = path.join(repoInfo(t.fx.root).commonDir, 'harness');
+    const events = readFileSync(path.join(dir, 'runner.jsonl'), 'utf8');
+    const end = events
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.event === 'session-end');
+    assert.ok(end, 'env 장애여도 기록한다');
+    assert.match(readFileSync(String(end.log), 'utf8'), /usage limit/);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+/**
+ * runner-1 계획의 step0을 끝내고 PR을 연 상태를 만든다. PR 브랜치는 shared.txt를 'pr'로 바꾼다.
+ * `mainShared`가 있으면 원격 main의 shared.txt를 그 내용으로 바꿔 충돌시킨다. 가짜 PR의 mergeState를 정한다.
+ */
+async function openPR(t: ReturnType<typeof setup>, mergeState: string, mainShared?: string) {
+  addFakeIssue(t.state, 'Demo feature', '데모 기능을 만든다');
+  const task = await newTask(t.fx.root, {
+    issue: 1,
+    slug: 'demo',
+    size: 'medium',
+    owner: 'runner-1',
+    github: false,
+    date: '20261112',
+  });
+  const plan = path.join(task.worktree, task.planFile);
+  writeFileSync(plan, readFileSync(plan, 'utf8').replace(/^status: \w+/m, 'status: active'));
+  write(
+    task.worktree,
+    path.join(path.dirname(task.planFile), 'index.json'),
+    JSON.stringify({
+      plan: '20261112-demo',
+      steps: [{ step: 0, name: 'demo', status: 'completed' }],
+    }),
+  );
+  write(task.worktree, 'shared.txt', 'pr\n');
+  commitAll(task.worktree, 'pr: shared');
+  sh('git', ['push', '-q', '-u', 'origin', task.branch], task.worktree);
+  if (mainShared !== undefined) advanceRemote(t.fx, 'shared.txt', mainShared);
+  const pr = new FakeGitHub(t.state).createPR({
+    head: task.branch,
+    base: 'main',
+    title: 'demo',
+    body: 'Refs #1',
+  });
+  const s = t.gh();
+  s.prs.find((p) => p.number === pr.number)!.mergeState = mergeState;
+  writeFileSync(t.state, JSON.stringify(s));
+  return task;
+}
+
+const runnerEvents = (root: string) =>
+  readFileSync(path.join(repoInfo(root).commonDir, 'harness', 'runner.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+
+test('runner: GitHub이 DIRTY라 해도 브랜치가 이미 최신이면 실패로 세지 않고 기다린다(헛도는 반복 방지)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY');
+    const stop = await runRunner({
+      cwd: t.fx.root,
+      worker: 'runner-1',
+      tool: 'fake',
+      maxIterations: 3,
+      noWait: true,
+    });
+    assert.equal(stop, 'max-iterations');
+    assert.equal(
+      runnerEvents(t.fx.root).filter((e) => e.event === 'wait-env').length,
+      3,
+      '바퀴마다 환경 대기로 처리',
+    );
+    assert.equal(
+      readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:update' && !a.ok).length,
+      0,
+      '실패로 세지 않는다',
+    );
+    assert.ok(!t.gh().issues[0].labels.includes('needs-human'));
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 계획을 멈춰 needs-human으로 한 번만 보고한다 (ADR-0006)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY', 'main\n');
+    assert.equal(await run(t.fx.root), 'human', '사람 답변만 기다리면 멈춘다');
+    const issue = t.gh().issues[0];
+    assert.ok(issue.labels.includes('needs-human'), 'Issue에 needs-human');
+    assert.equal(
+      issue.comments.filter((c) => /중단 보고/.test(c.body)).length,
+      1,
+      '같은 중단 보고를 반복하지 않는다',
+    );
+    assert.match(issue.comments.at(-1)!.body, /shared\.txt/);
+    assert.equal(
+      gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
+      false,
+      '병합을 취소했다',
+    );
+    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
+    assert.equal(
+      gitTry(['merge-base', '--is-ancestor', 'origin/main', `origin/${task.branch}`], t.fx.root).ok,
+      false,
+      '충돌한 병합을 원격에 올리지 않았다',
+    );
+    const fails = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:update');
+    assert.equal(fails.length, 1);
+    assert.equal(fails[0].ok, false);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: step 완료 push가 거부되고 원격 브랜치가 갈라졌으면 덮어쓰지 않고 멈춰 보고한다 (Issue #27)', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Diverge demo', '원격 브랜치 갈라짐');
+    const task = await newTask(t.fx.root, {
+      issue: 1,
+      slug: 'diverge',
+      size: 'medium',
+      owner: 'runner-1',
+      github: false,
+      date: '20261112',
+    });
+    // 다른 곳에서 같은 브랜치에 커밋이 올라간 상태를 만든다
+    sh('git', ['push', '-q', '-u', 'origin', task.branch], task.worktree);
+    const other = advanceRemote(t.fx, 'other.txt', 'o\n', { branch: task.branch });
+
+    assert.equal(await run(t.fx.root), 'human', '사람 답변만 기다리면 멈춘다');
+    const remoteHead = sh(
+      'git',
+      ['ls-remote', t.fx.remote, `refs/heads/${task.branch}`],
+      t.fx.root,
+    ).split(/\s+/)[0];
+    assert.equal(remoteHead, other, '원격 브랜치를 덮어쓰지 않았다');
+    const s = t.gh();
+    assert.ok(s.issues[0].labels.includes('needs-human'), 'Issue에 needs-human');
+    assert.match(s.issues[0].comments.at(-1)!.body, /로컬에 없는 커밋/);
+    assert.equal(s.prs.length, 0, 'PR을 만들지 않았다');
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 계획 작성 세션이 열린 질문을 남기면 needs-human·멘션으로 한 번 올리고 멈췄다가, 답을 넣어 계획을 다시 쓰고 이어 간다 (TD-18)', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Gamma feature', '질문이 필요한 기능');
+    writeFileSync(
+      t.behavior,
+      JSON.stringify({ 'gamma-feature': { plan: ['question', 'ok'], steps: 1 } }),
+    );
+    assert.equal(await run(t.fx.root), 'human', '답을 기다리면 멈춘다');
+    let issue = t.gh().issues[0];
+    assert.ok(issue.labels.includes('needs-human'), 'Issue에 needs-human');
+    const asked = issue.comments.filter((c) => c.body.includes('데모 질문'));
+    assert.equal(asked.length, 1, '질문을 한 번 올린다');
+    assert.match(asked[0].body, /@maker/, '제작자 멘션');
+    assert.match(asked[0].body, /추천: A/, '질문 블록 전문');
+    assert.equal(t.gh().prs.length, 0, 'step으로 넘어가지 않았다');
+    assert.ok(
+      !t.prompts().some((p) => p.slug === 'gamma-feature' && p.step !== 'plan'),
+      'step 세션을 띄우지 않았다',
+    );
+    const wt = listWorktrees(t.fx.root).find((w) => w.branch?.includes('gamma-feature'))!;
+    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
+    const planRel = sh(
+      'git',
+      ['ls-tree', '-r', '--name-only', `origin/${wt.branch}`, 'docs/exec-plans/active/'],
+      t.fx.root,
+    )
+      .split('\n')
+      .find((f) => f.endsWith('/plan.md'))!;
+    assert.match(
+      sh('git', ['show', `origin/${wt.branch}:${planRel}`], t.fx.root),
+      /^status: blocked/m,
+      '멈춘 계획을 push했다',
+    );
+
+    // 답을 기다리는 동안 다시 돌려도 같은 질문을 또 올리지 않는다
+    assert.equal(await run(t.fx.root), 'human');
+    issue = t.gh().issues[0];
+    assert.equal(issue.comments.filter((c) => c.body.includes('데모 질문')).length, 1);
+
+    // 제작자 답 → 답을 넣어 계획을 다시 작성 → 이미 올린 질문만 남았으니 진행
+    new FakeGitHub(t.state).ownerComment(1, 'B로 하라');
+    assert.equal(await run(t.fx.root), 'idle');
+    issue = t.gh().issues[0];
+    assert.equal(issue.state, 'closed', '답을 받은 뒤 끝까지 간다');
+    assert.ok(!issue.labels.includes('needs-human'));
+    const plans = t.prompts().filter((p) => p.slug === 'gamma-feature' && p.step === 'plan');
+    assert.equal(plans.length, 2, '답을 받은 뒤 계획을 다시 작성한다');
+    assert.doesNotMatch(plans[0].prompt, /제작자 답변/);
+    assert.match(plans[1].prompt, /제작자 답변[\s\S]*B로 하라/);
+    assert.equal(
+      issue.comments.filter((c) => c.body.includes('데모 질문')).length,
+      1,
+      '이미 올린 질문은 다시 올리지 않는다',
+    );
+  } finally {
+    t.fx.cleanup();
+  }
+});

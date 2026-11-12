@@ -9,6 +9,7 @@
 //   6. 없으면 idle (CI·사람 대기 수 포함)
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { listRemoteClaims } from '../commands/task.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import type { Comment, GitHubPort, Issue, PullRequest } from '../lib/github.ts';
 import { gitTry, listWorktrees, showFile } from '../lib/git.ts';
@@ -42,7 +43,8 @@ export interface LocalPlan {
 export type Task =
   | { kind: 'answered'; issue: number; answer: string; local: LocalPlan | null }
   | { kind: 'fix-pr'; local: LocalPlan; pr: PullRequest }
-  | { kind: 'rebase'; local: LocalPlan; pr: PullRequest }
+  /** main에 뒤처지거나 충돌한 PR을 origin/main 병합으로 갱신(ADR-0006) */
+  | { kind: 'update'; local: LocalPlan; pr: PullRequest }
   | { kind: 'plan'; local: LocalPlan }
   | { kind: 'step'; local: LocalPlan }
   | { kind: 'next-step'; id: string; step: number; issue: number }
@@ -170,7 +172,7 @@ function hasAcceptLine(body: string): boolean {
 /**
  * 제작자(`owner`) 계정이 쓴 댓글 가운데 `/harness accept` 한 줄이 있는지 본다(9.1절 답변 인정과 같은 근거:
  * 댓글 작성자는 봇이 흉내 낼 수 없다). 봇·외주 개발자 등 다른 계정의 댓글은 보지 않는다.
- * 한계: 마지막 편집자는 보지 않는다. 쓰기 권한 계정이 제작자 댓글을 고친 경우를 가려내지 못한다(TD-24).
+ * 한계: 마지막 편집자는 보지 않는다. 쓰기 권한 계정이 제작자 댓글을 고친 경우를 가려내지 못한다(TD-26).
  */
 export function ownerAccepted(comments: Comment[], owner: string): boolean {
   return comments.some((c) => sameLogin(c.author, owner) && hasAcceptLine(c.body));
@@ -249,6 +251,8 @@ export function pickNext(env: NextEnv): Pick {
     const pr = l.pr;
     if (!pr || pr.state !== 'open') continue;
     if (pr.labels.includes(label)) continue;
+    // 멈춘 계획은 사람의 답을 기다린다(needs-human은 Issue에 달린다). 다시 고르면 같은 중단 보고를 반복한다
+    if (l.fm.status === 'blocked') continue;
     if (pr.checks === 'failure')
       return {
         task: { kind: 'fix-pr', local: l, pr },
@@ -256,10 +260,14 @@ export function pickNext(env: NextEnv): Pick {
         waiting: { ci, human: humanIssues.size },
         excluded: [],
       };
-    if (pr.mergeState === 'BEHIND')
+    // BEHIND는 "main 최신 필수" 브랜치 보호에서만 나온다. 충돌은 DIRTY로 온다
+    if (pr.mergeState === 'BEHIND' || pr.mergeState === 'DIRTY')
       return {
-        task: { kind: 'rebase', local: l, pr },
-        reason: `PR #${pr.number}가 main에 뒤처졌다`,
+        task: { kind: 'update', local: l, pr },
+        reason:
+          pr.mergeState === 'DIRTY'
+            ? `PR #${pr.number}가 main과 충돌한다(DIRTY)`
+            : `PR #${pr.number}가 main에 뒤처졌다(BEHIND)`,
         waiting: { ci, human: humanIssues.size },
         excluded: [],
       };
@@ -327,13 +335,12 @@ export function pickNext(env: NextEnv): Pick {
   let excluded: ExcludedIssue[] = [];
   const openMine = mine.filter((l) => l.pr?.state === 'open').length;
   if (openMine < cfg.limits.wipPerWorker) {
-    const claims = new Set(
-      gitTry(['ls-remote', '--heads', cfg.github.remote, 'claim/*'], env.main)
-        .stdout.split('\n')
-        .map((l) => /refs\/heads\/claim\/(\d+)/.exec(l)?.[1])
-        .filter(Boolean)
-        .map(Number),
-    );
+    let claims = new Set<number>();
+    try {
+      claims = new Set(listRemoteClaims(env.main, cfg));
+    } catch {
+      // 조회 실패는 선점 없음으로 본다(기존 동작). push 거부가 실제 선점을 지킨다(8.3절)
+    }
     const open = issues.filter(
       (i) =>
         !i.labels.includes(label) &&

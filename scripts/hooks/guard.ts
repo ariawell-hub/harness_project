@@ -1,11 +1,11 @@
 // L1 훅 진입점. Claude Code·Codex의 PreToolUse 훅이 stdin으로 JSON을 넘긴다.
 // 차단은 종료 코드 2 + stderr 메시지(13.1절 훅 구현 규칙). 0이 아닌 다른 코드는 차단이 아니므로 쓰지 않는다.
 // 내부 오류가 나도 종료 코드 2로 막는다(fail-closed): R20은 L1에 기대기 때문이다(13.2절).
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasCommits, tryRepoInfo } from '../lib/git.ts';
-import { findPlan } from '../lib/plan.ts';
+import { hasCommits, tryRepoInfo, type RepoInfo } from '../lib/git.ts';
+import { findPlan, parseDoc } from '../lib/plan.ts';
 import { formatProblem } from '../lib/util.ts';
 import { evaluate, type GuardContext, type GuardInput } from './rules.ts';
 import { commandName, type Dialect } from './shell.ts';
@@ -98,17 +98,51 @@ function loadGuardConfig(root: string | null): { dbPatterns: string[]; dbClients
   return { dbPatterns: cfg.guard?.dbPatterns ?? [], dbClients: cfg.guard?.dbClients ?? [] };
 }
 
-export function decide(payload: Json): string | null {
-  const input = normalize(payload);
-  if (!input) return null;
-  const repo = tryRepoInfo(input.cwd);
-  const ctx: GuardContext = {
+/** 경로가 속한 리포(worktree). 아직 없는 파일이면 존재하는 가장 가까운 상위 폴더로 찾는다 */
+export function repoOfPath(abs: string): RepoInfo | null {
+  let d = abs;
+  while (!existsSync(d)) {
+    const up = path.dirname(d);
+    if (up === d) return null;
+    d = up;
+  }
+  if (!statSync(d).isDirectory()) d = path.dirname(d);
+  return tryRepoInfo(d);
+}
+
+/** worktree에 있는 계획의 frontmatter owner. 못 찾거나 못 읽으면 null(호출자가 막는다) */
+export function planOwnerOf(root: string, id: string): string | null {
+  const ref = findPlan(root, id);
+  if (!ref) return null;
+  try {
+    const owner = parseDoc(readFileSync(path.join(root, ref.file), 'utf8')).frontmatter?.owner;
+    return typeof owner === 'string' && owner ? owner : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 판정 문맥. 작업자 이름 규칙은 new-task의 owner 기본값과 같다 */
+export function buildContext(
+  cwd: string,
+  worker = process.env.HARNESS_WORKER ?? 'session',
+): GuardContext {
+  const repo = tryRepoInfo(cwd);
+  return {
     repo,
     hasCommits: repo ? hasCommits(repo.root) : undefined,
     hasPlan: (root, id) => findPlan(root, id) !== null,
+    repoOf: repoOfPath,
+    planOwner: planOwnerOf,
+    worker,
     ...loadGuardConfig(repo?.root ?? null),
   };
-  const p = evaluate(input, ctx);
+}
+
+export function decide(payload: Json): string | null {
+  const input = normalize(payload);
+  if (!input) return null;
+  const p = evaluate(input, buildContext(input.cwd));
   return p ? formatProblem(p) : null;
 }
 

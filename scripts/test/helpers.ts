@@ -134,3 +134,27 @@ export function makeFixture(configOver: Record<string, unknown> = {}): Fixture {
   sh('git', ['push', '-q', '-u', 'origin', 'main'], root);
   return { dir, root, remote, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
+
+/**
+ * bare 원격을 다른 곳에 clone해 `branch`(기본 main)의 파일을 바꾸고 push한다.
+ * `fetch`가 참이면(기본) fixture 리포에서 fetch까지 한다. fixture 리포의 체크아웃은 건드리지 않는다.
+ */
+export function advanceRemote(
+  fx: Fixture,
+  rel: string,
+  content: string,
+  o: { branch?: string; fetch?: boolean } = {},
+): string {
+  const branch = o.branch ?? 'main';
+  const clone = path.join(mkdtempSync(path.join(fx.dir, 'clone-')), 'c');
+  sh('git', ['clone', '-q', fx.remote, clone], fx.dir);
+  sh('git', ['config', 'user.email', 'test@example.invalid'], clone);
+  sh('git', ['config', 'user.name', 'test'], clone);
+  sh('git', ['config', 'commit.gpgsign', 'false'], clone);
+  if (branch !== 'main') sh('git', ['checkout', '-q', branch], clone);
+  write(clone, rel, content);
+  const sha = commitAll(clone, `remote: ${rel}`);
+  sh('git', ['push', '-q', 'origin', branch], clone);
+  if (o.fetch ?? true) sh('git', ['fetch', '-q', 'origin'], fx.root);
+  return sha;
+}
