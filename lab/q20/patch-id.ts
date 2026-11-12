@@ -216,15 +216,15 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   const m0 = fetchLab(cwd).main;
 
   // 1. PR A1·A2(a.txt), PR B(b.txt) 병합
-  const a1c = commitFiles(cwd, m0, { 'a.txt': 'A1: PR이 바꾼 줄\n' }, 'pid: A1 a.txt');
+  const a1c = commitFiles(cwd, m0, { 'a.txt': `A1 ${tag}: PR이 바꾼 줄\n` }, 'pid: A1 a.txt');
   push(cwd, a1c, br('a1'));
   const a1 = openPR(cwd, br('a1'), `pid A1 (${tag})`);
-  const a2c = commitFiles(cwd, m0, { 'a2.txt': 'A2: PR이 바꾼 줄\n' }, 'pid: A2 a2.txt');
+  const a2c = commitFiles(cwd, m0, { 'a2.txt': `A2 ${tag}: PR이 바꾼 줄\n` }, 'pid: A2 a2.txt');
   push(cwd, a2c, br('a2'));
   const a2 = openPR(cwd, br('a2'), `pid A2 (${tag})`);
   const a1Before = await patchIdAt(cwd, a1.number, a1c);
   const a2Before = await patchIdAt(cwd, a2.number, a2c);
-  const bc = commitFiles(cwd, m0, { 'b.txt': 'B: main이 바꾼 다른 파일\n' }, 'pid: B b.txt');
+  const bc = commitFiles(cwd, m0, { 'b.txt': `B ${tag}: main이 바꾼 다른 파일\n` }, 'pid: B b.txt');
   push(cwd, bc, br('b'));
   const b = openPR(cwd, br('b'), `pid B (${tag})`);
   await mergePR(cwd, b.number, bc);
@@ -266,13 +266,18 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   gh(['pr', 'close', String(a2.number), '-R', LAB_REPO, '--delete-branch'], cwd);
 
   // 3. main이 a.txt를 바꾼 뒤 A1에 main 병합(충돌 해결: PR 쪽 내용 유지)
-  const cc = commitFiles(cwd, m1, { 'a.txt': 'C: main이 같은 파일을 바꿈\n' }, 'pid: C a.txt');
+  const cc = commitFiles(
+    cwd,
+    m1,
+    { 'a.txt': `C ${tag}: main이 같은 파일을 바꿈\n` },
+    'pid: C a.txt',
+  );
   push(cwd, cc, br('c'));
   const c = openPR(cwd, br('c'), `pid C (${tag})`);
   await mergePR(cwd, c.number, cc);
   const m2 = fetchLab(cwd).main;
   const a1Conf = mergeCommit(cwd, a1m.commit, m2, `Merge main into ${br('a1')} (충돌 해결)`, {
-    'a.txt': 'A1: PR이 바꾼 줄\n',
+    'a.txt': `A1 ${tag}: PR이 바꾼 줄\n`,
   });
   push(cwd, a1Conf.commit, br('a1'));
   const a1Resolved = await patchIdAt(cwd, a1.number, a1Conf.commit);
