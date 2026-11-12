@@ -40,3 +40,7 @@ review_cycle: on-change
 - 세션 절차는 [절차서 5절](../harness/workflow.md)의 "main에 뒤처지거나 충돌한 PR 갱신"에 있다.
 - runner 갱신 경로(Issue #22 step1): `scripts/lib/git.ts`의 `updateBranchFromBase`가 PR 브랜치에 `origin/main`을 병합하고 일반 push한다. 충돌하면 병합을 취소하고 `conflict`를, 원격 PR 브랜치에 로컬에 없는 커밋이 있으면 병합 없이 `failed`를 돌려준다. runner(`doUpdate`)는 충돌이면 계획을 `blocked` + `needs-human`으로, 그 밖의 실패는 `pr:update` 실패로 기록한다. `pickNext`는 `BEHIND`와 `DIRTY`를 갱신 대상으로 보고, 계획이 `blocked`인 PR은 다시 고르지 않는다. GitHub 상태가 늦어 이미 최신인데 갱신 대상으로 보이면 환경 대기로 처리한다.
 - runner step 완료 push의 `--force-with-lease` 폴백(TD-22)도 Issue #27에서 없앴다. 자기 브랜치 push가 거부되고 원격과 갈라졌으면(`remoteBranchDiverged`) 계획을 `blocked` + `needs-human`으로 보고한다. 이제 runner 어디에도 force push가 없다.
+
+## 검토 기록
+
+- 2026-11-12 (Issue #37): R8 검토. 마지막 갱신(#28) 뒤 변경은 #31(선점 해제)과 #34(계획 작성 질문)이고, `updateBranchFromBase`·`doUpdate`·`pickNext`의 `BEHIND`·`DIRTY` 처리와 force push 없음이 그대로다. 결정 유효, 본문 수정 없음.
