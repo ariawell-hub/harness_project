@@ -1,0 +1,16 @@
+{
+  "plan": "20261112-runner-stop-paths",
+  "steps": [
+    {
+      "step": 0,
+      "name": "conflict-resolve",
+      "status": "in_progress",
+      "summary": "충돌 중단은 계획 파일 밖 conflict.json(next.ts read/writeConflictState)에 기록, 답을 받으면 doResolveConflict가 updateBranchFromBase(keepConflict)+conflictPrompt 세션+judgeResolution(표시·미병합·AC·check) 뒤 일반 push, 실패면 merge --abort(pr:conflict). 설계서 v0.7.14"
+    },
+    {
+      "step": 1,
+      "name": "step-questions",
+      "status": "pending"
+    }
+  ]
+}

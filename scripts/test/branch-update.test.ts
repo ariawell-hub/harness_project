@@ -184,3 +184,30 @@ test('remoteBranchDiverged: 원격 브랜치가 없거나 fetch가 실패하면 
     fx.cleanup();
   }
 });
+
+test('updateBranchFromBase: keepConflict면 충돌을 남긴 채(병합 진행 중) 파일 목록을 돌려주고 원격은 그대로 둔다 (TD-27)', () => {
+  const fx = makeFixture();
+  try {
+    const before = setupPR(fx, 'shared.txt', 'pr\n');
+    advanceRemote(fx, 'shared.txt', 'main\n', { fetch: false });
+    const r = updateBranchFromBase(fx.root, 'origin', 'main', BRANCH, { keepConflict: true });
+    assert.deepEqual(r, { status: 'conflict', files: ['shared.txt'] });
+    assert.equal(merging(fx.root), true, '병합이 진행 중이다');
+    assert.match(sh('git', ['show', ':2:shared.txt'], fx.root) + '', /pr/);
+    assert.equal(rev(fx.root), before, '아직 커밋하지 않았다');
+    assert.equal(remoteHead(fx), before, '원격 그대로');
+    sh('git', ['merge', '--abort'], fx.root);
+    // 충돌이 없으면 keepConflict여도 평소처럼 병합해 push한다
+    const fx2 = makeFixture();
+    try {
+      setupPR(fx2);
+      advanceRemote(fx2, 'remote.txt', 'r\n', { fetch: false });
+      const r2 = updateBranchFromBase(fx2.root, 'origin', 'main', BRANCH, { keepConflict: true });
+      assert.equal(r2.status, 'updated');
+    } finally {
+      fx2.cleanup();
+    }
+  } finally {
+    fx.cleanup();
+  }
+});

@@ -22,7 +22,7 @@ review_cycle: on-change
 
 1. 에이전트 세션과 runner 모두 PR 브랜치는 **`origin/main`을 PR 브랜치에 병합하고 일반 push로** 갱신한다. 이미 push한 브랜치는 rebase하지 않는다.
 2. R14(에이전트 force push 금지)는 완화하지 않는다.
-3. 충돌은 세션이 병합 커밋 안에서 해결하고 `check`를 다시 돌린다. runner는 병합을 취소해 worktree를 깨끗이 두고 계획을 `blocked` + `needs-human`으로 넘긴다(2단계 충돌 해결 세션 전까지, TD-9).
+3. 충돌은 세션이 병합 커밋 안에서 해결하고 `check`를 다시 돌린다. runner는 병합을 취소해 worktree를 깨끗이 두고 Issue에 `needs-human`으로 넘긴다. 제작자 답을 받으면 runner가 충돌을 남긴 병합과 충돌 해결 세션을 띄우고, 판정·커밋·push는 runner가 한다(TD-27). 답 없이 자동으로 푸는 것은 2단계다(TD-9).
 4. 이미 로컬에서 rebase했다면 `git merge -s ours origin/<브랜치>`로 원격 이력을 부모로 연결한 뒤 일반 push한다. 트리는 rebase 결과 그대로이고, 원격 head의 자손이 되므로 fast-forward다.
 5. 충돌을 풀 수 없거나 push가 막히면 우회하지 않고 Issue에 `needs-human` 라벨과 질문을 남긴다(절차서 7절). 댓글만으로는 `start` ①에 나오지 않는다.
 
@@ -39,6 +39,7 @@ review_cycle: on-change
 - PR 커밋 목록에 병합 커밋이 남지만, squash 병합이라 main 이력에는 남지 않는다.
 - 세션 절차는 [절차서 5절](../harness/workflow.md)의 "main에 뒤처지거나 충돌한 PR 갱신"에 있다.
 - runner 갱신 경로(Issue #22 step1): `scripts/lib/git.ts`의 `updateBranchFromBase`가 PR 브랜치에 `origin/main`을 병합하고 일반 push한다. 충돌하면 병합을 취소하고 `conflict`를, 원격 PR 브랜치에 로컬에 없는 커밋이 있으면 병합 없이 `failed`를 돌려준다. runner(`doUpdate`)는 충돌이면 계획을 `blocked` + `needs-human`으로, 그 밖의 실패는 `pr:update` 실패로 기록한다. `pickNext`는 `BEHIND`와 `DIRTY`를 갱신 대상으로 보고, 계획이 `blocked`인 PR은 다시 고르지 않는다. GitHub 상태가 늦어 이미 최신인데 갱신 대상으로 보이면 환경 대기로 처리한다.
+- 충돌 답변 경로(Issue #43 step0, TD-27): runner 세션에는 `git fetch`·`git merge` 권한이 없어 "병합해 풀어라"라는 답을 세션이 실행할 수 없었다(Issue #5 / PR #29). 이제 충돌 중단은 계획 파일을 바꾸지 않고 worktree 하네스 상태(`conflict.json`)에 대기를 둔다. 답을 받으면 `updateBranchFromBase(..., { keepConflict: true })`로 충돌을 남긴 병합을 시작하고 충돌 해결 세션(`conflictPrompt`)이 파일만 고친다. runner가 충돌 표시(`<<<<<<<`·`>>>>>>>` 줄)·미병합 경로·step AC·`check`를 확인한 뒤에만 `git commit --no-edit`와 일반 push를 한다. 실패하면 `git merge --abort`로 되돌린다.
 - runner step 완료 push의 `--force-with-lease` 폴백(TD-22)도 Issue #27에서 없앴다. 자기 브랜치 push가 거부되고 원격과 갈라졌으면(`remoteBranchDiverged`) 계획을 `blocked` + `needs-human`으로 보고한다. 이제 runner 어디에도 force push가 없다.
 
 ## 검토 기록

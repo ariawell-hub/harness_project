@@ -318,11 +318,27 @@ test('runner: GitHub이 DIRTY라 해도 브랜치가 이미 최신이면 실패�
   }
 });
 
-test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 계획을 멈춰 needs-human으로 한 번만 보고한다 (ADR-0006)', async () => {
+test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 needs-human으로 한 번만 보고하며, 계획 파일은 바꾸지 않는다 (ADR-0006, TD-27)', async () => {
   const t = setup();
   try {
     const task = await openPR(t, 'DIRTY', 'main\n');
+    const head = sh('git', ['rev-parse', 'HEAD'], task.worktree);
     assert.equal(await run(t.fx.root), 'human', '사람 답변만 기다리면 멈춘다');
+    assert.equal(
+      sh('git', ['rev-parse', 'HEAD'], task.worktree),
+      head,
+      '계획 커밋을 만들지 않았다',
+    );
+    assert.equal(
+      sh('git', ['status', '--porcelain'], task.worktree),
+      '',
+      '계획 파일을 바꾸지 않았다',
+    );
+    assert.equal(
+      sh('git', ['ls-remote', 'origin', `refs/heads/${task.branch}`], t.fx.root).split(/\s+/)[0],
+      head,
+      'PR 브랜치에 blocked를 push하지 않았다(PR plan-gate 유지)',
+    );
     const issue = t.gh().issues[0];
     assert.ok(issue.labels.includes('needs-human'), 'Issue에 needs-human');
     assert.equal(
@@ -475,6 +491,80 @@ test('runner: 선점 뒤 계획 작성 전에 허용 계정이 아닌 계정이 
     assert.equal(issue.state, 'closed', '승인 뒤 끝까지 간다');
     const plan = t.prompts().find((p) => p.slug === 'delta-feature' && p.step === 'plan');
     assert.match(plan!.prompt, /봇이 고친 본문/, '확인한 이력 조회의 본문을 넣는다');
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+/** 충돌로 멈춘 PR에 제작자가 답하게 만든다. 답을 받는 바퀴와 갱신 바퀴를 한 번씩 돌린다 */
+async function answerConflict(t: ReturnType<typeof setup>, answer: string) {
+  const once = () =>
+    runRunner({ cwd: t.fx.root, worker: 'runner-1', tool: 'fake', once: true, noWait: true });
+  assert.equal(await run(t.fx.root), 'human');
+  new FakeGitHub(t.state).ownerComment(1, answer);
+  await once(); // 답 받음
+  await once(); // 충돌 해결 시도
+}
+
+test('runner: 충돌 중단에 제작자가 답하면 충돌을 남긴 병합 + 해결 세션 뒤, runner가 판정해 병합 커밋을 일반 push한다 (TD-27)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY', 'main\n');
+    writeFileSync(t.behavior, JSON.stringify({ demo: { conflict: ['ok'] } }));
+    await answerConflict(t, '양쪽을 모두 살려라');
+    const prompt = t.prompts().find((p) => p.step === 'conflict');
+    assert.ok(prompt, '충돌 해결 세션을 띄웠다');
+    assert.match(prompt.prompt, /## 충돌 파일\n- `shared\.txt`/);
+    assert.match(prompt.prompt, /양쪽을 모두 살려라/, '제작자 답을 넣는다');
+    assert.equal(
+      gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
+      false,
+      '병합을 마쳤다',
+    );
+    const shared = readFileSync(path.join(task.worktree, 'shared.txt'), 'utf8');
+    assert.doesNotMatch(shared, /^(<{7}|>{7})/m, '충돌 표시 없음');
+    assert.match(shared, /pr/);
+    assert.match(shared, /main/);
+    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
+    assert.ok(
+      gitTry(['merge-base', '--is-ancestor', 'origin/main', `origin/${task.branch}`], t.fx.root).ok,
+      '해결한 병합 커밋을 push했다',
+    );
+    const resolved = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:conflict');
+    assert.deepEqual(
+      resolved.map((a) => a.ok),
+      [true],
+    );
+    assert.ok(!t.gh().issues[0].labels.includes('needs-human'));
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 해결 세션이 충돌을 풀지 못하면 병합을 취소하고 push하지 않으며 pr:conflict 실패로 센다 (TD-27)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY', 'main\n');
+    const head = sh('git', ['rev-parse', 'HEAD'], task.worktree);
+    writeFileSync(t.behavior, JSON.stringify({ demo: { conflict: ['fail'] } }));
+    await answerConflict(t, '풀어라');
+    assert.ok(t.prompts().some((p) => p.step === 'conflict'));
+    assert.equal(
+      gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
+      false,
+      '병합을 취소했다',
+    );
+    assert.equal(sh('git', ['rev-parse', 'HEAD'], task.worktree), head, 'HEAD 그대로');
+    assert.equal(sh('git', ['status', '--porcelain'], task.worktree), '', 'worktree 깨끗');
+    assert.equal(
+      sh('git', ['ls-remote', 'origin', `refs/heads/${task.branch}`], t.fx.root).split(/\s+/)[0],
+      head,
+      '원격 그대로',
+    );
+    const fails = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:conflict');
+    assert.equal(fails.length, 1);
+    assert.equal(fails[0].ok, false);
+    assert.match(fails[0].detail ?? '', /shared\.txt/);
   } finally {
     t.fx.cleanup();
   }

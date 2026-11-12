@@ -8,7 +8,7 @@
 //      그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절).
 //      만든 뒤 허용 계정이 아닌 계정이 제목·본문을 고쳤으면 그 뒤의 제작자 승인이 있어야 한다(TD-19)
 //   6. 없으면 idle (CI·사람 대기 수 포함)
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { listRemoteClaims } from '../commands/task.ts';
 import type { HarnessConfig } from '../lib/config.ts';
@@ -20,7 +20,7 @@ import type {
   IssueHistory,
   PullRequest,
 } from '../lib/github.ts';
-import { gitTry, listWorktrees, showFile } from '../lib/git.ts';
+import { gitTry, harnessStateDir, listWorktrees, repoInfo, showFile } from '../lib/git.ts';
 import {
   PLANS_DIR,
   findPlan,
@@ -46,6 +46,42 @@ export interface LocalPlan {
   /** 계획 작성이 아직 안 됨(status=draft) */
   needsPlanning: boolean;
   pr: PullRequest | null;
+  /** main 병합 충돌로 멈춰 제작자 답을 기다린다(`conflict.json`, TD-27). 이 PR은 다시 고르지 않는다 */
+  conflictWaiting: boolean;
+}
+
+/**
+ * main 병합 충돌 상태(TD-27). worktree 하네스 상태 폴더의 `conflict.json`(git이 추적하지 않는다).
+ * 충돌 중단은 계획 파일을 바꾸지 않으므로(열린 PR의 plan-gate 유지) 대기 여부를 여기에 둔다.
+ * - waiting: 중단 보고를 올리고 제작자 답을 기다린다
+ * - resolve: 답을 받았다. 다음 갱신에서 충돌을 남긴 병합 + 해결 세션으로 푼다
+ */
+export interface ConflictState {
+  waiting: boolean;
+  resolve: boolean;
+  files: string[];
+}
+
+function conflictFile(worktree: string): string {
+  return path.join(harnessStateDir(repoInfo(worktree), 'worktree'), 'conflict.json');
+}
+
+/** 없거나 깨졌으면 대기·해결 모두 false */
+export function readConflictState(worktree: string): ConflictState {
+  try {
+    const raw = JSON.parse(readFileSync(conflictFile(worktree), 'utf8')) as Partial<ConflictState>;
+    return {
+      waiting: raw.waiting === true,
+      resolve: raw.resolve === true,
+      files: Array.isArray(raw.files) ? raw.files.map(String) : [],
+    };
+  } catch {
+    return { waiting: false, resolve: false, files: [] };
+  }
+}
+
+export function writeConflictState(worktree: string, s: ConflictState): void {
+  writeFileSync(conflictFile(worktree), JSON.stringify(s, null, 2) + '\n');
 }
 
 export type Task =
@@ -121,6 +157,7 @@ export function readLocalPlans(env: NextEnv): LocalPlan[] {
       stepStatus,
       needsPlanning,
       pr,
+      conflictWaiting: readConflictState(wt.path).waiting,
     });
   }
   return out;
@@ -356,6 +393,11 @@ export function pickNext(env: NextEnv): Pick {
     if (pr.labels.includes(label)) continue;
     // 멈춘 계획은 사람의 답을 기다린다(needs-human은 Issue에 달린다). 다시 고르면 같은 중단 보고를 반복한다
     if (l.fm.status === 'blocked') continue;
+    // 충돌로 멈춘 계획은 계획 파일이 아니라 conflict.json으로 기다린다(TD-27)
+    if (l.conflictWaiting) {
+      humanIssues.add(l.issue);
+      continue;
+    }
     if (pr.checks === 'failure')
       return {
         task: { kind: 'fix-pr', local: l, pr },

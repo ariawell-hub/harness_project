@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.13 · 상태: 초안 · 최종 갱신: 2026-11-12
+> 버전 v0.7.14 · 상태: 초안 · 최종 갱신: 2026-11-12
 
 ---
 
@@ -46,6 +46,7 @@ review_cycle: quarterly
   - v0.7.11 (2026-11-12): 문서 frontmatter의 `related_code`는 그 문서의 내용이 기대는 파일만 적는다. 폴더 전체·계획 폴더처럼 다른 이유로 자주 바뀌는 경로는 넣지 않는다(7.2절, Issue #39, TD-25 해결)
   - v0.7.12 (2026-11-12): 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`)로 제작자 `/harness accept` 댓글이 있는 봇 Issue를 받을 수 있게 함(4.5절, 14.6절, Issue #5)
   - v0.7.13 (2026-11-12): 판정에 쓰는 댓글·Issue의 편집 이력을 본다. 다른 계정이 고친 제작자 댓글은 답·승인이 아니고, 허용 계정이 아닌 계정이 만들거나 고친 Issue는 그 뒤의 제작자 `/harness accept`가 있어야 runner가 맡는다. runner는 계획 작성 직전에 다시 확인한다(9.1절, 14.6절, Issue #41, TD-19·TD-26 해결)
+  - v0.7.14 (2026-11-12): main 병합 충돌로 멈춘 PR에 제작자가 답하면 runner가 충돌을 남긴 병합과 충돌 해결 세션을 띄우고, 충돌 표시·AC·`check`를 직접 확인한 뒤에만 병합 커밋을 일반 push한다. 충돌 중단은 계획 파일을 바꾸지 않는다(4.5절, 10.3절, ADR-0006, Issue #43, TD-27 해결)
 
 ### 0.1 전제 조건
 
@@ -258,6 +259,7 @@ review_cycle: quarterly
 - 환경 장애(사용량 한도, 네트워크, 서비스 장애)는 실패로 세지 않는다. 기다렸다가 같은 step을 다시 시도한다.
 - 세션이 시간 제한(Q19)을 넘기면 runner가 세션을 끝내고 실패 1회로 기록한다. runner 자신은 죽지 않는다.
 - 계획 작성 세션이 "열린 질문"에 `### 질문:`(9.1절 형식)을 남기면 runner는 그 계획을 `blocked`로 커밋·push하고 Issue에 `needs-human` 라벨과 제작자 멘션으로 질문 전문을 올린다. 같은 질문은 다시 올리지 않는다. 제작자 답을 받으면 계획을 `draft`로 되돌리고 답을 넣어 계획 작성 세션을 다시 띄운다(Issue #33). step 세션의 질문 감지는 TD-24.
+- 내 PR을 `origin/main`으로 갱신하다 충돌하면(ADR-0006) runner는 병합을 취소하고 Issue에 `needs-human`과 중단 보고를 남긴다. 계획 파일은 바꾸지 않는다(완료된 step의 PR에 `blocked`를 올리면 plan-gate가 실패한다). 대기는 worktree 하네스 상태(`conflict.json`)에 두고, 답을 받기 전에는 그 PR을 다시 고르지 않는다. 제작자 답을 받으면 runner가 `origin/main`을 다시 병합해 충돌을 남긴 채 충돌 해결 세션을 띄운다(답 본문을 넣는다). 세션은 파일만 고치고, runner가 충돌 표시·미병합 경로·step AC·`check`를 직접 확인한 뒤에만 병합 커밋을 만들어 일반 push한다. 실패하면 `git merge --abort`로 되돌리고 실패 1회(`pr:conflict`)로 센다. 5회면 다시 사람에게 넘긴다. 답 없이 자동으로 푸는 것은 2단계다(TD-9).
 - 세션이 띄운 프로세스(`dev` 서버 등)는 세션이 끝날 때 runner가 정리한다.
 
 **runner가 멈추는 조건** (이 밖에는 멈추지 않는다)
@@ -836,7 +838,7 @@ pnpm test src/auth/login-guard.spec.ts
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).
 2. 필수 체크가 모두 통과하면 GitHub이 squash merge 한다. 커밋 메시지에 계획 id를 넣는다.
 3. 위험도에 맞는 검증자가 모두 승인하면 계획 전용 커밋으로 계획을 완료 처리한다(8.3절). 위험도 높음이면 그 뒤에 제작자가 head를 승인한다.
-4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 병합이 충돌하면 병합을 취소하고 `needs-human`으로 넘긴다. 위 결속 기준에 맞지 않으면 다시 검증하고, 위험도 높음이면 제작자도 새 head를 다시 승인한다.
+4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 병합이 충돌하면 병합을 취소하고 `needs-human`으로 넘기며, 제작자 답을 받으면 충돌 해결 세션으로 푼다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증하고, 위험도 높음이면 제작자도 새 head를 다시 승인한다.
 5. 병합되면 head 브랜치는 리포 설정으로 삭제되고, worktree는 runner의 다음 바퀴나 다음 세션 시작 시 정리한다(4.5절, 7.1절). 마지막 step이 병합되면 Issue가 자동으로 닫히고 `claim/<issue>` 브랜치도 정리한다. 남은 step이 있으면 runner가 다음 step을 시작한다. `merge` 스크립트는 이 정리를 수동으로 할 때 쓰는 편의 도구이며 강제 장치가 아니다.
 
 **병합 후 main CI가 실패하면**
