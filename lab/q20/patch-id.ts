@@ -142,8 +142,31 @@ function openPR(cwd: string, branch: string, title: string): { number: number; u
   return { number: Number(url.split('/').pop()), url };
 }
 
-function mergePR(cwd: string, n: number, head: string): void {
-  gh(['pr', 'merge', String(n), '-R', LAB_REPO, '--squash', '--match-head-commit', head], cwd);
+/**
+ * head가 GitHub PR에 반영된 뒤 squash 병합한다. push 직후에는 GitHub이 새 head를 아직 모를 수 있어
+ * "Head branch was modified"로 거부된다(1차 실행에서 관찰). 기대 head를 고정해(--match-head-commit) 기다렸다 다시 시도한다.
+ */
+async function mergePR(cwd: string, n: number, head: string, tries = 20): Promise<void> {
+  let last = '';
+  for (let i = 0; i < tries; i++) {
+    const cur = gh(
+      ['pr', 'view', String(n), '-R', LAB_REPO, '--json', 'headRefOid', '--jq', '.headRefOid'],
+      cwd,
+    );
+    if (cur === head) {
+      const r = runSync(
+        'gh',
+        ['pr', 'merge', String(n), '-R', LAB_REPO, '--squash', '--match-head-commit', head],
+        { cwd },
+      );
+      if (r.code === 0) return;
+      last = r.stderr.trim();
+      if (!/Head branch was modified|not mergeable|Base branch was modified/i.test(last))
+        throw new Error(`PR #${n} 병합 실패: ${last}`);
+    }
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+  throw new Error(`PR #${n} 병합 실패(head 동기화 대기 초과): ${last}`);
 }
 
 async function waitHead(cwd: string, pr: number, not: string, timeoutMs = 90_000): Promise<string> {
@@ -184,7 +207,7 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   const bc = commitFiles(cwd, m0, { 'b.txt': 'B: main이 바꾼 다른 파일\n' }, 'pid: B b.txt');
   push(cwd, bc, br('b'));
   const b = openPR(cwd, br('b'), `pid B (${tag})`);
-  mergePR(cwd, b.number, bc);
+  await mergePR(cwd, b.number, bc);
   const m1 = fetchLab(cwd).main;
 
   // 2-(1). A1: main 병합 커밋 + 일반 push(ADR-0006)
@@ -226,7 +249,7 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   const cc = commitFiles(cwd, m1, { 'a.txt': 'C: main이 같은 파일을 바꿈\n' }, 'pid: C a.txt');
   push(cwd, cc, br('c'));
   const c = openPR(cwd, br('c'), `pid C (${tag})`);
-  mergePR(cwd, c.number, cc);
+  await mergePR(cwd, c.number, cc);
   const m2 = fetchLab(cwd).main;
   const a1Conf = mergeCommit(cwd, a1m.commit, m2, `Merge main into ${br('a1')} (충돌 해결)`, {
     'a.txt': 'A1: PR이 바꾼 줄\n',
@@ -245,7 +268,7 @@ export async function experiment(cwd: string): Promise<{ summary: string; cases:
   // 4. 최신 PR의 squash 결과 트리 == PR head 트리
   const latest = fetchLab(cwd, a1.number);
   const upToDate = gitTry(['merge-base', '--is-ancestor', latest.main, latest.head!], cwd).ok;
-  mergePR(cwd, a1.number, latest.head!);
+  await mergePR(cwd, a1.number, latest.head!);
   const m3 = fetchLab(cwd).main;
   const headTree = git(['rev-parse', `${latest.head}^{tree}`], cwd);
   const squashTree = git(['rev-parse', `${m3}^{tree}`], cwd);
