@@ -79,7 +79,9 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 - `origin/main` (`913c9d6`) 위로 rebase했다. `scripts/commands/start.ts`, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`의 충돌을 해결했고, main의 Issue 후보 제외 및 병합 worktree 보호 변경을 보존했다. main에서 TD-17이 Issue #16 step4로 이미 사용·해결되어, step0의 조건부 지침에 따라 runner 설정 캐시 부채를 TD-21로 옮기고 계획·index 참조를 맞췄다. rebase 결과의 작업 커밋은 `bf5e977`, 계획 전용 커밋은 `000e728`이다.
 - 원격 PR branch는 여전히 이전 커밋 `ef78279`를 가리킨다. rebase 결과를 반영하려면 non-fast-forward 갱신이 필요하지만 R2가 force push를 금지하므로 수행하지 않았다. PR #14의 GitHub 상태는 아직 갱신되지 않았다.
 
-- 2026-11-12 11:29 (KST) 제작자가 PR #14 갱신을 추가 지시했다. 재확인 결과 PR은 OPEN이고 원격 head는 예상한 `ef78279`, `origin/main`은 `913c9d6` 그대로다. 포맷 수정 뒤 `node scripts/harness.ts check`가 통과했다. 이 PR branch에 한해 `--force-with-lease`로 로컬 rebase를 반영한다.
+- 2026-11-12 11:29 (KST) 제작자가 PR #14 갱신을 추가 지시했다. 재확인 결과 PR은 OPEN이고 원격 head는 예상한 `ef78279`, `origin/main`은 `913c9d6` 그대로다. 포맷 수정 뒤 `node scripts/harness.ts check`가 통과했다. `--force-with-lease` 갱신은 시도했지만, Git 실행 전 L1 hook이 R14로 차단했다. 원격 ref는 변경되지 않았다.
+
+- 2026-11-12 11:35 (KST) 최종 `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan; 기존 R8 경고 5건). 확인한 원격 head `ef78279`를 lease에 고정해 PR branch 갱신을 시도했으나, PreToolUse L1 hook이 `[R14 파괴적 git]`로 명령을 차단했다. Git push는 실행되지 않았고 원격 ref는 그대로다. hook을 우회하지 않는다.
 
 ## 의사결정 로그
 
@@ -94,7 +96,7 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 
 - 결정: runner 설정 캐시 부채를 TD-21로 등록한다. / 이유: origin/main에서 TD-17은 Issue #16 step4로 이미 사용·해결되어 있고, step0 계획의 조건부 지침은 다음 빈 번호 사용을 허용한다. / 버린 대안: TD-17을 중복 등록한다.
 
-- 결정: 제작자의 후속 지시에 따라 PR #14 branch에 한해 `--force-with-lease`로 rebase 결과를 반영한다. / 이유: PR head가 확인한 `ef78279` 그대로이고, lease는 다른 변경이 먼저 올라오면 갱신을 거부한다. / 버린 대안: 일반 push(비-fast-forward로 거부됨), merge 업데이트(rebase 요구와 다름).
+- 시도: 제작자의 후속 지시에 따라 PR #14 branch만, 예상 head `ef78279`를 고정한 `--force-with-lease`로 갱신하려 했다. / 이유: 로컬 rebase 결과를 원격 PR에 반영하려면 이력이 바뀌어야 한다. / 결과: L1 hook이 R14 파괴적 git으로 차단했고 push 명령은 실행되지 않았다. / 금지한 대안: hook 우회.
 
 ## 발견 사항
 
