@@ -26,7 +26,8 @@ node scripts/harness.ts start
 무인 실행은 runner가 위 루프를 step마다 새 세션으로 돌린다: `node scripts/harness.ts run --worker runner-1`
 
 - step 하나 = 세션 하나 = PR 하나.
-- 판단이 필요하면 혼자 추측하지 말고 묻는다. 형식은 [workflow.md](docs/harness/workflow.md)의 "에스컬레이션"을 따른다.
+- 판단이 필요하면 혼자 추측하지 말고 묻는다. 단, "반드시 묻는 것"이 아니면 추천안으로 진행하고 의사결정 로그에 남긴다. 질문은 작업 시작 때 모은다. 기준과 형식은 [workflow.md](docs/harness/workflow.md) 7절 "에스컬레이션".
+- 제작자가 대화로 직접 지시한 일은 묻지 않고 봇이 Issue를 등록해 시작한다([workflow.md](docs/harness/workflow.md) 1절).
 
 ## 표준 명령
 

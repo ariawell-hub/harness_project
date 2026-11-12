@@ -18,6 +18,7 @@ review_cycle: on-change
 - 설계서 v0.7.5: runner의 새 Issue 후보(4.5절 우선순위 5번)를 제작자(`github.owner`)·외주 개발자(새 설정 `github.collaborators`) 계정이 만든 Issue로 한정. 봇·그 밖의 계정·작성자 불명 Issue는 제외하고 `start`·`next`에 번호와 이유를 보인다. `github.owner`가 비면 새 Issue를 고르지 않는다(fail-closed). Issue 작성 뒤 수정 미확인은 TD-19(Issue #5).
 - 설계서 v0.7.6 · L1 R3 판정(Issue #16 step0): 쓰기 대상을 그 파일이 속한 worktree 기준으로 판정한다. main 체크아웃의 대화 세션은 자기 소유(계획 `owner` = `HARNESS_WORKER`, 없으면 `session`) 작업 worktree를 `EnterWorktree` 없이 고칠 수 있다. 다른 작업자의 worktree, 소유자를 알 수 없는 worktree, worktree 간 수정, main 체크아웃 수정은 막는다(임시 폴더 안이어도 같은 리포면 막는다).
 - 병합 worktree 정리(Issue #16 step1): `cleanupMerged`(`start`·runner)가 호출한 프로세스의 현재 폴더가 들어 있는 worktree는 지우지 않고 "남김"과 이유를 출력한다(경로는 `realpath`로 비교).
+- 설계서 v0.7.7 · 질문 규칙(Issue #16 step2): 제작자가 대화로 직접 지시한 일은 봇이 Issue를 등록하고 묻지 않고 시작한다(절차서 1절의 "Issue가 없으면 만들지 말고 묻는다" 삭제). 추천안이 분명한 운영 판단은 묻지 않고 기록, 질문은 작업 시작 때 모음, 대화 결정은 즉시 리포에 기록(절차서 7절, 설계서 9.1절, AGENTS.md).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
