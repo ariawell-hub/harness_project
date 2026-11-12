@@ -1,10 +1,11 @@
 // PR 브랜치 갱신(ADR-0006, Issue #22): origin/main을 병합하고 일반 push로 올린다. force push는 없다.
+// 원격 브랜치 갈라짐 판정(Issue #27): runner가 자기 브랜치 push 거부 때 덮어쓰지 않고 멈추는 근거.
 // 로컬 bare 원격. 원격 main·PR 브랜치는 별도 clone에서 push해 앞서게 만든다.
 import assert from 'node:assert/strict';
 import { chmodSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { gitTry, updateBranchFromBase } from '../lib/git.ts';
+import { gitTry, remoteBranchDiverged, updateBranchFromBase } from '../lib/git.ts';
 import { advanceRemote, commitAll, makeFixture, sh, write, type Fixture } from './helpers.ts';
 
 const BRANCH = 'feat/20261112-demo-s0';
@@ -149,6 +150,36 @@ test('updateBranchFromBase: fetch가 실패하면 failed(fetch) (h)', () => {
     assert.equal(r.status, 'failed');
     assert.equal(r.status === 'failed' && r.stage, 'fetch');
     assert.equal(rev(fx.root), before);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('remoteBranchDiverged: 원격 브랜치에 로컬에 없는 커밋이 있으면 true, 같거나 로컬이 앞서면 false', () => {
+  const fx = makeFixture();
+  try {
+    setupPR(fx);
+    assert.equal(remoteBranchDiverged(fx.root, 'origin', BRANCH), false, '같음');
+    write(fx.root, 'local.txt', 'l\n');
+    commitAll(fx.root, 'local only');
+    assert.equal(
+      remoteBranchDiverged(fx.root, 'origin', BRANCH),
+      false,
+      '로컬이 앞섬(일반 push 가능)',
+    );
+    advanceRemote(fx, 'other.txt', 'o\n', { branch: BRANCH, fetch: false });
+    assert.equal(remoteBranchDiverged(fx.root, 'origin', BRANCH), true, '원격에만 커밋이 있음');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('remoteBranchDiverged: 원격 브랜치가 없거나 fetch가 실패하면 false(확인하지 못함)', () => {
+  const fx = makeFixture();
+  try {
+    sh('git', ['checkout', '-q', '-b', BRANCH], fx.root);
+    assert.equal(remoteBranchDiverged(fx.root, 'origin', BRANCH), false, '원격 브랜치 없음');
+    assert.equal(remoteBranchDiverged(fx.root, 'no-such-remote', BRANCH), false, 'fetch 실패');
   } finally {
     fx.cleanup();
   }
