@@ -1,0 +1,66 @@
+# 공격 overlay env-ref-prt: PR이 pull_request_target 워크플로를 고쳐 비밀을 내보내려 한다.
+# 금지사항(step2)에 따라 값 대신 표식 LEAK-ATTEMPT와 sha256 앞 8자만 출력한다.
+# 기대: pull_request_target은 main 정의로 돌아 이 내용(PROBE_DEF=attack-*, LEAK-ATTEMPT)이 로그에 나오지 않는다.
+name: probe-prt
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+env:
+  PROBE_DEF: attack-env-ref-prt
+jobs:
+  no-env:
+    if: contains(github.head_ref, 'env-ref')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ENV_NAME: none
+          S: ${{ secrets.Q20_FAKE_SECRET }}
+        run: |
+          if [ -n "$S" ]; then secret="set sha8=$(printf '%s' "$S" | sha256sum | cut -c1-8)"; else secret=empty; fi
+          echo "Q20 env=$ENV_NAME event=$EVENT ref=$REF sha=$SHA base=$BASE_SHA head=$HEAD_SHA def=$PROBE_DEF workflow_ref=$WORKFLOW_REF workflow_sha=$WORKFLOW_SHA secret=$secret"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: checked-out
+        run: |
+          echo "Q20 checkout head=$(git rev-parse HEAD) def_in_tree=$(grep -m1 -o 'PROBE_DEF: .*' .github/workflows/probe-prt.yml)"
+  env:
+    if: contains(github.head_ref, 'env-ref')
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [judge-claude, judge-codex, codex-auth-store, recorder]
+    environment: ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ENV_NAME: ${{ matrix.env }}
+          S: ${{ secrets.Q20_FAKE_SECRET }}
+        run: |
+          if [ -n "$S" ]; then secret="set sha8=$(printf '%s' "$S" | sha256sum | cut -c1-8)"; else secret=empty; fi
+          echo "Q20 env=$ENV_NAME event=$EVENT ref=$REF sha=$SHA base=$BASE_SHA head=$HEAD_SHA def=$PROBE_DEF workflow_ref=$WORKFLOW_REF workflow_sha=$WORKFLOW_SHA secret=$secret"
+      - name: leak
+        env:
+          S: ${{ secrets.Q20_FAKE_SECRET }}
+        run: |
+          echo "Q20 LEAK-ATTEMPT env=${{ matrix.env }} sha8=$(printf '%s' "$S" | sha256sum | cut -c1-8)"
