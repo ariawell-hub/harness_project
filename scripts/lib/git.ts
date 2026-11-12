@@ -195,6 +195,21 @@ export type BranchUpdate =
   | { status: 'failed'; stage: 'precheck' | 'fetch' | 'merge' | 'push'; reason: string };
 
 /**
+ * 원격 브랜치에 로컬 HEAD에 없는 커밋이 있는가(다른 곳에서 push됐거나 로컬 이력을 고쳐 갈라짐).
+ * `<remote> <branch>`를 fetch해 판정한다. fetch 실패나 원격 브랜치 없음은 false(확인하지 못함). 예외를 던지지 않는다.
+ */
+export function remoteBranchDiverged(worktree: string, remote: string, branch: string): boolean {
+  try {
+    if (!gitTry(['fetch', '--quiet', remote, branch], worktree).ok) return false;
+    const ref = `${remote}/${branch}`;
+    if (!revParse(ref, worktree)) return false;
+    return !gitTry(['merge-base', '--is-ancestor', ref, 'HEAD'], worktree).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * PR 브랜치(worktree의 HEAD)에 <remote>/<base>를 병합하고 일반 push로 <remote>/<branch>를 갱신한다(ADR-0006).
  * rebase·force push는 하지 않는다. 충돌하면 병합을 취소해 worktree와 HEAD를 호출 전으로 둔다.
  * 원격 PR 브랜치에 로컬에 없는 커밋이 있으면(다른 곳에서 push됨) 병합하지 않는다. 예외를 던지지 않는다.
