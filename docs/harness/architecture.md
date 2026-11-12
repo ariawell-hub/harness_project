@@ -30,7 +30,7 @@ review_cycle: on-change
 | `lib/config.ts`   | `harness.config.json` 로드·검증                                                                                                                                                              |
 | `lib/plan.ts`     | 계획 frontmatter·섹션·`index.json`·step AC·브랜치 이름·열린 질문(`openQuestions`, TD-18)                                                                                                     |
 | `lib/attempts.ts` | 실패 기록(`.git/.../harness/attempts.jsonl`), 3회/5회·총량 판정                                                                                                                              |
-| `lib/github.ts`   | `GitHubPort`(gh CLI). `github-fake.ts`는 테스트·스모크용                                                                                                                                     |
+| `lib/github.ts`   | `GitHubPort`(gh CLI). 댓글·Issue 편집 이력(`issueHistory`, TD-19·TD-26). `github-fake.ts`는 테스트·스모크용                                                                                  |
 | `gates/*`         | 기계 검사. 에러 메시지는 "무엇 + 고치는 법 + 근거"                                                                                                                                           |
 | `hooks/*`         | 도구 실행 직전 금지 규칙(R1~R4, R10, R13, R14, R20). POSIX·PowerShell·cmd 방언과 셸 래퍼 재귀, 명령 이름은 대소문자·확장자 무시 (ADR-0005)                                                   |
 | `runner/*`        | 다음 할 일 고르기 → 새 세션 → AC·check로 직접 판정 → PR                                                                                                                                      |

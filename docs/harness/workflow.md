@@ -20,6 +20,7 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
   - 지시 없이 에이전트가 스스로 떠올린 일(발견 사항, 개선 아이디어)은 Issue를 만들지 않는다. 제작자에게 제안하거나 TD·발견 사항으로 남긴다.
   - runner는 제작자·외주 개발자(`harness.config.json`의 `github.collaborators`) 계정이 만든 Issue만 가져간다. 봇 계정이 대신 등록한 Issue는 runner가 고르지 않는다. 대화 세션의 `new-task --issue`로는 시작할 수 있다.
   - 봇이 대신 등록한 Issue를 runner에 맡기려면 `harness.config.json`의 `github.botIssues`가 `"owner-approved"`여야 한다(기본값 `"exclude"`). 그 상태에서 제작자 계정으로 그 Issue에 `/harness accept` 한 줄 댓글을 달면 후보가 된다. 봇·외주 개발자 계정의 댓글, 인용, 문장 속 언급, 코드 블록 안의 줄은 승인이 아니다. 취소하려면 Issue를 닫거나 `needs-human` 라벨을 붙인다.
+  - runner는 Issue를 만든 뒤의 변경도 본다(설계서 14.6절). 허용 계정이 아닌 계정(봇 등)이 제목·본문을 고쳤으면 그 Issue를 고르지 않고, 이미 맡았으면 계획을 멈추고 `needs-human`으로 알린다. 내용을 확인하고 맞으면 제작자 계정으로 `/harness accept` 한 줄 댓글을 단다(봇 Issue 설정과 관계없다). 승인 뒤에 다시 고쳐지면 다시 승인한다. 다른 계정이 고친 제작자 댓글은 답·승인이 아니므로 새 댓글로 단다.
 - `new-task`가 `claim/<issue>`를 push해 선점한다. 거부되면 다른 작업자가 이미 맡은 것이니 다음 Issue로 간다.
   - 선점은 마지막 step이 병합되어 Issue가 닫힌 뒤 다음 `start`가 지운다(닫혔음을 확인 못 하면 남긴다). 손으로 지우지 않는다. 만료된 선점 정리는 아직 없다(TD-11).
 - **대화 세션은 main 체크아웃에 머문 채** `new-task`가 출력한 worktree 경로의 파일을 고친다. 자기 계획(`owner`가 현재 작업자)의 worktree면 L1 훅이 허용하므로 `EnterWorktree`(사람 승인 필요)로 옮겨 갈 필요가 없다. 다른 작업자(runner 등)의 worktree는 막힌다.

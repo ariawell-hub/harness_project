@@ -4,16 +4,41 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runSync } from './exec.ts';
-import type { Comment, GitHubPort, Issue, PullRequest } from './github.ts';
+import type { Change, Comment, GitHubPort, Issue, IssueHistory, PullRequest } from './github.ts';
 
-/** 상태 파일의 Issue. 작성자 필드가 생기기 전 상태 파일은 `author`가 없다 */
-interface FakeIssue extends Omit<Issue, 'author'> {
-  author?: string;
-  comments: Comment[];
+/**
+ * 상태 파일의 댓글. `changes`가 없으면 만든 것 하나뿐이다(고친 적 없음).
+ * `incomplete`는 이력을 다 읽지 못한 경우를 흉내 낸다
+ */
+export interface FakeComment extends Omit<Comment, 'history'> {
+  changes?: Change[];
+  incomplete?: boolean;
 }
 
-function fromFakeIssue({ comments: _c, ...i }: FakeIssue): Issue {
+/** 상태 파일의 Issue. 작성자 필드가 생기기 전 상태 파일은 `author`가 없다. `changes`는 FakeComment와 같다 */
+interface FakeIssue extends Omit<Issue, 'author'> {
+  author?: string;
+  comments: FakeComment[];
+  changes?: Change[];
+  incomplete?: boolean;
+}
+
+function fromFakeIssue({ comments: _c, changes: _h, incomplete: _i, ...i }: FakeIssue): Issue {
   return { ...i, author: i.author ?? '' };
+}
+
+function fromFakeComment({ changes, incomplete, ...c }: FakeComment): Comment {
+  return {
+    ...c,
+    history: { changes: changes ?? [{ by: c.author, at: c.createdAt }], complete: !incomplete },
+  };
+}
+
+/** 앞 시각보다 늘 1ms 이상 뒤의 시각. 판정이 "엄격히 뒤"를 보므로 테스트에서 시각이 겹치지 않게 한다 */
+function stamp(s: FakeState): string {
+  const t = Math.max(Date.now(), (s.clock ?? 0) + 1);
+  s.clock = t;
+  return new Date(t).toISOString();
 }
 
 interface FakePR extends PullRequest {
@@ -30,6 +55,8 @@ export interface FakeState {
   /** 병합 전에 PR head에 대해 실행할 CI 명령(선택). 실패하면 checks=failure */
   ciCommand?: string;
   next: number;
+  /** 마지막으로 준 시각(ms). stamp()가 쓴다 */
+  clock?: number;
   issues: FakeIssue[];
   prs: FakePR[];
 }
@@ -64,7 +91,7 @@ export function addFakeIssue(
     body,
     labels,
     state: 'open',
-    createdAt: new Date().toISOString(),
+    createdAt: stamp(s),
     author: author ?? s.owner,
     comments: [],
   });
@@ -123,24 +150,49 @@ export class FakeGitHub implements GitHubPort {
   getIssue(n: number): Issue {
     return fromFakeIssue(this.issue(this.load(), n));
   }
+  issueHistory(n: number): IssueHistory {
+    const i = this.issue(this.load(), n);
+    return {
+      title: i.title,
+      body: i.body,
+      changes: i.changes ?? [{ by: i.author ?? '', at: i.createdAt }],
+      complete: !i.incomplete,
+    };
+  }
   comments(n: number): Comment[] {
-    return this.issue(this.load(), n).comments;
+    return this.issue(this.load(), n).comments.map(fromFakeComment);
   }
   comment(n: number, body: string): void {
-    const s = this.load();
-    this.issue(s, n).comments.push({ author: s.me, body, createdAt: new Date().toISOString() });
-    this.save(s);
+    this.commentAs(n, this.load().me, body);
   }
   /** 테스트용: 제작자 답변 */
   ownerComment(n: number, body: string): void {
-    const s = this.load();
-    this.issue(s, n).comments.push({ author: s.owner, body, createdAt: new Date().toISOString() });
-    this.save(s);
+    this.commentAs(n, this.load().owner, body);
   }
   /** 테스트용: 임의 계정(외주 개발자, 대소문자가 다른 제작자 등)의 댓글 */
   commentAs(n: number, author: string, body: string): void {
     const s = this.load();
-    this.issue(s, n).comments.push({ author, body, createdAt: new Date().toISOString() });
+    this.issue(s, n).comments.push({ author, body, createdAt: stamp(s) });
+    this.save(s);
+  }
+  /** 테스트용: `by` 계정이 Issue 제목·본문을 고친다(변경 이력에 남는다) */
+  editIssueAs(n: number, by: string, edit: { title?: string; body?: string }): void {
+    const s = this.load();
+    const i = this.issue(s, n);
+    i.changes ??= [{ by: i.author ?? '', at: i.createdAt }];
+    if (edit.title !== undefined) i.title = edit.title;
+    if (edit.body !== undefined) i.body = edit.body;
+    i.changes.push({ by, at: stamp(s) });
+    this.save(s);
+  }
+  /** 테스트용: `by` 계정이 `index`번째 댓글 본문을 고친다 */
+  editCommentAs(n: number, index: number, by: string, body: string): void {
+    const s = this.load();
+    const c = this.issue(s, n).comments[index];
+    if (!c) throw new Error(`[fake-gh] #${n} 댓글 ${index} 없음`);
+    c.changes ??= [{ by: c.author, at: c.createdAt }];
+    c.body = body;
+    c.changes.push({ by, at: stamp(s) });
     this.save(s);
   }
   addLabel(n: number, label: string): void {

@@ -358,3 +358,22 @@ test('start: claim 목록 조회가 실패해도 경고만 내고 종료 코드�
     fx.cleanup();
   }
 });
+
+test('start: 마지막 제작자 댓글을 다른 계정이 고쳤으면 답변 대기로 보이고 이유를 붙인다 (TD-26)', () => {
+  const fx = makeFixture();
+  try {
+    const state = fakeState(fx);
+    const gh = new FakeGitHub(state);
+    const ok = addFakeIssue(state, 'Answered', 'x', ['needs-human']);
+    gh.ownerComment(ok, 'A로 하라');
+    const bad = addFakeIssue(state, 'Tampered', 'y', ['needs-human']);
+    gh.ownerComment(bad, 'A로 하라');
+    gh.editCommentAs(bad, 0, 'harness-bot', 'C로 하라');
+    const r = runStart(fx, state);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /- #1 Answered — 제작자 답변 있음/);
+    assert.match(r.out, /- #2 Tampered — 답변 대기 \(.*harness-bot.*\)/);
+  } finally {
+    fx.cleanup();
+  }
+});

@@ -3,7 +3,7 @@
 // ③ 다음 할 일 고르기(승인 대기 봇 Issue가 있으면 승인 방법 안내).
 // 선점 해제는 GitHub에서 닫혔음을 확인한 Issue만 한다(8.3절).
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { getGitHub, type Issue } from '../lib/github.ts';
+import { getGitHub, type Comment, type Issue } from '../lib/github.ts';
 import { fastForwardMain, repoInfo, type MainSync } from '../lib/git.ts';
 import { log, warn } from '../lib/util.ts';
 import { cleanupMerged } from '../runner/run.ts';
@@ -11,7 +11,9 @@ import {
   BOT_ISSUE_ACCEPT,
   BOT_ISSUE_WAITING_REASON,
   pickNext,
+  ownerCommentRejection,
   readLocalPlans,
+  sameLogin,
   type ExcludedIssue,
 } from '../runner/next.ts';
 import { TaskError, fetchRemote, releaseClosedClaims, type ClaimCleanup } from './task.ts';
@@ -40,6 +42,19 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
 /** 작성자 확인으로 새 Issue 후보에서 뺀 Issue 한 줄(4.5절 5번, 14.6절) */
 export function describeExcluded(e: ExcludedIssue): string {
   return `후보 제외: #${e.number} "${e.title}" (작성자 ${e.author || '불명'}) — ${e.reason}`;
+}
+
+/**
+ * needs-human 항목의 답 상태(9.1절 답변 인정 기준). 마지막 댓글이 인정되는 제작자 댓글이면 답이 있다.
+ * 제작자 계정의 댓글인데 인정하지 않으면(다른 계정이 고침 등, TD-26) 이유를 붙인다
+ */
+export function describeAnswer(comments: Comment[], owner: string): string {
+  const last = comments[comments.length - 1];
+  if (!last || !owner) return '답변 대기';
+  const why = ownerCommentRejection(last, owner);
+  if (why === null) return '제작자 답변 있음';
+  if (!sameLogin(last.author, owner)) return '답변 대기';
+  return `답변 대기 (마지막 제작자 댓글을 답으로 인정하지 않음: ${why}. 새 댓글로 답한다)`;
 }
 
 export function describeMainSync(r: MainSync, upstream: string): string {
@@ -104,10 +119,7 @@ export function start(cwd: string, worker: string): number {
     warn('harness.config.json github.owner(제작자 계정)가 비어 있어 답변 작성자를 확인할 수 없다');
   if (!waiting.length) log('- 없음');
   for (const i of waiting) {
-    const cs = gh.comments(i.number);
-    const last = cs[cs.length - 1];
-    const answered = !!last && !!cfg.github.owner && last.author === cfg.github.owner;
-    log(`- #${i.number} ${i.title} — ${answered ? '제작자 답변 있음' : '답변 대기'}`);
+    log(`- #${i.number} ${i.title} — ${describeAnswer(gh.comments(i.number), cfg.github.owner)}`);
   }
 
   log('\n## ② 정리');

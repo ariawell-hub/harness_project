@@ -30,6 +30,7 @@ review_cycle: on-change
 - 설계서 v0.7.10 · runner 계획 작성 질문(Issue #33, TD-18 해결): 계획 작성 세션이 "열린 질문"에 `### 질문:`(절차서 7절 형식)을 남기면 runner가 계획을 `blocked`로 커밋·push하고 Issue에 `needs-human` + 제작자 멘션으로 질문 전문을 올린다. 올린 질문은 worktree 하네스 상태의 `questions.json`에 남겨 다시 올리지 않는다. 제작자 답을 받으면 계획을 `draft`로 되돌리고 답을 넣어 계획 작성 세션을 다시 띄운다. 계획 작성 프롬프트에 질문 형식 안내를 더했다. `lib/plan.ts`에 `openQuestions`. step 세션의 질문 감지는 TD-24.
 - 설계서 v0.7.11 · `related_code` 작성 기준(Issue #39, TD-25 해결): 7.2절에 "문서의 내용이 기대는 파일만, 폴더 전체·계획 폴더는 넣지 않는다"를 적었다. ADR-0001 `[package.json, tsconfig.json]`, ADR-0005 `[lib/exec.ts, hooks/shell.ts, .gitattributes]`, ADR-0006 `[lib/git.ts]`, `workflow.md`는 `docs/exec-plans/` 대신 `docs/exec-plans/TEMPLATE*.md`. R8 검토 경고가 무관한 코드 변경·계획 파일 추가마다 반복되던 문제를 줄인다.
 - 설계서 v0.7.12: 새 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`). `owner-approved`면 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue도 runner 후보가 된다(봇·외주 개발자 댓글, 인용·문장 속 언급·코드 블록은 불인정). `harness.config.json`은 `exclude`로 명시하고, 승인 대기 Issue가 있으면 `start`가 승인 방법을 안내한다. 쓰기 권한 계정이 고친 댓글을 가려내지 못하는 한계는 TD-26(Issue #5).
+- 설계서 v0.7.13 (Issue #41): runner 신뢰 판정이 편집 이력을 본다. `GitHubPort.issueHistory`(본문 편집 + 제목 변경)와 댓글 편집 이력(GraphQL, 댓글은 최근 100개). 다른 계정이 고친 제작자 댓글은 답·승인이 아니다(`ownerComment`, `start`는 이유 표시). 허용 계정이 아닌 계정이 만들거나 고친 Issue는 그 뒤의 제작자 `/harness accept`가 있어야 후보다(`issueTrust`). runner는 계획 작성 직전에 다시 확인하고, 통과하지 못하면 `blocked` + `needs-human`. TD-19·TD-26 해결.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
