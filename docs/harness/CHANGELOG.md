@@ -19,6 +19,7 @@ review_cycle: on-change
 - 설계서 v0.7.6 · L1 R3 판정(Issue #16 step0): 쓰기 대상을 그 파일이 속한 worktree 기준으로 판정한다. main 체크아웃의 대화 세션은 자기 소유(계획 `owner` = `HARNESS_WORKER`, 없으면 `session`) 작업 worktree를 `EnterWorktree` 없이 고칠 수 있다. 다른 작업자의 worktree, 소유자를 알 수 없는 worktree, worktree 간 수정, main 체크아웃 수정은 막는다(임시 폴더 안이어도 같은 리포면 막는다).
 - 병합 worktree 정리(Issue #16 step1): `cleanupMerged`(`start`·runner)가 호출한 프로세스의 현재 폴더가 들어 있는 worktree는 지우지 않고 "남김"과 이유를 출력한다(경로는 `realpath`로 비교).
 - 설계서 v0.7.7 · 질문 규칙(Issue #16 step2): 제작자가 대화로 직접 지시한 일은 봇이 Issue를 등록하고 묻지 않고 시작한다(절차서 1절의 "Issue가 없으면 만들지 말고 묻는다" 삭제). 추천안이 분명한 운영 판단은 묻지 않고 기록, 질문은 작업 시작 때 모음, 대화 결정은 즉시 리포에 기록(절차서 7절, 설계서 9.1절, AGENTS.md).
+- runner 세션 기록(Issue #16 step3): 세션마다 원본 출력을 `<공유 git-dir>/harness/sessions/`에 남기고 `runner.jsonl`에 `session-end`(세션 id·턴·종료 이유·권한 거부 개수와 도구 이름·로그 경로)를 쓴다. 환경 장애로 끝난 세션도 기록한다. `harness.config.json`의 Claude 실행 인자에서 `--no-session-persistence`를 빼 세션 전체 기록이 남는다(보호 경로). Codex는 TD-20.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

@@ -3,6 +3,7 @@
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -39,7 +40,7 @@ import {
   slugFor,
 } from '../commands/task.ts';
 import { planGate } from '../gates/plan-gate.ts';
-import { resolveAgentCommand, runSession, type AgentTool } from './agents.ts';
+import { resolveAgentCommand, runSession, type AgentTool, type SessionResult } from './agents.ts';
 import { pickNext, readLocalPlans, type LocalPlan, type Pick } from './next.ts';
 import { planningPrompt, stepPrompt } from './prompt.ts';
 
@@ -82,6 +83,51 @@ function event(ctx: Ctx, ev: string, data: Record<string, unknown> = {}): void {
   log(
     `[runner ${ctx.o.worker}] ${ev}${data.reason ? ': ' + data.reason : ''}${data.detail ? ' — ' + String(data.detail).slice(0, 200) : ''}`,
   );
+}
+
+/**
+ * 세션 원본 출력을 공유 git-dir의 harness/sessions/에 남기고 session-end 이벤트를 쓴다(Issue #16).
+ * 무인 세션이 왜 멈췄는지(권한 거부, 종료 이유)를 나중에 볼 수 있게 한다. 기록 실패는 작업을 막지 않는다.
+ */
+function recordSession(
+  ctx: Ctx,
+  l: LocalPlan,
+  kind: 'planning' | 'step',
+  attempt: number,
+  s: SessionResult,
+): void {
+  let file: string | undefined;
+  try {
+    const dir = path.join(harnessStateDir(ctx.main, 'common'), 'sessions');
+    mkdirSync(dir, { recursive: true });
+    const stamp = nowIso().replace(/[:+]/g, '-');
+    const part = kind === 'planning' ? 'plan' : `s${l.step ?? 0}`;
+    // 환경 장애 재시도는 시도 번호가 같고 같은 초에 끝날 수 있다. 덮어쓰지 않게 번호를 붙인다
+    const base = path.join(dir, `${stamp}-${l.id}-${part}-${attempt}`);
+    file = `${base}.log`;
+    for (let i = 2; existsSync(file); i++) file = `${base}-${i}.log`;
+    writeFileSync(file, s.raw, { flag: 'wx' });
+  } catch (e) {
+    warn(`세션 출력 저장 실패: ${(e as Error).message}`);
+  }
+  const sum = s.summary;
+  const tools = [...new Set((sum?.denials ?? []).map((d) => d.tool))];
+  event(ctx, 'session-end', {
+    plan: l.id,
+    step: l.step,
+    kind,
+    attempt,
+    code: s.code,
+    timedOut: s.timedOut,
+    durationMs: s.durationMs,
+    sessionId: sum?.sessionId,
+    turns: sum?.numTurns,
+    terminalReason: sum?.terminalReason,
+    denials: sum?.denials.length ?? 0,
+    deniedTools: tools,
+    log: file,
+    ...(tools.length ? { reason: `권한 거부 ${sum!.denials.length}건: ${tools.join(', ')}` } : {}),
+  });
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -187,6 +233,7 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
     ctx.cfg,
     ctx.cfg.limits.sessionTimeoutMin * 60_000,
   );
+  recordSession(ctx, l, 'planning', n, s);
   if (s.envFailure) {
     recordAttempt(info, {
       plan: l.id,
@@ -296,6 +343,7 @@ async function doStep(
     ctx.cfg,
     ctx.cfg.limits.sessionTimeoutMin * 60_000,
   );
+  recordSession(ctx, l, 'step', sessions + 1, s);
   if (s.envFailure) {
     recordAttempt(info, {
       plan: l.id,

@@ -5,6 +5,7 @@
 //   timeout : 오래 멈춘다(세션 시간 제한 확인)
 //   limit   : 사용량 한도 메시지로 실패한다(환경 장애, 실패로 세지 않음)
 // FAKE_LOG: 받은 프롬프트를 JSON 줄로 남긴다.
+// FAKE_RESULT_JSON=1: 끝에 Claude `-p --output-format json` 형식의 결과 객체(권한 거부 포함)를 출력한다.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -71,4 +72,23 @@ if (action === 'timeout') {
   }
   git('add', '-A');
   git('commit', '-q', '-m', `feat: ${slug} step ${step}`);
+}
+
+if (process.env.FAKE_RESULT_JSON && action !== 'timeout') {
+  process.stdout.write(
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      num_turns: 7,
+      terminal_reason: 'completed',
+      session_id: `fake-${slug}-${step}`,
+      result: '끝났습니다',
+      permission_denials: [
+        { tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'sed -n 1,20p a.ts' } },
+        { tool_name: 'Bash', tool_use_id: 't2', tool_input: { command: 'find . -name x' } },
+        { tool_name: 'WebFetch', tool_use_id: 't3', tool_input: { url: 'https://example.com' } },
+      ],
+    }) + '\n',
+  );
 }

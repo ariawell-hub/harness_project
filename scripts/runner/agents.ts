@@ -18,6 +18,66 @@ export interface SessionResult {
   output: string;
   /** 사용량 한도·네트워크 등 환경 장애(실패로 세지 않음, 9.2절) */
   envFailure: boolean;
+  /** 자르지 않은 원본 출력(stdout, stderr). runner가 세션 로그 파일로 남긴다 */
+  raw: string;
+  /** Claude 결과 JSON 요약. 결과 객체가 없으면(Codex, 텍스트 출력) null */
+  summary: SessionSummary | null;
+}
+
+/** 무인 세션이 어떻게 끝났는지(Issue #16). 특히 dontAsk가 조용히 거부한 도구를 남긴다 */
+export interface SessionSummary {
+  sessionId?: string;
+  numTurns?: number;
+  terminalReason?: string;
+  isError?: boolean;
+  result?: string;
+  denials: { tool: string; input: string }[];
+}
+
+type Obj = Record<string, unknown>;
+
+function resultObject(stdout: string): Obj | null {
+  const isResult = (x: unknown): x is Obj =>
+    typeof x === 'object' && x !== null && (x as Obj).type === 'result';
+  const text = stdout.trim();
+  if (!text) return null;
+  try {
+    const whole = JSON.parse(text) as unknown;
+    if (isResult(whole)) return whole;
+    if (Array.isArray(whole)) return [...whole].reverse().find(isResult) ?? null;
+  } catch {
+    // 여러 줄 출력: 줄마다 본다
+  }
+  for (const line of text.split('\n').reverse()) {
+    const l = line.trim();
+    if (!l.startsWith('{')) continue;
+    try {
+      const o = JSON.parse(l) as unknown;
+      if (isResult(o)) return o;
+    } catch {
+      // JSON이 아닌 줄
+    }
+  }
+  return null;
+}
+
+/** `claude -p --output-format json`(또는 stream-json)의 마지막 결과 객체를 요약한다. 없으면 null */
+export function parseSessionSummary(stdout: string): SessionSummary | null {
+  const r = resultObject(stdout);
+  if (!r) return null;
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const denials = Array.isArray(r.permission_denials) ? (r.permission_denials as Obj[]) : [];
+  return {
+    sessionId: str(r.session_id),
+    numTurns: typeof r.num_turns === 'number' ? r.num_turns : undefined,
+    terminalReason: str(r.terminal_reason) ?? str(r.subtype),
+    isError: typeof r.is_error === 'boolean' ? r.is_error : undefined,
+    result: str(r.result)?.slice(0, 500),
+    denials: denials.map((d) => ({
+      tool: str(d.tool_name) ?? '?',
+      input: JSON.stringify(d.tool_input ?? null).slice(0, 200),
+    })),
+  };
 }
 
 const ENV_FAILURE =
@@ -130,5 +190,7 @@ export async function runSession(
     durationMs: r.durationMs,
     output: (r.stdout + '\n' + r.stderr).slice(-20000),
     envFailure: isEnvFailure(r),
+    raw: r.stdout + (r.stderr ? `\n--- stderr ---\n${r.stderr}` : ''),
+    summary: parseSessionSummary(r.stdout),
   };
 }
