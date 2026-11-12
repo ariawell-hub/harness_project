@@ -26,7 +26,7 @@ review_cycle: on-change
 | 모듈              | 책임                                                                                                                                                |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lib/exec.ts`     | 시간 제한 프로세스 실행, 프로세스 그룹 정리. 셸 명령은 macOS·Linux `/bin/sh`, Windows Git Bash. Windows 실행 파일 확인(`.cmd` 래퍼 거부) (ADR-0005) |
-| `lib/git.ts`      | worktree·git-dir·트리 해시·diff 도우미, main 체크아웃 fast-forward                                                                                  |
+| `lib/git.ts`      | worktree·git-dir·트리 해시·diff 도우미, main 체크아웃 fast-forward, PR 브랜치 main 병합 갱신(`updateBranchFromBase`, 일반 push만, ADR-0006)         |
 | `lib/config.ts`   | `harness.config.json` 로드·검증                                                                                                                     |
 | `lib/plan.ts`     | 계획 frontmatter·섹션·`index.json`·step AC·브랜치 이름                                                                                              |
 | `lib/attempts.ts` | 실패 기록(`.git/.../harness/attempts.jsonl`), 3회/5회·총량 판정                                                                                     |

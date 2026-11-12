@@ -23,6 +23,7 @@ review_cycle: on-change
 - CLI·차단 메시지(Issue #16 step4): `node scripts/harness.ts <명령> --help`(또는 `-h`)는 아무것도 실행하지 않고 도움말을 출력하고, `--` 앞의 모르는 `--옵션`은 실행 없이 종료 코드 2로 끝난다(TD-17 해결). 리포 밖(사용자 환경·다른 프로젝트) 파일 쓰기 차단 메시지를 "리포 밖 파일"로 바꾸고 사용자가 직접 실행할 `! <명령>` 안내를 준다.
 - `start`가 fetch 뒤 main 체크아웃을 `origin/main`으로 fast-forward 하고 `harness.config.json`을 다시 읽는다(Issue #4). 못 당기면(다른 브랜치, 미커밋 변경, 로컬 전용 커밋, merge 실패) ② 정리 절에 이유를 출력하고 넘어간다. runner `syncMain`과 같은 함수(`lib/git.ts`의 `fastForwardMain`)를 쓴다. runner 실행 중 설정 재로드는 TD-21.
 - 설계서 v0.7.8 · PR 갱신 방식(ADR-0006, Issue #22 step0): main에 뒤처지거나 충돌한 PR은 rebase가 아니라 `origin/main` 병합 + 일반 push로 갱신한다. R14(에이전트 force push 금지)는 유지. 절차서 5절에 세션 절차(이미 rebase했으면 `merge -s ours`, 막히면 `needs-human`)를 더했다. runner 구현은 step1, runner step 완료 push의 lease 폴백은 TD-22, 다른 작업자 worktree 인계는 TD-23.
+- runner PR 갱신(ADR-0006, Issue #22 step1): `doRebase`(rebase + `--force-with-lease`)를 `doUpdate`로 바꿨다. `lib/git.ts`의 `updateBranchFromBase`가 `origin/main`을 병합하고 일반 push한다. 충돌하면 병합을 취소하고 계획을 `blocked` + `needs-human`으로, 원격 PR 브랜치에 로컬에 없는 커밋이 있거나 push가 거부되면 실패로 기록한다(반복되면 5회에 멈춤). GitHub은 갱신이 필요하다는데 브랜치가 이미 최신이면 환경 대기로 처리해 헛돌지 않는다. `pickNext`는 `BEHIND`뿐 아니라 `DIRTY`(충돌)도 갱신 대상으로 보고, 계획이 `blocked`인 PR은 다시 고르지 않는다. 작업 종류 `rebase` → `update`, 실패 키 `pr:rebase-conflict` → `pr:update`.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

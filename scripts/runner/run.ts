@@ -23,6 +23,7 @@ import {
   harnessStateDir,
   isClean,
   repoInfo,
+  updateBranchFromBase,
   type RepoInfo,
 } from '../lib/git.ts';
 import { acceptanceCommands, findPlan, parseDoc, readIndex, section } from '../lib/plan.ts';
@@ -523,36 +524,38 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
   event(ctx, 'answered', { issue: t.issue });
 }
 
-async function doRebase(ctx: Ctx, l: LocalPlan): Promise<void> {
-  const target = `${ctx.cfg.github.remote}/${ctx.cfg.github.defaultBranch}`;
-  const r = gitTry(['rebase', '--quiet', target], l.worktree);
+/** main에 뒤처지거나 충돌한 PR을 origin/main 병합 + 일반 push로 갱신한다(ADR-0006). force push는 없다 */
+async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env'> {
+  const { remote, defaultBranch } = ctx.cfg.github;
+  const r = updateBranchFromBase(l.worktree, remote, defaultBranch, l.branch);
   const info = repoInfo(l.worktree);
-  if (!r.ok) {
-    gitTry(['rebase', '--abort'], l.worktree);
-    recordAttempt(info, {
-      plan: l.id,
-      step: l.step,
-      key: 'pr:rebase-conflict',
-      ok: false,
-      kind: 'pr',
-      detail: tail(r.stderr, 20),
-    });
-    // 1단계: 충돌 해결 세션은 아직 없다. 사람에게 넘긴다(2단계에서 자동 대응)
-    await blockPlan(ctx, l, `main과 충돌해 자동 rebase를 할 수 없다: ${tail(r.stderr, 3)}`);
-    return;
+  const record = (ok: boolean, detail?: string) =>
+    recordAttempt(info, { plan: l.id, step: l.step, key: 'pr:update', ok, kind: 'pr', detail });
+  if (r.status === 'updated') {
+    record(true);
+    event(ctx, 'updated', { plan: l.id, pr: l.pr?.number, from: r.from, to: r.to });
+    return 'ok';
   }
-  gitTry(
-    ['push', '--quiet', '--force-with-lease', ctx.cfg.github.remote, `HEAD:refs/heads/${l.branch}`],
-    l.worktree,
-  );
-  recordAttempt(info, {
-    plan: l.id,
-    step: l.step,
-    key: 'pr:rebase-conflict',
-    ok: true,
-    kind: 'pr',
-  });
-  event(ctx, 'rebased', { plan: l.id, pr: l.pr?.number });
+  if (r.status === 'up-to-date') {
+    // GitHub의 병합 상태 계산이 늦은 것이다. 실패로 세지 않고 환경 대기로 넘긴다(바로 다시 고르면 헛돈다)
+    event(ctx, 'update-noop', { plan: l.id, pr: l.pr?.number, head: r.head });
+    return 'env';
+  }
+  if (r.status === 'conflict') {
+    record(false, `main 병합 충돌: ${r.files.join(', ')}`);
+    // 1단계: 충돌 해결 세션은 아직 없다. 사람에게 넘긴다(2단계에서 자동 대응, TD-9)
+    await blockPlan(
+      ctx,
+      l,
+      `${remote}/${defaultBranch} 병합이 충돌한다(${r.files.join(', ')}). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다`,
+    );
+    return 'ok';
+  }
+  record(false, `PR 갱신 실패(${r.stage}): ${r.reason}`);
+  event(ctx, 'update-fail', { plan: l.id, pr: l.pr?.number, stage: r.stage, reason: r.reason });
+  const v = judge(readAttempts(info), l.id, l.step, limitsOf(ctx.cfg));
+  if (v.action === 'stop') await blockPlan(ctx, l, v.reason ?? `PR 갱신 반복 실패: ${r.reason}`);
+  return 'ok';
 }
 
 async function doFixPR(
@@ -683,8 +686,8 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
           case 'fix-pr':
             outcome = await doFixPR(ctx, t.local, t.pr.failingChecks);
             break;
-          case 'rebase':
-            await doRebase(ctx, t.local);
+          case 'update':
+            outcome = await doUpdate(ctx, t.local);
             break;
           case 'plan':
             outcome = await doPlanning(ctx, t.local);

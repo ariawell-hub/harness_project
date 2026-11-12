@@ -188,6 +188,75 @@ export function fastForwardMain(mainRoot: string, remote: string, branch: string
   }
 }
 
+export type BranchUpdate =
+  | { status: 'up-to-date'; head: string }
+  | { status: 'updated'; from: string; to: string }
+  | { status: 'conflict'; files: string[] }
+  | { status: 'failed'; stage: 'precheck' | 'fetch' | 'merge' | 'push'; reason: string };
+
+/**
+ * PR 브랜치(worktree의 HEAD)에 <remote>/<base>를 병합하고 일반 push로 <remote>/<branch>를 갱신한다(ADR-0006).
+ * rebase·force push는 하지 않는다. 충돌하면 병합을 취소해 worktree와 HEAD를 호출 전으로 둔다.
+ * 원격 PR 브랜치에 로컬에 없는 커밋이 있으면(다른 곳에서 push됨) 병합하지 않는다. 예외를 던지지 않는다.
+ * `updated.from`은 갱신 전 원격 PR 브랜치 head다. push가 실패하면 로컬 병합 커밋은 남고 다음 호출이 push만 다시 한다.
+ */
+export function updateBranchFromBase(
+  worktree: string,
+  remote: string,
+  base: string,
+  branch: string,
+): BranchUpdate {
+  const fail = (stage: 'precheck' | 'fetch' | 'merge' | 'push', reason: string): BranchUpdate => ({
+    status: 'failed',
+    stage,
+    reason,
+  });
+  const baseRef = `${remote}/${base}`;
+  const branchRef = `${remote}/${branch}`;
+  try {
+    const status = gitTry(['status', '--porcelain'], worktree);
+    if (!status.ok) return fail('precheck', `git status 실패: ${firstLine(status.stderr)}`);
+    if (status.stdout.trim() !== '') {
+      return fail(
+        'precheck',
+        '미커밋 변경이나 추적 안 된 파일이 있다. 커밋하거나 치운 뒤 다시 갱신한다',
+      );
+    }
+    const fetched = gitTry(['fetch', '--quiet', remote, base, branch], worktree);
+    if (!fetched.ok) return fail('fetch', `git fetch 실패: ${firstLine(fetched.stderr)}`);
+    const remoteHead = revParse(branchRef, worktree);
+    if (!remoteHead || !revParse(baseRef, worktree)) {
+      return fail('fetch', `${baseRef} 또는 ${branchRef}가 없다`);
+    }
+    if (!gitTry(['merge-base', '--is-ancestor', branchRef, 'HEAD'], worktree).ok) {
+      return fail(
+        'precheck',
+        `${branchRef}에 로컬에 없는 커밋이 있다(다른 곳에서 push됐다). 덮어쓰지 않는다. 고치는 법: 절차서 5절대로 원격 이력을 병합한 뒤 갱신한다`,
+      );
+    }
+    if (!gitTry(['merge-base', '--is-ancestor', baseRef, 'HEAD'], worktree).ok) {
+      const m = gitTry(['merge', '--no-edit', '--quiet', baseRef], worktree);
+      if (!m.ok) {
+        const unmerged = gitTry(['diff', '--name-only', '--diff-filter=U'], worktree);
+        const files = unmerged.ok ? unmerged.stdout.split('\n').filter(Boolean) : [];
+        if (gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], worktree).ok) {
+          gitTry(['merge', '--abort'], worktree);
+        }
+        if (files.length) return { status: 'conflict', files };
+        return fail('merge', `git merge 실패: ${firstLine(m.stderr || m.stdout)}`);
+      }
+    }
+    const head = revParse('HEAD', worktree);
+    if (!head) return fail('merge', 'HEAD를 읽지 못했다');
+    if (head === remoteHead) return { status: 'up-to-date', head };
+    const pushed = gitTry(['push', '--quiet', remote, `HEAD:refs/heads/${branch}`], worktree);
+    if (!pushed.ok) return fail('push', `git push 실패: ${firstLine(pushed.stderr)}`);
+    return { status: 'updated', from: remoteHead, to: head };
+  } catch (e) {
+    return fail('precheck', `git 실행 실패: ${firstLine((e as Error).message)}`);
+  }
+}
+
 function firstLine(s: string): string {
   return s.trim().split('\n')[0] || '(출력 없음)';
 }

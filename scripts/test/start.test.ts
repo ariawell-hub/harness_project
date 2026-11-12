@@ -1,29 +1,23 @@
 // start의 main 동기화 테스트(Issue #4): fastForwardMain 단위 + `harness.ts start` 통합.
 // 원격 main은 bare 원격을 별도 clone에서 push해 앞서게 만든다(main 체크아웃을 되돌리지 않는다).
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runSync } from '../lib/exec.ts';
 import { fastForwardMain } from '../lib/git.ts';
 import { initFakeState } from '../lib/github-fake.ts';
-import { commitAll, fixtureConfig, makeFixture, sh, write, type Fixture } from './helpers.ts';
+import {
+  advanceRemote,
+  commitAll,
+  fixtureConfig,
+  makeFixture,
+  sh,
+  write,
+  type Fixture,
+} from './helpers.ts';
 
 const head = (root: string, ref = 'HEAD') => sh('git', ['rev-parse', ref], root);
-
-/** bare 원격을 다른 곳에 clone해 파일을 바꾸고 push한 뒤, fixture 리포에서 fetch한다 */
-function advanceRemote(fx: Fixture, rel: string, content: string): string {
-  const clone = path.join(mkdtempSync(path.join(fx.dir, 'clone-')), 'c');
-  sh('git', ['clone', '-q', fx.remote, clone], fx.dir);
-  sh('git', ['config', 'user.email', 'test@example.invalid'], clone);
-  sh('git', ['config', 'user.name', 'test'], clone);
-  sh('git', ['config', 'commit.gpgsign', 'false'], clone);
-  write(clone, rel, content);
-  const sha = commitAll(clone, `remote: ${rel}`);
-  sh('git', ['push', '-q', 'origin', 'main'], clone);
-  sh('git', ['fetch', '-q', 'origin'], fx.root);
-  return sha;
-}
 
 test('fastForwardMain: 원격이 앞서면 당긴다 (a)', () => {
   const fx = makeFixture();

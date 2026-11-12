@@ -12,7 +12,8 @@
     {
       "step": 1,
       "name": "runner-update",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-12T12:44:40+09:00"
     }
   ]
 }
