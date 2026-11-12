@@ -2,7 +2,7 @@
 id: 20261112-r8-adr-review
 issue: 37 # GitHub Issue 번호
 type: docs # 브랜치 접두어
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
