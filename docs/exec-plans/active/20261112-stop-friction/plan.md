@@ -58,6 +58,8 @@ claimed_at: 2026-11-12T09:50:06+09:00 # new-task가 채운다
 - 2026-11-12 10:15 step0: 먼저 실패한 테스트 기록 — `node --test scripts/test/guard.test.ts` → `does not provide an export named 'buildContext'`로 실패. 구현 후 15개 통과(새 테스트 2개: 판정 표, 실제 훅 프로세스). 훅 프로세스로 main 체크아웃 `cwd` + 자기 worktree `Write`는 0, 임시 폴더 안의 worktree 간 `Write`는 2를 확인(수정 전에는 임시 폴더 허용 때문에 통과했다). step0 AC와 `check` 통과.
 - 2026-11-12 10:14 step0 PR #17 병합. 이 세션은 `ExitWorktree`로 main 체크아웃에 돌아왔다.
 - 2026-11-12 10:20 step1: **step0 실사용 확인** — main 체크아웃에 있는 세션이 `EnterWorktree` 없이 s1 worktree에 새 파일 `Write`·기존 파일 `Edit`를 했고 훅 차단도, Claude Code 승인 요청도 없었다. 먼저 실패한 테스트 기록 — `node --test scripts/test/cleanup.test.ts` → 세션이 있는 worktree가 지워져 `removed` 배열이 기대와 달라 실패. 구현 후 새 파일 2개 통과, `runner.test.ts` 2개 통과. step1 AC와 `check` 통과.
+- 2026-11-12 10:19 step1 PR #18 병합. `start`가 s1 worktree를 정리했다(세션은 main에 있으므로 남김 없음).
+- 2026-11-12 10:25 step2(문서만): 절차서 1절 접수 규칙(대화 지시는 봇이 Issue 등록 후 바로 시작), 7절(추천안이 분명한 운영 판단은 묻지 않음, 질문 시점, 대화 결정 즉시 기록), AGENTS.md, 설계서 v0.7.7(8.3절 접수, 9.1절). "반드시 묻는다" 목록과 runner의 봇 Issue 제외 규칙은 그대로 뒀다. step2 AC와 `check` 통과.
 
 ## 의사결정 로그
 
