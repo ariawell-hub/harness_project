@@ -211,7 +211,8 @@ export function remoteBranchDiverged(worktree: string, remote: string, branch: s
 
 /**
  * PR 브랜치(worktree의 HEAD)에 <remote>/<base>를 병합하고 일반 push로 <remote>/<branch>를 갱신한다(ADR-0006).
- * rebase·force push는 하지 않는다. 충돌하면 병합을 취소해 worktree와 HEAD를 호출 전으로 둔다.
+ * rebase·force push는 하지 않는다. 충돌하면 병합을 취소해 worktree와 HEAD를 호출 전으로 둔다
+ * (`keepConflict`면 취소하지 않고 병합 진행 중으로 남긴다. 호출한 쪽이 끝내거나 `git merge --abort`한다).
  * 원격 PR 브랜치에 로컬에 없는 커밋이 있으면(다른 곳에서 push됨) 병합하지 않는다. 예외를 던지지 않는다.
  * `updated.from`은 갱신 전 원격 PR 브랜치 head다. push가 실패하면 로컬 병합 커밋은 남고 다음 호출이 push만 다시 한다.
  */
@@ -220,6 +221,8 @@ export function updateBranchFromBase(
   remote: string,
   base: string,
   branch: string,
+  /** keepConflict: 충돌이면 병합을 취소하지 않고 진행 중으로 남긴다(충돌 해결 세션용, TD-27) */
+  opts: { keepConflict?: boolean } = {},
 ): BranchUpdate {
   const fail = (stage: 'precheck' | 'fetch' | 'merge' | 'push', reason: string): BranchUpdate => ({
     status: 'failed',
@@ -254,9 +257,9 @@ export function updateBranchFromBase(
       if (!m.ok) {
         const unmerged = gitTry(['diff', '--name-only', '--diff-filter=U'], worktree);
         const files = unmerged.ok ? unmerged.stdout.split('\n').filter(Boolean) : [];
-        if (gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], worktree).ok) {
-          gitTry(['merge', '--abort'], worktree);
-        }
+        const merging = gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], worktree).ok;
+        if (files.length && merging && opts.keepConflict) return { status: 'conflict', files };
+        if (merging) gitTry(['merge', '--abort'], worktree);
         if (files.length) return { status: 'conflict', files };
         return fail('merge', `git merge 실패: ${firstLine(m.stderr || m.stdout)}`);
       }

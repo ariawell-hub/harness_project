@@ -5,6 +5,9 @@
 //   timeout : 오래 멈춘다(세션 시간 제한 확인)
 //   limit   : 사용량 한도 메시지로 실패한다(환경 장애, 실패로 세지 않음)
 //   question: (계획 작성만) ok처럼 계획을 채우고 "열린 질문"에 `### 질문: 데모 질문` 블록을 남긴다
+// 충돌 해결 프롬프트("# 이번 작업: 충돌 해결")는 behavior의 "conflict" 순서를 쓴다.
+//   ok   : "## 충돌 파일"에 나열된 파일에서 충돌 표시 줄(<<<<<<<, =======, >>>>>>>)을 지운다(양쪽 내용 유지). git은 쓰지 않는다
+//   fail : 아무것도 하지 않는다
 // FAKE_LOG: 받은 프롬프트를 JSON 줄로 남긴다.
 // FAKE_RESULT_JSON=1: 끝에 Claude `-p --output-format json` 형식의 결과 객체(권한 거부 포함)를 출력한다.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -13,9 +16,14 @@ import { execFileSync } from 'node:child_process';
 
 const prompt = readFileSync(0, 'utf8');
 const planning = prompt.includes('# 이번 작업: 계획 작성');
+const resolving = prompt.includes('# 이번 작업: 충돌 해결');
 const planFile = /계획 파일: `([^`]+)`/.exec(prompt)?.[1] ?? '';
 const id = /(\d{8}-[a-z0-9-]+?)(?:\/plan\.md|\.md)$/.exec(planFile)?.[1] ?? '';
-const step = planning ? 'plan' : (/step 지시서 \([^)]*step(\d+)\.md/.exec(prompt)?.[1] ?? '0');
+const step = planning
+  ? 'plan'
+  : resolving
+    ? 'conflict'
+    : (/step 지시서 \([^)]*step(\d+)\.md/.exec(prompt)?.[1] ?? '0');
 const slug = id.replace(/^\d{8}-/, '');
 
 if (process.env.FAKE_LOG)
@@ -37,6 +45,16 @@ if (action === 'timeout') {
   setTimeout(() => process.exit(0), 600_000);
 } else if (action === 'fail') {
   process.stdout.write('완료했습니다! 모든 작업을 마쳤습니다.\n');
+} else if (resolving) {
+  const list = prompt.split('## 충돌 파일')[1]?.split('\n## ')[0] ?? '';
+  for (const m of list.matchAll(/^- `([^`]+)`/gm)) {
+    const f = m[1];
+    if (!existsSync(f)) continue;
+    const kept = readFileSync(f, 'utf8')
+      .split('\n')
+      .filter((l) => !/^(<{7}|={7}|>{7})( |$)/.test(l));
+    writeFileSync(f, kept.join('\n'));
+  }
 } else if (planning) {
   const steps = Number(behavior[slug]?.steps ?? 2);
   let text = readFileSync(planFile, 'utf8').replace(/^status: draft/m, 'status: active');

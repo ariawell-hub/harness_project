@@ -20,6 +20,7 @@ function merged(worktree: string, branch: string, id: string): LocalPlan {
     stepStatus: 'completed',
     needsPlanning: false,
     pr: { state: 'merged' } as LocalPlan['pr'],
+    conflictWaiting: false,
   };
 }
 

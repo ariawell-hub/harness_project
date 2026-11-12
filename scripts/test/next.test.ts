@@ -28,10 +28,12 @@ import {
   ownerComment,
   ownerCommentRejection,
   pickNext,
+  readConflictState,
   sameLogin,
+  writeConflictState,
   type Pick,
 } from '../runner/next.ts';
-import { fixtureConfig, makeFixture, tmp } from './helpers.ts';
+import { fixtureConfig, makeFixture, sh, tmp } from './helpers.ts';
 
 const GITHUB = {
   remote: 'origin',
@@ -378,7 +380,11 @@ test('loadConfig: github.collaborators는 없으면 []이고, 문자열 배열�
 // ---------- 내 PR 갱신(4.5절 우선순위 2번, ADR-0006) ----------
 
 /** runner-1 소유 계획 worktree와 열린 PR(mergeState)을 만들고 pickNext 결과를 돌려준다 */
-async function pickWithPR(mergeState: string, planStatus?: string): Promise<Pick> {
+async function pickWithPR(
+  mergeState: string,
+  planStatus?: string,
+  conflict?: Parameters<typeof writeConflictState>[1],
+): Promise<Pick> {
   const fx = makeFixture({ github: GITHUB });
   const prev = process.env.HARNESS_FAKE_GH;
   try {
@@ -393,6 +399,7 @@ async function pickWithPR(mergeState: string, planStatus?: string): Promise<Pick
       github: false,
       date: '20261112',
     });
+    if (conflict) writeConflictState(t.worktree, conflict);
     if (planStatus) {
       const f = path.join(t.worktree, t.planFile);
       writeFileSync(f, readFileSync(f, 'utf8').replace(/^status: \w+/m, `status: ${planStatus}`));
@@ -436,6 +443,34 @@ test('pickNext: 계획이 blocked인 PR은 BEHIND·DIRTY여도 다시 고르지 
     const pick = await pickWithPR(state, 'blocked');
     assert.equal(pick.task.kind, 'idle', state);
   }
+});
+
+test('pickNext: 충돌 답을 기다리는 계획의 PR은 DIRTY여도 고르지 않고 사람 대기로 센다 (TD-27)', async () => {
+  const pick = await pickWithPR('DIRTY', undefined, {
+    waiting: true,
+    resolve: false,
+    files: ['shared.txt'],
+  });
+  assert.equal(pick.task.kind, 'idle');
+  assert.equal(pick.waiting.human, 1);
+  // 답을 받아 해결할 차례면 update로 고른다
+  const resolve = await pickWithPR('DIRTY', undefined, {
+    waiting: false,
+    resolve: true,
+    files: ['shared.txt'],
+  });
+  assert.equal(resolve.task.kind, 'update');
+});
+
+test('readConflictState: 없거나 깨진 상태 파일은 대기·해결 모두 false다', () => {
+  const dir = tmp('harness-conflict-state-');
+  sh('git', ['init', '-q'], dir);
+  assert.deepEqual(readConflictState(dir), { waiting: false, resolve: false, files: [] });
+  writeConflictState(dir, { waiting: true, resolve: false, files: ['a'] });
+  assert.deepEqual(readConflictState(dir), { waiting: true, resolve: false, files: ['a'] });
+  const f = path.join(dir, '.git', 'harness', 'conflict.json');
+  writeFileSync(f, '{not json');
+  assert.deepEqual(readConflictState(dir), { waiting: false, resolve: false, files: [] });
 });
 
 test('pickNext: CLEAN PR은 갱신하지 않는다', async () => {

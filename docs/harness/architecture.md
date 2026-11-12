@@ -33,7 +33,7 @@ review_cycle: on-change
 | `lib/github.ts`   | `GitHubPort`(gh CLI). 댓글·Issue 편집 이력(`issueHistory`, TD-19·TD-26). `github-fake.ts`는 테스트·스모크용                                                                                  |
 | `gates/*`         | 기계 검사. 에러 메시지는 "무엇 + 고치는 법 + 근거"                                                                                                                                           |
 | `hooks/*`         | 도구 실행 직전 금지 규칙(R1~R4, R10, R13, R14, R20). POSIX·PowerShell·cmd 방언과 셸 래퍼 재귀, 명령 이름은 대소문자·확장자 무시 (ADR-0005)                                                   |
-| `runner/*`        | 다음 할 일 고르기 → 새 세션 → AC·check로 직접 판정 → PR                                                                                                                                      |
+| `runner/*`        | 다음 할 일 고르기 → 새 세션 → AC·check로 직접 판정 → PR. 충돌 답변 뒤 해결 세션(`conflictPrompt`, `conflict.json`, TD-27)                                                                    |
 
 ## 상태가 사는 곳
 

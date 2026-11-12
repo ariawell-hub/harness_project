@@ -58,11 +58,13 @@ import {
   allowedAccounts,
   issueTrust,
   pickNext,
+  readConflictState,
   readLocalPlans,
+  writeConflictState,
   type LocalPlan,
   type Pick,
 } from './next.ts';
-import { planningPrompt, stepPrompt } from './prompt.ts';
+import { conflictPrompt, planningPrompt, stepPrompt } from './prompt.ts';
 
 export interface RunnerOptions {
   cwd: string;
@@ -112,7 +114,7 @@ function event(ctx: Ctx, ev: string, data: Record<string, unknown> = {}): void {
 function recordSession(
   ctx: Ctx,
   l: LocalPlan,
-  kind: 'planning' | 'step',
+  kind: 'planning' | 'step' | 'conflict',
   attempt: number,
   s: SessionResult,
 ): void {
@@ -121,7 +123,8 @@ function recordSession(
     const dir = path.join(harnessStateDir(ctx.main, 'common'), 'sessions');
     mkdirSync(dir, { recursive: true });
     const stamp = nowIso().replace(/[:+]/g, '-');
-    const part = kind === 'planning' ? 'plan' : `s${l.step ?? 0}`;
+    const part =
+      kind === 'planning' ? 'plan' : `s${l.step ?? 0}${kind === 'conflict' ? '-conflict' : ''}`;
     // 환경 장애 재시도는 시도 번호가 같고 같은 초에 끝날 수 있다. 덮어쓰지 않게 번호를 붙인다
     const base = path.join(dir, `${stamp}-${l.id}-${part}-${attempt}`);
     file = `${base}.log`;
@@ -650,6 +653,13 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
       kind: 'plan',
       detail: '제작자 답변으로 실패 횟수 초기화',
     });
+    const cs = readConflictState(t.local.worktree);
+    if (cs.waiting) {
+      // main 병합 충돌(TD-27): 다음 갱신에서 충돌을 남긴 병합 + 해결 세션으로 푼다. 계획 파일은 그대로 둔다
+      writeConflictState(t.local.worktree, { ...cs, waiting: false, resolve: true });
+      event(ctx, 'answered', { issue: t.issue, resolveConflict: true });
+      return;
+    }
     const qs = readQuestionState(info);
     if (qs.waiting) {
       // 계획 작성 단계의 질문(TD-18): 답을 넣어 계획을 다시 작성한다. step 상태는 그대로 둔다
@@ -667,8 +677,9 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
 }
 
 /** main에 뒤처지거나 충돌한 PR을 origin/main 병합 + 일반 push로 갱신한다(ADR-0006). force push는 없다 */
-async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env'> {
+async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env' | 'fail'> {
   const { remote, defaultBranch } = ctx.cfg.github;
+  if (readConflictState(l.worktree).resolve) return doResolveConflict(ctx, l);
   const r = updateBranchFromBase(l.worktree, remote, defaultBranch, l.branch);
   const info = repoInfo(l.worktree);
   const record = (ok: boolean, detail?: string) =>
@@ -685,18 +696,198 @@ async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env'> {
   }
   if (r.status === 'conflict') {
     record(false, `main 병합 충돌: ${r.files.join(', ')}`);
-    // 1단계: 충돌 해결 세션은 아직 없다. 사람에게 넘긴다(2단계에서 자동 대응, TD-9)
-    await blockPlan(
-      ctx,
-      l,
-      `${remote}/${defaultBranch} 병합이 충돌한다(${r.files.join(', ')}). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다`,
-    );
+    // 제작자 답 없이 자동으로 풀지는 않는다(TD-9). 답을 받으면 해결 세션으로 푼다(TD-27)
+    await reportConflict(ctx, l, r.files);
     return 'ok';
   }
   record(false, `PR 갱신 실패(${r.stage}): ${r.reason}`);
   event(ctx, 'update-fail', { plan: l.id, pr: l.pr?.number, stage: r.stage, reason: r.reason });
   const v = judge(readAttempts(info), l.id, l.step, limitsOf(ctx.cfg));
   if (v.action === 'stop') await blockPlan(ctx, l, v.reason ?? `PR 갱신 반복 실패: ${r.reason}`);
+  return 'ok';
+}
+
+// ---------- main 병합 충돌 (ADR-0006, TD-27) ----------
+
+/**
+ * 충돌로 PR 갱신을 멈추고 Issue에 needs-human과 중단 보고를 남긴다. 계획 파일은 바꾸지 않는다
+ * (완료된 step의 PR에 blocked를 push하면 plan-gate가 실패한다, PR #29). 대기는 conflict.json에 둔다
+ */
+async function reportConflict(
+  ctx: Ctx,
+  l: LocalPlan,
+  files: string[],
+  extra?: string,
+): Promise<void> {
+  const { remote, defaultBranch, owner } = ctx.cfg.github;
+  writeConflictState(l.worktree, { waiting: true, resolve: false, files });
+  const base = `${remote}/${defaultBranch}`;
+  const mention = owner ? `@${owner} ` : '';
+  const report = `${mention}runner가 PR 갱신을 멈췄다.
+
+## 중단 보고: ${l.id}
+- 원인: ${base} 병합이 충돌한다(${files.map((f) => `\`${f}\``).join(', ')}). 병합은 취소했고 PR 브랜치와 계획 파일은 그대로다.${extra ? `\n- 경과: ${extra}` : ''}
+- PR: ${l.pr ? `#${l.pr.number}` : '(없음)'} (브랜치 \`${l.branch}\`)
+- 사람이 결정할 것:
+  - A) 이 Issue에 제작자 계정으로 답을 단다(추천). runner가 ${base}를 다시 병합해 충돌을 남기고 충돌 해결 세션을 띄운다. 답에 적은 지시(어느 쪽을 살릴지 등)는 세션에 넘긴다. runner가 충돌 표시·AC·\`check\`를 확인한 뒤에만 병합 커밋을 일반 push하고, 실패하면 병합을 취소한다.
+  - B) 사람이 worktree에서 직접 병합해 push한다(절차서 5절). 그 뒤 이 Issue에 답을 달면 runner가 이어 간다.
+  - C) 포기한다(PR을 닫는다).`;
+  try {
+    ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
+    ctx.gh.comment(l.issue, report);
+  } catch (e) {
+    warn(`GitHub 알림 실패: ${(e as Error).message}`);
+  }
+  event(ctx, 'blocked', {
+    plan: l.id,
+    step: l.step,
+    reason: `main 병합 충돌: ${files.join(', ')}`,
+  });
+}
+
+/** 충돌 파일에 남은 충돌 표시 줄. 충돌 블록에는 여는·닫는 표시가 반드시 있으므로 그 둘만 본다 */
+const CONFLICT_MARKER = /^(<{7}|>{7})( |$)/m;
+
+/**
+ * 해결 세션이 끝난 병합을 runner가 직접 판정한다. 통과하면 null, 아니면 이유.
+ * 충돌 표시 → 모두 스테이징 → 미병합 경로 → step AC(있으면) → check 순서
+ */
+async function judgeResolution(
+  l: LocalPlan,
+  ref: PlanRef,
+  files: string[],
+): Promise<string | null> {
+  const left = files.filter((f) => {
+    const p = path.join(l.worktree, f);
+    return existsSync(p) && CONFLICT_MARKER.test(readFileSync(p, 'utf8'));
+  });
+  if (left.length) return `충돌 표시가 남았다: ${left.join(', ')}`;
+  const added = gitTry(['add', '-A'], l.worktree);
+  if (!added.ok) return `git add 실패: ${tail(added.stderr, 3)}`;
+  const unmerged = gitTry(['diff', '--name-only', '--diff-filter=U'], l.worktree);
+  const still = unmerged.ok ? unmerged.stdout.split('\n').filter(Boolean) : ['(확인 실패)'];
+  if (still.length) return `미병합 경로가 남았다: ${still.join(', ')}`;
+  const cfg = loadConfig(l.worktree);
+  let acs: string[] = [];
+  try {
+    acs = acceptanceCommands(l.worktree, ref, l.step);
+  } catch {
+    acs = []; // step 파일이 없으면 AC 없이 check만 본다
+  }
+  for (const cmd of acs) {
+    const r = await runShell(cmd, { cwd: l.worktree, timeoutMs: cfg.limits.acTimeoutSec * 1000 });
+    if (r.code !== 0)
+      return `AC 실패: $ ${cmd}\n${r.timedOut ? '시간 제한 초과\n' : ''}${tail(r.stdout + '\n' + r.stderr, 30)}`;
+  }
+  const check = await runCheck(repoInfo(l.worktree), cfg, { quiet: true });
+  if (!check.ok)
+    return `check 실패: ${check.results
+      .filter((r) => !r.ok)
+      .map((r) => r.name)
+      .join(', ')}`;
+  return null;
+}
+
+/**
+ * 제작자 답을 받은 충돌을 푼다(TD-27). origin/main을 병합해 충돌을 남기고 해결 세션을 띄운 뒤 runner가 판정한다.
+ * 통과하면 병합 커밋을 만들고 일반 push, 실패하면 `git merge --abort`로 병합 전으로 되돌린다(force push·reset 없음).
+ * 충돌이 그사이 사라졌으면 세션 없이 일반 갱신으로 끝낸다. 9.2절 한도에 닿으면 다시 사람에게 넘긴다
+ */
+async function doResolveConflict(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env' | 'fail'> {
+  const { remote, defaultBranch } = ctx.cfg.github;
+  const base = `${remote}/${defaultBranch}`;
+  const info = repoInfo(l.worktree);
+  const all = readAttempts(info);
+  const prev = readConflictState(l.worktree);
+  const v = judge(all, l.id, l.step, limitsOf(ctx.cfg));
+  if (v.action === 'stop') {
+    await reportConflict(ctx, l, prev.files, `충돌 해결을 반복해 실패했다(${v.reason})`);
+    return 'fail';
+  }
+  const record = (ok: boolean, detail?: string, env = false) =>
+    recordAttempt(info, {
+      plan: l.id,
+      step: l.step,
+      key: 'pr:conflict',
+      ok,
+      kind: 'pr',
+      env,
+      detail,
+    });
+  const clear = () => writeConflictState(l.worktree, { waiting: false, resolve: false, files: [] });
+  const r = updateBranchFromBase(l.worktree, remote, defaultBranch, l.branch, {
+    keepConflict: true,
+  });
+  if (r.status === 'updated' || r.status === 'up-to-date') {
+    clear();
+    event(ctx, 'updated', { plan: l.id, pr: l.pr?.number, detail: '충돌 없이 갱신' });
+    return r.status === 'updated' ? 'ok' : 'env';
+  }
+  if (r.status === 'failed') {
+    record(false, `PR 갱신 실패(${r.stage}): ${r.reason}`);
+    event(ctx, 'update-fail', { plan: l.id, pr: l.pr?.number, stage: r.stage, reason: r.reason });
+    return 'fail';
+  }
+  const abort = () => gitTry(['merge', '--abort'], l.worktree);
+  const ref = findPlan(l.worktree, l.id) ?? l.ref;
+  const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
+  const answer = existsSync(answerFile) ? readFileSync(answerFile, 'utf8') : undefined;
+  const n =
+    all.filter((a) => a.plan === l.id && a.step === l.step && a.key === 'pr:conflict').length + 1;
+  const prompt = conflictPrompt({
+    root: l.worktree,
+    ref,
+    id: l.id,
+    step: l.step,
+    branch: l.branch,
+    base,
+    files: r.files,
+    attempts: all,
+    attemptNo: n,
+    switchApproach: v.action === 'switch',
+    answer,
+  });
+  event(ctx, 'session-start', { plan: l.id, step: l.step, kind: 'conflict', attempt: n });
+  const s = await runSession(
+    ctx.o.tool,
+    prompt,
+    l.worktree,
+    ctx.main,
+    ctx.cfg,
+    ctx.cfg.limits.sessionTimeoutMin * 60_000,
+  );
+  recordSession(ctx, l, 'conflict', n, s);
+  if (s.envFailure) {
+    abort();
+    record(false, tail(s.output, 10), true);
+    event(ctx, 'env-failure', { plan: l.id, detail: tail(s.output, 3) });
+    return 'env';
+  }
+  const problem = s.timedOut
+    ? `세션이 시간 제한 ${ctx.cfg.limits.sessionTimeoutMin}분을 넘겨 종료됐다`
+    : await judgeResolution(l, ref, r.files);
+  if (problem) {
+    abort();
+    record(false, `충돌 파일 ${r.files.join(', ')}: ${problem}`);
+    event(ctx, 'conflict-fail', { plan: l.id, pr: l.pr?.number, detail: problem });
+    return 'fail';
+  }
+  const commit = gitTry(['commit', '--quiet', '--no-edit'], l.worktree);
+  if (!commit.ok) {
+    abort();
+    record(false, `병합 커밋 실패: ${tail(commit.stderr, 3)}`);
+    return 'fail';
+  }
+  clear();
+  record(true, `충돌 해결: ${r.files.join(', ')}`);
+  if (existsSync(answerFile)) unlinkSync(answerFile);
+  const push = gitTry(['push', '--quiet', remote, `HEAD:refs/heads/${l.branch}`], l.worktree);
+  if (!push.ok) {
+    // 병합 커밋은 남는다. 다음 갱신(updateBranchFromBase)이 push만 다시 한다
+    event(ctx, 'push-fail', { plan: l.id, detail: push.stderr });
+    return 'env';
+  }
+  event(ctx, 'conflict-resolved', { plan: l.id, pr: l.pr?.number, files: r.files });
   return 'ok';
 }
 

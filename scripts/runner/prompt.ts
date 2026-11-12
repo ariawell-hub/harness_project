@@ -128,3 +128,47 @@ export function planningPrompt(
   parts.push(COMMON_RULES);
   return parts.join('\n\n---\n\n');
 }
+
+export interface ConflictPromptInput {
+  root: string;
+  ref: PlanRef;
+  id: string;
+  step: number | null;
+  branch: string;
+  /** 병합한 기준 브랜치(예: origin/main) */
+  base: string;
+  files: string[];
+  attempts: Attempt[];
+  attemptNo: number;
+  switchApproach: boolean;
+  /** 제작자 답변 본문(9.1절) */
+  answer?: string;
+}
+
+/**
+ * main 병합 충돌 해결 세션(TD-27, ADR-0006). runner가 병합을 시작해 충돌을 남겨 두었다.
+ * 세션은 파일만 고친다. 스테이징·커밋·push와 판정은 runner가 한다
+ */
+export function conflictPrompt(i: ConflictPromptInput): string {
+  const parts: string[] = [];
+  parts.push(`# 지도 (AGENTS.md)\n\n${read(i.root, 'AGENTS.md')}`);
+  parts.push(
+    `# 이번 작업: 충돌 해결 (main 병합, ADR-0006)\n계획 \`${i.id}\`. 브랜치 \`${i.branch}\`. worktree: \`${i.root}\`\n계획 파일: \`${i.ref.file}\`\n\nrunner가 \`${i.base}\`를 이 브랜치에 병합했고 아래 파일이 충돌했다. 병합은 진행 중이다(MERGE_HEAD). 충돌 표시를 풀어 병합을 끝낼 수 있게 만들어라.`,
+  );
+  parts.push(`## 충돌 파일\n${i.files.map((f) => `- \`${f}\``).join('\n')}`);
+  parts.push(
+    `## 해야 할 일\n- 각 파일의 충돌 블록(\`<<<<<<<\` … \`=======\` … \`>>>>>>>\`)을 모두 없애고 양쪽 변경의 의도를 모두 살려라. ${i.base} 쪽 변경을 버리지 마라.\n- 여러 브랜치가 차례로 덧붙이는 자리(설계서 버전·이력, CHANGELOG, tech-debt-tracker의 TD 번호)는 ${i.base} 내용을 먼저 두고 이 브랜치 내용을 다음 번호로 옮겨라. 옮긴 번호를 가리키는 곳(코드 주석, 계획 파일)도 함께 고쳐라.\n- 계획 파일 "진행 로그"에 한 줄: 무엇이 충돌했고 어떻게 풀었는지.\n- 끝내기 전에 \`node scripts/harness.ts check\`가 통과하는지 확인하라.`,
+  );
+  parts.push(
+    `## 하지 마라\n- git 명령(add, commit, merge, reset, checkout, stash)을 쓰지 마라(아래 공통 규칙의 git add/commit도 이번에는 하지 않는다). runner가 충돌 표시·미병합 경로·AC·check를 직접 확인한 뒤에만 병합 커밋을 만들고 일반 push한다. 실패하면 runner가 병합을 취소한다.\n- 충돌과 무관한 변경을 하지 마라. step 파일의 "작업"·"Acceptance Criteria"도 고치지 마라.`,
+  );
+  if (i.answer) parts.push(`## 제작자 답변 (9.1절, 이 지시를 따른다)\n${i.answer}`);
+  const digest = attemptsDigest(i.attempts, i.id, i.step);
+  if (digest) parts.push(`## 직전 실패 (이번이 ${i.attemptNo}번째 시도)\n${digest}`);
+  if (i.switchApproach)
+    parts.push(
+      `## 방법 전환 지시 (9.2절 3회 규칙)\n같은 충돌 해결이 3회 이상 실패했다. 지금까지의 접근을 버리고 다른 방법으로 풀어라. 계획의 "의사결정 로그"에 이유를 먼저 적어라.`,
+    );
+  parts.push(COMMON_RULES);
+  return parts.join('\n\n---\n\n');
+}
