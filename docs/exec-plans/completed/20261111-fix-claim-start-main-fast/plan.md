@@ -2,7 +2,7 @@
 id: 20261111-fix-claim-start-main-fast
 issue: 4 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -83,6 +83,13 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 
 - 2026-11-12 11:35 (KST) 최종 `node scripts/harness.ts check` 통과(fmt·lint·test·doc-lint·bypass-scan·secret-scan; 기존 R8 경고 5건). 확인한 원격 head `ef78279`를 lease에 고정해 PR branch 갱신을 시도했으나, PreToolUse L1 hook이 `[R14 파괴적 git]`로 명령을 차단했다. Git push는 실행되지 않았고 원격 ref는 그대로다. hook을 우회하지 않는다.
 
+- 2026-11-12 13:41 (KST) step1 claim-release(runner-1 무인 세션). 브랜치 `feat/20261111-fix-claim-start-main-fast-s1`.
+  - 먼저 실패한 테스트 1: `node --test scripts/test/start.test.ts` → 파일 전체 실패(`SyntaxError: ... '../commands/task.ts' does not provide an export named 'listRemoteClaims'`).
+  - `task.ts`(`listRemoteClaims`, `releaseClaim` 반환값, `releaseClosedClaims`)만 구현하고 `start.ts`는 그대로 둔 뒤 같은 명령: 24개 중 단위 14개 통과, `start` 통합 2개 실패. 실패 요지: (1) `start` 뒤에도 원격에 `claim/2`가 남음(`deepEqual` actual에 `'claim/2'`), 출력에 `## ② 정리`가 `- 병합된 worktree: 없음`에서 끝나 선점 해제 줄 없음 — Issue #4 증상 재현 (2) claim 목록 조회 실패 경고 없음.
+  - `start.ts` ② 절에 `releaseClosedClaims` 호출·출력, `next.ts` 5번 우선순위를 `listRemoteClaims`로 바꾼 뒤 `node --test scripts/test/start.test.ts scripts/test/runner.test.ts` 24개 모두 통과.
+  - 문서: `AGENTS.md` 세션 시작 절차 2번, `docs/harness/workflow.md` 1절 선점 설명, `docs/harness/CHANGELOG.md`, `docs/harness/architecture.md` "상태가 사는 곳" 선점 행.
+- 2026-11-12 (KST) step1 이어서(runner-1 무인 세션, 앞 세션의 미커밋 변경을 이어받음). 변경 diff를 다시 검토하고 AC를 실행했다: `node --test scripts/test/start.test.ts scripts/test/runner.test.ts` 24개 통과, grep 3개 통과, `AGENTS.md` 73줄. `node scripts/harness.ts check` 통과(R8 경고 4건, 아래 결과 참고). `index.json` step1 summary, "검증 방법과 결과"의 step1 결과를 채웠다.
+
 ## 의사결정 로그
 
 - 결정: 선점 해제 기준을 로컬 worktree 상태가 아니라 "GitHub Issue가 닫혔는가"로 한다. 이유: Issue는 마지막 step PR의 `Closes #N`으로 닫히므로 8.3절의 "마지막 step 병합"과 같은 뜻이고, worktree를 손으로 지웠거나 다른 머신에서 병합한 경우도 잡는다. 버린 대안: `complete-step`에서 해제(PR 병합 전이라 다른 작업자가 같은 Issue를 선점할 수 있다), PR 병합 감시(대화 세션은 병합을 기다리지 않는다), `cleanupMerged` 조건 완화(로컬에 worktree가 없으면 여전히 못 본다).
@@ -98,12 +105,22 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 
 - 시도: 제작자의 후속 지시에 따라 PR #14 branch만, 예상 head `ef78279`를 고정한 `--force-with-lease`로 갱신하려 했다. / 이유: 로컬 rebase 결과를 원격 PR에 반영하려면 이력이 바뀌어야 한다. / 결과: L1 hook이 R14 파괴적 git으로 차단했고 push 명령은 실행되지 않았다. / 금지한 대안: hook 우회.
 
+- 결정(step1): `listRemoteClaims`는 ref 이름 전체가 정확히 `refs/heads/claim/<1 이상 정수, 앞자리 0 없음>`인 것만 센다. 이유: `ls-remote` 패턴은 꼬리 일치라 `feat/claim/5`·`claim/1/x`도 돌아오고, `claim/04`를 4로 읽으면 `releaseClaim`이 다른 이름(`claim/4`)을 지우려 한다. `claimIssue`는 항상 `claim/${정수}`로 만들므로 잃는 것이 없다. 버린 대안: 기존 `next.ts` 정규식(앵커 없음) 재사용.
+- 결정(step1): `releaseClaim`은 지정대로 `boolean`만 돌려주고, `releaseClosedClaims`는 같은 내부 함수(`deleteClaim`)의 stderr 첫 줄을 `failed.reason`에 쓴다. 이유: 시그니처를 지키면서 실패 이유를 출력하기 위해서. `cleanupMerged`는 그대로(반환값 무시).
+- 결정(step1): `start` ② 절에서 해제·확인 실패가 하나도 없으면 `- 닫힌 Issue의 선점: 없음` 한 줄을 낸다. 이유: 같은 절의 `- 병합된 worktree: 없음`과 맞춰 단계가 실행됐음을 보인다. 열린 Issue의 claim(`kept`)은 정상 상태라 출력하지 않는다.
+- 결정(step1): `releaseClosedClaims`가 TaskError 말고 다른 예외(프로그래밍 오류)를 던지면 `start`에서 잡지 않는다. 이유: 명세는 claim 목록 조회 실패(TaskError)만 경고로 넘기라고 했고, `getIssue`·삭제 실패는 함수 안에서 `failed`로 모은다.
+
 ## 발견 사항
 
 - `start`의 ② 정리(`cleanupMerged`)는 이미 `releaseClaim`을 부르지만, 마지막 step의 worktree가 로컬에 남아 깨끗하고 PR이 병합된 경우에만 동작한다. Issue 본문의 "runner에서만 호출"보다 "조건이 좁아 대화형 경로를 놓친다"가 정확한 원인이다 → 처리: 해당 없음(step1에서 닫힌 Issue 기준 정리로 보완)
 - runner는 시작할 때 읽은 `harness.config.json`(`runRunner`의 `cfg`)을 끝까지 쓴다. 매 바퀴 `syncMain`으로 main을 당겨도 설정 변경은 runner를 다시 시작해야 반영된다 → 처리: TD-21 (step0에서 등록. TD-17은 main에서 이미 사용·해결되어 다음 빈 번호를 썼다)
 - 기존 runner `syncMain`은 `isClean`(git 실패 시 예외)을 먼저 불러 git status가 실패하면 runner 바퀴가 예외로 끊길 수 있었다. `fastForwardMain`은 모든 git 실패를 `skipped`로 돌려주므로 이 경우 조용히 넘어간다. 판정 순서도 "브랜치 → 깨끗함"으로 바뀌었지만 결과(당김/안 당김)는 같다 → 처리: 해당 없음
 - `start`는 당긴 뒤 설정을 다시 읽으므로, 원격 main의 `harness.config.json`이 깨져 있으면 재로드에서 `ConfigError`로 끝난다. 사람이 손으로 pull 한 뒤 `start`를 실행한 것과 같은 결과이고, 메시지에 파싱·검증 실패 내용이 나온다 → 처리: 해당 없음
+- (step1) `git ls-remote --heads <remote> 'claim/*'`의 패턴은 꼬리 일치(`*/claim/*`)라 `feat/claim/5`, `claim/1/x`도 돌려준다. 기존 `next.ts` 정규식은 앵커가 없어 `claim/1/x`를 #1 선점으로 셌다(그런 브랜치를 만드는 코드는 없어 실제 영향은 없었다) → 처리: 해당 없음(`listRemoteClaims`가 정확히 `claim/<숫자>`만 세도록 고침, 테스트 포함)
+- (step1) 실제 `GhCli.listOpenIssues`는 `--limit 200`이다. 열린 Issue가 200개를 넘으면 목록에 없는 열린 Issue의 claim이 생기지만, `releaseClosedClaims`가 `getIssue`로 다시 확인해 `open`이면 남긴다(테스트 "목록에 없어도 GitHub에서 열려 있으면 지우지 않는다") → 처리: 해당 없음
+- (step1) runner 루프는 `releaseClosedClaims`를 부르지 않는다(금지사항). runner는 자기 선점을 `cleanupMerged`로 풀고, 다른 경로로 남은 claim은 다음 대화 세션 `start`가 정리한다. runner만 오래 도는 기간에는 그런 claim이 남아 있을 수 있지만 닫힌 Issue는 후보가 아니라 새 선점을 막지 않는다 → 처리: 해당 없음
+- (step1) 마지막 PR 병합으로 닫힌 Issue가 `start`가 돌기 전에 다시 열리면, 옛 `claim/<N>`은 "열린 Issue의 claim"이 되어 `start`가 남긴다(금지사항: 열린 Issue의 claim은 지우지 않는다). 이 경우 `new-task --issue <N>`이 "이미 선점되어 있다"로 거부된다. 만료 선점 정리(인수 절차 포함)의 범위다 → 처리: TD-11
+- (step1) 실제 `GhCli`의 `toIssue`는 `state`가 `'OPEN'`이 아니면 모두 `closed`로 바꾼다. `gh issue view --json state`는 `OPEN`/`CLOSED`만 돌려주므로 지금은 안전하지만, `releaseClosedClaims`의 "닫혔음을 확인한 것만 지운다"는 이 매핑에 기댄다. `lib/github.ts`는 이 step 범위 밖이라 고치지 않았다 → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -119,8 +136,9 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 - 병합 뒤 실제 리포 확인(대화 세션, 선택): `node scripts/harness.ts start` 출력의 ② 절, `git ls-remote --heads origin 'claim/*'`.
 - 결과
   - step0: `scripts/test/start.test.ts` — `fastForwardMain` 단위 (a) 당김 (b) 최신 (c) 미커밋 변경 (d) 다른 브랜치·detached (e) 로컬 전용 커밋(앞섬·갈라짐, 커밋 수 표시) + 원격 브랜치 없음, `start` 통합(당김 + owner 경고 없음, 미커밋 변경이면 이유 출력·HEAD 그대로, 최신) 통과. 통합 테스트는 고치기 전 `start.ts`에서 실패함을 확인(진행 로그). `node scripts/harness.ts check` 통과. doc-lint R8 경고(비차단): `docs/harness/architecture.md`는 이번에 갱신했고, `docs/harness/workflow.md`는 `start` 명령만 적고 절차를 풀어 쓰지 않아 갱신할 내용이 없고, ADR-0001·0002·0003·0005는 이 변경과 관계없다.
+  - step1: `scripts/test/start.test.ts`에 7개 추가 — `releaseClosedClaims` (a) 가짜 PR 병합(`Closes #2`)으로 닫힌 #2만 해제, 열린 #1은 `kept`, 없는 #99는 `failed`(이유에 `#99`), `ls-remote`에 claim/1·claim/99만 남음, 다시 실행하면 `released` 빈 배열 (b) 열린 목록에 있는 번호는 `getIssue`를 부르지 않음 (c) 열린 목록이 비어도 GitHub에서 열려 있으면 남김; `listRemoteClaims` (d) `claim/abc`·`claim/3/x`·`claim/04`·`feat/claim/5`·`claimx/6`을 버리고 `[2, 10]` (e) 원격 조회 실패는 `TaskError`; `start` 통합 (f) 로컬 worktree 없이 종료 코드 0, claim/2 삭제·claim/1·claim/99 유지, 출력에 `- 선점 해제: claim/2 (Issue #2 닫힘)`·`- 선점 유지(확인 실패): claim/99 — …`, 재실행 멱등 (g) claim 목록 조회 실패 시 경고 `선점 정리 건너뜀` + 종료 코드 0. (f)·(g)는 `start.ts`를 고치기 전에 실패함을 확인(진행 로그). AC: `node --test scripts/test/start.test.ts scripts/test/runner.test.ts` 24개 통과, grep 3개 통과, `node scripts/harness.ts check` 통과. doc-lint R8 경고(비차단): `docs/harness/workflow.md`는 이번에 1절을 갱신했다(커밋 뒤 시각 비교로 해소될 것). ADR-0005(Windows)는 `task.ts`가 새로 쓰는 git 호출이 기존 `gitTry`(`lib/exec.ts`) 경로뿐이라 관계없고, ADR-0001·0003은 이 변경과 관계없다.
 
 ## 다음 할 일
 
-- step0 main-sync: 이 worktree(`feat/20261111-fix-claim-start-main-fast-s0`)에서 `step0.md`대로 구현한다.
-- step0 병합 뒤 step1 claim-release: `node scripts/harness.ts new-task --plan 20261111-fix-claim-start-main-fast --step 1`. step1이 마지막 step이라 PR 본문은 `Closes #4`.
+- step1 claim-release: runner가 AC·`check`로 판정하고 push·PR(본문 첫 줄 `Closes #4`)·병합한다. 이 step이 마지막이다.
+- 병합 뒤(대화 세션, 선택): main 체크아웃에서 `node scripts/harness.ts start`를 실행해 ② 절의 `- 선점 해제: claim/<N>` 줄과 `git ls-remote --heads origin 'claim/*'`로 Issue #1·#4의 claim이 사라졌는지 본다. 무인 세션에서는 실제 원격 claim을 지우는 외부 동작이라 실행하지 않았다.
