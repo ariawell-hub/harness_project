@@ -68,8 +68,8 @@ claimed_at: 2026-11-12T12:24:49+09:00 # new-task가 채운다
 
 ## 발견 사항
 
-- runner `pickNext`는 `BEHIND`만 갱신 대상으로 본다. 브랜치 보호에 "main 최신 필수"가 꺼져 있으면 GitHub은 충돌 없이 뒤처진 PR을 `BEHIND`로 알리지 않고, 충돌한 PR은 `DIRTY`로 알린다. 그래서 지금 runner는 충돌한 PR을 CI 대기로 세고 아무 일도 하지 않는다 → 처리: step1
-- `doRebase`는 `--force-with-lease` push의 결과를 확인하지 않고 `pr:rebase-conflict`를 `ok: true`로 기록한다 → 처리: step1
+- runner `pickNext`는 `BEHIND`만 갱신 대상으로 본다. 브랜치 보호에 "main 최신 필수"가 꺼져 있으면 GitHub은 충돌 없이 뒤처진 PR을 `BEHIND`로 알리지 않고, 충돌한 PR은 `DIRTY`로 알린다. 그래서 지금 runner는 충돌한 PR을 CI 대기로 세고 아무 일도 하지 않는다 → 처리: #22 (step1)
+- `doRebase`는 `--force-with-lease` push의 결과를 확인하지 않고 `pr:rebase-conflict`를 `ok: true`로 기록한다 → 처리: #22 (step1)
 - 설계서 14.4절은 `push --force`를 금지 대상으로 적지만, runner의 step 완료 push는 일반 push가 거부되면 자기 브랜치에 `--force-with-lease`로 덮어쓴다(`scripts/runner/run.ts`). 문서는 에이전트만 막는다고 구분하지 않는다 → 처리: TD-22 (step0에서 등록)
 - 다른 작업자(runner 등) worktree를 제작자 지시로 넘겨받을 정식 방법이 없다. PR #14 갱신 때 L1 훅(R3)이 계획 파일 수정을 막아, 진행 로그를 Issue #4 댓글로 남겼다 → 처리: TD-23 (step0에서 등록)
 
