@@ -441,3 +441,41 @@ test('runner: 계획 작성 세션이 열린 질문을 남기면 needs-human·�
     t.fx.cleanup();
   }
 });
+
+test('runner: 선점 뒤 계획 작성 전에 허용 계정이 아닌 계정이 Issue를 고치면 계획을 멈추고, 제작자 /harness accept 뒤 고친 내용으로 이어 간다 (TD-19)', async () => {
+  const t = setup();
+  try {
+    const n = addFakeIssue(t.state, 'Delta feature', '원래 본문');
+    await newTask(t.fx.root, {
+      issue: n,
+      slug: 'delta-feature',
+      size: 'medium',
+      owner: 'runner-1',
+      github: false,
+    });
+    const gh = new FakeGitHub(t.state);
+    gh.editIssueAs(n, 'harness-bot', { body: '봇이 고친 본문' });
+
+    assert.equal(await run(t.fx.root), 'human', '확인을 기다린다');
+    let issue = t.gh().issues[0];
+    assert.ok(issue.labels.includes('needs-human'));
+    const report = issue.comments.find((c) => c.body.includes('runner가 계획을 멈췄다'));
+    assert.ok(report, '중단 보고');
+    assert.match(report.body, /@maker/);
+    assert.match(report.body, /harness-bot/);
+    assert.match(report.body, /\/harness accept/, '확인 방법');
+    assert.ok(
+      !t.prompts().some((p) => p.slug === 'delta-feature'),
+      '계획 작성 세션을 띄우지 않았다',
+    );
+
+    gh.ownerComment(n, '봤다.\n/harness accept');
+    assert.equal(await run(t.fx.root), 'idle');
+    issue = t.gh().issues[0];
+    assert.equal(issue.state, 'closed', '승인 뒤 끝까지 간다');
+    const plan = t.prompts().find((p) => p.slug === 'delta-feature' && p.step === 'plan');
+    assert.match(plan!.prompt, /봇이 고친 본문/, '확인한 이력 조회의 본문을 넣는다');
+  } finally {
+    t.fx.cleanup();
+  }
+});

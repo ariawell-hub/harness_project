@@ -53,7 +53,15 @@ import {
 } from '../commands/task.ts';
 import { planGate } from '../gates/plan-gate.ts';
 import { resolveAgentCommand, runSession, type AgentTool, type SessionResult } from './agents.ts';
-import { pickNext, readLocalPlans, type LocalPlan, type Pick } from './next.ts';
+import {
+  BOT_ISSUE_ACCEPT,
+  allowedAccounts,
+  issueTrust,
+  pickNext,
+  readLocalPlans,
+  type LocalPlan,
+  type Pick,
+} from './next.ts';
 import { planningPrompt, stepPrompt } from './prompt.ts';
 
 export interface RunnerOptions {
@@ -177,7 +185,16 @@ function limitsOf(cfg: HarnessConfig) {
 
 // ---------- 중단 (9.2절 5회 / 총량 상한) ----------
 
-async function blockPlan(ctx: Ctx, l: LocalPlan, reason: string): Promise<void> {
+/** 중단 보고의 기본 "사람이 결정할 것" */
+const DEFAULT_DECISION =
+  'A) 계획·AC를 고쳐 재개 / B) 범위를 줄여 재개 / C) 포기(abandoned) — 추천: A. 이 Issue에 제작자 계정으로 답을 달면 runner가 이어 간다.';
+
+async function blockPlan(
+  ctx: Ctx,
+  l: LocalPlan,
+  reason: string,
+  decision = DEFAULT_DECISION,
+): Promise<void> {
   const info = repoInfo(l.worktree);
   const attempts = readAttempts(info)
     .filter((a) => a.plan === l.id && !a.ok && !a.env)
@@ -207,7 +224,7 @@ ${attempts.map((a) => `  - ${a.ts} [${a.key}] ${(a.detail ?? '').split('\n').fil
 - 3회차 방법 전환 내용과 이유: 계획의 "의사결정 로그" 참조 (브랜치 \`${l.branch}\`)
 - 추정 원인: ${reason}
 - 교차 검증 의견: (2단계에서 추가)
-- 사람이 결정할 것: A) 계획·AC를 고쳐 재개 / B) 범위를 줄여 재개 / C) 포기(abandoned) — 추천: A. 이 Issue에 제작자 계정으로 답을 달면 runner가 이어 간다.`;
+- 사람이 결정할 것: ${decision}`;
   try {
     ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
     ctx.gh.comment(l.issue, report);
@@ -294,7 +311,29 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
     await blockPlan(ctx, l, v.reason ?? '계획 작성 반복 실패');
     return 'fail';
   }
-  const issue = ctx.gh.getIssue(l.issue);
+  // 계획을 쓰기 직전에 Issue 제목·본문을 다시 확인한다(14.6절, TD-19). 선점한 뒤에 허용 계정이 아닌 계정이
+  // 고쳤으면 그 내용으로 계획을 쓰지 않는다. 프롬프트에는 확인한 조회의 제목·본문을 넣는다
+  let issue;
+  let trust;
+  try {
+    const h = ctx.gh.issueHistory(l.issue);
+    trust = issueTrust(h, allowedAccounts(ctx.cfg), ctx.cfg.github.owner, () =>
+      ctx.gh.comments(l.issue),
+    );
+    issue = { ...ctx.gh.getIssue(l.issue), title: h.title, body: h.body };
+  } catch (e) {
+    event(ctx, 'issue-check-failed', { plan: l.id, issue: l.issue, detail: (e as Error).message });
+    return 'env';
+  }
+  if (!trust.ok) {
+    await blockPlan(
+      ctx,
+      l,
+      `Issue #${l.issue} 제목·본문을 믿을 수 없다: ${trust.reason}`,
+      `Issue 제목·본문과 편집 기록을 확인한다. 맞으면(필요하면 제작자 계정으로 고친 뒤) 이 Issue에 제작자 계정으로 \`${BOT_ISSUE_ACCEPT}\` 한 줄 댓글을 단다. runner가 그때의 제목·본문으로 계획을 작성한다. 맡기지 않으려면 Issue를 닫는다.`,
+    );
+    return 'fail';
+  }
   const n = (keyFailures(all, l.id).get('plan:structure') ?? 0) + 1;
   const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
   const answer = existsSync(answerFile) ? readFileSync(answerFile, 'utf8') : undefined;
