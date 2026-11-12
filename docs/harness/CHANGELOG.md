@@ -22,6 +22,7 @@ review_cycle: on-change
 - runner 세션 기록(Issue #16 step3): 세션마다 원본 출력을 `<공유 git-dir>/harness/sessions/`에 남기고 `runner.jsonl`에 `session-end`(세션 id·턴·종료 이유·권한 거부 개수와 도구 이름·로그 경로)를 쓴다. 환경 장애로 끝난 세션도 기록한다. `harness.config.json`의 Claude 실행 인자에서 `--no-session-persistence`를 빼 세션 전체 기록이 남는다(보호 경로). Codex는 TD-20.
 - CLI·차단 메시지(Issue #16 step4): `node scripts/harness.ts <명령> --help`(또는 `-h`)는 아무것도 실행하지 않고 도움말을 출력하고, `--` 앞의 모르는 `--옵션`은 실행 없이 종료 코드 2로 끝난다(TD-17 해결). 리포 밖(사용자 환경·다른 프로젝트) 파일 쓰기 차단 메시지를 "리포 밖 파일"로 바꾸고 사용자가 직접 실행할 `! <명령>` 안내를 준다.
 - `start`가 fetch 뒤 main 체크아웃을 `origin/main`으로 fast-forward 하고 `harness.config.json`을 다시 읽는다(Issue #4). 못 당기면(다른 브랜치, 미커밋 변경, 로컬 전용 커밋, merge 실패) ② 정리 절에 이유를 출력하고 넘어간다. runner `syncMain`과 같은 함수(`lib/git.ts`의 `fastForwardMain`)를 쓴다. runner 실행 중 설정 재로드는 TD-21.
+- 설계서 v0.7.8 · PR 갱신 방식(ADR-0006, Issue #22 step0): main에 뒤처지거나 충돌한 PR은 rebase가 아니라 `origin/main` 병합 + 일반 push로 갱신한다. R14(에이전트 force push 금지)는 유지. 절차서 5절에 세션 절차(이미 rebase했으면 `merge -s ours`, 막히면 `needs-human`)를 더했다. runner 구현은 step1, runner step 완료 push의 lease 폴백은 TD-22, 다른 작업자 worktree 인계는 TD-23.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

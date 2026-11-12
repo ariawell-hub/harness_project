@@ -21,6 +21,7 @@ node scripts/harness.ts start
 4. **자체 검증**: step의 AC 명령 + `check` + [자체 리뷰 체크리스트](scripts/cross-review/checklist.md)
 5. **완료 처리**: `node scripts/harness.ts complete-step` (계획 전용 커밋)
 6. **PR**: push → PR(`Refs #N`, 마지막 step만 `Closes #N`) → `gh pr merge --auto --squash`
+   - main에 뒤처지거나 충돌한 PR은 rebase하지 않고 `origin/main`을 병합해 일반 push로 갱신한다([workflow.md](docs/harness/workflow.md) 5절, ADR-0006).
 7. 남은 step은 병합 뒤 `new-task --plan <id> --step <N>`으로 새 브랜치에서 이어 간다.
 
 무인 실행은 runner가 위 루프를 step마다 새 세션으로 돌린다: `node scripts/harness.ts run --worker runner-1`
