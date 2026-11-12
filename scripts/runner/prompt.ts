@@ -95,6 +95,8 @@ export function planningPrompt(
   issue: Issue,
   attempts: Attempt[],
   attemptNo: number,
+  /** 열린 질문에 대한 제작자 답(TD-18). 있으면 계획에 반영하게 한다 */
+  answer?: string,
 ): string {
   const parts: string[] = [];
   parts.push(`# 지도 (AGENTS.md)\n\n${read(root, 'AGENTS.md')}`);
@@ -114,6 +116,13 @@ export function planningPrompt(
       `## 해야 할 일 (중·대 규모)\n- \`${ref.file}\`의 모든 섹션을 채워라. 특히 목표와 수용 기준, 범위, 관련 파일, 검증 방법.\n- step으로 나눠 \`${ref.dir}/index.json\`의 steps에 적어라: {"step":0,"name":"kebab-name","status":"pending"} …\n- step마다 \`${ref.dir}/stepN.md\`를 docs/exec-plans/TEMPLATE-step.md 형식으로 만들어라. 각 step은 PR 하나(400줄 안팎)이며 새 세션이 그 파일만 읽고 작업할 수 있어야 한다.\n- Acceptance Criteria는 \`\`\`bash 블록에 runner가 실행할 명령으로 쓴다.`,
     );
   }
+  parts.push(
+    `## 질문 (절차서 7절)\n- 제작자에게 반드시 물어야 할 것만 계획의 "열린 질문"에 \`### 질문: <한 줄>\` 형식(선택지·영향·추천)으로 적어라. runner가 Issue에 \`needs-human\`과 제작자 멘션으로 올리고, 답을 받을 때까지 이 계획을 멈춘다.\n- 추천안으로 진행해도 되는 판단은 질문으로 적지 말고 "의사결정 로그"에 결정/이유/버린 대안으로 남겨라.`,
+  );
+  if (answer)
+    parts.push(
+      `## 제작자 답변 (9.1절, 이 지시를 따른다)\n${answer}\n\n답을 계획에 반영하라. 반영한 질문은 "열린 질문"에서 지우고 "의사결정 로그"에 결정/이유/버린 대안으로 옮겨라.`,
+    );
   const digest = attemptsDigest(attempts, id, null);
   if (digest) parts.push(`## 직전 계획 검사 실패 (이번이 ${attemptNo}번째 시도)\n${digest}`);
   parts.push(COMMON_RULES);

@@ -4,6 +4,7 @@ import { judge, keyFailures, stepTotals, type Attempt } from '../lib/attempts.ts
 import { run } from '../lib/exec.ts';
 import {
   extractCommands,
+  openQuestions,
   parseBranch,
   parseDoc,
   section,
@@ -123,4 +124,40 @@ test('글롭', () => {
   assert.ok(matchesAny('docs/x/TEMPLATE-step.md', ['docs/**/TEMPLATE*.md']));
   assert.ok(matchesAny('docs/TEMPLATE.md', ['docs/**/TEMPLATE*.md']));
   assert.ok(!matchesAny('src/a.ts', ['docs/**']));
+});
+
+test('열린 질문 추출: "### 질문:" 블록만 나누고, 주석·"없음"·목록은 질문이 아니다 (TD-18)', () => {
+  const body = [
+    '## 의사결정 로그',
+    '### 질문: 여기는 다른 섹션',
+    '## 열린 질문',
+    '<!-- 선택지 + 추천안 (9.1절) -->',
+    '',
+    '### 질문: 봇 Issue를 받을까',
+    '',
+    '- A) 제외 — 영향: 없음',
+    '- B) 받는다 — 영향: 크다',
+    '- 추천: A. 이유: 안전',
+    '',
+    '### 질문:   설정 이름  ',
+    '- A) x',
+    '### 참고',
+    '- 질문이 아니다',
+    '',
+    '## 검증 방법과 결과',
+    '- 없음',
+  ].join('\n');
+  const qs = openQuestions(body);
+  assert.deepEqual(
+    qs.map((q) => q.title),
+    ['봇 Issue를 받을까', '설정 이름'],
+  );
+  assert.equal(
+    qs[0].text,
+    '### 질문: 봇 Issue를 받을까\n\n- A) 제외 — 영향: 없음\n- B) 받는다 — 영향: 크다\n- 추천: A. 이유: 안전',
+  );
+  assert.equal(qs[1].text, '### 질문:   설정 이름  \n- A) x', '다음 ### 제목 앞에서 끊는다');
+  assert.deepEqual(openQuestions('## 열린 질문\n<!-- ### 질문: 주석 -->\n- 없음\n'), []);
+  assert.deepEqual(openQuestions('## 열린 질문\n\n- step2 전: environment 4개\n'), []);
+  assert.deepEqual(openQuestions('## 목표\n- x\n'), []);
 });

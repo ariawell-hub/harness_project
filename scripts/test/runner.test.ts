@@ -381,3 +381,63 @@ test('runner: step 완료 push가 거부되고 원격 브랜치가 갈라졌으�
     t.fx.cleanup();
   }
 });
+
+test('runner: 계획 작성 세션이 열린 질문을 남기면 needs-human·멘션으로 한 번 올리고 멈췄다가, 답을 넣어 계획을 다시 쓰고 이어 간다 (TD-18)', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Gamma feature', '질문이 필요한 기능');
+    writeFileSync(
+      t.behavior,
+      JSON.stringify({ 'gamma-feature': { plan: ['question', 'ok'], steps: 1 } }),
+    );
+    assert.equal(await run(t.fx.root), 'human', '답을 기다리면 멈춘다');
+    let issue = t.gh().issues[0];
+    assert.ok(issue.labels.includes('needs-human'), 'Issue에 needs-human');
+    const asked = issue.comments.filter((c) => c.body.includes('데모 질문'));
+    assert.equal(asked.length, 1, '질문을 한 번 올린다');
+    assert.match(asked[0].body, /@maker/, '제작자 멘션');
+    assert.match(asked[0].body, /추천: A/, '질문 블록 전문');
+    assert.equal(t.gh().prs.length, 0, 'step으로 넘어가지 않았다');
+    assert.ok(
+      !t.prompts().some((p) => p.slug === 'gamma-feature' && p.step !== 'plan'),
+      'step 세션을 띄우지 않았다',
+    );
+    const wt = listWorktrees(t.fx.root).find((w) => w.branch?.includes('gamma-feature'))!;
+    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
+    const planRel = sh(
+      'git',
+      ['ls-tree', '-r', '--name-only', `origin/${wt.branch}`, 'docs/exec-plans/active/'],
+      t.fx.root,
+    )
+      .split('\n')
+      .find((f) => f.endsWith('/plan.md'))!;
+    assert.match(
+      sh('git', ['show', `origin/${wt.branch}:${planRel}`], t.fx.root),
+      /^status: blocked/m,
+      '멈춘 계획을 push했다',
+    );
+
+    // 답을 기다리는 동안 다시 돌려도 같은 질문을 또 올리지 않는다
+    assert.equal(await run(t.fx.root), 'human');
+    issue = t.gh().issues[0];
+    assert.equal(issue.comments.filter((c) => c.body.includes('데모 질문')).length, 1);
+
+    // 제작자 답 → 답을 넣어 계획을 다시 작성 → 이미 올린 질문만 남았으니 진행
+    new FakeGitHub(t.state).ownerComment(1, 'B로 하라');
+    assert.equal(await run(t.fx.root), 'idle');
+    issue = t.gh().issues[0];
+    assert.equal(issue.state, 'closed', '답을 받은 뒤 끝까지 간다');
+    assert.ok(!issue.labels.includes('needs-human'));
+    const plans = t.prompts().filter((p) => p.slug === 'gamma-feature' && p.step === 'plan');
+    assert.equal(plans.length, 2, '답을 받은 뒤 계획을 다시 작성한다');
+    assert.doesNotMatch(plans[0].prompt, /제작자 답변/);
+    assert.match(plans[1].prompt, /제작자 답변[\s\S]*B로 하라/);
+    assert.equal(
+      issue.comments.filter((c) => c.body.includes('데모 질문')).length,
+      1,
+      '이미 올린 질문은 다시 올리지 않는다',
+    );
+  } finally {
+    t.fx.cleanup();
+  }
+});
