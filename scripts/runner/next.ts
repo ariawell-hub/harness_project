@@ -170,7 +170,7 @@ function hasAcceptLine(body: string): boolean {
 /**
  * 제작자(`owner`) 계정이 쓴 댓글 가운데 `/harness accept` 한 줄이 있는지 본다(9.1절 답변 인정과 같은 근거:
  * 댓글 작성자는 봇이 흉내 낼 수 없다). 봇·외주 개발자 등 다른 계정의 댓글은 보지 않는다.
- * 한계: 마지막 편집자는 보지 않는다. 쓰기 권한 계정이 제작자 댓글을 고친 경우를 가려내지 못한다(TD-20).
+ * 한계: 마지막 편집자는 보지 않는다. 쓰기 권한 계정이 제작자 댓글을 고친 경우를 가려내지 못한다(TD-24).
  */
 export function ownerAccepted(comments: Comment[], owner: string): boolean {
   return comments.some((c) => sameLogin(c.author, owner) && hasAcceptLine(c.body));

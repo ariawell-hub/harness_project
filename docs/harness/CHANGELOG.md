@@ -16,7 +16,7 @@ review_cycle: on-change
 - L1 훅 셸 방언(ADR-0005): PowerShell·cmd 토큰화, `powershell -Command`·`pwsh -c`·`-EncodedCommand`·`cmd /c`·`iex` 재귀, 명령 이름 대소문자·확장자 무시, `.ENV`도 `.env`로 판정. Claude Code `PowerShell` 도구를 훅 matcher에 넣고(대화·runner), runner 권한 프로필은 `PowerShell` 도구를 거부한다.
 - L1 Windows 차단 규칙(ADR-0005): R14 재귀 삭제에 `Remove-Item -Recurse`(별칭 포함)·cmd `rd`·`rmdir`·`del /s`, 대상 없는 PowerShell 재귀 삭제(파이프 입력) 차단, `$env:USERPROFILE`·`%USERPROFILE%`를 홈으로 해석. R20에 `cmdkey`·`vaultcmd`·`Get-StoredCredential`·`git-credential-*`, `PasswordVault`·`CredRead` 등 API, `%APPDATA%\GitHub CLI\hosts.yml`·`Microsoft\Credentials·Protect·Vault`, `$env:GH_TOKEN=`·`Remove-Item Env:GH_TOKEN`·`SetEnvironmentVariable`·`set`·`setx`(이름 대소문자 무시). 자격증명 파일 판정은 대소문자 무시. `Read(~/AppData/Roaming/GitHub CLI/**)` 거부.
 - 설계서 v0.7.5: runner의 새 Issue 후보(4.5절 우선순위 5번)를 제작자(`github.owner`)·외주 개발자(새 설정 `github.collaborators`) 계정이 만든 Issue로 한정. 봇·그 밖의 계정·작성자 불명 Issue는 제외하고 `start`·`next`에 번호와 이유를 보인다. `github.owner`가 비면 새 Issue를 고르지 않는다(fail-closed). Issue 작성 뒤 수정 미확인은 TD-19(Issue #5).
-- 설계서 v0.7.5(이어서): 새 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`). `owner-approved`면 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue도 runner 후보가 된다(봇·외주 개발자 댓글, 인용·문장 속 언급·코드 블록은 불인정). `harness.config.json`은 `exclude`로 명시하고, 승인 대기 Issue가 있으면 `start`가 승인 방법을 안내한다. 쓰기 권한 계정이 고친 댓글을 가려내지 못하는 한계는 TD-20(Issue #5).
+- 설계서 v0.7.5(이어서): 새 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`). `owner-approved`면 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue도 runner 후보가 된다(봇·외주 개발자 댓글, 인용·문장 속 언급·코드 블록은 불인정). `harness.config.json`은 `exclude`로 명시하고, 승인 대기 Issue가 있으면 `start`가 승인 방법을 안내한다. 쓰기 권한 계정이 고친 댓글을 가려내지 못하는 한계는 TD-24(Issue #5).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
