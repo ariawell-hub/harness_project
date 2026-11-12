@@ -44,6 +44,9 @@ claimed_at: 2026-11-12T13:31:12+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-12 13:31 (KST) `new-task --issue 27 --slug no-force-push --size medium --type fix`. 동작이 바뀌는 변경이라 medium(절차서 1절), step 하나.
+- 2026-11-12 13:31~13:33 (KST) 먼저 실패한 테스트: `branch-update.test.ts` 전체 실패(`remoteBranchDiverged` export 없음). runner 통합 테스트(원격 브랜치에 다른 커밋) → 기대 `human`, 실제 `idle`. 옛 코드가 lease로 원격 커밋을 덮어쓰고 PR까지 병합했다.
+- 2026-11-12 13:33 (KST) 구현(커밋 `b3bd985`): `remoteBranchDiverged`(lib/git.ts), `doStep` push 실패 처리(runner/run.ts). 테스트 18개 통과, `scripts/runner`·`scripts/lib`에 `force-with-lease` 없음. PR #26 병합으로 main이 앞서 `origin/main`을 병합해 갱신했다(ADR-0006 절차, 충돌 없음).
+- 2026-11-12 13:34 (KST) 문서: 설계서 v0.7.9(14.4절 git 행), TD-22 해결, ADR-0006 결과, architecture.md, CHANGELOG.
 
 ## 의사결정 로그
 
@@ -60,7 +63,7 @@ claimed_at: 2026-11-12T13:31:12+09:00 # new-task가 채운다
 
 ## 검증 방법과 결과
 
-- `node --test scripts/test/branch-update.test.ts scripts/test/runner.test.ts`, `! grep -rn "force-with-lease" scripts/runner scripts/lib`, `node scripts/harness.ts check`. 결과: (작성 예정)
+- `node --test scripts/test/branch-update.test.ts scripts/test/runner.test.ts`, `! grep -rn "force-with-lease" scripts/runner scripts/lib`, `node scripts/harness.ts check`. 결과: AC 4개 통과(테스트 18개), `check` 통과.
 
 ## 다음 할 일
 
