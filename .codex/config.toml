@@ -2,6 +2,7 @@
 # runner는 이 값 대신 harness.config.json agents.codex 인자를 명시적으로 넘긴다.
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
+approvals_reviewer = "auto_review"
 
 [features]
 memories = false
