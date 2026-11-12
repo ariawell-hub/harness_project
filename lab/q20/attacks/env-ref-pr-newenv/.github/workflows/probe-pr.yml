@@ -1,0 +1,44 @@
+# 공격 overlay env-ref-pr-newenv: PR 쪽 정의로 없는 environment(q20-attack-new)를 참조한다.
+# 관찰: GitHub이 규칙 없는 environment를 새로 만드는지, 그 job이 비밀을 받는지(기대: 비밀 없음).
+name: probe-pr
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+env:
+  PROBE_DEF: attack-env-ref-pr-newenv
+jobs:
+  no-env:
+    if: contains(github.head_ref, 'env-ref')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          ENV_NAME: none
+          S: ${{ secrets.Q20_FAKE_SECRET }}
+        run: |
+          if [ -n "$S" ]; then secret="set sha8=$(printf '%s' "$S" | sha256sum | cut -c1-8)"; else secret=empty; fi
+          echo "Q20 env=$ENV_NAME event=$EVENT ref=$REF sha=$SHA def=$PROBE_DEF workflow_ref=$WORKFLOW_REF secret=$secret"
+  env:
+    if: contains(github.head_ref, 'env-ref')
+    environment: q20-attack-new
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          ENV_NAME: q20-attack-new
+          S: ${{ secrets.Q20_FAKE_SECRET }}
+        run: |
+          if [ -n "$S" ]; then secret="set sha8=$(printf '%s' "$S" | sha256sum | cut -c1-8)"; else secret=empty; fi
+          echo "Q20 env=$ENV_NAME event=$EVENT ref=$REF sha=$SHA def=$PROBE_DEF workflow_ref=$WORKFLOW_REF secret=$secret"
