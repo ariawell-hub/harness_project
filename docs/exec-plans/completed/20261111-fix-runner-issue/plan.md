@@ -2,7 +2,7 @@
 id: 20261111-fix-runner-issue
 issue: 5 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: blocked   # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -79,6 +79,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 2026-11-12T15:35:07+09:00 제작자 답변 받음(#5)
 - 2026-11-12T15:35:09+09:00 step1 재작업: CI 체크 실패: plan-gate
 - 2026-11-12 step1 재작업 세션(runner-1 무인 세션, 2번째 시도). 제작자 답변("origin/main을 병합해 충돌을 풀고 계속 진행, botIssues는 exclude")을 따르려 했으나 **병합하지 못했다**. `git fetch origin`·`git merge origin/main`이 세션 권한 프로필(`.claude/runner-settings.json`, main도 같음)에 없어 거부됐다. `.git` 내부 파일(`MERGE_HEAD`)을 직접 써서 병합 커밋을 흉내 내거나 `node`로 git을 감싸 부르는 것은 권한 경계 우회이자 R3(worktree 밖 수정) 위반이라 하지 않았다. CI plan-gate 실패 원인: runner의 `blockPlan`이 `completed/`에 있는 계획을 `status: blocked`로 바꿔 push했고(7486ad0), plan-gate는 마지막 step PR의 계획이 `completed`가 아니라서 실패했다. 지금 로컬에서는 step1이 `in_progress`라 `plan-gate`가 "완료 처리 전"으로 실패하고, runner의 완료 처리가 이것을 고친다. 한 일: 로컬의 `origin/main`(f82dec8) 기준으로 충돌 5개 파일을 분석해 병합 지침을 "열린 질문"에 적었다. main이 이미 TD-20~23을 등록해 이 step의 TD-20을 TD-24로 바꿨다(tracker·plan·index.json·CHANGELOG·설계서 14.6절·`next.ts` 주석). 병합 경로가 없는 문제는 TD-25로 등록했다. 코드 동작은 바꾸지 않았다.
+- 2026-11-12T15:42:43+09:00 중단: origin/main 병합이 충돌한다(docs/exec-plans/tech-debt-tracker.md, docs/harness/CHANGELOG.md, docs/harness/design.md, scripts/commands/start.ts, scripts/test/next.test.ts). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다
 
 ## 의사결정 로그
 
