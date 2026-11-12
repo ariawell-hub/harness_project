@@ -1,12 +1,12 @@
 ---
 id: 20261112-planning-questions
 issue: 33 # GitHub Issue 번호
-type: fix  # 브랜치 접두어: feat | fix | chore | docs | refactor | test
+type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
 status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
-owner: session  # 선점한 runner 작업자 또는 사람
+owner: session # 선점한 runner 작업자 또는 사람
 claimed_at: 2026-11-12T16:10:59+09:00 # new-task가 채운다
 ---
 
@@ -45,6 +45,9 @@ claimed_at: 2026-11-12T16:10:59+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-12 16:11 (KST) `new-task --issue 33 --slug planning-questions --size medium --type fix`. 동작이 바뀌는 변경이라 medium(절차서 1절), step 하나.
+- 2026-11-12 (KST) 먼저 실패한 테스트: runner 통합 테스트(계획 작성 세션이 `### 질문:`을 남김) → 기대 `human`, 실제 `idle`. 옛 코드는 질문을 무시하고 step·PR·병합까지 갔다. `lib.test.ts`는 `openQuestions` export가 없어 실패.
+- 2026-11-12 (KST) 구현(커밋 `3929326`): `openQuestions`(lib/plan.ts), `askQuestions`·`questions.json`·`doPlanning`·`doAnswered`(runner/run.ts), `planningPrompt` 질문 안내·제작자 답변(runner/prompt.ts), 가짜 에이전트 `question` 동작. 전체 테스트 112개 통과.
+- 2026-11-12 (KST) 문서: 설계서 v0.7.10(4.5절 실패와 대기, 9.1절 질문·알림 방법), 절차서 7절, TD-18 해결·TD-24 등록, CHANGELOG, architecture.md.
 
 ## 의사결정 로그
 
@@ -55,13 +58,15 @@ claimed_at: 2026-11-12T16:10:59+09:00 # new-task가 채운다
 
 ## 발견 사항
 
+- step 세션도 같은 무인 세션 규칙("열린 질문에 적고 멈춰라")을 받지만 runner는 step 판정 전에 질문을 보지 않는다. AC 실패로 세다가 5회에 중단 보고로만 올라간다. → 처리: TD-24
+
 ## 열린 질문
 
 - 없음. 무인 세션 규칙("열린 질문에 적고 멈춰라")과 설계서 9.1절("needs-human 라벨 + 제작자 멘션")을 runner가 실제로 지키게 하는 변경이라 규칙 변경이 아니다.
 
 ## 검증 방법과 결과
 
-- step0 AC: `node --test scripts/test/lib.test.ts scripts/test/runner.test.ts`, `grep`으로 `openQuestions`·설계서 버전 확인, `node scripts/harness.ts check`.
+- step0 AC: `node --test scripts/test/lib.test.ts scripts/test/runner.test.ts`, `grep`으로 `openQuestions`·설계서 버전·TD-18 해결 확인, `node scripts/harness.ts check`. 결과: AC 4개 통과(테스트 20개), 전체 테스트 112개 통과.
 
 ## 다음 할 일
 
