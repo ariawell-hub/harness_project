@@ -20,6 +20,7 @@ review_cycle: on-change
 - 병합 worktree 정리(Issue #16 step1): `cleanupMerged`(`start`·runner)가 호출한 프로세스의 현재 폴더가 들어 있는 worktree는 지우지 않고 "남김"과 이유를 출력한다(경로는 `realpath`로 비교).
 - 설계서 v0.7.7 · 질문 규칙(Issue #16 step2): 제작자가 대화로 직접 지시한 일은 봇이 Issue를 등록하고 묻지 않고 시작한다(절차서 1절의 "Issue가 없으면 만들지 말고 묻는다" 삭제). 추천안이 분명한 운영 판단은 묻지 않고 기록, 질문은 작업 시작 때 모음, 대화 결정은 즉시 리포에 기록(절차서 7절, 설계서 9.1절, AGENTS.md).
 - runner 세션 기록(Issue #16 step3): 세션마다 원본 출력을 `<공유 git-dir>/harness/sessions/`에 남기고 `runner.jsonl`에 `session-end`(세션 id·턴·종료 이유·권한 거부 개수와 도구 이름·로그 경로)를 쓴다. 환경 장애로 끝난 세션도 기록한다. `harness.config.json`의 Claude 실행 인자에서 `--no-session-persistence`를 빼 세션 전체 기록이 남는다(보호 경로). Codex는 TD-20.
+- CLI·차단 메시지(Issue #16 step4): `node scripts/harness.ts <명령> --help`(또는 `-h`)는 아무것도 실행하지 않고 도움말을 출력하고, `--` 앞의 모르는 `--옵션`은 실행 없이 종료 코드 2로 끝난다(TD-17 해결). 리포 밖(사용자 환경·다른 프로젝트) 파일 쓰기 차단 메시지를 "리포 밖 파일"로 바꾸고 사용자가 직접 실행할 `! <명령>` 안내를 준다.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

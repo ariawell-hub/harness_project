@@ -404,6 +404,12 @@ test('파일 도구: main 체크아웃의 대화 세션은 자기 소유 작업 
   gitInit(elsewhere);
   assert.match(w(path.join(elsewhere, 'a.ts'), main)!.rule, /^R3/);
   assert.match(w(path.join(dir, 'loose', 'a.ts'), main)!.rule, /^R3/);
+  // 사용자 환경 파일은 "리포 밖"이라고 알리고 사용자가 직접 실행할 명령을 안내하게 한다(step4)
+  const zshrc = w(`${HOME}/.zshrc`, main)!;
+  assert.match(zshrc.rule, /^R3/);
+  assert.match(zshrc.what, /리포 밖 파일/);
+  assert.match(zshrc.how, /! <명령>/);
+  assert.doesNotMatch(zshrc.how, /현재 worktree 안의 파일만/);
 });
 
 // ---- 실제 프로세스: stdin JSON → 종료 코드 2 (13.1절: 경고만 하고 통과시키지 않는지) ----

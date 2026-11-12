@@ -2,7 +2,7 @@
 id: 20261112-stop-friction
 issue: 16 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -62,6 +62,8 @@ claimed_at: 2026-11-12T09:50:06+09:00 # new-task가 채운다
 - 2026-11-12 10:25 step2(문서만): 절차서 1절 접수 규칙(대화 지시는 봇이 Issue 등록 후 바로 시작), 7절(추천안이 분명한 운영 판단은 묻지 않음, 질문 시점, 대화 결정 즉시 기록), AGENTS.md, 설계서 v0.7.7(8.3절 접수, 9.1절). "반드시 묻는다" 목록과 runner의 봇 Issue 제외 규칙은 그대로 뒀다. step2 AC와 `check` 통과.
 - 2026-11-12 10:22 step2 PR #19 병합.
 - 2026-11-12 10:40 step3: 먼저 실패한 테스트 기록 — `node --test scripts/test/runner.test.ts` → `parseSessionSummary` export 없음으로 실패. 구현 후 사용량 한도 테스트가 한 번 더 실패(로그 파일 덮어쓰기, 발견 사항)해서 고쳤다. 최종 5개 통과(새 테스트 3개: 결과 JSON 요약, 세션마다 `session-end`·원본 출력, 환경 장애 세션 기록). 콘솔에 `session-end: 권한 거부 3건: Bash, WebFetch`가 보인다. step3 AC와 `check` 통과.
+- 2026-11-12 10:29 step3 PR #20 병합.
+- 2026-11-12 10:40 step4: 먼저 실패한 테스트 기록 — `node --test scripts/test/cli.test.ts` → `run --help`가 리포가 아닌 폴더에서 실행을 시도해 실패, `--bogus-flag`가 종료 코드 2가 아니라 실패. 구현 후 `cli.test.ts` 2개·`guard.test.ts` 15개 통과. `node scripts/harness.ts run --help`는 도움말만 출력. TD-17 해결. step4 AC와 `check` 통과. 계획 완료.
 
 ## 의사결정 로그
 
@@ -81,7 +83,9 @@ claimed_at: 2026-11-12T09:50:06+09:00 # new-task가 채운다
 
 - 각 step의 AC 명령과 `node scripts/harness.ts check`.
 - step0은 병합 뒤 이 세션이 main 체크아웃에서 step1 worktree 파일을 바로 고치는 것으로 실제 동작을 확인한다. Claude Code 자체가 작업 폴더 밖 쓰기에 승인을 요구하는지도 이때 확인한다.
+- 결과: step0~4 AC와 `check` 모두 통과(PR #17, #18, #19, #20, 이 PR). 새 테스트는 `guard.test.ts` 2개(+1 단언 묶음), `cleanup.test.ts` 2개, `runner.test.ts` 3개, `cli.test.ts` 2개.
+- 실사용: step1~4는 이 대화 세션이 main 체크아웃에 머문 채 `EnterWorktree` 없이 각 worktree 파일을 만들고 고쳤다. 훅 차단과 Claude Code 승인 요청이 한 번도 없었다(step0 전에는 `EnterWorktree` 승인이 필요했다). 각 step 병합 뒤 `start`가 지난 worktree를 정리했고 세션 폴더는 영향받지 않았다.
 
 ## 다음 할 일
 
-- step0 구현.
+- 없음(계획 완료). runner 무인 권한 프로필의 허용 목록은 `session-end`의 `deniedTools`가 쌓인 뒤 따로 정한다. Codex 세션 기록은 TD-20.
