@@ -7,7 +7,7 @@ review_cycle: on-change
 # ADR-0006: 뒤처진 PR은 rebase가 아니라 main 병합으로 갱신한다
 
 - 날짜: 2026-11-12
-- 상태: 채택 (제작자 대화 결정). runner 구현은 Issue #22 step1
+- 상태: 채택 (제작자 대화 결정). 절차서·설계서는 Issue #22 step0, runner 구현은 step1
 - 관련: 설계서 4.5절, 10.3절, 14.4절, R2, R14, [절차서 5절](../harness/workflow.md), Issue #4·#22, PR #14
 
 ## 맥락
@@ -38,5 +38,5 @@ review_cycle: on-change
 
 - PR 커밋 목록에 병합 커밋이 남지만, squash 병합이라 main 이력에는 남지 않는다.
 - 세션 절차는 [절차서 5절](../harness/workflow.md)의 "main에 뒤처지거나 충돌한 PR 갱신"에 있다.
-- runner 갱신 경로(main 병합, `DIRTY` 처리, push 실패 기록)는 Issue #22 step1에서 구현한다.
+- runner 갱신 경로(Issue #22 step1): `scripts/lib/git.ts`의 `updateBranchFromBase`가 PR 브랜치에 `origin/main`을 병합하고 일반 push한다. 충돌하면 병합을 취소하고 `conflict`를, 원격 PR 브랜치에 로컬에 없는 커밋이 있으면 병합 없이 `failed`를 돌려준다. runner(`doUpdate`)는 충돌이면 계획을 `blocked` + `needs-human`으로, 그 밖의 실패는 `pr:update` 실패로 기록한다. `pickNext`는 `BEHIND`와 `DIRTY`를 갱신 대상으로 보고, 계획이 `blocked`인 PR은 다시 고르지 않는다. GitHub 상태가 늦어 이미 최신인데 갱신 대상으로 보이면 환경 대기로 처리한다.
 - runner step 완료 push가 일반 push 거부 시 자기 브랜치에 `--force-with-lease`로 덮어쓰는 폴백은 이 결정의 범위 밖이다(TD-22).
