@@ -32,6 +32,7 @@ review_cycle: on-change
 - 설계서 v0.7.12: 새 설정 `github.botIssues`(`exclude` 기본 | `owner-approved`). `owner-approved`면 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue도 runner 후보가 된다(봇·외주 개발자 댓글, 인용·문장 속 언급·코드 블록은 불인정). `harness.config.json`은 `exclude`로 명시하고, 승인 대기 Issue가 있으면 `start`가 승인 방법을 안내한다. 쓰기 권한 계정이 고친 댓글을 가려내지 못하는 한계는 TD-26(Issue #5).
 - 설계서 v0.7.13 (Issue #41): runner 신뢰 판정이 편집 이력을 본다. `GitHubPort.issueHistory`(본문 편집 + 제목 변경)와 댓글 편집 이력(GraphQL, 댓글은 최근 100개). 다른 계정이 고친 제작자 댓글은 답·승인이 아니다(`ownerComment`, `start`는 이유 표시). 허용 계정이 아닌 계정이 만들거나 고친 Issue는 그 뒤의 제작자 `/harness accept`가 있어야 후보다(`issueTrust`). runner는 계획 작성 직전에 다시 확인하고, 통과하지 못하면 `blocked` + `needs-human`. TD-19·TD-26 해결.
 - 설계서 v0.7.14 (Issue #43 step0, TD-27 해결): main 병합 충돌 답변 경로. 충돌 중단은 계획 파일을 바꾸지 않고 `conflict.json`에 대기를 둔다(PR plan-gate 유지, PR #29에서 실패했던 경로). 답을 받으면 `updateBranchFromBase(..., { keepConflict: true })` + 충돌 해결 세션(`conflictPrompt`) + runner 판정(충돌 표시·미병합 경로·AC·`check`) 뒤 병합 커밋을 일반 push, 실패면 `git merge --abort`. 실패 키 `pr:conflict`.
+- 설계서 v0.7.15 (Issue #43 step1, TD-24 해결): step 세션의 새 `### 질문:`을 runner가 AC 판정 전에 보고 계획 `blocked` + `needs-human`·제작자 멘션으로 올린다(실패로 세지 않음). 답을 받으면 계획 `active`·step `in_progress`로 답을 넣은 step 세션을 다시 띄운다. `questions.json`에 `stage`(plan | step). step 프롬프트에 질문 안내.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

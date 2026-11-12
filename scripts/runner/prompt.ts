@@ -76,6 +76,9 @@ export function stepPrompt(i: StepPromptInput): string {
       `## step 마무리\n- \`${i.ref.dir}/index.json\`에서 이 step의 "summary"에 다음 step에 필요한 정보(만든 파일, 핵심 결정)를 한 줄로 적어라. "status"는 바꾸지 마라(runner가 바꾼다).\n- 이 step 파일의 "작업"·"Acceptance Criteria"는 고치지 마라(plan-gate가 막는다).`,
     );
   }
+  parts.push(
+    `## 질문 (절차서 7절)\n- 제작자에게 반드시 물어야 할 것(9.1절)만 계획의 "열린 질문"에 \`### 질문: <한 줄>\` 형식(선택지·영향·추천)으로 적고 멈춰라. runner가 판정 전에 보고 Issue에 \`needs-human\`과 제작자 멘션으로 올리며, 답을 받으면 답을 넣어 이 step을 다시 띄운다.\n- 추천안으로 진행해도 되는 판단은 질문으로 적지 말고 "의사결정 로그"에 결정/이유/버린 대안으로 남기고 계속하라.`,
+  );
   const digest = attemptsDigest(i.attempts, i.id, i.step);
   if (digest) parts.push(`## 직전 실패 (이번이 ${i.attemptNo}번째 시도)\n${digest}`);
   if (i.switchApproach) {

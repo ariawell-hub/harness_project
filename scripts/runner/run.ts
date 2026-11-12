@@ -239,10 +239,14 @@ ${attempts.map((a) => `  - ${a.ts} [${a.key}] ${(a.detail ?? '').split('\n').fil
 
 // ---------- 열린 질문 (TD-18) ----------
 
-/** 올린 질문 제목과 답 대기 여부. worktree 하네스 상태 폴더의 questions.json(answer.md 옆) */
+/**
+ * 올린 질문 제목과 답 대기 여부. worktree 하네스 상태 폴더의 questions.json(answer.md 옆).
+ * stage는 질문을 남긴 세션: plan(계획 작성, TD-18) | step(step 세션, TD-24). 답을 받은 뒤 이어 갈 곳이 다르다
+ */
 interface QuestionState {
   reported: string[];
   waiting: boolean;
+  stage: 'plan' | 'step';
 }
 
 function questionFile(info: RepoInfo): string {
@@ -255,9 +259,10 @@ function readQuestionState(info: RepoInfo): QuestionState {
     return {
       reported: Array.isArray(raw.reported) ? raw.reported.map(String) : [],
       waiting: raw.waiting === true,
+      stage: raw.stage === 'step' ? 'step' : 'plan',
     };
   } catch {
-    return { reported: [], waiting: false };
+    return { reported: [], waiting: false, stage: 'plan' };
   }
 }
 
@@ -272,6 +277,7 @@ async function askQuestions(
   ref: PlanRef,
   fresh: OpenQuestion[],
   prev: QuestionState,
+  stage: 'plan' | 'step' = 'plan',
 ): Promise<void> {
   const info = repoInfo(l.worktree);
   setPlanStatus(
@@ -284,12 +290,18 @@ async function askQuestions(
   writeQuestionState(info, {
     reported: [...prev.reported, ...fresh.map((q) => q.title)],
     waiting: true,
+    stage,
   });
   const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
-  const body = `${mention}runner의 계획 작성 세션이 질문 ${fresh.length}건을 남겼다. 답을 받을 때까지 계획 \`${l.id}\`를 멈춘다.
+  const who = stage === 'step' ? `step ${l.step ?? 0} 세션` : '계획 작성 세션';
+  const resume =
+    stage === 'step'
+      ? `runner가 답을 넣어 step ${l.step ?? 0}을 이어 간다`
+      : 'runner가 답을 넣어 계획을 다시 작성하고 이어 간다';
+  const body = `${mention}runner의 ${who}이 질문 ${fresh.length}건을 남겼다. 답을 받을 때까지 계획 \`${l.id}\`를 멈춘다.
 
 - 계획: \`${ref.file}\` (브랜치 \`${l.branch}\`)
-- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. runner가 답을 넣어 계획을 다시 작성하고 이어 간다.
+- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. ${resume}.
 
 ${fresh.map((q) => q.text).join('\n\n')}`;
   try {
@@ -300,6 +312,7 @@ ${fresh.map((q) => q.text).join('\n\n')}`;
   }
   event(ctx, 'questions', {
     plan: l.id,
+    stage,
     reason: `열린 질문 ${fresh.length}건: ${fresh.map((q) => q.title).join(' / ')}`,
   });
 }
@@ -446,7 +459,7 @@ async function doStep(
   ).length;
   const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
   const answer = existsSync(answerFile)
-    ? `## 제작자 답변 (9.1절, 이 지시를 따른다)\n${readFileSync(answerFile, 'utf8')}`
+    ? `## 제작자 답변 (9.1절, 이 지시를 따른다)\n${readFileSync(answerFile, 'utf8')}\n\n답을 반영하라. 계획의 "열린 질문"에 남긴 질문이 이 답으로 풀렸으면 지우고 "의사결정 로그"에 결정/이유/버린 대안으로 옮겨라.`
     : '';
   const prompt = stepPrompt({
     root: l.worktree,
@@ -499,6 +512,17 @@ async function doStep(
       ? `세션이 시간 제한 ${ctx.cfg.limits.sessionTimeoutMin}분을 넘겨 종료됐다`
       : undefined,
   });
+
+  // ---- 열린 질문(TD-24): 판정 전에 본다. 새 질문이면 제작자 답을 받을 때까지 이 step을 멈춘다 ----
+  const qref = findPlan(l.worktree, l.id) ?? ref;
+  const qs = readQuestionState(info);
+  const fresh = openQuestions(
+    parseDoc(readFileSync(path.join(l.worktree, qref.file), 'utf8')).body,
+  ).filter((q) => !qs.reported.includes(q.title));
+  if (fresh.length) {
+    await askQuestions(ctx, l, qref, fresh, qs, 'step');
+    return 'blocked';
+  }
 
   // ---- runner가 직접 판정 (세션의 "완료" 주장은 근거가 아니다) ----
   const acs = acceptanceCommands(l.worktree, ref, l.step);
@@ -661,6 +685,14 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
       return;
     }
     const qs = readQuestionState(info);
+    if (qs.waiting && qs.stage === 'step') {
+      // step 세션의 질문(TD-24): 답을 넣어 그 step을 이어 간다
+      writeQuestionState(info, { ...qs, waiting: false });
+      setPlanStatus(t.local.worktree, 'active', `제작자 답변 받음(#${t.issue}): step을 이어 간다`);
+      setStepStatus(t.local.worktree, 'in_progress');
+      event(ctx, 'answered', { issue: t.issue, resumeStep: true });
+      return;
+    }
     if (qs.waiting) {
       // 계획 작성 단계의 질문(TD-18): 답을 넣어 계획을 다시 작성한다. step 상태는 그대로 둔다
       writeQuestionState(info, { ...qs, waiting: false });

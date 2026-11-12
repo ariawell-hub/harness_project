@@ -4,7 +4,8 @@
 //   fail    : 아무것도 하지 않고 "완료했다"고만 말한다(세션 주장은 판정 근거가 아님을 확인)
 //   timeout : 오래 멈춘다(세션 시간 제한 확인)
 //   limit   : 사용량 한도 메시지로 실패한다(환경 장애, 실패로 세지 않음)
-//   question: (계획 작성만) ok처럼 계획을 채우고 "열린 질문"에 `### 질문: 데모 질문` 블록을 남긴다
+//   question: 계획 작성이면 ok처럼 계획을 채우고 "열린 질문"에 `### 질문: 데모 질문` 블록을 남긴다.
+//             step이면 계획의 "열린 질문"에 `### 질문: 스텝 질문` 블록만 남기고 멈춘다(커밋하지 않는다)
 // 충돌 해결 프롬프트("# 이번 작업: 충돌 해결")는 behavior의 "conflict" 순서를 쓴다.
 //   ok   : "## 충돌 파일"에 나열된 파일에서 충돌 표시 줄(<<<<<<<, =======, >>>>>>>)을 지운다(양쪽 내용 유지). git은 쓰지 않는다
 //   fail : 아무것도 하지 않는다
@@ -84,6 +85,13 @@ if (action === 'timeout') {
       `# Step ${i}: part-${i}\n\n## 읽어야 할 파일\n- AGENTS.md\n\n## 작업\n- out/${slug}-s${i}.txt를 만든다\n\n## Acceptance Criteria\n\`\`\`bash\ntest -f out/${slug}-s${i}.txt\n\`\`\`\n\n## 금지사항\n- 다른 파일을 고치지 마라. 이유: 범위\n`,
     );
   }
+} else if (action === 'question') {
+  const text = readFileSync(planFile, 'utf8').replace(
+    '## 열린 질문',
+    '## 열린 질문\n\n### 질문: 스텝 질문\n\n- A) 이쪽 — 영향: 작다\n- B) 저쪽 — 영향: 크다\n- 추천: A. 이유: 단순하다\n',
+  );
+  writeFileSync(planFile, text);
+  process.stdout.write('판단이 필요해 열린 질문에 적고 멈춘다.\n');
 } else {
   mkdirSync('out', { recursive: true });
   writeFileSync(`out/${slug}-s${step}.txt`, `step ${step}\n`);
