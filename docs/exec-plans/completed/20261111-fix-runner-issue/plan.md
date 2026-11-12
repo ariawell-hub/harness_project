@@ -2,7 +2,7 @@
 id: 20261111-fix-runner-issue
 issue: 5 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: blocked   # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -75,6 +75,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 2026-11-11T21:05:08+09:00 계획 작성 완료
 - 2026-11-11 step0 issue-author(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'filterTrustedIssues'`(1 fail). 구현: `Issue.author`와 `toIssue`(gh `--json`에 `author`), 가짜 GitHub `addFakeIssue(..., author?)`(생략 시 제작자, 옛 상태·PR 그림자는 `''`), `github.collaborators`(없으면 `[]`, 문자열 배열 아니면 `ConfigError`), `sameLogin`·`filterTrustedIssues`·`Pick.excluded`, idle 이유 끝에 "작성자 확인으로 제외: #N", `start` ③과 `next`(일반·`--json`)에 제외 목록. 일반 `next` 출력에도 제외 줄을 넣었다(수용 기준 4가 `start`·`next`를 함께 요구해서, 출력 형식은 `describeExcluded` 하나로 공유). 그 뒤 `next.test.ts` 13개 통과, `runner.test.ts`는 기대값을 고치지 않고 통과. 설계서 v0.7.5(4.5·14.6절), 절차서 1절, architecture, CHANGELOG, TD-18·TD-19 등록(번호 그대로).
 - 2026-11-12 step1 bot-approval(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'BOT_ISSUE_ACCEPT'`(1 fail). 구현: `github.botIssues`(`BotIssuesMode`, 없으면 `exclude`, 두 값이 아니면 `ConfigError`), `harness.config.json`에 `"botIssues": "exclude"` 명시, `BOT_ISSUE_ACCEPT`·`BOT_ISSUE_WAITING_REASON`·`ownerAccepted`(제작자 댓글만, 줄 단위 정확히 일치, 펜스 코드 블록 안은 건너뜀), `filterTrustedIssues(issues, cfg, comments)`(owner-approved이고 봇 Issue일 때만 댓글 조회, 조회 예외는 그 Issue만 "댓글 조회 실패: <첫 줄>"로 제외), `pickNext` 5번은 `(n) => gh.comments(n)`, `start` ③에 승인 안내 한 줄(`acceptHint`, exclude면 없음), 가짜 GitHub `commentAs`. 그 뒤 `next.test.ts` 28개 통과(새 15개), `runner.test.ts`는 기대값을 고치지 않고 통과. 펜스 판정은 CommonMark 규칙 일부(같은 문자·여는 펜스 이상 길이·3칸까지 들여쓰기·정보 문자열이 붙은 줄은 닫지 않음)를 따랐다. 4칸 들여 쓴 ` ``` `이 펜스를 닫는 것으로 잘못 보면 코드 블록 안의 줄이 승인으로 인정되기 때문이다. 설계서 14.6절(v0.7.5 유지)·4.5절 5번, 절차서 1절, CHANGELOG, TD-20 등록(발견 사항).
+- 2026-11-12T13:36:44+09:00 중단: origin/main 병합이 충돌한다(docs/exec-plans/tech-debt-tracker.md, docs/harness/CHANGELOG.md, docs/harness/design.md, scripts/commands/start.ts, scripts/test/next.test.ts). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다
 
 ## 의사결정 로그
 
