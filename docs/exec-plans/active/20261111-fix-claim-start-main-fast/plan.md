@@ -73,7 +73,11 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
   - 먼저 실패한 테스트 1: `node --test scripts/test/start.test.ts` → 파일 전체 실패(`lib/git.ts`에 `fastForwardMain` export 없음).
   - `fastForwardMain`만 구현한 뒤 같은 명령: 단위 6개 통과, `start` 통합 3개 실패. 실패 요지: 로컬 main HEAD ≠ `origin/main`(당기지 않음), 출력에 "harness.config.json github.owner(제작자 계정)가 비어 있어" 경고 재현, `## ② 정리`·`- main:` 줄 없음. Issue #4 증상 재현 확인.
   - `start.ts`(fetch → fast-forward → 설정 재로드 → ①②③, ② 첫 줄에 main 동기화 결과)와 runner `syncMain`(`fastForwardMain` 호출만) 변경 뒤 `node --test scripts/test/start.test.ts scripts/test/runner.test.ts` 11개 모두 통과.
-  - 문서: `AGENTS.md` 세션 시작 절차 2번, `docs/harness/architecture.md` `lib/git.ts` 행, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md` TD-17 등록.
+  - 문서: `AGENTS.md` 세션 시작 절차 2번, `docs/harness/architecture.md` `lib/git.ts` 행, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md` TD-21 등록.
+
+- 2026-11-12 11:07 (KST) 제작자 지시로 runner-1 소유 PR #14 충돌 해결을 넘겨받았다. 대상 worktree `feat/20261111-fix-claim-start-main-fast-s0`는 rebase 전 깨끗했다. 지정 worktree에서 `node scripts/harness.ts start`를 다시 실행한 결과 열린 `needs-human` 항목은 없었다.
+- `origin/main` (`913c9d6`) 위로 rebase했다. `scripts/commands/start.ts`, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`의 충돌을 해결했고, main의 Issue 후보 제외 및 병합 worktree 보호 변경을 보존했다. main에서 TD-17이 Issue #16 step4로 이미 사용·해결되어, step0의 조건부 지침에 따라 runner 설정 캐시 부채를 TD-21로 옮기고 계획·index 참조를 맞췄다. rebase 결과의 작업 커밋은 `bf5e977`, 계획 전용 커밋은 `000e728`이다.
+- 원격 PR branch는 여전히 이전 커밋 `ef78279`를 가리킨다. rebase 결과를 반영하려면 non-fast-forward 갱신이 필요하지만 R2가 force push를 금지하므로 수행하지 않았다. PR #14의 GitHub 상태는 아직 갱신되지 않았다.
 
 ## 의사결정 로그
 
@@ -86,10 +90,12 @@ claimed_at: 2026-11-11T20:38:21+09:00 # new-task가 채운다
 - 결정: 하네스 스크립트가 main 체크아웃을 `merge --ff-only`로 당기는 것은 R3("main 체크아웃은 고치지 않는다") 위반으로 보지 않는다. 이유: 에이전트가 파일을 고치는 것이 아니라 원격 기본 브랜치에 맞추는 것뿐이고, fast-forward만 하므로 로컬 커밋·미커밋 작업을 잃지 않는다. runner `syncMain`이 이미 같은 일을 한다.
 - 결정: step 2개(main-sync, claim-release)로 나눈다. 이유: 두 동작이 독립적이고 각각 PR 하나(400줄 안팎)에 든다. main-sync를 먼저 하는 이유는 claim-release 통합 테스트가 PR 병합으로 원격 main을 앞서게 만들어 `start`의 동기화를 함께 거치기 때문이다.
 
+- 결정: runner 설정 캐시 부채를 TD-21로 등록한다. / 이유: origin/main에서 TD-17은 Issue #16 step4로 이미 사용·해결되어 있고, step0 계획의 조건부 지침은 다음 빈 번호 사용을 허용한다. / 버린 대안: TD-17을 중복 등록한다.
+
 ## 발견 사항
 
 - `start`의 ② 정리(`cleanupMerged`)는 이미 `releaseClaim`을 부르지만, 마지막 step의 worktree가 로컬에 남아 깨끗하고 PR이 병합된 경우에만 동작한다. Issue 본문의 "runner에서만 호출"보다 "조건이 좁아 대화형 경로를 놓친다"가 정확한 원인이다 → 처리: 해당 없음(step1에서 닫힌 Issue 기준 정리로 보완)
-- runner는 시작할 때 읽은 `harness.config.json`(`runRunner`의 `cfg`)을 끝까지 쓴다. 매 바퀴 `syncMain`으로 main을 당겨도 설정 변경은 runner를 다시 시작해야 반영된다 → 처리: TD-17 (step0에서 등록. 번호는 비어 있었다)
+- runner는 시작할 때 읽은 `harness.config.json`(`runRunner`의 `cfg`)을 끝까지 쓴다. 매 바퀴 `syncMain`으로 main을 당겨도 설정 변경은 runner를 다시 시작해야 반영된다 → 처리: TD-21 (step0에서 등록. TD-17은 main에서 이미 사용·해결되어 다음 빈 번호를 썼다)
 - 기존 runner `syncMain`은 `isClean`(git 실패 시 예외)을 먼저 불러 git status가 실패하면 runner 바퀴가 예외로 끊길 수 있었다. `fastForwardMain`은 모든 git 실패를 `skipped`로 돌려주므로 이 경우 조용히 넘어간다. 판정 순서도 "브랜치 → 깨끗함"으로 바뀌었지만 결과(당김/안 당김)는 같다 → 처리: 해당 없음
 - `start`는 당긴 뒤 설정을 다시 읽으므로, 원격 main의 `harness.config.json`이 깨져 있으면 재로드에서 `ConfigError`로 끝난다. 사람이 손으로 pull 한 뒤 `start`를 실행한 것과 같은 결과이고, 메시지에 파싱·검증 실패 내용이 나온다 → 처리: 해당 없음
 
