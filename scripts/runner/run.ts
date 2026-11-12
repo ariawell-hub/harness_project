@@ -17,6 +17,7 @@ import { runShell, tail } from '../lib/exec.ts';
 import { getGitHub, type GitHubPort } from '../lib/github.ts';
 import {
   defaultBase,
+  fastForwardMain,
   git,
   gitTry,
   harnessStateDir,
@@ -149,16 +150,10 @@ function acquireLock(main: RepoInfo, worker: string): string | null {
   return f;
 }
 
-/** main 체크아웃을 origin/main으로 빨리 감는다(깨끗할 때만). runner는 main의 훅·프로필을 쓴다 */
+/** main 체크아웃을 origin/main으로 빨리 감는다(깨끗할 때만). runner는 main의 훅·프로필을 쓴다.
+ * 결과는 무시한다(매 바퀴 반복되므로 출력하지 않는다). 이유 출력은 `start`가 한다 */
 function syncMain(ctx: Ctx): void {
-  const m = ctx.main.mainRoot;
-  if (!isClean(m)) return;
-  const branch = gitTry(['symbolic-ref', '--short', '-q', 'HEAD'], m).stdout.trim();
-  if (branch !== ctx.cfg.github.defaultBranch) return;
-  gitTry(
-    ['merge', '--ff-only', '--quiet', `${ctx.cfg.github.remote}/${ctx.cfg.github.defaultBranch}`],
-    m,
-  );
+  fastForwardMain(ctx.main.mainRoot, ctx.cfg.github.remote, ctx.cfg.github.defaultBranch);
 }
 
 function limitsOf(cfg: HarnessConfig) {
