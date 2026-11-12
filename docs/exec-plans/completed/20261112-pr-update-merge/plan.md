@@ -58,12 +58,12 @@ claimed_at: 2026-11-12T12:24:49+09:00 # new-task가 채운다
 - 2026-11-12 12:29 (KST) 계획 작성(커밋 `c02c1d0`). 관련 코드 확인: `doRebase`(`scripts/runner/run.ts`)는 rebase 뒤 `--force-with-lease`로 push하고 push 결과를 확인하지 않는다. `pickNext`(`scripts/runner/next.ts`)는 `mergeState === 'BEHIND'`만 갱신 대상으로 보고, 충돌(`DIRTY`) PR은 CI 대기로 센다. 갱신·rebase 경로에 테스트가 없다.
 - 2026-11-12 12:31 (KST) step0 구현(커밋 `c4443e5`): ADR-0006 작성·색인, 절차서 5절 "main에 뒤처지거나 충돌한 PR 갱신"(병합 명령, rebase 금지 이유, `merge -s ours` 복구, `needs-human` 보고), 설계서 v0.7.8(4.5절·10.3절 결속 설명·절차 4번·14.4절·로드맵·시험 항목의 rebase 표현), AGENTS.md 작업 루프 6번, TD-9 문구, TD-22·TD-23 등록, CHANGELOG. step0 AC 12개 모두 통과.
 - 2026-11-12 12:33 (KST) step0 병합(PR #23, `9d10ad2`). `new-task --plan 20261112-pr-update-merge --step 1`로 step1 worktree 생성.
-- 2026-11-12 12:40 (KST) step1 먼저 실패한 테스트:
+- 2026-11-12 12:34~12:43 (KST, 구현 커밋 `306a82d` 전) step1 먼저 실패한 테스트:
   - `node --test scripts/test/branch-update.test.ts` → 파일 전체 실패(`lib/git.ts`에 `updateBranchFromBase` export 없음).
   - `node --test scripts/test/next.test.ts`의 새 PR 테스트: `BEHIND` → 기대 `update`, 실제 `rebase`. `DIRTY` → 기대 `update`, 실제 `idle`(충돌 PR을 무시하는 발견 사항 재현). `blocked` + `BEHIND` → 기대 `idle`, 실제 `rebase`(같은 중단 보고를 반복할 경로).
   - runner 통합 테스트(DIRTY PR)를 구현 파일만 stash한 옛 코드로 돌림 → 기대 `human`, 실제 `idle`(PR #14처럼 아무 보고 없이 멈춤).
-- 2026-11-12 12:45 (KST) step1 구현: `updateBranchFromBase`(lib/git.ts), `pickNext`의 `update`·`DIRTY`·`blocked` 건너뛰기(runner/next.ts), `doUpdate`(runner/run.ts), `describeTask` 문구(commands/start.ts). `advanceRemote`를 `scripts/test/helpers.ts`로 옮겨 branch 지정·fetch 생략을 더했다. 새 테스트 13개 포함 AC 테스트 파일 4개 통과. architecture.md `lib/git.ts` 행, CHANGELOG 갱신.
-- 2026-11-12 12:55 (KST) 자체 리뷰에서 헛도는 반복을 찾았다: runner 루프는 갱신 작업 뒤 기다리지 않으므로, GitHub이 계산이 늦어 `DIRTY`를 계속 알리는데 브랜치는 이미 최신이면 같은 PR을 쉬지 않고 다시 고른다. 테스트(`DIRTY` + 이미 최신, `maxIterations: 3`)를 먼저 추가 → 기대 `wait-env` 3회, 실제 0회로 실패. `doUpdate`가 `up-to-date`이면 `env`를 돌려 기존 환경 대기(`pollSec`, `usageLimitMaxWaitMin` 상한)를 타게 고친 뒤 AC 테스트 41개 통과.
+- 2026-11-12 12:43 (KST) step1 구현(커밋 `306a82d`): `updateBranchFromBase`(lib/git.ts), `pickNext`의 `update`·`DIRTY`·`blocked` 건너뛰기(runner/next.ts), `doUpdate`(runner/run.ts), `describeTask` 문구(commands/start.ts). `advanceRemote`를 `scripts/test/helpers.ts`로 옮겨 branch 지정·fetch 생략을 더했다. 새 테스트 13개 포함 AC 테스트 파일 4개 통과. architecture.md `lib/git.ts` 행, CHANGELOG 갱신.
+- 같은 커밋(`306a82d`) 전 자체 리뷰에서 헛도는 반복을 찾았다: runner 루프는 갱신 작업 뒤 기다리지 않으므로, GitHub이 계산이 늦어 `DIRTY`를 계속 알리는데 브랜치는 이미 최신이면 같은 PR을 쉬지 않고 다시 고른다. 테스트(`DIRTY` + 이미 최신, `maxIterations: 3`)를 먼저 추가 → 기대 `wait-env` 3회, 실제 0회로 실패. `doUpdate`가 `up-to-date`이면 `env`를 돌려 기존 환경 대기(`pollSec`, `usageLimitMaxWaitMin` 상한)를 타게 고친 뒤 AC 테스트 41개 통과.
 
 ## 의사결정 로그
 
