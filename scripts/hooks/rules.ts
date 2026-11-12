@@ -807,10 +807,12 @@ export function evaluateFile(
     // 리포 밖이라도 임시 폴더와 Claude 계획 파일은 허용한다
     if (tmpRoots(ctx).some((d) => within(abs, d))) return null;
     if (within(abs, path.join(home, '.claude', 'plans'))) return null;
+    // 사용자 환경(셸 프로필, 토큰 파일 등)이나 다른 프로젝트다. worktree 이야기를 하면 혼란을 준다(Issue #16)
     return v(
       'R3 worktree',
-      `worktree 밖의 파일을 수정하려 했다: ${abs}`,
-      '현재 worktree 안의 파일만 고쳐라. 다른 작업은 다른 worktree에서 한다',
+      `리포 밖 파일을 수정하려 했다: ${abs}`,
+      '리포 밖(사용자 환경·다른 프로젝트) 파일은 에이전트가 고치지 않는다. ' +
+        '바꿀 내용과 사용자가 직접 실행할 명령("! <명령>")을 안내하라',
       `${D} R3`,
     );
   }
