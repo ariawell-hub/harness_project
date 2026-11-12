@@ -1,12 +1,13 @@
 // runner 통합 테스트(12.4절 4.5절 시나리오, 1단계 완료 기준 S6).
 // 가짜 에이전트 + 가짜 GitHub(즉시 squash merge) + 로컬 bare 원격.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { readAttempts } from '../lib/attempts.ts';
 import { repoInfo, listWorktrees } from '../lib/git.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
+import { parseSessionSummary } from '../runner/agents.ts';
 import { runRunner } from '../runner/run.ts';
 import { HARNESS_ROOT, makeFixture, sh } from './helpers.ts';
 
@@ -146,3 +147,98 @@ function baseLimits() {
     pollSec: 0,
   };
 }
+
+// ---- 세션 기록(Issue #16 step3): 무인 세션이 왜 멈췄는지 남긴다 ----
+
+test('parseSessionSummary: Claude 결과 JSON에서 세션 id·턴·종료 이유·권한 거부를 뽑는다', () => {
+  const result = {
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    num_turns: 3,
+    terminal_reason: 'api_error',
+    session_id: 'abc-123',
+    result: 'x'.repeat(2000),
+    permission_denials: [
+      { tool_name: 'Bash', tool_input: { command: 'sed -n 1,9p ' + 'a'.repeat(400) } },
+      { tool_name: 'Bash', tool_input: { command: 'find .' } },
+    ],
+  };
+  const s = parseSessionSummary(JSON.stringify(result, null, 2))!;
+  assert.equal(s.sessionId, 'abc-123');
+  assert.equal(s.numTurns, 3);
+  assert.equal(s.terminalReason, 'api_error');
+  assert.equal(s.isError, true);
+  assert.equal(s.denials.length, 2);
+  assert.equal(s.denials[0].tool, 'Bash');
+  assert.ok(s.denials[0].input.length <= 200, '입력은 200자로 자른다');
+  assert.ok((s.result ?? '').length <= 500, '결과 문구도 자른다');
+  // 여러 줄 출력(stream-json 등)이면 마지막 result 객체를 쓴다
+  const lines = [
+    '{"type":"system","session_id":"old"}',
+    'not json',
+    JSON.stringify({ ...result, session_id: 'last', permission_denials: [] }),
+  ].join('\n');
+  assert.equal(parseSessionSummary(lines)!.sessionId, 'last');
+  assert.equal(parseSessionSummary('완료했습니다!'), null);
+  assert.equal(parseSessionSummary(''), null);
+});
+
+test('runner: 세션마다 원본 출력과 session-end(세션 id·권한 거부 도구)를 남긴다', async () => {
+  const t = setup();
+  process.env.FAKE_RESULT_JSON = '1';
+  try {
+    addFakeIssue(t.state, 'Log demo', '세션 기록 확인');
+    assert.equal(await run(t.fx.root), 'idle');
+    const dir = path.join(repoInfo(t.fx.root).commonDir, 'harness');
+    const ends = readFileSync(path.join(dir, 'runner.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.event === 'session-end');
+    // 계획 작성 1 + step 2(기본 behavior)
+    assert.equal(ends.length, 3, '세션마다 session-end');
+    const planning = ends.find((e) => e.kind === 'planning')!;
+    assert.match(String(planning.sessionId), /^fake-log-demo-plan$/);
+    assert.equal(planning.denials, 3);
+    assert.deepEqual(planning.deniedTools, ['Bash', 'WebFetch'], '도구 이름은 중복 없이');
+    assert.equal(planning.turns, 7);
+    const step0 = ends.find((e) => e.kind === 'step' && e.step === 0)!;
+    assert.equal(step0.sessionId, 'fake-log-demo-0');
+    for (const e of ends) {
+      assert.ok(existsSync(String(e.log)), `원본 출력 파일: ${e.log}`);
+      assert.match(readFileSync(String(e.log), 'utf8'), /permission_denials/);
+    }
+    assert.equal(readdirSync(path.join(dir, 'sessions')).length, 3);
+  } finally {
+    delete process.env.FAKE_RESULT_JSON;
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 사용량 한도로 끝난 세션도 session-end를 남긴다', async () => {
+  const t = setup();
+  try {
+    addFakeIssue(t.state, 'Limit demo', '환경 장애 기록');
+    writeFileSync(t.behavior, JSON.stringify({ 'limit-demo': { plan: ['limit'] } }));
+    // 선점 → 계획 작성 세션(사용량 한도) → 대기 없이 종료
+    await runRunner({
+      cwd: t.fx.root,
+      worker: 'runner-1',
+      tool: 'fake',
+      maxIterations: 4,
+      noWait: true,
+    });
+    const dir = path.join(repoInfo(t.fx.root).commonDir, 'harness');
+    const events = readFileSync(path.join(dir, 'runner.jsonl'), 'utf8');
+    const end = events
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.event === 'session-end');
+    assert.ok(end, 'env 장애여도 기록한다');
+    assert.match(readFileSync(String(end.log), 'utf8'), /usage limit/);
+  } finally {
+    t.fx.cleanup();
+  }
+});

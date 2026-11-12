@@ -37,12 +37,15 @@ review_cycle: on-change
 
 ## 상태가 사는 곳
 
-| 상태                         | 위치                                                | 이유                                      |
-| ---------------------------- | --------------------------------------------------- | ----------------------------------------- |
-| 계획·step 상태               | `docs/exec-plans/` (git)                            | 인수인계 문서. 병합으로만 main에 들어간다 |
-| 실패 기록                    | `$(git rev-parse --git-dir)/harness/attempts.jsonl` | 작업 트리 밖. 캐시·승인을 깨지 않는다     |
-| check 캐시, runner 로그·lock | `$(git rev-parse --git-common-dir)/harness/`        | worktree끼리 공유                         |
-| 선점                         | 원격 `claim/<issue>` 브랜치                         | push 거부로 원자적 선점                   |
+| 상태                         | 위치                                                  | 이유                                      |
+| ---------------------------- | ----------------------------------------------------- | ----------------------------------------- |
+| 계획·step 상태               | `docs/exec-plans/` (git)                              | 인수인계 문서. 병합으로만 main에 들어간다 |
+| 실패 기록                    | `$(git rev-parse --git-dir)/harness/attempts.jsonl`   | 작업 트리 밖. 캐시·승인을 깨지 않는다     |
+| check 캐시, runner 로그·lock | `$(git rev-parse --git-common-dir)/harness/`          | worktree끼리 공유                         |
+| 선점                         | 원격 `claim/<issue>` 브랜치                           | push 거부로 원자적 선점                   |
+| runner 세션 원본 출력        | `$(git rev-parse --git-common-dir)/harness/sessions/` | 무인 세션이 왜 멈췄는지 본다(Issue #16)   |
+
+runner는 세션이 끝날 때마다 `runner.jsonl`에 `session-end`를 남긴다: 세션 id, 턴 수, 종료 이유, 권한 거부 개수와 도구 이름(`deniedTools`), 원본 출력 파일(`log`). Claude 세션의 전체 기록은 Claude Code가 `~/.claude/projects/<worktree 경로를 - 로 바꾼 이름>/<세션 id>.jsonl`에 남긴다. `dontAsk` 권한 프로필이 조용히 거부한 도구는 `deniedTools`로 먼저 확인한다.
 
 ## 설정과 프로파일
 
