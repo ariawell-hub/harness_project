@@ -56,6 +56,8 @@ claimed_at: 2026-11-12T09:50:06+09:00 # new-task가 채운다
 
 - 2026-11-12 09:55 계획 작성. Issue #16 선점(owner: session). step0 수정 전이라 이 세션은 `EnterWorktree`로 s0 worktree에 들어가 작업한다.
 - 2026-11-12 10:15 step0: 먼저 실패한 테스트 기록 — `node --test scripts/test/guard.test.ts` → `does not provide an export named 'buildContext'`로 실패. 구현 후 15개 통과(새 테스트 2개: 판정 표, 실제 훅 프로세스). 훅 프로세스로 main 체크아웃 `cwd` + 자기 worktree `Write`는 0, 임시 폴더 안의 worktree 간 `Write`는 2를 확인(수정 전에는 임시 폴더 허용 때문에 통과했다). step0 AC와 `check` 통과.
+- 2026-11-12 10:14 step0 PR #17 병합. 이 세션은 `ExitWorktree`로 main 체크아웃에 돌아왔다.
+- 2026-11-12 10:20 step1: **step0 실사용 확인** — main 체크아웃에 있는 세션이 `EnterWorktree` 없이 s1 worktree에 새 파일 `Write`·기존 파일 `Edit`를 했고 훅 차단도, Claude Code 승인 요청도 없었다. 먼저 실패한 테스트 기록 — `node --test scripts/test/cleanup.test.ts` → 세션이 있는 worktree가 지워져 `removed` 배열이 기대와 달라 실패. 구현 후 새 파일 2개 통과, `runner.test.ts` 2개 통과. step1 AC와 `check` 통과.
 
 ## 의사결정 로그
 

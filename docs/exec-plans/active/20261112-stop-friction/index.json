@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "keep-current-worktree",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-12T10:16:39+09:00"
     },
     {
       "step": 2,

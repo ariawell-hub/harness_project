@@ -21,6 +21,7 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 - **대화 세션은 main 체크아웃에 머문 채** `new-task`가 출력한 worktree 경로의 파일을 고친다. 자기 계획(`owner`가 현재 작업자)의 worktree면 L1 훅이 허용하므로 `EnterWorktree`(사람 승인 필요)로 옮겨 갈 필요가 없다. 다른 작업자(runner 등)의 worktree는 막힌다.
   - 셸 명령은 `git -C <worktree> …` 또는 `cd <worktree> && …`로 실행한다.
   - push는 브랜치 이름을 적는다: `git -C <worktree> push -u origin <브랜치>`. 인자 없는 `git push`는 세션 위치(main) 기준으로 판정되어 R2로 막힌다.
+  - `start`는 병합된 worktree를 지우지만, 실행한 프로세스가 들어 있는 worktree는 "남김"으로 두고 이유를 출력한다. 다른 세션이 정리해서 세션이 있던 worktree가 사라졌다면(명령마다 "Working directory … was deleted") `ExitWorktree` 또는 main 체크아웃으로 `cd`해서 돌아온다.
 - 규모(4.3절)는 아래 기준으로 정한다. 애매하면 큰 쪽을 고른다. 동작이 바뀌는 변경은 아무리 작아도 medium 이상이다.
 
 | 규모   | 예                       | 계획 형태                                                            |
