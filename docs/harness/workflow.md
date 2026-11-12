@@ -19,6 +19,7 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
   - **제작자가 대화에서 직접 지시한 일**은 묻지 않고 봇이 Issue를 등록한 뒤 그 세션이 바로 `new-task`로 시작한다. 본문 첫 줄에 `> 출처: 제작자 대화 지시(<날짜>). 봇이 대신 등록했다.`를 적는다.
   - 지시 없이 에이전트가 스스로 떠올린 일(발견 사항, 개선 아이디어)은 Issue를 만들지 않는다. 제작자에게 제안하거나 TD·발견 사항으로 남긴다.
   - runner는 제작자·외주 개발자(`harness.config.json`의 `github.collaborators`) 계정이 만든 Issue만 가져간다. 봇 계정이 대신 등록한 Issue는 runner가 고르지 않는다. 대화 세션의 `new-task --issue`로는 시작할 수 있다.
+  - 봇이 대신 등록한 Issue를 runner에 맡기려면 `harness.config.json`의 `github.botIssues`가 `"owner-approved"`여야 한다(기본값 `"exclude"`). 그 상태에서 제작자 계정으로 그 Issue에 `/harness accept` 한 줄 댓글을 달면 후보가 된다. 봇·외주 개발자 계정의 댓글, 인용, 문장 속 언급, 코드 블록 안의 줄은 승인이 아니다. 취소하려면 Issue를 닫거나 `needs-human` 라벨을 붙인다.
 - `new-task`가 `claim/<issue>`를 push해 선점한다. 거부되면 다른 작업자가 이미 맡은 것이니 다음 Issue로 간다.
   - 선점은 마지막 step이 병합되어 Issue가 닫힌 뒤 다음 `start`가 지운다(닫혔음을 확인 못 하면 남긴다). 손으로 지우지 않는다. 만료된 선점 정리는 아직 없다(TD-11).
 - **대화 세션은 main 체크아웃에 머문 채** `new-task`가 출력한 worktree 경로의 파일을 고친다. 자기 계획(`owner`가 현재 작업자)의 worktree면 L1 훅이 허용하므로 `EnterWorktree`(사람 승인 필요)로 옮겨 갈 필요가 없다. 다른 작업자(runner 등)의 worktree는 막힌다.

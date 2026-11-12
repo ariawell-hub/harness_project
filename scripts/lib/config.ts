@@ -26,6 +26,9 @@ export interface AgentDef {
   permissionProfile?: string;
 }
 
+export type BotIssuesMode = 'exclude' | 'owner-approved';
+export const BOT_ISSUES_MODES: BotIssuesMode[] = ['exclude', 'owner-approved'];
+
 export interface HarnessConfig {
   version: number;
   stage: 'build' | 'operation';
@@ -38,6 +41,11 @@ export interface HarnessConfig {
     bot: string;
     /** 외주 개발자 계정(14.6절). 이 계정이 만든 Issue도 runner 작업 후보가 된다 */
     collaborators: string[];
+    /**
+     * 봇 계정이 만든 Issue 처리(14.6절). `exclude`(기본)는 runner 후보에서 뺀다.
+     * `owner-approved`는 제작자 계정이 `/harness accept` 한 줄 댓글을 단 봇 Issue만 후보로 삼는다
+     */
+    botIssues: BotIssuesMode;
     priorityLabels: string[];
     needsHumanLabel: string;
   };
@@ -112,10 +120,14 @@ export function loadConfig(repoRoot: string): HarnessConfig {
     !(Array.isArray(collaborators) && collaborators.every((c) => typeof c === 'string'))
   )
     problems.push('github.collaborators는 계정 이름 문자열 배열이어야 한다');
+  const botIssues: unknown = cfg.github?.botIssues;
+  if (botIssues !== undefined && !BOT_ISSUES_MODES.some((m) => m === botIssues))
+    problems.push('github.botIssues는 exclude | owner-approved');
   if (problems.length) {
     throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- ${problems.join('\n- ')}`);
   }
   cfg.github.collaborators ??= [];
+  cfg.github.botIssues ??= 'exclude'; // 제작자가 고르기 전에는 fail-closed(14.6절)
   cfg.agents ??= {};
   cfg.riskPaths ??= [];
   cfg.protectedPaths ??= [];

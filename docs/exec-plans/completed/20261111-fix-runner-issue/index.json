@@ -1,0 +1,21 @@
+{
+  "plan": "20261111-fix-runner-issue",
+  "steps": [
+    {
+      "step": 0,
+      "name": "issue-author",
+      "status": "completed",
+      "started_at": "2026-11-11T21:05:12+09:00",
+      "summary": "Issue.author(gh --json author, toIssue)·addFakeIssue(..., author?: 기본 제작자)·config github.collaborators(기본 [])를 더하고, next.ts에 sameLogin·filterTrustedIssues(제작자·collaborators만 trusted, owner 비면 전부 제외)·Pick.excluded를 만들어 pickNext 5번에만 적용. 제외 목록은 start ③·next(일반/--json)에 describeExcluded로 출력. step1은 filterTrustedIssues의 excluded 중 봇 Issue에 승인 경로를 붙이면 된다. 테스트 scripts/test/next.test.ts(pickWith 도우미), TD-18·TD-19 등록, 설계서 v0.7.5",
+      "completed_at": "2026-11-11T21:11:23+09:00"
+    },
+    {
+      "step": 1,
+      "name": "bot-approval",
+      "status": "completed",
+      "started_at": "2026-11-11T21:13:50+09:00",
+      "summary": "config github.botIssues('exclude' 기본 | 'owner-approved', 그 밖은 ConfigError, harness.config.json에 exclude 명시). next.ts에 BOT_ISSUE_ACCEPT('/harness accept')·BOT_ISSUE_WAITING_REASON·ownerAccepted(제작자 댓글만, 줄 단위 정확히 일치, 펜스 코드 블록 안은 무시)를 더하고 filterTrustedIssues(issues, cfg, comments)는 owner-approved이고 봇 Issue일 때만 댓글을 조회(예외는 그 Issue만 '댓글 조회 실패'로 제외). start ③에 acceptHint 안내 한 줄, github-fake commentAs. 테스트 scripts/test/next.test.ts(28개). 설계서 14.6·4.5절(main 병합 때 v0.7.12로 올림), 절차서 1절, CHANGELOG. 고친 댓글 미확인은 TD-26(owner-approved를 켜기 전 처리 권장. main의 TD-20~23과 겹쳐 TD-20에서 바꿈). origin/main 병합은 runner 세션 권한에 git fetch·merge가 없어 못 하고(TD-27) 제작자가 병합 지침대로 했다(A안)",
+      "completed_at": "2026-11-12T15:42:35+09:00"
+    }
+  ]
+}

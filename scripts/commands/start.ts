@@ -1,12 +1,19 @@
 // 세션 시작 절차 (7.1절, S1): fetch → main 체크아웃 fast-forward(안 되면 이유만) → 설정 다시 읽기 →
 // ① 열린 needs-human 먼저 보고 ② 정리(main 동기화 결과, 병합된 worktree, 닫힌 Issue의 claim/<N> 선점 해제)
-// ③ 다음 할 일 고르기. 선점 해제는 GitHub에서 닫혔음을 확인한 Issue만 한다(8.3절).
-import { loadConfig } from '../lib/config.ts';
+// ③ 다음 할 일 고르기(승인 대기 봇 Issue가 있으면 승인 방법 안내).
+// 선점 해제는 GitHub에서 닫혔음을 확인한 Issue만 한다(8.3절).
+import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { getGitHub, type Issue } from '../lib/github.ts';
 import { fastForwardMain, repoInfo, type MainSync } from '../lib/git.ts';
 import { log, warn } from '../lib/util.ts';
 import { cleanupMerged } from '../runner/run.ts';
-import { pickNext, readLocalPlans, type ExcludedIssue } from '../runner/next.ts';
+import {
+  BOT_ISSUE_ACCEPT,
+  BOT_ISSUE_WAITING_REASON,
+  pickNext,
+  readLocalPlans,
+  type ExcludedIssue,
+} from '../runner/next.ts';
 import { TaskError, fetchRemote, releaseClosedClaims, type ClaimCleanup } from './task.ts';
 
 export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
@@ -53,6 +60,18 @@ export function describeClaimCleanup(r: ClaimCleanup): string[] {
     ...r.failed.map((f) => `- 선점 유지(확인 실패): claim/${f.issue} — ${f.reason}`),
   ];
   return lines.length ? lines : ['- 닫힌 Issue의 선점: 없음'];
+}
+
+/**
+ * `github.botIssues`가 owner-approved이고 제작자 승인을 기다리는 봇 Issue가 있으면 승인 방법 한 줄.
+ * exclude면 승인 경로가 없으므로 안내하지 않는다(null)
+ */
+export function acceptHint(cfg: HarnessConfig, excluded: ExcludedIssue[]): string | null {
+  if (cfg.github.botIssues !== 'owner-approved') return null;
+  const waiting = excluded.filter((e) => e.reason === BOT_ISSUE_WAITING_REASON);
+  if (!waiting.length) return null;
+  const nums = waiting.map((e) => `#${e.number}`).join(', ');
+  return `안내: ${nums}에 제작자 계정(${cfg.github.owner})으로 \`${BOT_ISSUE_ACCEPT}\` 한 줄 댓글을 달면 runner 작업 후보가 된다`;
 }
 
 export function start(cwd: string, worker: string): number {
@@ -108,6 +127,8 @@ export function start(cwd: string, worker: string): number {
   log(`- ${describeTask(pick.task)}`);
   log(`- 이유: ${pick.reason}`);
   for (const e of pick.excluded) log(`- ${describeExcluded(e)}`);
+  const hint = acceptHint(cfg, pick.excluded);
+  if (hint) log(`- ${hint}`);
   if (info.isMainCheckout && pick.task.kind !== 'idle') {
     log('- 주의: 지금은 main 체크아웃이다. 코드는 worktree 안에서만 고친다(R3).');
   }
