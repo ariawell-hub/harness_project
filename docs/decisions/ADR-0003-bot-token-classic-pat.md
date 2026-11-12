@@ -59,3 +59,7 @@ gh api repos/ariawell-hub/harness_project/branches/main --jq '.protection.requir
 
 - **리포를 GitHub 조직으로 옮기고 fine-grained 토큰을 쓴다**: E1을 그대로 지킬 수 있다. 하지만 E2에서 개인 계정 + GitHub Pro로 정했고, 조직으로 옮기면 같은 보호 기능에 Team 요금제가 필요하다.
 - **제작자 계정 토큰을 쓴다**: E1·E5 위반이다. 에이전트가 보호 설정을 바꿀 수 있게 되고, 제작자가 에이전트 PR을 승인할 수 없게 된다.
+
+## 검토 기록
+
+- 2026-11-12 (Issue #37): R8 검토. ADR 뒤 `harness.config.json` 변경(`github.collaborators` #15, `.gitattributes` 보호 경로 #9, runner Claude 인자 `--no-session-persistence` 제거 #20)은 봇 계정·토큰 결정과 무관하다. 결정 유효, 본문 수정 없음.

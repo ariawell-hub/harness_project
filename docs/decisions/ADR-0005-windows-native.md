@@ -51,3 +51,7 @@ review_cycle: on-change
 - Codex의 Windows 훅 지원과 셸 도구 페이로드 형식은 확인 전이다(TD-8과 함께 확인).
 - L0(샌드박스)의 Windows 지원은 4단계 전에 확인한다(Q4).
 - CI는 Linux 러너만 쓴다. 하네스 스크립트의 Windows·macOS 회귀는 CI가 잡지 못한다(TD-15, 비용 Q16).
+
+## 검토 기록
+
+- 2026-11-12 (Issue #37): R8 검토. Git Bash 실행·WSL bash 거부(`lib/exec.ts`), `.cmd` 래퍼 거부(`runner/agents.ts`), PowerShell·cmd 방언과 Windows 규칙(`hooks/`), `.env` 하드 링크 대체(`commands/task.ts`), runner 권한 프로필의 `PowerShell` 거부가 그대로다. ADR 뒤 변경(#14~#34)은 Windows 결정과 무관하다. 결정 유효, 본문 수정 없음. Windows 실측은 여전히 TD-14.

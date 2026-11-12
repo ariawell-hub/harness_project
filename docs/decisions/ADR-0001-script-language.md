@@ -40,3 +40,7 @@ review_cycle: on-change
 ## 다시 볼 조건
 
 게임 엔진이 확정되어(Q1) 엔진 쪽 CI 러너에 Node를 둘 수 없을 때.
+
+## 검토 기록
+
+- 2026-11-12 (Issue #37): R8 검토. ADR 뒤 변경 13건은 모두 `scripts/` 안의 기능 변경이고 `package.json`·`tsconfig.json`은 그대로다. `scripts/`에 `node:`·상대 경로 밖 import와 `enum`·`namespace`가 없다. 결정 유효, 본문 수정 없음.
