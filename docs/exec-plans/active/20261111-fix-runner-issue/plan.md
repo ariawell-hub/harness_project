@@ -77,6 +77,7 @@ claimed_at: 2026-11-11T20:56:02+09:00 # new-task가 채운다
 - 2026-11-12 step1 bot-approval(runner-1 무인 세션). 먼저 실패한 테스트: `node --test scripts/test/next.test.ts` → `SyntaxError: The requested module '../runner/next.ts' does not provide an export named 'BOT_ISSUE_ACCEPT'`(1 fail). 구현: `github.botIssues`(`BotIssuesMode`, 없으면 `exclude`, 두 값이 아니면 `ConfigError`), `harness.config.json`에 `"botIssues": "exclude"` 명시, `BOT_ISSUE_ACCEPT`·`BOT_ISSUE_WAITING_REASON`·`ownerAccepted`(제작자 댓글만, 줄 단위 정확히 일치, 펜스 코드 블록 안은 건너뜀), `filterTrustedIssues(issues, cfg, comments)`(owner-approved이고 봇 Issue일 때만 댓글 조회, 조회 예외는 그 Issue만 "댓글 조회 실패: <첫 줄>"로 제외), `pickNext` 5번은 `(n) => gh.comments(n)`, `start` ③에 승인 안내 한 줄(`acceptHint`, exclude면 없음), 가짜 GitHub `commentAs`. 그 뒤 `next.test.ts` 28개 통과(새 15개), `runner.test.ts`는 기대값을 고치지 않고 통과. 펜스 판정은 CommonMark 규칙 일부(같은 문자·여는 펜스 이상 길이·3칸까지 들여쓰기·정보 문자열이 붙은 줄은 닫지 않음)를 따랐다. 4칸 들여 쓴 ` ``` `이 펜스를 닫는 것으로 잘못 보면 코드 블록 안의 줄이 승인으로 인정되기 때문이다. 설계서 14.6절(v0.7.5 유지)·4.5절 5번, 절차서 1절, CHANGELOG, TD-20 등록(발견 사항).
 - 2026-11-12T13:36:44+09:00 중단: origin/main 병합이 충돌한다(docs/exec-plans/tech-debt-tracker.md, docs/harness/CHANGELOG.md, docs/harness/design.md, scripts/commands/start.ts, scripts/test/next.test.ts). 병합은 취소했다. 절차서 5절대로 worktree에서 병합해 충돌을 풀고 일반 push한다
 - 2026-11-12T15:35:07+09:00 제작자 답변 받음(#5)
+- 2026-11-12T15:35:09+09:00 step1 재작업: CI 체크 실패: plan-gate
 
 ## 의사결정 로그
 
