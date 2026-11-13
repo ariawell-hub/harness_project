@@ -91,4 +91,5 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main(process.argv.slice(2)));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  process.exit(main(process.argv.slice(2)));

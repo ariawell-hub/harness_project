@@ -60,6 +60,9 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
   - 2026-11-12 14:57 (KST) 4회(#14~#17): 4개 사례 모두 기대대로다. `node lab/q20/report.ts --item patch-id` 통과. 시험 리포에 열린 PR은 남지 않았다.
 - 2026-11-12 22:55 (KST) step2: 시험 워크플로 3개(`lab/q20/repo/.github/workflows/probe-{prt,pr,push}.yml`)와 공격 overlay 3개(`lab/q20/attacks/env-ref-*`)를 작성했다. 워크플로는 시험 리포 데이터라 단위 테스트 대상이 아니고, Ruby YAML 파서로 구조(이벤트·permissions·job별 environment)만 확인했다. 제작자에게 environment 4개를 요청했다.
 - 2026-11-12 23:16 (KST) step2: 제작자가 environment 4개를 만들었다(봇 API로 main 전용 규칙·시크릿 이름 확인, 리포 수준 시크릿 0개). 배포 PR #18(squash 병합), 공격 PR #19~#21(병합하지 않고 닫음). 9개 사례 중 8개 pass, 1개 partial(없는 environment 참조). `node lab/q20/report.ts --item env-ref` 통과. 시험 리포에 열린 PR은 남지 않았다.
+- 2026-11-13 15:25 (KST) step3: 시작 전 점검. 봇 API로 `recorder`에 변수 0개·시크릿 `Q20_FAKE_SECRET`뿐임을 확인했다(시험 App 미준비). 제작자 결정(대화)으로 App 없이 할 수 있는 준비만 먼저 했다. 시험 워크플로 `lab/q20/repo/.github/workflows/recorder.yml`, 공격 overlay 3개(`lab/q20/attacks/check-source-{job-name,token-status,pat}`), 대조군 overlay(`lab/q20/attacks/check-source-control`). 워크플로는 PyYAML로 구조(이벤트·permissions·environment·job `if`·고정한 액션)만 확인했다. 배포는 App 준비 뒤에 한다.
+- 2026-11-13 16:15 (KST) step3: 제작자가 시험 App, `recorder`의 `RECORDER_APP_CLIENT_ID`·`RECORDER_APP_KEY`, 자동 병합 허용, head 브랜치 자동 삭제를 마쳤다(봇 API로 이름·설정 확인, 필수 체크는 아직 없음). 배포 명령이 아무 출력 없이 끝나 원인을 찾았다. `lab/q20/*.ts`의 진입점 검사가 Windows에서 항상 거짓이었다(발견 사항). 실패하는 테스트 `lab/q20/test/entry.test.ts` 3개를 먼저 쓰고(3개 실패 확인) 진입점 검사를 `scripts/hooks/guard.ts`와 같은 방식으로 고쳤다. `node --test lab/q20/test/*.test.ts` 14개 통과, `report.ts --item env-ref|patch-id|merge-queue`가 실제로 검사해 통과했다.
+- 2026-11-13 16:28 (KST) step3: 배포 PR #22(squash 병합), 대조군 PR #23(recorder 성공, creator `harness-q20-lab-recorder[bot]`). 제작자가 필수 체크 `q20/recorded`를 출처 = 시험 App(App ID 5740375)으로 등록했고, 봇이 `branches/main`의 `app_id`로 확인했다. 공격 PR #24~#26(recorder는 모두 skipped). 대조군 `CLEAN`, 흉내 3개 모두 `BLOCKED`. 7개 사례 중 5개 pass, 1개 fail(체크 요약 API가 출처를 반영하지 않음), 1개 n/a(App의 check run). `node lab/q20/report.ts --item check-source` 통과. PR #23~#26은 병합하지 않고 닫았고 시험 리포에 열린 PR은 없다. 필수 체크 등록은 step4 배포에 쓰려고 그대로 둔다.
 
 ## 의사결정 로그
 
@@ -72,6 +75,10 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 - 결정(step2): 공격 사례에 "PR이 없는 environment 이름을 참조"(`env-ref-pr-newenv`)를 더한다. / 이유: GitHub은 없는 environment를 참조하면 규칙 없이 새로 만든다고 알려져 있다. 그러면 "막힌다"가 아니라 "돌지만 비밀이 없다"가 되므로 설계서 문구(이 제한이 막는 것)를 정확히 하려면 관찰이 필요하다. 생긴 environment는 step6에서 제작자가 지운다. / 버린 대안: step 원문의 이름 바꾸기(기존 `recorder`)만 시험.
 - 결정(step2): 공격 overlay `env-ref-prt`의 "비밀 출력"은 값 대신 표식 `LEAK-ATTEMPT`와 sha256 앞 8자만 출력한다. / 이유: step2 금지사항. PR 정의가 적용됐는지는 표식으로 판정할 수 있다.
 - 결정(step2): 시험 워크플로는 environment 4개가 생긴 뒤에 배포한다. / 이유: 없는 environment를 참조하는 워크플로가 먼저 돌면 GitHub이 배포 규칙 없는 environment를 만들어 "main 전용" 전제가 깨진다.
+- 결정(step3): recorder는 `q20/attack-*` 브랜치의 PR에는 status를 쓰지 않는다(job `if`). 같은 리포 브랜치의 PR에만 돈다(10.4절). / 이유: 공격 PR에도 시험 App의 success가 붙으면 흉내가 막혔는지와 상관없이 필수 체크가 만족돼 관찰할 수 없다. / 버린 대안: 모든 PR에 쓰기(step 원문 그대로, 판정 불가), 대조군 브랜치에만 쓰기(필수 체크 등록 뒤 step4·5 배포 PR이 막힌다).
+- 결정(step3): App 토큰은 `actions/create-github-app-token` v3.3.0(커밋 SHA 고정)의 `client-id` 입력으로 만들고, 변수 이름을 `RECORDER_APP_ID`에서 `RECORDER_APP_CLIENT_ID`로 바꾼다. 토큰 권한은 `permission-statuses: write`로 좁히고, 워크플로 `permissions`는 `{}`다. / 이유: v3.3.0에서 `app-id`는 폐지 예정이고, 2단계 구현의 참고가 될 시험이다. 제작자가 아직 변수를 만들지 않아 바꾸는 비용이 없다. / 버린 대안: `app-id` 유지(경고가 나고 이후 버전에서 빠질 수 있다).
+- 결정(step3): recorder는 commit status만 쓴다. check run 쪽은 "다른 출처(GitHub Actions)가 같은 이름으로 만든 check run이 인정되지 않는지"(`check-source-job-name`)만 본다. / 이유: 설계서 10.3절은 기록 job 결과를 "상태"로 적는다. 시험 App이 만든 check run이 인정되는지는 2단계에서 check run을 쓰기로 할 때 확인한다. / 버린 대안: recorder가 check run도 함께 씀(필수 체크 하나에 두 종류가 섞여 판정이 흐려진다).
+- 결정(step3): 순서는 recorder 배포 → 대조군 PR(`q20/check-source-control`)로 시험 App이 `q20/recorded`를 한 번 보고 → 제작자가 필수 체크 등록(출처 = 시험 App) → 봇이 `gh api repos/ariawell-hub/harness-q20-lab/branches/main --jq '.protection.required_status_checks.checks'`로 `app_id` 확인 → 공격 PR 3개. 판정은 `mergeStateStatus`를 값이 정해질 때까지 다시 조회해 쓴다. / 이유: 화면에서 출처를 고르려면 그 App이 최근에 보고한 기록이 필요한 것으로 알고 있다. 흉내 status가 등록보다 먼저 있으면 출처가 잘못 골라질 수 있다. 봇은 admin이 아니지만 위 엔드포인트로 등록된 `app_id`를 읽을 수 있다.
 
 ## 발견 사항
 
@@ -81,6 +88,9 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 - `node scripts/harness.ts run --help`가 도움말을 출력하지 않고 runner를 그대로 시작한다. 알 수 없는 플래그를 무시하기 때문이다. 이 세션에서 실수로 runner가 #4를 선점했다. → 처리: TD-17
 - PR 쪽 정의(`pull_request`)가 없는 environment 이름을 참조하면 GitHub이 배포 규칙 없는 environment를 새로 만들고 job이 돈다(비밀은 없음). 10.4절 "이 제한이 막는 것은 PR 쪽 정의로 도는 워크플로"는 "이미 있는 main 전용 environment의 비밀"로 좁혀야 한다. 2단계에서 environment 이름이나 배포 기록을 신뢰 근거로 쓰지 않고, `harness-guard`가 정해 둔 environment 밖의 참조를 탐지하는 안을 검토한다. 시험 리포에 남은 `q20-attack-new`는 step6에서 제작자가 지운다. → 처리: [lab/q20/results/env-ref.json](../../../../lab/q20/results/env-ref.json), 설계서 10.4절 문구는 step6에서 고친다
 - `pull_request_target`의 "main 정의"는 이벤트의 base SHA가 아니라 실행이 만들어질 때의 main 끝이다(PR #18: opened 시점 main에 없던 워크플로가 병합 직후 만들어진 실행에서 돌았다). 판정 job은 `base/`를 이벤트의 `pull_request.base.sha`가 아니라 `github.sha`로 체크아웃해야 실행 중인 정의와 스크립트가 일치한다. → 처리: [lab/q20/results/env-ref.json](../../../../lab/q20/results/env-ref.json), 설계서 10.4절 판정 job 규칙에 step6에서 반영
+- 필수 체크를 등록하면 `lab/q20/deploy.ts --merge`가 깨진다. PR을 만든 직후 `gh pr merge --squash`를 바로 실행해 recorder 결과보다 먼저 병합을 시도한다. step3은 등록 전에 배포해서 걸리지 않았다. 시험 리포 자동 병합은 2026-11-13에 켜져 `--auto`를 쓸 수 있다. → 처리: [step4.md](step4.md) 배포 전에 고친다(`--auto` 또는 필수 체크 대기, "다음 할 일"). step4는 필수 승인 1이라 어차피 제작자가 승인해야 한다
+- `lab/q20/deploy.ts`·`report.ts`·`patch-id.ts`의 진입점 검사(`import.meta.url === \`file://${process.argv[1]}\``)가 Windows에서 항상 거짓이라 main이 돌지 않았다. `report.ts`는 검사 없이 종료 코드 0으로 끝나 Windows에서는 AC가 거짓으로 통과했다. 이전 step의 결과는 이번에 다시 검사해 모두 통과했다. → 처리: [lab/q20/test/entry.test.ts](../../../../lab/q20/test/entry.test.ts)로 막고, 진입점 검사를 `path.resolve(argv[1]) === fileURLToPath(import.meta.url)`로 고쳤다(step3)
+- 필수 체크의 출처 고정은 병합 판정(`mergeStateStatus`)에만 반영되고, PR 체크 요약 API(GraphQL `statusCheckRollup.state`, `isRequired`)는 이름만 본다. 흉내만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크는 필수로 표시된다. 지금 runner는 요약을 `failure` 판단에만 쓰고 병합은 GitHub 자동 병합에 맡겨 영향이 없다. 2단계 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 출처(App)를 확인해야 한다. → 처리: [lab/q20/results/check-source.json](../../../../lab/q20/results/check-source.json), 설계서 10.3절에 step6에서 반영
 
 ## 열린 질문
 
@@ -88,7 +98,7 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 
 - step0 전: 시험 리포 설정. 자동 병합 허용, head 브랜치 자동 삭제 켬, Actions 기본 권한 읽기 전용, "Actions가 PR 생성·승인" 끔.
 - step2 전: environment `judge-claude`, `judge-codex`, `codex-auth-store`, `recorder`. 각각 Deployment branches를 main만 허용하고, 시크릿 `Q20_FAKE_SECRET`에 environment마다 다른 임의 문자열(32자 이상)을 넣는다.
-- step3 전: 시험용 GitHub App(webhook 끔, 권한 Commit statuses·Checks 쓰기, Pull requests·Contents 읽기, 시험 리포에만 설치). `recorder`에 변수 `RECORDER_APP_ID`, 시크릿 `RECORDER_APP_KEY`. 배포 뒤 main 필수 체크 등록(출처 = 이 App).
+- step3 전: 시험용 GitHub App(webhook 끔, 권한 Commit statuses·Checks 쓰기, Pull requests·Contents 읽기, 시험 리포에만 설치). `recorder`에 변수 `RECORDER_APP_CLIENT_ID`(App의 Client ID), 시크릿 `RECORDER_APP_KEY`(App 개인 키). main 필수 체크 등록(출처 = 이 App)은 recorder 배포와 대조군 PR 뒤에 따로 요청한다.
 - step4 전: 시험 리포 필수 승인 1로 올림, `claude setup-token`으로 만든 토큰을 `judge-claude`의 `CLAUDE_CODE_OAUTH_TOKEN`에.
 - step5 전: Codex 로그인 인증 파일을 `judge-codex`의 `CODEX_AUTH_JSON`에, 재저장용 자격증명을 `codex-auth-store`에(step5에서 형식 안내).
 - step6: 진짜 자격증명 교체, 시험 App 삭제, 봇 초대 철회, 시험 리포 보관. step2 공격이 만든 environment `q20-attack-new` 삭제.
@@ -98,12 +108,14 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 - 명령: `node lab/q20/report.ts --all`
 - 결과 요약(항목 | 판정 | 근거): step마다 채운다.
 
-| 항목        | 판정    | 근거                                                                                                                                                                                                                                           |
-| ----------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| merge-queue | fail    | 개인 계정 리포는 대상 아님(GitHub 문서). 10.3절 대안이 있어 2단계 영향 없음(step0)                                                                                                                                                             |
-| patch-id    | pass    | main 병합 갱신·GitHub Update branch 모두 patch-id 유지, 충돌 해결 시 변경, 최신 PR squash 트리 = head 트리(시험 리포 PR #14~#17, step1)                                                                                                        |
-| env-ref     | partial | pull_request_target은 main 정의로 돌고 main 전용 environment 비밀을 받음, PR 정의 변경 미적용. pull_request·다른 브랜치 push는 기존 environment에 막힘. 없는 environment 참조는 규칙 없이 새로 생겨 돎(비밀 없음). 시험 리포 PR #18~#21(step2) |
+| 항목         | 판정    | 근거                                                                                                                                                                                                                                                      |
+| ------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| merge-queue  | fail    | 개인 계정 리포는 대상 아님(GitHub 문서). 10.3절 대안이 있어 2단계 영향 없음(step0)                                                                                                                                                                        |
+| patch-id     | pass    | main 병합 갱신·GitHub Update branch 모두 patch-id 유지, 충돌 해결 시 변경, 최신 PR squash 트리 = head 트리(시험 리포 PR #14~#17, step1)                                                                                                                   |
+| env-ref      | partial | pull_request_target은 main 정의로 돌고 main 전용 environment 비밀을 받음, PR 정의 변경 미적용. pull_request·다른 브랜치 push는 기존 environment에 막힘. 없는 environment 참조는 규칙 없이 새로 생겨 돎(비밀 없음). 시험 리포 PR #18~#21(step2)            |
+| check-source | partial | 출처를 시험 App으로 고정하면 job 이름(check run)·GITHUB_TOKEN status·봇 PAT status 흉내가 모두 BLOCKED, App status만 있는 대조군은 CLEAN. 체크 요약 API는 출처를 반영하지 않음(fail 1). App의 check run은 시험하지 않음(n/a). 시험 리포 PR #22~#26(step3) |
 
 ## 다음 할 일
 
-- step3(check-source) 전에 제작자에게 시험용 GitHub App과 `recorder`의 `RECORDER_APP_ID`·`RECORDER_APP_KEY`를 요청한다(열린 질문). 시험 리포 설정(자동 병합, head 브랜치 자동 삭제, Actions 권한)과 merge queue 설정 화면 확인도 아직 받지 못했다(봇 API로는 자동 병합·head 브랜치 자동 삭제가 아직 꺼져 있다).
+- step4(judge-claude): 시작 전에 `deploy.ts --merge`를 필수 체크가 있는 시험 리포에 맞게 고친다(발견 사항). 제작자에게 시험 리포 필수 승인 1과 `judge-claude`의 `CLAUDE_CODE_OAUTH_TOKEN`을 요청한다(열린 질문, 순서는 ADR-0004).
+- 시험 리포 Actions 권한 설정과 merge queue 설정 화면 확인은 아직 받지 못했다. 자동 병합 허용·head 브랜치 자동 삭제는 2026-11-13에 켜졌다(봇 API 확인).

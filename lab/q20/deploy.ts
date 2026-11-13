@@ -5,6 +5,7 @@
 //   node lab/q20/deploy.ts --branch q20/<이름> [--overlay <디렉터리>] [--title <제목>] [--merge]
 import { rmSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { git, gitTry, repoInfo } from '../../scripts/lib/git.ts';
 import { runSync } from '../../scripts/lib/exec.ts';
 
@@ -161,7 +162,7 @@ function main(argv: string[]): void {
   process.stdout.write(JSON.stringify({ ...r, pr: url, merged }) + '\n');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     main(process.argv.slice(2));
   } catch (e) {
