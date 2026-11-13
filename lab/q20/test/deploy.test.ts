@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { commitAll, gitInit, sh, tmp, write } from '../../../scripts/test/helpers.ts';
-import { deploy } from '../deploy.ts';
+import { deploy, mergeArgs } from '../deploy.ts';
 
 /** 시험 리포 역할의 bare 원격(README 하나)과 하네스 역할의 리포를 만든다 */
 function fixture() {
@@ -68,4 +68,17 @@ test('작업 트리를 바꾸지 않는다', () => {
   const { bare, harness } = fixture();
   deploy({ cwd: harness, remoteUrl: bare, branch: 'q20/y', overlayDir: 'lab/q20/attacks/a1' });
   assert.equal(sh('git', ['status', '--porcelain'], harness), '');
+});
+
+test('--merge는 자동 병합(--auto --squash)을 켠다. 필수 체크·승인이 있는 시험 리포에서 바로 병합하면 거부된다', () => {
+  const args = mergeArgs('https://github.com/ariawell-hub/harness-q20-lab/pull/1');
+  assert.deepEqual(args, [
+    'pr',
+    'merge',
+    'https://github.com/ariawell-hub/harness-q20-lab/pull/1',
+    '-R',
+    'ariawell-hub/harness-q20-lab',
+    '--auto',
+    '--squash',
+  ]);
 });
