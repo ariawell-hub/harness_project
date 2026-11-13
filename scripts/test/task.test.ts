@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, linkSync, lstatSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  lstatSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ClaimError, claimHeartbeat, completeStep, linkFile, newTask } from '../commands/task.ts';
@@ -11,8 +19,20 @@ test('linkFile: 심볼릭 링크 → 하드 링크 순으로 연결하고 복사
   const d = tmp('harness-link-');
   const src = path.join(d, 'dev-env');
   writeFileSync(src, 'A=1\n');
-  assert.equal(linkFile(src, path.join(d, 'a')), 'symlink');
-  assert.ok(lstatSync(path.join(d, 'a')).isSymbolicLink());
+  // 심볼릭 링크를 만들 수 있는지는 환경이 정한다(개발자 모드가 꺼진 Windows는 못 만든다, ADR-0005)
+  let canSymlink = true;
+  try {
+    symlinkSync(src, path.join(d, 'probe'));
+  } catch {
+    canSymlink = false;
+  }
+  if (canSymlink) {
+    assert.equal(linkFile(src, path.join(d, 'a')), 'symlink');
+    assert.ok(lstatSync(path.join(d, 'a')).isSymbolicLink());
+  } else {
+    assert.equal(linkFile(src, path.join(d, 'a')), 'hardlink');
+    assert.equal(statSync(path.join(d, 'a')).ino, statSync(src).ino);
+  }
   const fail = (): never => {
     throw new Error('EPERM: 심볼릭 링크 권한 없음');
   };

@@ -104,6 +104,8 @@ export function makeFixture(configOver: Record<string, unknown> = {}): Fixture {
   sh('git', ['init', '-q', '--bare', '-b', 'main', remote], dir);
   gitInit(root);
   cpSync(path.join(HARNESS_ROOT, 'scripts'), path.join(root, 'scripts'), { recursive: true });
+  // 실제 리포처럼 LF로 고정한다. 없으면 Windows Git 기본값(core.autocrlf=true)으로 CRLF 체크아웃된다
+  cpSync(path.join(HARNESS_ROOT, '.gitattributes'), path.join(root, '.gitattributes'));
   for (const f of [
     'TEMPLATE.md',
     'TEMPLATE-small.md',

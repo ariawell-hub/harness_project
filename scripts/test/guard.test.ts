@@ -324,7 +324,8 @@ test('파일 도구: main 체크아웃·worktree 밖·계획 없음·.env·자�
   assert.match(w('/opt/elsewhere/x.ts', c, wt)!.rule, /^R3/, 'worktree 밖');
   const rm = (cmd: string) => evaluate({ kind: 'bash', command: cmd, cwd: wt }, c);
   assert.equal(rm('rm -rf node_modules dist'), null, 'worktree 안 정리는 허용');
-  assert.match(rm(`rm -rf ${wt}`)!.rule, /^R14/, '임시 폴더 안 리포라도 루트 삭제는 막는다');
+  // 따옴표로 감싼다. 따옴표 없는 Windows 경로(C:\…)는 bash에서 역슬래시가 풀려 다른 경로가 된다
+  assert.match(rm(`rm -rf '${wt}'`)!.rule, /^R14/, '임시 폴더 안 리포라도 루트 삭제는 막는다');
   assert.match(rm('rm -rf .git')!.rule, /^R14/);
   assert.match(rm('rm -rf ..')!.rule, /^R14/);
   assert.equal(w('/tmp/scratch.txt', c, wt), null, '임시 폴더는 허용');
