@@ -1,0 +1,11 @@
+{
+  "plan": "20261113-windows-tests",
+  "steps": [
+    {
+      "step": 0,
+      "name": "windows-tests",
+      "status": "completed",
+      "completed_at": "2026-11-13T17:03:24+09:00"
+    }
+  ]
+}
