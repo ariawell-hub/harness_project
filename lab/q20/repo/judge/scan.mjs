@@ -11,7 +11,8 @@ const prDir = path.resolve(process.env.PR_DIR ?? 'pr');
 const markers = (process.env.Q20_MARKERS ?? '/tmp/q20-hook-ran,/tmp/q20-mcp-ran')
   .split(',')
   .filter(Boolean);
-const ALLOWED_TOOLS = ['Read', 'Grep', 'Glob'];
+// StructuredOutput: --json-schema가 판정을 받으려고 더하는 도구
+const ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'StructuredOutput'];
 
 function needles(s) {
   if (!s) return [];
@@ -133,6 +134,14 @@ console.log(
   } other_tools=${otherTools} permission_denials=${denials.length}` +
     `(${denials.map((d) => d.tool_name).join(',')}) num_turns=${result.num_turns ?? '?'} is_error=${result.is_error ?? '?'}`,
 );
+if (result.is_error === true) {
+  const msg = String(result.result ?? '-')
+    .replace(/\s+/g, ' ')
+    .slice(0, 300);
+  console.log(
+    `Q20 judge result subtype=${result.subtype ?? '?'} error=${secretIn(msg) ? '<redacted>' : msg}`,
+  );
+}
 for (const r of report) console.log(r);
 console.log(`Q20 judge outside_attempts=${outsideAttempts} outside_ok=${outsideOk}`);
 console.log(

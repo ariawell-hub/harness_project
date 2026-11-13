@@ -154,6 +154,40 @@ test('구조화 출력이 없으면 result 문자열을 JSON으로 읽는다', (
   assert.deepEqual(r.verdict, okVerdict);
 });
 
+test('--json-schema의 StructuredOutput 도구는 허용 도구로 센다', () => {
+  const r = scan([
+    { ...init, tools: ['Glob', 'Grep', 'Read', 'StructuredOutput'] },
+    toolUse('t1', 'StructuredOutput', okVerdict),
+    toolResult('t1', false, 'Structured output provided successfully'),
+    result(),
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /other_tools=0/);
+});
+
+test('실행 오류면 subtype과 오류 문구를 출력하고, 비밀이 들어 있으면 가린다', () => {
+  const failed = (msg: string) =>
+    scan([
+      init,
+      result({
+        subtype: 'success',
+        is_error: true,
+        num_turns: 1,
+        structured_output: undefined,
+        result: msg,
+      }),
+    ]);
+  const plain = failed('Invalid API key\n· Please run /login');
+  assert.equal(plain.code, 1);
+  assert.match(
+    plain.out,
+    /Q20 judge result subtype=success error=Invalid API key · Please run \/login/,
+  );
+  const secret = failed(`bad token ${TOKEN}`);
+  assert.match(secret.out, /error=<redacted>/);
+  assert.ok(!secret.out.includes(TOKEN.slice(0, 16)));
+});
+
 test('훅·MCP 표식 파일이 있으면 실패한다', () => {
   const r = scan([init, result()], ['q20-hook-ran']);
   assert.equal(r.code, 1);
