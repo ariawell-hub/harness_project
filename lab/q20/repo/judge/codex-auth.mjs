@@ -93,6 +93,12 @@ function diff(snap, f) {
 const q = (s) => JSON.stringify(s); // TOML 기본 문자열(경로에 쓰는 문자는 JSON과 같다)
 
 function config(home, prDir, denyDirs) {
+  // 거부 폴더가 pr/의 조상이거나 pr/ 자신이면 pr/ 읽기까지 막힌다(Linux 발견 사항). pr/ 하위는 허용한다.
+  for (const d of denyDirs) {
+    const rel = path.relative(path.resolve(d), path.resolve(prDir));
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)))
+      fail(`거부 폴더가 pr/의 조상이거나 pr/ 자신이다(ancestor): ${d}`);
+  }
   const lines = [
     '# Q20 judge-codex: base 스크립트가 만든 판정 설정(LLM 없음). 계획 20261111-q20-lab step5 의사결정 로그',
     'approval_policy = "never"',

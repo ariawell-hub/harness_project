@@ -84,7 +84,9 @@ jobs:
           node base/judge/codex-auth.mjs restore "$CODEX_HOME"
           if [ "$FORCE_REFRESH" = true ]; then node base/judge/codex-auth.mjs age "$CODEX_HOME/auth.json" 9; fi
           node base/judge/codex-auth.mjs snapshot "$CODEX_HOME/auth.json" "$RUNNER_TEMP/auth-before.json"
-          node base/judge/codex-auth.mjs config "$CODEX_HOME" "$GITHUB_WORKSPACE/pr" "$HOME"
+          # 거부 목록: pr/의 조상은 넣지 않는다(Linux 발견 사항). auth.json이 있는 곳과 base/·홈 설정만 거부한다.
+          node base/judge/codex-auth.mjs config "$CODEX_HOME" "$GITHUB_WORKSPACE/pr" \
+            "$RUNNER_TEMP" "$GITHUB_WORKSPACE/base" "$HOME/.codex" "$HOME/.config"
       - name: sandbox setup (LLM 없음)
         working-directory: pr
         run: |

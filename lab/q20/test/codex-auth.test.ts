@@ -140,6 +140,21 @@ test('config: pr/ 읽기, 거부 경로, 신뢰하지 않는 프로젝트, 도�
   assert.ok(!/sandbox_mode/.test(toml), '권한 프로필과 sandbox_mode를 함께 쓰지 않는다');
 });
 
+test('config: 거부 폴더가 pr/의 조상이거나 pr/ 자신이면 값 없이 실패한다', () => {
+  const d = tmp('q20-cx-');
+  const home = path.join(d, 'codex-home');
+  mkdirSync(home);
+  // /home/runner는 pr/(/home/runner/work/.../pr)의 조상이다. 거부하면 pr/ 읽기까지 막힌다(Linux 발견 사항).
+  const ancestor = run(['config', home, '/home/runner/work/r/r/pr', '/home/runner']);
+  assert.notEqual(ancestor.code, 0);
+  assert.match(ancestor.out, /조상|ancestor/);
+  const self = run(['config', home, '/home/runner/work/r/r/pr', '/home/runner/work/r/r/pr']);
+  assert.notEqual(self.code, 0);
+  // pr/ 안의 하위 폴더를 거부하는 것은 허용한다(읽기 범위를 좁힐 수 있다)
+  const child = run(['config', home, '/home/runner/work/r/r/pr', '/home/runner/work/r/r/pr/sub']);
+  assert.equal(child.code, 0, child.out);
+});
+
 test('seal: 한 줄 JSON을 공개키로 봉인해 sealed=<base64>만 출력한다', () => {
   const d = tmp('q20-cx-');
   const f = path.join(d, 'auth.json');
