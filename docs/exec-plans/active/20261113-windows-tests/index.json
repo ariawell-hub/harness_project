@@ -1,0 +1,10 @@
+{
+  "plan": "20261113-windows-tests",
+  "steps": [
+    {
+      "step": 0,
+      "name": "windows-tests",
+      "status": "pending"
+    }
+  ]
+}
