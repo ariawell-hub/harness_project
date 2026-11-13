@@ -61,6 +61,7 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 - 2026-11-12 22:55 (KST) step2: 시험 워크플로 3개(`lab/q20/repo/.github/workflows/probe-{prt,pr,push}.yml`)와 공격 overlay 3개(`lab/q20/attacks/env-ref-*`)를 작성했다. 워크플로는 시험 리포 데이터라 단위 테스트 대상이 아니고, Ruby YAML 파서로 구조(이벤트·permissions·job별 environment)만 확인했다. 제작자에게 environment 4개를 요청했다.
 - 2026-11-12 23:16 (KST) step2: 제작자가 environment 4개를 만들었다(봇 API로 main 전용 규칙·시크릿 이름 확인, 리포 수준 시크릿 0개). 배포 PR #18(squash 병합), 공격 PR #19~#21(병합하지 않고 닫음). 9개 사례 중 8개 pass, 1개 partial(없는 environment 참조). `node lab/q20/report.ts --item env-ref` 통과. 시험 리포에 열린 PR은 남지 않았다.
 - 2026-11-13 15:25 (KST) step3: 시작 전 점검. 봇 API로 `recorder`에 변수 0개·시크릿 `Q20_FAKE_SECRET`뿐임을 확인했다(시험 App 미준비). 제작자 결정(대화)으로 App 없이 할 수 있는 준비만 먼저 했다. 시험 워크플로 `lab/q20/repo/.github/workflows/recorder.yml`, 공격 overlay 3개(`lab/q20/attacks/check-source-{job-name,token-status,pat}`), 대조군 overlay(`lab/q20/attacks/check-source-control`). 워크플로는 PyYAML로 구조(이벤트·permissions·environment·job `if`·고정한 액션)만 확인했다. 배포는 App 준비 뒤에 한다.
+- 2026-11-13 16:20 (KST) step3: 제작자가 시험 App, `recorder`의 `RECORDER_APP_CLIENT_ID`·`RECORDER_APP_KEY`, 자동 병합 허용, head 브랜치 자동 삭제를 마쳤다(봇 API로 이름·설정 확인, 필수 체크는 아직 없음). 배포 명령이 아무 출력 없이 끝나 원인을 찾았다. `lab/q20/*.ts`의 진입점 검사가 Windows에서 항상 거짓이었다(발견 사항). 실패하는 테스트 `lab/q20/test/entry.test.ts` 3개를 먼저 쓰고(3개 실패 확인) 진입점 검사를 `scripts/hooks/guard.ts`와 같은 방식으로 고쳤다. `node --test lab/q20/test/*.test.ts` 14개 통과, `report.ts --item env-ref|patch-id|merge-queue`가 실제로 검사해 통과했다.
 
 ## 의사결정 로그
 
@@ -87,6 +88,7 @@ claimed_at: 2026-11-11T20:41:27+09:00 # new-task가 채운다
 - PR 쪽 정의(`pull_request`)가 없는 environment 이름을 참조하면 GitHub이 배포 규칙 없는 environment를 새로 만들고 job이 돈다(비밀은 없음). 10.4절 "이 제한이 막는 것은 PR 쪽 정의로 도는 워크플로"는 "이미 있는 main 전용 environment의 비밀"로 좁혀야 한다. 2단계에서 environment 이름이나 배포 기록을 신뢰 근거로 쓰지 않고, `harness-guard`가 정해 둔 environment 밖의 참조를 탐지하는 안을 검토한다. 시험 리포에 남은 `q20-attack-new`는 step6에서 제작자가 지운다. → 처리: [lab/q20/results/env-ref.json](../../../../lab/q20/results/env-ref.json), 설계서 10.4절 문구는 step6에서 고친다
 - `pull_request_target`의 "main 정의"는 이벤트의 base SHA가 아니라 실행이 만들어질 때의 main 끝이다(PR #18: opened 시점 main에 없던 워크플로가 병합 직후 만들어진 실행에서 돌았다). 판정 job은 `base/`를 이벤트의 `pull_request.base.sha`가 아니라 `github.sha`로 체크아웃해야 실행 중인 정의와 스크립트가 일치한다. → 처리: [lab/q20/results/env-ref.json](../../../../lab/q20/results/env-ref.json), 설계서 10.4절 판정 job 규칙에 step6에서 반영
 - 필수 체크를 등록하면 `lab/q20/deploy.ts --merge`가 깨진다. PR을 만든 직후 `gh pr merge --squash`를 바로 실행해 recorder 결과보다 먼저 병합을 시도하고, 시험 리포는 자동 병합도 꺼져 있다(봇 API, 2026-11-13). step3은 등록 전에 배포하므로 recorder를 다시 고치지 않으면 걸리지 않는다. → 처리: step4 배포 전에 고친다(자동 병합 허용 + `--auto`, 또는 필수 체크 대기). step4는 필수 승인 1이라 어차피 제작자가 승인해야 한다
+- `lab/q20/deploy.ts`·`report.ts`·`patch-id.ts`의 진입점 검사(`import.meta.url === \`file://${process.argv[1]}\``)가 Windows에서 항상 거짓이라 main이 돌지 않았다. `report.ts`는 검사 없이 종료 코드 0으로 끝나 Windows에서는 AC가 거짓으로 통과했다. 이전 step의 결과는 이번에 다시 검사해 모두 통과했다. → 처리: 진입점 검사를 `path.resolve(argv[1]) === fileURLToPath(import.meta.url)`로 고치고 `lab/q20/test/entry.test.ts`로 막았다(step3)
 
 ## 열린 질문
 

@@ -6,6 +6,7 @@
 //   node lab/q20/patch-id.ts --experiment     # 시험 전체를 돌리고 results/patch-id.json을 쓴다
 import { rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { git, gitTry, repoInfo } from '../../scripts/lib/git.ts';
 import { runSync } from '../../scripts/lib/exec.ts';
 import { LAB_REPO, LAB_URL } from './deploy.ts';
@@ -330,7 +331,7 @@ async function main(argv: string[]): Promise<void> {
   process.stdout.write(JSON.stringify(prPatchId(cwd, n)) + '\n');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
     process.stderr.write(`${(e as Error).message}\n`);
     process.exit(1);
