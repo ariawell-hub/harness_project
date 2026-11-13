@@ -1,0 +1,74 @@
+{
+  "item": "check-source",
+  "summary": "필수 체크 q20/recorded의 출처를 시험 App(harness-q20-lab-recorder, App ID 5740375)으로 고정하자, 같은 이름을 흉내 낸 3가지(PR 워크플로 job 이름 = check run, PR 워크플로의 GITHUB_TOKEN status, 봇 PAT status)가 모두 병합을 막혔고(BLOCKED), 시험 App의 status만 있는 대조군은 병합할 수 있었다(CLEAN). 0.2절·ADR-0003의 '필수 체크는 출처 앱을 고정한다'는 commit status와 check run 모두에 통한다. 다만 PR의 체크 요약 API(statusCheckRollup.state, isRequired)는 출처를 따지지 않아 흉내 PR도 SUCCESS·필수로 보인다. 병합은 GitHub이 막으므로 영향이 없지만, 2단계 도구가 '검증 통과'를 이 요약으로 판단하면 안 된다.",
+  "cases": [
+    {
+      "name": "필수 체크 출처를 시험 App으로 고정하고 봇이 확인",
+      "expected": "제작자가 main 필수 체크 q20/recorded의 출처를 시험 App으로 지정할 수 있고, admin이 아닌 봇이 등록된 출처를 확인할 수 있다",
+      "observed": "recorder 배포(PR #22)와 대조군 PR #23에서 시험 App이 q20/recorded를 한 번 보고한 뒤 제작자가 등록했다. 봇 토큰으로 GET repos/ariawell-hub/harness-q20-lab/branches/main의 protection.required_status_checks = {checks: [{context: q20/recorded, app_id: 5740375}], enforcement_level: everyone}. app_id는 제작자가 알려 준 시험 App ID와 같다. 시험 App이 비공개라 봇은 GET apps/<slug>로 App을 조회할 수 없다(404). 2026-11-13 확인",
+      "verdict": "pass",
+      "evidence": [
+        "gh api repos/ariawell-hub/harness-q20-lab/branches/main --jq '.protection.required_status_checks'",
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/22"
+      ]
+    },
+    {
+      "name": "대조군: 시험 App(recorder job)이 쓴 status만 있음",
+      "expected": "필수 체크를 만족해 병합할 수 있는 상태가 된다",
+      "observed": "PR #23(q20/check-source-control, head 4c9ecea6c4ea). recorder 실행 43384892127이 App 토큰으로 status를 썼고 creator는 harness-q20-lab-recorder[bot]. 등록 뒤 mergeStateStatus=CLEAN, mergeable=MERGEABLE. 병합하지 않고 닫았다",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/23",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43384892127"
+      ]
+    },
+    {
+      "name": "흉내: PR 워크플로(pull_request)의 job 이름을 q20/recorded로 둠(check run)",
+      "expected": "출처가 GitHub Actions라 필수 체크를 만족하지 못한다",
+      "observed": "PR #24(q20/attack-check-source-job-name, head c400c07b9f23). check run q20/recorded가 SUCCESS로 생겼고 출처 App은 github-actions(15368). recorder는 공격 브랜치라 skipped(실행 43385712338). mergeStateStatus=BLOCKED, mergeable=MERGEABLE(충돌 없음). 같은 main 끝에서 만든 대조군은 CLEAN이므로 차이는 q20/recorded의 출처뿐이다. 병합하지 않고 닫았다",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/24",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43385712432/job/131753562397"
+      ]
+    },
+    {
+      "name": "흉내: PR 워크플로가 GITHUB_TOKEN(statuses: write)으로 commit status를 씀",
+      "expected": "출처가 GitHub Actions라 필수 체크를 만족하지 못한다",
+      "observed": "PR #25(q20/attack-check-source-token-status, head 497b985188c7). 리포 기본 권한이 읽기 전용이어도 같은 리포 브랜치의 pull_request 워크플로는 permissions로 statuses: write를 받아 status q20/recorded=success를 썼다(creator github-actions). recorder는 skipped(실행 43385726228). mergeStateStatus=BLOCKED. 병합하지 않고 닫았다",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/25",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43385726382"
+      ]
+    },
+    {
+      "name": "흉내: 봇 PAT로 gh api를 써서 commit status를 씀(ADR-0003의 위험)",
+      "expected": "출처가 App이 아니라 필수 체크를 만족하지 못한다",
+      "observed": "PR #26(q20/attack-check-source-pat, head dd155ec23b44). 봇 토큰으로 POST statuses가 성공했다(creator ariawell247, type User). 클래식 PAT로 필수 체크와 같은 이름의 status를 만들 수 있다는 ADR-0003의 전제가 맞다. recorder는 skipped(실행 43385737385). mergeStateStatus=BLOCKED. 병합하지 않고 닫았다",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/26",
+        "gh api -X POST repos/ariawell-hub/harness-q20-lab/statuses/dd155ec23b44c4d3a1e2f98e9edbac0a666b6659 -f state=success -f context=q20/recorded"
+      ]
+    },
+    {
+      "name": "PR 체크 요약 API가 출처 고정을 반영하는지",
+      "expected": "흉내만 있는 PR은 체크 요약에서도 필수 체크 미충족으로 보인다(도구가 요약으로 '검증 통과'를 판단할 수 있다)",
+      "observed": "GraphQL commit.statusCheckRollup.state는 #24·#25·#26 모두 SUCCESS이고, 흉내 check run·status의 isRequired(pullRequestNumber)도 true다. 이름만 보고 출처는 따지지 않는다. 출처 고정이 반영된 신호는 mergeStateStatus(BLOCKED)뿐이었다. 하네스 runner는 요약을 'failure'일 때 고칠 일을 찾는 데만 쓰고 병합은 GitHub 자동 병합이 판정하므로 지금은 영향이 없다",
+      "verdict": "fail",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/24",
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/25",
+        "https://github.com/ariawell-hub/harness-q20-lab/pull/26"
+      ]
+    },
+    {
+      "name": "시험 App이 만든 check run이 필수 체크를 만족하는지",
+      "expected": "출처를 고정한 App의 check run도 필수 체크로 인정된다",
+      "observed": "시험하지 않았다. recorder는 commit status만 쓴다(계획 의사결정 로그 step3: 설계서 10.3절은 기록 job 결과를 '상태'로 적고, 한 필수 체크에 두 종류를 섞으면 판정이 흐려진다). 2단계에서 check run을 쓰기로 하면 그때 확인한다",
+      "verdict": "n/a",
+      "evidence": []
+    }
+  ]
+}
