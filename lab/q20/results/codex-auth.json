@@ -1,0 +1,51 @@
+{
+  "item": "codex-auth",
+  "summary": "ChatGPT 로그인 auth.json을 judge-codex environment 시크릿 CODEX_AUTH_JSON으로 두고, 판정 job이 복원해 임시 CODEX_HOME에 0600으로 쓰고 codex exec를 비대화로 돌린 뒤, 실행 뒤 auth.json을 judge-codex의 GitHub 공개키(libsodium sealed box, 시크릿 API 형식)로 봉인해 job 출력으로 넘기고, LLM 없는 저장 job(codex-auth-store의 시험 App, Environments 쓰기)이 풀지 않고 그 암호문을 CODEX_AUTH_JSON으로 다시 등록한다. 공개키는 앞선 pubkey job(저장 자격증명, LLM 없음)이 조회한다. 비대화 실행, 재저장, 동시 실행 제한은 확인됐다. 인증 갱신은 last_refresh를 9일 전으로 바꿔도 일어나지 않았다(access token이 유효해 Codex가 갱신 없이 API 호출). 진짜 갱신은 access token 만료 뒤 일어난다는 문서 근거만 남기고 강제 만료는 하지 않았다(제작자 결정). 사용량 한도는 일부러 소진하지 않았다. 자격증명 값은 기록하지 않고 sha256 앞 8자와 필드 이름만 남겼다. 부작용: 갱신 유도 실행이 last_refresh를 9일 전으로 바꾼 파일을 다시 저장해, 현재 CODEX_AUTH_JSON은 last_refresh가 인위적으로 과거다(해 없음. step6의 자격증명 교체/재로그인으로 해소된다).",
+  "cases": [
+    {
+      "name": "비대화 실행이 되는지",
+      "expected": "codex exec가 ChatGPT 로그인 인증으로 비대화(--json, 승인 없음)로 끝까지 돈다",
+      "observed": "복원한 auth.json(sha8 f23c292b)으로 codex exec --json --ephemeral이 종료 코드 0으로 끝났다(대조군·공격 전부). 이벤트는 thread.started·turn.started·item.completed(agent_message·command_execution)·turn.completed. 판정은 --output-schema로 정해진 JSON. 대조군 사용량 in:20131 out:348",
+      "verdict": "pass",
+      "evidence": ["https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43525158920"]
+    },
+    {
+      "name": "실행 뒤 auth.json이 바뀌는지(갱신 시점·필드)",
+      "expected": "실행 중 토큰이 갱신되면 auth.json의 필드가 바뀌고 저장 job이 갱신본을 저장한다. 값은 기록하지 않고 해시와 필드 이름만 기록한다",
+      "observed": "필드(한 단계 펼침): OPENAI_API_KEY, auth_mode, last_refresh, tokens.access_token, tokens.account_id, tokens.id_token, tokens.login_owner_id, tokens.oauth_provenance, tokens.refresh_token (api_key=false). 대조군 실행 전후 sha8 f23c292b 동일(changed=false). 갱신 유도: last_refresh를 9일 전으로 바꾸자 sha8 9a339467로 바뀌었으나(age 단계), codex exec 실행 뒤에도 9a339467 그대로(changed=false)라 실행 중 갱신은 없었다. 문서(요약)의 'last_refresh 약 8일 경과 시 갱신'과 달리 access token이 유효하면 갱신하지 않는 것으로 보인다. 진짜 필드 갱신은 access token 만료(또는 401) 뒤라는 문서 근거만 남기고, 제작자 구독 자격증명을 더 건드리는 강제 만료는 하지 않았다(제작자 결정, 계획 의사결정 로그)",
+      "verdict": "partial",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43525414546",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43525158920",
+        "lab/q20/repo/judge/codex-auth.mjs"
+      ]
+    },
+    {
+      "name": "재저장된 인증으로 다음 실행이 되는지",
+      "expected": "봉인·저장 job이 CODEX_AUTH_JSON을 다시 쓰고, 다음 실행이 그 값으로 복원해 돈다",
+      "observed": "매 실행이 봉인(libsodium crypto_box_seal, 로컬에서 봉인→공개키쌍으로 풀기 왕복 확인)→저장 job이 gh api로 CODEX_AUTH_JSON을 다시 등록(updated_at 갱신). 이후 실행들(대조군 2차, 갱신 유도, 공격 5종)이 그 재저장된 시크릿으로 복원해 비대화 실행에 성공했다. 저장 job은 공개키 key_id가 일치할 때만 등록한다. 봉인·저장은 판정·검사가 실패해도(if: always) 실행해 갱신본을 잃지 않는다",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43525158920",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43528065918"
+      ]
+    },
+    {
+      "name": "concurrency group이 동시 실행을 하나씩 처리하는지",
+      "expected": "Codex 작업(판정+저장)이 동시에 돌지 않고 토큰 갱신이 충돌하지 않는다. 대기 실행이 취소되지 않는다",
+      "observed": "공격 3개를 거의 동시에 열자 하나만 in_progress·나머지 pending(취소 안 됨), judge job 실행 시각이 겹치지 않고 직렬화됐다(23:34→23:35→23:36). 워크플로 단위 concurrency group q20-codex-auth, cancel-in-progress=false, queue=max",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43528065918",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43528075940",
+        "https://github.com/ariawell-hub/harness-q20-lab/actions/runs/43528086610"
+      ]
+    },
+    {
+      "name": "사용량 한도에 걸릴 때의 동작",
+      "expected": "한도에 걸리면 판정 없이 실패로 끝나고(fail closed) 검증자 장애 규칙을 따른다. 일부러 소진하지 않는다",
+      "observed": "제작자의 대화형 사용과 한도를 공유하므로 일부러 소진하지 않았다. 문서 근거: codex exec --json은 한도·오류를 error·turn.failed 이벤트로 낸다. 오류 처리 경로: codex-scan.mjs가 turn.failed를 감지하면 오류 문구(비밀이 있으면 가림)를 출력하고 clean=false로 종료해 verdict.json을 쓰지 않는다(fail closed). 실제 한도 도달은 시험하지 않았다",
+      "verdict": "n/a"
+    }
+  ]
+}
