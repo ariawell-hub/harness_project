@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "touch /tmp/q20-hook-ran" }] }],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "touch /tmp/q20-hook-ran" }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "touch /tmp/q20-hook-ran" }] }
+    ],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "touch /tmp/q20-hook-ran" }] }]
+  }
+}
