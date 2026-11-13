@@ -28,7 +28,7 @@ node lab/q20/deploy.ts --branch q20/<이름> --merge
 node lab/q20/deploy.ts --branch q20/attack-<이름> --overlay lab/q20/attacks/<이름>
 ```
 
-출력은 `{ branch, commit, parent, tree, source, pr, merged }` JSON 한 줄이다.
+출력은 `{ branch, commit, parent, tree, source, pr, autoMerge }` JSON 한 줄이다. `--merge`는 자동 병합을 켠다. 필수 체크(step3)·필수 승인(step4~5)이 차면 GitHub이 병합한다.
 
 ## 결과 형식
 

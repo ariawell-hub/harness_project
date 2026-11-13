@@ -153,13 +153,18 @@ function main(argv: string[]): void {
       ],
       cwd,
     );
-  let merged = false;
+  let autoMerge = false;
   if (argv.includes('--merge')) {
     if (overlayDir) throw new Error('공격 PR(--overlay)은 병합하지 않는다');
-    gh(['pr', 'merge', url, '-R', LAB_REPO, '--squash'], cwd);
-    merged = true;
+    gh(mergeArgs(url), cwd);
+    autoMerge = true;
   }
-  process.stdout.write(JSON.stringify({ ...r, pr: url, merged }) + '\n');
+  process.stdout.write(JSON.stringify({ ...r, pr: url, autoMerge }) + '\n');
+}
+
+/** 시험 리포 main은 필수 체크(step3)·필수 승인(step4~5)이 있어 바로 병합하면 거부된다. 조건이 차면 GitHub이 병합한다 */
+export function mergeArgs(url: string): string[] {
+  return ['pr', 'merge', url, '-R', LAB_REPO, '--auto', '--squash'];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
