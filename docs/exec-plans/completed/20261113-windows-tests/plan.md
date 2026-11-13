@@ -46,7 +46,7 @@ Windows 네이티브(Git Bash, ADR-0005)에서 하네스 자체 테스트가 실
   - `start.test.ts` (a): `'r\r\n' !== 'r\n'`. fixture 리포에 `.gitattributes`가 없어 Windows Git 기본값 `core.autocrlf=true`로 CRLF 체크아웃된다.
   - `task.test.ts` linkFile: 실제 연산이 `hardlink`. 개발자 모드가 꺼진 Windows는 심볼릭 링크를 만들 수 없다(ADR-0005가 예상한 대체 경로).
   - `guard.test.ts` 파일 도구: `rm -rf ${wt}`에 따옴표 없는 `C:\…` 경로가 들어가 bash 규칙대로 역슬래시가 이스케이프로 풀린다. 같은 경로를 작은따옴표·큰따옴표·`/` 표기로 넣으면 R14로 막히는 것을 확인했다(대화 세션의 재현 스크립트).
-- 2026-11-13 17:10 (KST) step0: 고치기 전 worktree에서 AC 실행 36개 중 3개 실패(위 3건). `makeFixture`에 `.gitattributes` 복사, linkFile 테스트를 심볼릭 링크 가능 여부에 따라 기대값을 정하게, guard 테스트 `rm -rf` 경로를 작은따옴표로 감쌌다. AC 36개 통과. gitleaks를 PATH에 넣고 `node scripts/harness.ts check` 전체 통과(test 143개 포함). 이 PC(Windows, 개발자 모드 꺼짐)에서 `check`가 통과한 첫 기록이다.
+- 2026-11-13 17:02 (KST) step0: 고치기 전 worktree에서 AC 실행 36개 중 3개 실패(위 3건). `makeFixture`에 `.gitattributes` 복사, linkFile 테스트를 심볼릭 링크 가능 여부에 따라 기대값을 정하게, guard 테스트 `rm -rf` 경로를 작은따옴표로 감쌌다. AC 36개 통과. gitleaks를 PATH에 넣고 `node scripts/harness.ts check` 전체 통과(test 143개 포함). 이 PC(Windows, 개발자 모드 꺼짐)에서 `check`가 통과한 첫 기록이다.
 
 ## 의사결정 로그
 
