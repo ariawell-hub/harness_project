@@ -1,0 +1,22 @@
+# 공격 overlay check-source-token-status: PR 쪽 정의(pull_request)가 GITHUB_TOKEN(statuses 쓰기)으로
+# commit status q20/recorded=success를 PR head에 쓴다. GitHub Actions 출처의 status가 생긴다.
+# 기대: 필수 체크의 출처가 시험 App으로 고정돼 있어 만족하지 못한다.
+name: mimic-status
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  statuses: write
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state=success -f context=q20/recorded \
+            -f description="q20 mimic GITHUB_TOKEN" --jq '.creator.login'
