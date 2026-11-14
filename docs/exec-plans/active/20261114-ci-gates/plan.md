@@ -3,10 +3,10 @@ id: 20261114-ci-gates
 issue: 53 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
 status: active # draft | active | blocked | completed | abandoned
-size: large  # small | medium | large (4.3절)
-risk: high   # low | normal | high (10.1절)
+size: large # small | medium | large (4.3절)
+risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
-owner: session  # 선점한 runner 작업자 또는 사람
+owner: session # 선점한 runner 작업자 또는 사람
 claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 ---
 
@@ -62,6 +62,7 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-14: 제작자 대화 지시("로드맵 2단계를 진행해달라")로 2단계를 Issue #53~#57로 나눠 봇이 등록했다. 이 계획(#53)을 대화 세션에서 작성했다. 현재 main 필수 체크는 `check`·`plan-gate`(둘 다 GitHub Actions 출처, app_id 15368)이고 리포에 environment가 없다(봇 API로 확인).
+- 2026-11-14 step0: 제작자 답 2건(약화·완화 → 위험도 높음, ISC 허용)을 의사결정 로그에 기록. 테스트 `scripts/test/ci.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/ci/gates.ts`). `scripts/ci/{results,gates,record}.ts`, `harness.ts gates`·`record-status`, `.github/workflows/gates.yml` 구현 뒤 13개 통과. 테스트를 고친 2건은 fixture 문제였다(마지막 step 완료인데 계획이 active에 있음 → step 2개로, 예외 유발을 없는 base 대신 `planReview` 없는 설정으로). AC 명령 통과. 발견 사항(부트스트랩)은 설계서 10.4절에 바로 반영(v0.7.17). 실제 동작은 step1 PR에서 확인한다.
 
 ## 의사결정 로그
 
@@ -71,12 +72,14 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 판정 job은 `base/`를 `github.sha`(실행 중인 main 끝)로 받는다. 이유: 10.4절(Q20). 옛 `plan-gate.yml`의 `base.sha` 체크아웃은 step4에서 파일째 지운다.
 - 체크 하나에 job 하나가 아니라 판정 job 하나가 네 검사를 모두 돌린다. 이유: 체크아웃·설치가 한 번이고, 기록은 어차피 기록 job 하나가 한다. 검사 하나가 예외로 죽어도 그 context만 `error`가 되게 검사마다 격리한다.
 - 제작자 승인 뒤 재판정은 `pull_request_review` 트리거 워크플로(비밀·권한 없음) → `workflow_run`(main 정의)으로 `gates`를 다시 돌린다. 이유: `pull_request_review`는 PR 쪽 정의로 돌아 main 전용 environment(`recorder`)를 못 쓰고, `pull_request_target`은 리뷰에 반응하지 않는다. `workflow_run` 쪽은 페이로드를 믿지 않고 PR 번호로 API를 다시 조회해 현재 head에만 판정한다. 버린 대안: 제작자가 Actions에서 재실행(절차 부담), 정기 실행(지연).
+- 기록 job은 `permissions: contents: read`를 둔다. 이유: 비공개 리포에서 `base/`의 `scripts/`를 체크아웃하려면 `GITHUB_TOKEN` 읽기가 필요하다. 상태 쓰기는 `GITHUB_TOKEN`이 아니라 검증 App 토큰(`permission-statuses: write`만)으로 한다. 버린 대안: `permissions: {}`(체크아웃 실패).
+- `record-status`는 결과가 깨져도 모든 기계 판정을 `error`로 쓴 뒤 종료 코드 1로 끝난다. 이유: 상태가 없으면 PR 화면에 원인이 보이지 않고, job 실패로 기록 job 로그를 보게 한다.
 - (제작자 결정, 2026-11-14 대화) 보호 경로의 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조를 탐지하면 `harness-guard`는 표시만 하고 `risk-gate`가 위험도를 "높음"으로 올린다. 제작자 head 승인이 있어야 병합된다. 캐시 사용·`CHANGELOG`·체크리스트 누락은 작성자가 고칠 수 있으므로 `harness-guard` 실패다. 이유: 10.1절 "위험도는 올릴 수만 있다"와 같은 방향이고, 정당한 변경을 막지 않으면서 사람 확인을 강제한다. 버린 대안: 탐지 즉시 실패(정당한 완화도 제작자가 보호 설정을 풀어야 함), 표시만(②가 생기기 전엔 아무도 막지 않음).
 - (제작자 결정, 2026-11-14 대화) `deps-guard` 라이선스 허용 목록: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC. SPDX 식은 `OR` 중 하나, `AND`는 모두 허용이어야 통과. 이유: ISC는 MIT 수준의 허용 라이선스이고 npm에서 흔하다. 버린 대안: Q14 그대로(ISC 전이 의존성마다 막힘). 설계서 18절 Q14에 반영한다(step3).
 
 ## 발견 사항
 
-- `pull_request_target` 워크플로는 main에 들어간 뒤에만 돈다. 체크를 도입하는 PR은 그 체크를 자기 PR에서 통과할 수 없어서, 10.4절 부트스트랩의 "그 체크가 자기 PR에서 통과해야 병합"이 이 체크들에는 성립하지 않는다. 다음 PR(step1)에서 처음 동작을 확인한다. → 처리: step4에서 설계서 10.4절 부트스트랩에 반영
+- `pull_request_target` 워크플로는 main에 들어간 뒤에만 돈다. 체크를 도입하는 PR은 그 체크를 자기 PR에서 통과할 수 없어서, 10.4절 부트스트랩의 "그 체크가 자기 PR에서 통과해야 병합"이 이 체크들에는 성립하지 않는다. 다음 PR(step1)에서 처음 동작을 확인한다. → 처리: [설계서 10.4절 부트스트랩](../../../harness/design.md) (step0에서 반영)
 
 ## 열린 질문
 

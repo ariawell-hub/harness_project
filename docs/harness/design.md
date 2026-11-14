@@ -49,6 +49,7 @@ review_cycle: quarterly
   - v0.7.14 (2026-11-12): main 병합 충돌로 멈춘 PR에 제작자가 답하면 runner가 충돌을 남긴 병합과 충돌 해결 세션을 띄우고, 충돌 표시·AC·`check`를 직접 확인한 뒤에만 병합 커밋을 일반 push한다. 충돌 중단은 계획 파일을 바꾸지 않는다(4.5절, 10.3절, ADR-0006, Issue #43, TD-27 해결)
   - v0.7.15 (2026-11-12): step 세션이 "열린 질문"에 `### 질문:`을 남기면 runner가 판정 전에 계획을 멈추고 Issue에 `needs-human` + 제작자 멘션으로 올린다. 답을 받으면 답을 넣어 그 step을 다시 띄운다(4.5절, 9.1절, Issue #43, TD-24 해결)
   - v0.7.16 (2026-11-14): Q20 시험 결과 반영, 조건부 통과(18절 Q20, 19절, 결과 `lab/q20/results/`). E3 유지. 없는 environment 참조는 새 environment가 생겨 돎·`pull_request_target`의 main은 실행 생성 시점의 main 끝·네트워크는 job 단위로 막을 수 없음(10.4절), PR 트리의 도구 설정 무시·Codex 권한 프로필 거부 목록과 `pr/` 조상 금지·`pr/`의 심볼릭 링크 제거·판정 job 안 유출 검사(10.4절), 체크 요약 API는 출처를 보지 않음·merge queue 불가 확정·push 직후 PR head 반영 지연(10.3절), PR 워크플로의 `statuses: write`·App 화면 이름(0.2절), Codex CI 전용 로그인·공개키 봉인 재저장·워크플로 단위 동시 실행 제한·갱신 미관찰과 fail closed, Claude 토큰 한 줄 입력(13.3절), 인증 저장 자격증명을 GitHub App으로(14.2절, Issue #12)
+  - v0.7.17 (2026-11-14): 로드맵 2단계 착수(Issue #53~#57). 기계 판정(`plan-gate` 등)은 `gates` 워크플로의 판정 job 하나가 모아 내고 기록 job이 검증 App으로 커밋 상태를 쓴다(10.4절). `pull_request_target` 체크는 도입 PR에서 돌지 않으므로 다음 PR에서 확인한 뒤 등록한다(10.4절 부트스트랩, Issue #53)
 
 ### 0.1 전제 조건
 
@@ -876,6 +877,8 @@ pnpm test src/auth/login-guard.spec.ts
 | 기록 job | `pull_request_target` (main 정의) | 실행하지 않는다 | 검증 App 키(`recorder` environment). LLM 없음 |
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록 |
 
+- 기계 판정(`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
+
 - **main 정의로 실행하는 것과 main 스크립트를 실행하는 것은 다르다.** 판정 job은 실행할 스크립트·프롬프트를 `base/`(main)에서만 가져오고, `pr/` 아래는 아무것도 실행하지 않는다. 구현할 때 가장 흔히 뚫리는 곳이다.
 - **역할별 environment**: 시크릿은 역할마다 다른 environment에 둔다. `judge-claude`(Claude 구독 토큰), `judge-codex`(Codex 인증 파일), `codex-auth-store`(Codex 인증 저장용 자격증명), `recorder`(검증 App 키), `revert`(revert용 봇 토큰, 10.3절). 이름은 예시다. 각 environment는 main 브랜치에서만 쓰도록 제한하고, 각 job은 자기 environment 하나만 참조한다. 리포 수준 시크릿은 아무 브랜치의 `push` 워크플로가 읽을 수 있으므로 두지 않는다(0.2절).
 - **main 전용 environment는 PR 격리 장치가 아니다.** `pull_request_target` 작업은 PR의 head가 아니라 base 브랜치(main) ref로 실행되므로, main으로 제한한 environment의 비밀을 그대로 받는다. 이 제한이 막는 것은 PR 쪽 정의로 도는 워크플로(`pull_request`, 다른 브랜치의 `push`)가 **이미 있는** main 전용 environment에 들어가는 것뿐이다. PR 입력과 비밀의 격리는 아래 판정 job 규칙이 맡는다.
@@ -923,6 +926,7 @@ pnpm test src/auth/login-guard.spec.ts
   - 체크를 도입하는 PR은 그 체크가 자기 PR에서 통과해야 병합된다.
   - 병합되면 제작자가 그 체크를 필수 체크로 등록한다(관리자 설정 작업, 단계마다 한 번).
   - 필수 체크가 하나도 없는 동안에는 에이전트가 자기 PR의 새 체크 통과를 확인하고 병합한다(절차 수준). 이 기간은 로드맵 1단계 안으로 최대한 짧게 한다.
+  - `pull_request_target`(main 정의)로 도는 체크는 main에 들어간 뒤에야 돈다. 그래서 그런 체크를 도입하는 PR은 자기 PR에서 그 체크를 통과할 수 없다. 도입 PR은 테스트로 확인해 병합하고, 다음 PR에서 처음 동작(기록 출처 포함)을 확인한 뒤 등록한다(Issue #53).
 - **구축 단계의 남는 위험**
   - 보안 제어 파일(워크플로 권한, 샌드박스 설정, 검증 프롬프트)도 자동 병합된다. 검사 약화를 두 검증자와 `harness-guard`가 모두 놓치면 병합될 수 있다.
   - 판정 작업은 PR로 바꿀 수 없지만, 일단 병합되면 다음 PR부터 약화된 내용이 적용된다.

@@ -1,10 +1,13 @@
 // 하네스 CLI 진입점. 정규 호출: node scripts/harness.ts <명령> [옵션]
 // 모든 명령은 비대화식이고, 종료 코드로 성공·실패를 알린다(6절).
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
-import { defaultBase, repoInfo } from './lib/git.ts';
+import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
+import { runGates, summaryMarkdown } from './ci/gates.ts';
+import { githubStatusPoster, recordStatuses } from './ci/record.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
@@ -36,6 +39,12 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 게이트:
   plan-gate [--repo <dir>] [--config-root <dir>] [--base <sha>] [--head-ref <브랜치>] [--mode pr|plan]
   doc-lint | bypass-scan [--ci] [--base <sha>] | secret-scan [--ci] [--base <sha>]
+
+CI(gates 워크플로, 10.4절):
+  gates --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> --out <파일> [--summary <파일>]
+                                           기계 판정 결과 파일(판정 job, 비밀 없음)
+  record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
+                                           결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
@@ -78,6 +87,12 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   repo: { type: 'string' },
   'config-root': { type: 'string' },
   'head-ref': { type: 'string' },
+  'head-sha': { type: 'string' },
+  out: { type: 'string' },
+  summary: { type: 'string' },
+  results: { type: 'string' },
+  'repo-slug': { type: 'string' },
+  'target-url': { type: 'string' },
   mode: { type: 'string' },
   issue: { type: 'string' },
   slug: { type: 'string' },
@@ -199,6 +214,50 @@ async function main(argv: string[]): Promise<number> {
           : `plan-gate: 통과 (${branch}, ${r.plan?.file})`,
       );
       return r.problems.length ? 1 : 0;
+    }
+    case 'gates': {
+      const root = path.resolve(str('repo') ?? repoInfo(cwd).root);
+      const cfg = loadConfig(path.resolve(str('config-root') ?? root));
+      const out = str('out');
+      const base = str('base');
+      const branch = str('head-ref');
+      if (!out || !base || !branch) {
+        process.stderr.write('gates: --out, --base, --head-ref가 필요하다\n');
+        return 2;
+      }
+      const headSha = git(['rev-parse', 'HEAD'], root);
+      const r = runGates({ root, cfg, base, branch, headSha });
+      writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
+      const md = summaryMarkdown(r);
+      const summary = str('summary');
+      if (summary) appendFileSync(summary, md);
+      log(md);
+      return 0;
+    }
+    case 'record-status': {
+      const file = str('results');
+      const headSha = str('head-sha') ?? '';
+      const repo = str('repo-slug') ?? '';
+      const targetUrl = str('target-url') ?? '';
+      const token = process.env.GH_TOKEN ?? '';
+      if (!token) {
+        process.stderr.write('record-status: 환경 변수 GH_TOKEN(검증 App 토큰)이 없다\n');
+        return 2;
+      }
+      const raw = file && existsSync(file) ? readFileSync(file, 'utf8') : null;
+      const r = await recordStatuses({
+        raw,
+        headSha,
+        repo,
+        targetUrl,
+        post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
+      });
+      log(
+        r.ok
+          ? 'record-status: 기록함'
+          : `record-status: 모든 기계 판정을 error로 기록함 — ${r.reason}`,
+      );
+      return r.ok ? 0 : 1;
     }
     case 'new-task': {
       const r = await newTask(cwd, {

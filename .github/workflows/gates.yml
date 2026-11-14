@@ -1,0 +1,105 @@
+# L3 기계 판정(10.3·10.4절, 계획 20261114-ci-gates). main의 정의(pull_request_target)로 돈다.
+# evaluate: base/(실행 중인 main 끝 = github.sha)의 스크립트만 실행하고 pr/는 데이터로 읽는다. 비밀·environment 없음.
+# record: 판정 결과를 base 스크립트로 검사한 뒤 검증 App 토큰(recorder environment)으로 PR head에 커밋 상태를 쓴다.
+#         PR 트리를 받지 않고 LLM·PR 코드를 실행하지 않는다. 결과가 없거나 깨지면 모든 기계 판정을 error로 쓴다.
+# PR 유래 값(브랜치 이름, job 출력)은 run 스크립트에 직접 넣지 않고 env로만 넘긴다.
+# 두 job 모두 Actions 캐시를 복원하지 않는다(10.4절 캐시 규칙). 액션은 커밋 SHA로 고정한다. 포크 PR은 판정하지 않는다.
+name: gates
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions: {}
+
+concurrency:
+  group: gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: evaluate
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      results: ${{ steps.gates.outputs.results }}
+    steps:
+      - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          persist-credentials: false
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (데이터로만 읽음)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: gates (base 스크립트만 실행, 의존성 설치 없음)
+        id: gates
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          cd pr
+          BASE=$(git merge-base "$BASE_SHA" HEAD)
+          OUT="$RUNNER_TEMP/gates.json"
+          node ../base/scripts/harness.ts gates --repo . --config-root ../base \
+            --base "$BASE" --head-ref "$HEAD_REF" --out "$OUT" --summary "$GITHUB_STEP_SUMMARY"
+          echo "results=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
+
+  record:
+    name: record
+    needs: evaluate
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: recorder
+    permissions:
+      contents: read
+    steps:
+      - name: main 정의 체크아웃 (기록 스크립트만)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: 검증 App 토큰 (커밋 상태 쓰기만)
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RECORDER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RECORDER_APP_KEY }}
+          permission-statuses: write
+
+      - name: record-status (결과 검사 뒤 커밋 상태 기록)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RESULTS_B64: ${{ needs.evaluate.outputs.results }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          F="$RUNNER_TEMP/gates.json"
+          printf '%s' "$RESULTS_B64" | base64 -d > "$F" 2>/dev/null || : > "$F"
+          node base/scripts/harness.ts record-status --results "$F" --head-sha "$HEAD_SHA" \
+            --repo-slug "$REPO" --target-url "$RUN_URL"
