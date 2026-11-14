@@ -17,23 +17,25 @@ review_cycle: on-change
               │                                     │
 명령·runner  commands/  (표준 명령, check, new-task, complete-step, start, init)
              runner/    (run: 루프, next: 우선순위·새 Issue 작성자 확인, agents: 세션, prompt)
+             ci/        (gates 워크플로: 기계 판정 결과 조립, 결과 검사·커밋 상태 기록)
               │
 게이트       gates/     (plan-gate, doc-lint, bypass-scan, secret-scan)   hooks/rules.ts, hooks/shell.ts
               │
 라이브러리   lib/       (exec, git, config, plan, attempts, github, util)
 ```
 
-| 모듈              | 책임                                                                                                                                                                                         |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/exec.ts`     | 시간 제한 프로세스 실행, 프로세스 그룹 정리. 셸 명령은 macOS·Linux `/bin/sh`, Windows Git Bash. Windows 실행 파일 확인(`.cmd` 래퍼 거부) (ADR-0005)                                          |
-| `lib/git.ts`      | worktree·git-dir·트리 해시·diff 도우미, main 체크아웃 fast-forward, PR 브랜치 main 병합 갱신(`updateBranchFromBase`, 일반 push만, ADR-0006), 원격 브랜치 갈라짐 판정(`remoteBranchDiverged`) |
-| `lib/config.ts`   | `harness.config.json` 로드·검증                                                                                                                                                              |
-| `lib/plan.ts`     | 계획 frontmatter·섹션·`index.json`·step AC·브랜치 이름·열린 질문(`openQuestions`, TD-18)                                                                                                     |
-| `lib/attempts.ts` | 실패 기록(`.git/.../harness/attempts.jsonl`), 3회/5회·총량 판정                                                                                                                              |
-| `lib/github.ts`   | `GitHubPort`(gh CLI). 댓글·Issue 편집 이력(`issueHistory`, TD-19·TD-26). `github-fake.ts`는 테스트·스모크용                                                                                  |
-| `gates/*`         | 기계 검사. 에러 메시지는 "무엇 + 고치는 법 + 근거"                                                                                                                                           |
-| `hooks/*`         | 도구 실행 직전 금지 규칙(R1~R4, R10, R13, R14, R20). POSIX·PowerShell·cmd 방언과 셸 래퍼 재귀, 명령 이름은 대소문자·확장자 무시 (ADR-0005)                                                   |
-| `runner/*`        | 다음 할 일 고르기 → 새 세션 → AC·check로 직접 판정 → PR. 충돌 답변 뒤 해결 세션(`conflictPrompt`, `conflict.json`, TD-27)                                                                    |
+| 모듈              | 책임                                                                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/exec.ts`     | 시간 제한 프로세스 실행, 프로세스 그룹 정리. 셸 명령은 macOS·Linux `/bin/sh`, Windows Git Bash. Windows 실행 파일 확인(`.cmd` 래퍼 거부) (ADR-0005)                                                                                                  |
+| `lib/git.ts`      | worktree·git-dir·트리 해시·diff 도우미, main 체크아웃 fast-forward, PR 브랜치 main 병합 갱신(`updateBranchFromBase`, 일반 push만, ADR-0006), 원격 브랜치 갈라짐 판정(`remoteBranchDiverged`)                                                         |
+| `lib/config.ts`   | `harness.config.json` 로드·검증                                                                                                                                                                                                                      |
+| `lib/plan.ts`     | 계획 frontmatter·섹션·`index.json`·step AC·브랜치 이름·열린 질문(`openQuestions`, TD-18)                                                                                                                                                             |
+| `lib/attempts.ts` | 실패 기록(`.git/.../harness/attempts.jsonl`), 3회/5회·총량 판정                                                                                                                                                                                      |
+| `lib/github.ts`   | `GitHubPort`(gh CLI). 댓글·Issue 편집 이력(`issueHistory`, TD-19·TD-26). `github-fake.ts`는 테스트·스모크용                                                                                                                                          |
+| `gates/*`         | 기계 검사. 에러 메시지는 "무엇 + 고치는 법 + 근거"                                                                                                                                                                                                   |
+| `hooks/*`         | 도구 실행 직전 금지 규칙(R1~R4, R10, R13, R14, R20). POSIX·PowerShell·cmd 방언과 셸 래퍼 재귀, 명령 이름은 대소문자·확장자 무시 (ADR-0005)                                                                                                           |
+| `runner/*`        | 다음 할 일 고르기 → 새 세션 → AC·check로 직접 판정 → PR. 충돌 답변 뒤 해결 세션(`conflictPrompt`, `conflict.json`, TD-27)                                                                                                                            |
+| `ci/*`            | CI 전용. `gates.ts`: 판정 job이 main 설정으로 PR 트리(데이터)를 검사해 결과 파일(`results.ts` 형식)을 만든다. `record.ts`: 기록 job이 결과를 형식·head SHA로 검사한 뒤 검증 App 토큰으로 커밋 상태를 쓴다. 결과가 없거나 깨지면 모두 `error`(10.4절) |
 
 ## 상태가 사는 곳
 

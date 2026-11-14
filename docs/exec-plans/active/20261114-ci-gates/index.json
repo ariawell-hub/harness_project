@@ -1,0 +1,31 @@
+{
+  "plan": "20261114-ci-gates",
+  "steps": [
+    {
+      "step": 0,
+      "name": "gates-record",
+      "status": "completed",
+      "completed_at": "2026-11-14T14:28:58+09:00"
+    },
+    {
+      "step": 1,
+      "name": "risk-gate",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "harness-guard",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "deps-guard",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "required-checks",
+      "status": "pending"
+    }
+  ]
+}
