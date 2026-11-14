@@ -41,7 +41,8 @@
     {
       "step": 6,
       "name": "wrap-up",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-14T13:22:44+09:00"
     }
   ]
 }
