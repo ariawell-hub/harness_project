@@ -9,23 +9,29 @@ name: gates
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited]
+  # 리뷰 뒤 재판정(제작자 승인 확인). 페이로드의 PR 정보는 믿지 않고 ci-pr이 API로 다시 조회한다.
+  workflow_run:
+    workflows: [review-trigger]
+    types: [completed]
 
 permissions: {}
 
 concurrency:
-  group: gates-${{ github.event.pull_request.number }}
+  group: gates-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 jobs:
   evaluate:
     name: evaluate
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
     outputs:
+      skip: ${{ steps.pr.outputs.skip }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
       results: ${{ steps.gates.outputs.results }}
     steps:
       - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
@@ -34,38 +40,53 @@ jobs:
           path: base
           persist-credentials: false
 
-      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
-        run: git config --global core.symlinks false
-
-      - name: PR head 체크아웃 (데이터로만 읽음)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr
-          fetch-depth: 0
-          persist-credentials: false
-
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.20'
 
+      - name: 판정할 PR 정하기 (workflow_run이면 API로 현재 head 확인)
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node base/scripts/harness.ts ci-pr --event "$GITHUB_EVENT_PATH" --body-out "$RUNNER_TEMP/pr-body.md"
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        if: steps.pr.outputs.skip == 'false'
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (데이터로만 읽음)
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: gates (base 스크립트만 실행, 의존성 설치 없음)
         id: gates
+        if: steps.pr.outputs.skip == 'false'
         env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
         run: |
+          REVIEWS="$RUNNER_TEMP/reviews.json"
+          gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUMBER/reviews" > "$REVIEWS" || rm -f "$REVIEWS"
           cd pr
           BASE=$(git merge-base "$BASE_SHA" HEAD)
           OUT="$RUNNER_TEMP/gates.json"
           node ../base/scripts/harness.ts gates --repo . --config-root ../base \
-            --base "$BASE" --head-ref "$HEAD_REF" --out "$OUT" --summary "$GITHUB_STEP_SUMMARY"
+            --base "$BASE" --head-ref "$HEAD_REF" --reviews "$REVIEWS" \
+            --out "$OUT" --summary "$GITHUB_STEP_SUMMARY"
           echo "results=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
 
   record:
     name: record
     needs: evaluate
-    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ !cancelled() && needs.evaluate.result != 'skipped' && needs.evaluate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: recorder
@@ -95,7 +116,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           RESULTS_B64: ${{ needs.evaluate.outputs.results }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # 판정 job이 PR을 정하기 전에 죽었으면 이벤트의 head에 error를 남긴다
+          HEAD_SHA: ${{ needs.evaluate.outputs.head_sha || github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

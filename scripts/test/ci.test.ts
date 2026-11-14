@@ -81,7 +81,12 @@ function results(over: Partial<GateResults> = {}): GateResults {
   return {
     version: 1,
     headSha: SHA,
-    results: [{ context: 'plan-gate', state: 'success', description: '통과', details: [] }],
+    results: GATE_CONTEXTS.map((context) => ({
+      context,
+      state: 'success' as const,
+      description: '통과',
+      details: [],
+    })),
     ...over,
   };
 }
@@ -178,7 +183,9 @@ test('toStatuses: 결과가 없으면 모든 context error, 빠진 context도 er
     ],
   );
   assert.match(none[0].description, /판정 결과 없음/);
-  const part = toStatuses(results(), ['plan-gate', 'risk-gate'], 'x');
+  const only = results();
+  only.results = only.results.filter((x) => x.context === 'plan-gate');
+  const part = toStatuses(only, ['plan-gate', 'risk-gate'], 'x');
   assert.deepEqual(
     part.map((s) => [s.context, s.state]),
     [
@@ -219,7 +226,7 @@ test('recordStatuses: 정상 결과를 그대로 기록한다', async () => {
   assert.deepEqual(r, { ok: true, reason: null });
   assert.deepEqual(
     p.posted.map((s) => [s.context, s.state]),
-    [['plan-gate', 'success']],
+    GATE_CONTEXTS.map((c) => [c, 'success']),
   );
 });
 
@@ -321,4 +328,12 @@ test('gates.yml: run 블록에 PR 유래 표현식을 직접 넣지 않는다', 
   for (const b of runBlocks(WF)) {
     assert.doesNotMatch(b, /\$\{\{\s*(github\.event|github\.head_ref|needs\.|steps\.)/, b);
   }
+});
+
+test('review-trigger.yml: PR 쪽 정의로 도므로 비밀·environment·권한·체크아웃이 없다', () => {
+  const t = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/review-trigger.yml'), 'utf8');
+  assert.match(t, /^permissions: \{\}$/m);
+  assert.match(t, /pull_request_review:/);
+  assert.doesNotMatch(t, /environment:|secrets\.|vars\.|^\s*(?:- )?uses:|: write/m);
+  assert.match(WF, /workflows: \[review-trigger\]/);
 });

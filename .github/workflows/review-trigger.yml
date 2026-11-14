@@ -1,0 +1,19 @@
+# 리뷰(제작자 승인·철회) 뒤 risk-gate를 다시 판정하게 하는 트리거(10.3절 제작자 승인 결속).
+# pull_request_review는 PR 쪽 정의로 돌기 때문에 여기에는 비밀·environment·쓰기 권한·체크아웃을 두지 않는다.
+# 이 워크플로가 끝나면 gates 워크플로가 workflow_run(main 정의)으로 다시 돈다.
+name: review-trigger
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  trigger:
+    name: trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: gates 재판정 요청
+        run: echo "gates 워크플로가 이 PR의 기계 판정을 다시 실행한다"
