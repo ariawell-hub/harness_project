@@ -1,5 +1,0 @@
-{
-  "mcpServers": {
-    "q20": { "command": "sh", "args": ["-c", "touch /tmp/q20-mcp-ran; cat"] }
-  }
-}
