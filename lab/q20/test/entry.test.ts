@@ -1,5 +1,6 @@
-// lab/q20 도구를 node로 직접 실행하면 main이 돈다(Windows 경로 포함).
+// lab/q20/report.ts를 node로 직접 실행하면 main이 돈다(Windows 경로 포함).
 // 진입점 검사가 `file://${argv[1]}` 비교면 Windows에서 항상 거짓이라, 검사 없이 종료 코드 0으로 끝났다.
+// deploy.ts·patch-id.ts의 같은 검사는 시험 소스와 함께 지웠다(step6, README의 마지막 커밋 SHA 참고).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -14,17 +15,5 @@ function run(tool: string): { code: number | null; stderr: string } {
 test('report.ts: 인자 없이 실행하면 사용법을 출력하고 종료 코드 2', () => {
   const r = run('report.ts');
   assert.equal(r.code, 2);
-  assert.match(r.stderr, /사용법/);
-});
-
-test('deploy.ts: --branch 없이 실행하면 종료 코드 1', () => {
-  const r = run('deploy.ts');
-  assert.equal(r.code, 1);
-  assert.match(r.stderr, /--branch/);
-});
-
-test('patch-id.ts: 인자 없이 실행하면 사용법을 출력하고 종료 코드 1', () => {
-  const r = run('patch-id.ts');
-  assert.equal(r.code, 1);
   assert.match(r.stderr, /사용법/);
 });

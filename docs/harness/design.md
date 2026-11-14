@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.15 · 상태: 초안 · 최종 갱신: 2026-11-12
+> 버전 v0.7.16 · 상태: 초안 · 최종 갱신: 2026-11-14
 
 ---
 
@@ -48,6 +48,7 @@ review_cycle: quarterly
   - v0.7.13 (2026-11-12): 판정에 쓰는 댓글·Issue의 편집 이력을 본다. 다른 계정이 고친 제작자 댓글은 답·승인이 아니고, 허용 계정이 아닌 계정이 만들거나 고친 Issue는 그 뒤의 제작자 `/harness accept`가 있어야 runner가 맡는다. runner는 계획 작성 직전에 다시 확인한다(9.1절, 14.6절, Issue #41, TD-19·TD-26 해결)
   - v0.7.14 (2026-11-12): main 병합 충돌로 멈춘 PR에 제작자가 답하면 runner가 충돌을 남긴 병합과 충돌 해결 세션을 띄우고, 충돌 표시·AC·`check`를 직접 확인한 뒤에만 병합 커밋을 일반 push한다. 충돌 중단은 계획 파일을 바꾸지 않는다(4.5절, 10.3절, ADR-0006, Issue #43, TD-27 해결)
   - v0.7.15 (2026-11-12): step 세션이 "열린 질문"에 `### 질문:`을 남기면 runner가 판정 전에 계획을 멈추고 Issue에 `needs-human` + 제작자 멘션으로 올린다. 답을 받으면 답을 넣어 그 step을 다시 띄운다(4.5절, 9.1절, Issue #43, TD-24 해결)
+  - v0.7.16 (2026-11-14): Q20 시험 결과 반영, 조건부 통과(18절 Q20, 19절, 결과 `lab/q20/results/`). E3 유지. 없는 environment 참조는 새 environment가 생겨 돎·`pull_request_target`의 main은 실행 생성 시점의 main 끝·네트워크는 job 단위로 막을 수 없음(10.4절), PR 트리의 도구 설정 무시·Codex 권한 프로필 거부 목록과 `pr/` 조상 금지·`pr/`의 심볼릭 링크 제거·판정 job 안 유출 검사(10.4절), 체크 요약 API는 출처를 보지 않음·merge queue 불가 확정·push 직후 PR head 반영 지연(10.3절), PR 워크플로의 `statuses: write`·App 화면 이름(0.2절), Codex CI 전용 로그인·공개키 봉인 재저장·워크플로 단위 동시 실행 제한·갱신 미관찰과 fail closed, Claude 토큰 한 줄 입력(13.3절), 인증 저장 자격증명을 GitHub App으로(14.2절, Issue #12)
 
 ### 0.1 전제 조건
 
@@ -57,7 +58,7 @@ review_cycle: quarterly
 |---|---|---|
 | E1 | 에이전트 전용 GitHub 계정. 작성용은 머신 계정 + 리포 한정 토큰(contents·pull requests·issues 쓰기, admin 없음. `workflows` 쓰기는 구축 단계에만 주고 운영 단계에서 회수). 토큰 만료는 90일 이하. 검증 결과 기록용은 별도 GitHub App(10.4절) | 에이전트가 제작자 계정을 쓰면 보호 설정을 바꿀 수 있고, 제작자가 에이전트 PR을 승인할 수 없다(GitHub은 자기 PR 승인을 막는다) |
 | E2 | **GitHub Pro(개인 계정)를 결제한다(결정).** 리포를 조직에 둔다면 Team이 같은 역할을 한다 | 비공개 리포에서 브랜치 보호·rulesets·필수 상태 체크, 브랜치별로 제한한 CI 환경(environment)을 쓰려면 Pro 이상이 필요하다. 없으면 L3에 기댄 "차단"이 모두 권고 수준으로 떨어진다 |
-| E3 | CI에서 Claude Code·Codex를 **구독 요금제 토큰**으로 실행한다(결정). 둘 다 GitHub 호스팅(일회용) 러너에서 실행하고, 인증 정보는 도구별 environment에 둔다(10.4절, 13.3절). self-hosted 러너는 쓰지 않는다. Codex 인증 방식은 2단계 전 Q20 시험을 통과해야 확정된다 | 교차 검증을 CI에서 실행해야 작성자가 승인을 위조할 수 없다(10.1절) |
+| E3 | CI에서 Claude Code·Codex를 **구독 요금제 토큰**으로 실행한다(결정). 둘 다 GitHub 호스팅(일회용) 러너에서 실행하고, 인증 정보는 도구별 environment에 둔다(10.4절, 13.3절). self-hosted 러너는 쓰지 않는다. Codex 인증 방식은 Q20 시험에서 확인했다(2026-11-14, 조건부 통과: 실행 중 인증 갱신은 관찰하지 못함, 13.3절) | 교차 검증을 CI에서 실행해야 작성자가 승인을 위조할 수 없다(10.1절) |
 | E4 | 에이전트 환경에 운영 DB·인프라 자격증명이 없다. 에이전트가 닿는 곳에는 유출돼도 피해가 작은 개발·테스트 전용 키만 둔다 | 되돌릴 수 없는 작업은 권한으로 막는다(B9). 에이전트는 자기가 실행하는 테스트를 통해서도 환경의 키를 알 수 있다(14.2절) |
 | E5 | **(필수) 제작자 자격증명 위생.** 에이전트가 실행되는 모든 머신(macOS·Windows)에는 제작자의 GitHub 토큰(`gh` 로그인, git 자격증명 도우미·OS 자격증명 저장소에 저장된 토큰 등)을 두지 않고, 제작자 승인은 GitHub 웹·모바일에서만 한다. 에이전트용 브라우저는 임시 프로필만 쓴다. 제작자·봇 계정 모두 패스키 등으로 2단계 인증을 켠다 | 에이전트는 별도 OS 사용자로 분리하지 않고 제작자와 같은 사용자로 실행한다(사용자 결정). 훅이 없는 도구나 훅 우회가 생겨도 제작자를 사칭할 수단이 남지 않게 한다(R20) |
 
@@ -68,6 +69,8 @@ review_cycle: quarterly
 - **브랜치 보호(main)**
   - PR 필수, force push·삭제 금지, 관리자 우회 없음
   - 필수 상태 체크(10.3절). `check`를 뺀 모든 필수 체크(`review/*`, `plan-gate`, `risk-gate` 등 기록 job이 쓰는 체크)는 검증 App이 보낸 상태만 인정하도록 출처를 지정한다. PR에 같은 이름의 job을 가진 워크플로를 넣어 체크를 흉내 내는 것을 막기 위해서다
+    - Q20에서 확인: 같은 이름의 job(check run), PR 워크플로가 `permissions: statuses: write`로 쓴 status(리포 기본 권한이 읽기 전용이어도 받는다), 봇 PAT로 쓴 status가 모두 이 지정으로 병합이 막혔다. 막힘은 병합 판정에만 나타난다(10.3절 "체크 요약 API")
+    - 등록은 검증 App이 그 체크를 한 번 보고한 뒤에 한다. admin이 아닌 봇도 `GET repos/<리포>/branches/main`의 `protection.required_status_checks.checks[].app_id`로 등록된 출처를 확인할 수 있다
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
   - "Dismiss stale approvals"(새 커밋이 push되면 기존 승인 무효화)
@@ -77,6 +80,7 @@ review_cycle: quarterly
   - "Actions가 PR을 만들고 승인하도록 허용" 끔
   - 리포 수준 시크릿은 두지 않는다. 모든 시크릿은 역할별 environment(10.4절)에 두고, 각 environment는 main 브랜치에서만 쓰도록 제한한다
 - **일반**: 자동 병합 허용, "Automatically delete head branches" 켬, Dependabot 알림 켬
+- **GitHub App(2단계, 검증 App·인증 저장 App)**: 역할마다 App을 따로 만든다. webhook 끔, "이 계정에만 설치", 대상 리포에만 설치. 권한은 검증 App이 Commit statuses 쓰기·Pull requests 읽기·Contents 읽기(check run을 쓰면 Checks 쓰기), 인증 저장 App이 Environments 읽기·쓰기뿐이다(13.3절). environment에는 Client ID를 변수로, 개인 키를 시크릿으로 넣는다. 개인 키는 App 설정의 Credentials → Key pairs → New key에서 만든다. 옛 Callback URL 칸은 "Redirect URI"로 이름이 바뀌었고, 사용자 로그인을 쓰지 않으므로 필요 없다(2026-11 화면, Q20)
 - **협업자**: 외주 개발자만 초대한다. 외부 테스터는 초대하지 않는다(14.6절)
 - **운영 단계에 추가**: CODEOWNERS와 코드 오너 리뷰 필수, 봇의 `workflows` 쓰기 권한 회수(10.4절 운영 전환 체크리스트)
 
@@ -817,7 +821,7 @@ pnpm test src/auth/login-guard.spec.ts
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
 | `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
 | `deps-guard` | lockfile 전체 변경 검사 | R17 |
-| `harness-guard` | 보호 경로 변경 시 체크리스트·`CHANGELOG`·하네스 자체 테스트(로드맵 2단계부터), 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
+| `harness-guard` | 보호 경로 변경 시 체크리스트·`CHANGELOG`·하네스 자체 테스트(로드맵 2단계부터), 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
 | `revert-check` | revert PR 전용. diff가 대상 커밋을 정확히 되돌리는지 확인하고, 통과하면 `review/*`를 대신한다 | 아래 "병합 후 main CI가 실패하면" |
 
@@ -831,9 +835,11 @@ pnpm test src/auth/login-guard.spec.ts
 | 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
-- PR 갱신은 rebase가 아니라 `origin/main` 병합이다(ADR-0006). 병합 뒤 PR head와 main의 merge-base는 병합한 main 커밋이라, "merge-base 대비 diff"는 PR이 main에 더하는 변경과 같다. 충돌 없이 병합했으면 patch-id가 같아 승인을 이어받고, 충돌을 해결하며 PR 변경이 바뀌면 patch-id가 달라져 다시 검증한다.
+- PR 갱신은 rebase가 아니라 `origin/main` 병합이다(ADR-0006). 병합 뒤 PR head와 main의 merge-base는 병합한 main 커밋이라, "merge-base 대비 diff"는 PR이 main에 더하는 변경과 같다. 충돌 없이 병합했으면 patch-id가 같아 승인을 이어받고, 충돌을 해결하며 PR 변경이 바뀌면 patch-id가 달라져 다시 검증한다. Q20에서 main 병합 갱신과 GitHub "Update branch" 모두 patch-id가 같고, 충돌 해결로 PR 변경이 바뀌면 달라짐을 확인했다.
+- 기록 job이 새 head로 승인을 옮길 때는 PR ref(`refs/pull/<n>/head`, `headRefOid`)가 아니라 이벤트의 head SHA로 patch-id를 잰다. GitHub은 push 직후 PR head를 늦게 반영해서 PR ref가 옛 head를 가리킬 수 있다(Q20).
 - patch-id가 같다는 것은 패치가 같다는 뜻이지, 새 base와 합쳐진 코드의 의미까지 같다는 증거는 아니다. 그래서 승인을 이어받을 때도 `check`는 항상 새 head에서 다시 돈다. 최신 브랜치가 필수이므로 squash 결과의 트리는 head와 같고, 이 `check`가 최종 병합 대상에 대한 검증이 된다.
-- merge queue는 개인 계정 리포에서 쓸 수 없는 것으로 보이며, 확인이 필요하다(Q20). 쓸 수 없어도 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
+- merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
+- **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다. 지금 runner는 요약을 실패를 찾는 데만 쓰고 병합은 GitHub 자동 병합에 맡기므로 영향이 없다.
 
 **절차**
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).
@@ -853,7 +859,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 주체 | 할 수 있는 것 | 할 수 없는 것 |
 |---|---|---|
 | 작성 에이전트(봇 계정, E1) | 브랜치 push, PR 생성·갱신, Issue 라벨·댓글, 자동 병합 켜기 | 브랜치 보호·rulesets 변경, 필수 체크 우회, `review/*` 상태 기록, 제작자 권한 사용(R20), 운영 자격증명 사용 |
-| 판정 job (LLM) | PR을 데이터로 읽고 `verdict.json`을 낸다 | GitHub 쓰기, 검증 App 키·다른 도구의 인증·인증 저장용 자격증명 접근, PR 코드 실행, 셸·MCP·웹 도구 사용 |
+| 판정 job (LLM) | PR을 데이터로 읽고 `verdict.json`을 낸다 | GitHub 쓰기, 검증 App 키·다른 도구의 인증·인증 저장용 자격증명 접근, PR 코드 실행, 샌드박스 밖 셸·MCP·웹 도구 사용 |
 | 기록 job | 검증을 통과한 결과로 `review/*` 상태와 지적 원장 기록 | LLM 실행, 코드 push |
 | 재현 job | 재현 테스트를 PR head에 붙여 실행 | 비밀 접근, GitHub 쓰기 |
 | 제작자 | 위험도 "높음" 승인(웹·모바일, E5), 보호 설정 변경, 예외 승인 | — |
@@ -866,25 +872,40 @@ pnpm test src/auth/login-guard.spec.ts
 | 재현 job | `pull_request_target` (main 정의) | 실행한다(재현 테스트만) | 비밀 없음, 쓰기 권한 없음. 캐시에 쓰는 것은 막을 수 없다고 가정한다(아래 캐시 규칙) |
 | 판정 job: Claude (LLM) | `pull_request_target` (main 정의) | 실행하지 않는다. `base/`(main의 스크립트·프롬프트)만 실행하고 `pr/`는 데이터로 읽기만 | Claude 구독 토큰(`judge-claude` environment)만. 검증 App 키, Codex 인증, GitHub 쓰기 권한은 없음 |
 | 판정 job: Codex (LLM) | `pull_request_target` (main 정의) | 위와 같음 | Codex 인증 파일(`judge-codex` environment)만. 인증 저장용 자격증명, Claude 토큰, 검증 App 키, GitHub 쓰기 권한은 없음 |
-| Codex 인증 저장 job | `pull_request_target` (main 정의), Codex 판정 job 뒤 | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 이 job만 풀 수 있게 암호화해 받는다(13.3절) |
+| Codex 인증 저장 job | `pull_request_target` (main 정의). Codex 판정 job 앞(공개키 조회)과 뒤(저장) | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 판정 job이 `judge-codex`의 공개키로 봉인해 넘기고, 이 job은 풀지 않고 그대로 등록한다(13.3절) |
 | 기록 job | `pull_request_target` (main 정의) | 실행하지 않는다 | 검증 App 키(`recorder` environment). LLM 없음 |
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록 |
 
 - **main 정의로 실행하는 것과 main 스크립트를 실행하는 것은 다르다.** 판정 job은 실행할 스크립트·프롬프트를 `base/`(main)에서만 가져오고, `pr/` 아래는 아무것도 실행하지 않는다. 구현할 때 가장 흔히 뚫리는 곳이다.
 - **역할별 environment**: 시크릿은 역할마다 다른 environment에 둔다. `judge-claude`(Claude 구독 토큰), `judge-codex`(Codex 인증 파일), `codex-auth-store`(Codex 인증 저장용 자격증명), `recorder`(검증 App 키), `revert`(revert용 봇 토큰, 10.3절). 이름은 예시다. 각 environment는 main 브랜치에서만 쓰도록 제한하고, 각 job은 자기 environment 하나만 참조한다. 리포 수준 시크릿은 아무 브랜치의 `push` 워크플로가 읽을 수 있으므로 두지 않는다(0.2절).
-- **main 전용 environment는 PR 격리 장치가 아니다.** `pull_request_target` 작업은 PR의 head가 아니라 base 브랜치(main) ref로 실행되므로, main으로 제한한 environment의 비밀을 그대로 받는다. 이 제한이 막는 것은 PR 쪽 정의로 도는 워크플로(`pull_request`, 다른 브랜치의 `push`)뿐이다. PR 입력과 비밀의 격리는 아래 판정 job 규칙이 맡는다.
+- **main 전용 environment는 PR 격리 장치가 아니다.** `pull_request_target` 작업은 PR의 head가 아니라 base 브랜치(main) ref로 실행되므로, main으로 제한한 environment의 비밀을 그대로 받는다. 이 제한이 막는 것은 PR 쪽 정의로 도는 워크플로(`pull_request`, 다른 브랜치의 `push`)가 **이미 있는** main 전용 environment에 들어가는 것뿐이다. PR 입력과 비밀의 격리는 아래 판정 job 규칙이 맡는다.
+  - PR 쪽 정의가 없는 environment 이름을 참조하면 GitHub이 배포 규칙 없는 environment를 새로 만들고 job이 돈다. 비밀은 없다(Q20). 그래서 environment 이름이나 배포 기록을 신뢰 근거로 쓰지 않고, `harness-guard`가 정해 둔 environment 밖의 참조를 PR에 표시한다.
+  - `pull_request_target`의 "main 정의"는 이벤트의 base SHA(`pull_request.base.sha`)가 아니라 실행이 만들어질 때의 main 끝(`github.sha`)이다(Q20). 판정 job은 `base/`를 `github.sha`로 체크아웃해야 실행 중인 정의와 스크립트가 일치한다. `actions/checkout`에 ref를 주지 않으면 이 커밋을 받는다.
 - **판정 job 규칙**: 판정 job에는 신뢰할 수 없는 PR 입력(diff, 문서, 반박)과 구독 인증이 함께 있다.
-  - GitHub 호스팅 러너에서는 job 안의 프로세스가 sudo로 그 job의 비밀 전체에 닿을 수 있다고 가정한다. 그래서 LLM에게 명령 실행 수단을 주지 않는다. 셸, MCP 서버, 웹 접근 도구를 끈다. 네트워크는 LLM API처럼 꼭 필요한 주소만 열고, job의 GitHub 토큰은 읽기 전용으로 둔다.
+  - GitHub 호스팅 러너에서는 job 안의 프로세스가 sudo로 그 job의 비밀 전체에 닿을 수 있다고 가정한다. 그래서 LLM에게 샌드박스 밖의 명령 실행 수단을 주지 않는다. MCP 서버와 웹 접근 도구를 끄고, job의 GitHub 토큰은 읽기 전용으로 둔다.
+  - **셸**: 셸 도구를 뺄 수 있는 도구(Claude Code)는 뺀다. 셸을 뺄 수 없는 도구(Codex)는 OS 샌드박스 안에서만 셸을 실행하고, 샌드박스가 읽기 범위·쓰기·네트워크·sudo·환경 변수를 막는다(아래 "Codex 샌드박스").
+  - **네트워크**: GitHub 호스팅 러너는 job 단위로 나가는 연결을 막을 수 없다(Q20). 외부 송신은 도구에서 웹 수단을 빼는 것(Claude Code)과 샌드박스의 네트워크 차단(Codex)으로 막는다.
   - LLM 도구가 읽을 수 있는 범위는 `pr/`와 base 스크립트가 모은 입력뿐이다. 인증 파일(Codex `auth.json` 등)과 환경 변수는 읽을 수 없어야 한다.
-  - 도구가 셸 없이 실행되지 않거나 읽기 범위를 제한할 수 없으면, base 스크립트가 입력을 모두 모아 프롬프트로 넘기고 도구를 끈 채 실행한다. 이것도 안 되면 그 도구를 CI 검증자로 쓰지 않고 제작자가 결정한다(Q20).
+  - **도구는 허용 목록으로 준다.** Claude Code는 `--tools Read,Grep,Glob`와 `--permission-mode dontAsk`로 목록 밖 도구를 묻지 않고 거부한다. 뺄 도구를 나열하는 방식(`--disallowedTools`)은 새 도구가 생기면 열린다.
+  - **PR 트리의 도구 설정을 적용하지 않는다.** 판정은 `pr/`에서 실행되므로 PR이 넣은 도구 설정(훅은 셸 명령이다)·MCP 설정·지침 파일·스킬이 읽힐 수 있다. Claude Code는 `--restricted`(user·project·local 설정과 `CLAUDE.md`를 읽지 않음)와 `--strict-mcp-config`로, Codex는 프로젝트 신뢰 안 함(`.codex/` 무시)·`project_doc_max_bytes = 0`(`AGENTS.md` 무시)·훅·스킬·플러그인 기능 끄기로 막는다. Q20에서 PR이 넣은 훅·MCP·지침·스킬은 하나도 적용되지 않았다.
+  - **Codex 샌드박스**: 내장 `read-only`는 인증 파일을 포함한 파일 시스템 전체를 읽으므로 쓰지 않는다. 권한 프로필(`default_permissions`)에 읽기 거부 목록(인증 파일이 있는 폴더, `base/`, 홈의 도구 설정)을 준다. "read" 항목만 적어서는 나머지가 막히지 않는다(Q20).
+    - 거부 목록에 `pr/`의 조상이나 `pr/` 자신(예: `/home/runner`)을 넣지 않는다. Linux에서는 `pr/` 읽기까지 막히고, 쓰기는 덮인 임시 폴더로 들어가 성공한다(macOS에서는 드러나지 않았다). 설정을 만드는 base 스크립트가 이런 목록을 거절한다.
+    - 셸 환경은 최소(`shell_environment_policy`의 `inherit = "core"`)로 준다.
+    - LLM 실행 전에 같은 프로필로 `pr/` 읽기, 인증 파일·`base/` 읽기, 쓰기, 네트워크, sudo, 조상 프로세스 환경 읽기를 값 없이 종료 코드로만 측정한다. 하나라도 기대와 다르면 판정 없이 실패한다.
+  - **심볼릭 링크**: PR은 `pr/` 안에 밖을 가리키는 링크를 넣을 수 있다. Q20에서 Claude Code는 파일 링크 읽기를 거부했고, Codex 샌드박스는 해석된 경로 기준으로 거부 영역 읽기를 막았다(macOS). 디렉터리 링크를 검색 도구가 따라가는 경우와 Linux에서 링크를 거쳐 읽는 경우는 모델이 시도하지 않아 확인하지 못했다. 그래서 base 스크립트가 LLM 실행 전에 `pr/`의 심볼릭 링크를 없앤다(예: `core.symlinks=false`로 체크아웃하면 링크가 대상 경로를 담은 일반 파일이 된다).
+  - 도구 제한과 샌드박스로 위 범위를 지킬 수 없으면, base 스크립트가 입력을 모두 모아 프롬프트로 넘기고 도구를 끈 채 실행한다. 이것도 안 되면 그 도구를 CI 검증자로 쓰지 않고 제작자가 결정한다. Q20에서는 두 도구 모두 이 대안이 필요하지 않았다.
   - Claude와 Codex 판정은 서로 다른 job에서 자기 인증만 가지고 실행한다. 한쪽이 주입당해도 다른 쪽 인증은 노출되지 않는다.
+- **판정 job 안의 유출 검사**: LLM 단계 뒤에 같은 job에서 LLM 없는 base 스크립트가 판정과 실행 기록(도구 호출 포함) 전체를 검사한다. 인증 값을 원문·조각·흔한 인코딩으로 찾고, `pr/` 밖을 가리킨 도구 호출(경로 문자열이 아니라 실제 경로 기준)·허용 밖 도구·훅·MCP 실행 흔적을 센다. 문제가 없을 때만 `verdict.json`을 낸다.
+  - 실행 기록 원문과 값은 출력하지 않고 아티팩트로도 올리지 않는다. 실행 오류는 문구를 비밀을 가려 출력해 원인을 볼 수 있게 한다(Q20에서 오류 문구가 없어 인증 실패 원인을 못 찾은 적이 있다).
+  - `claude -p --json-schema`는 판정을 `StructuredOutput` 도구 호출로 낸다. 이 도구는 허용 밖 도구로 세지 않는다.
+  - 인증 실패·사용량 한도 같은 실행 오류는 판정 없이 실패로 끝난다(fail closed). 다른 검증자로 대신하지 않는다(10.1절 검증자 장애 규칙).
 - **기록 job의 검사**: `verdict.json`을 스키마(정해진 값, 길이 제한)로 검사하고, 시크릿 스캔을 통과해야만 기록한다. 스캔은 CI에 있는 토큰 값과의 정확 일치뿐 아니라 흔한 인코딩(base64·hex·URL 인코딩)과 고엔트로피 문자열도 찾는다. 다만 쪼개거나 바꿔 쓴 토큰까지 모두 잡을 수는 없으므로 이 검사는 보조 수단이다. 1차 방어는 판정 job 규칙대로 LLM이 인증 정보를 읽지 못하게 하는 것이다.
 - **재현 job의 한계**: PR 코드를 실행하므로 결과를 조작할 수 있다. 그래서 "재현됨"은 차단 근거로 쓰고, "재현 안 됨"으로 P1을 내릴 때는 검증자가 재현 테스트와 실행 로그를 다시 확인한다.
 - **self-hosted 러너는 쓰지 않는다.** 개인 계정 리포에서는 아무 브랜치의 `push` 워크플로가 self-hosted 러너를 지정해 바로 실행할 수 있기 때문이다. 모든 작업은 GitHub 호스팅(일회용) 러너에서 돈다.
 - **캐시 규칙**: 비밀을 가진 job(판정·기록·Codex 인증 저장·revert)과 main 브랜치에서 도는 워크플로는 Actions 캐시를 복원하지 않는다(`actions/cache`, `setup-*` 액션의 캐시 옵션 포함). 재현 job은 `pull_request_target`에서 PR 코드를 실행하므로, 그 코드가 러너에서 캐시 토큰을 꺼내 main 범위 캐시를 오염시킬 수 있다고 가정한다. 비밀을 가진 job이 그 캐시를 복원하면 공격 코드가 그 job 안에서 실행되어 검증 App 키 같은 비밀이 탈취되고, `review/*`를 위조할 수 있다. `harness-guard`가 이 job들의 캐시 사용을 탐지한다.
 - 액션은 커밋 SHA로 고정하고, 워크플로마다 `permissions:`를 명시한다.
 - 판정 작업은 같은 리포 브랜치에서 온 PR에만 실행한다. 포크에서 온 PR은 자동 검증하지 않는다(14.6절).
-- 위 구성의 세부 동작은 로드맵 2단계 착수 전에 빈 테스트 리포에서 확인한다(Q20). 실제 비밀 대신 가짜 토큰을 두고, 주입 문구를 담은 시험 PR로 판정 job이 인증을 읽거나 출력하지 못하는지 확인한다.
+- 위 구성의 세부 동작은 로드맵 2단계 착수 전에 빈 테스트 리포에서 확인했다(Q20, 2026-11-11~14, 결과 `lab/q20/results/`). environment마다 가짜 토큰을 두고, 판정 job은 실제 구독 인증으로, 주입 문구를 담은 시험 PR이 판정 job에서 인증을 읽거나 출력하지 못하는지 봤다.
 
 **보호 경로 정책 (단계별)**
 - **보호 경로**
@@ -1054,9 +1075,15 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 
 - **병합 판단용 검증**은 CI에서 실행한다(10.1절, 10.4절). Claude Code는 `claude -p`, Codex는 `codex exec` 같은 비대화 실행을 쓴다. 공식 도구(Claude Code CLI·공식 GitHub Action, Codex CLI)만 쓰고, 구독 토큰을 비공식 도구에 넣지 않는다.
 - **CI 인증: 구독 요금제 토큰(결정, E3)**
-  - Claude Code: 제작자가 로컬에서 `claude setup-token`으로 만든 토큰을 `judge-claude` environment에 둔다(10.4절). 토큰에는 만료가 있으므로 갱신을 정기 작업에 넣는다(12.2절).
-  - Codex: ChatGPT 로그인 인증 파일(`auth.json`)은 실행 중에 갱신된다. GitHub 호스팅 러너에서 실행할 때마다 `judge-codex` environment에서 복원하고, 갱신본은 LLM이 없는 별도 저장 job이 다시 저장한다(OpenAI의 임시 러너 가이드 방식). 저장에 쓰는 자격증명은 판정 job이 참조하지 않는 `codex-auth-store` environment에 두고, 갱신본은 저장 job만 풀 수 있게 암호화해 넘긴다(10.4절). 같은 job에 두면 판정 job 안의 프로세스가 저장용 자격증명에도 닿을 수 있기 때문이다. 동시에 실행하면 토큰 갱신이 충돌할 수 있으므로 Codex 작업은 하나씩 실행한다(concurrency group).
-  - **Codex 인증은 2단계 착수 전에 확인한다(Q20).** 이 흐름은 단순한 구현 세부가 아니라 CI 인증 방식, 장기 자격증명 보관, 사용량·계정 잠금 위험을 정한다. 작은 테스트 리포에서 실제 구독 계정으로 비대화 실행, 인증 갱신, 동시 실행 제한, 갱신본 재저장, 사용량 한도 도달 시 동작을 확인한다. 지원되지 않거나 유지 비용이 크면 2단계를 시작하지 않고 E3를 다시 정한다(예: Codex만 CI 전용 인증 + 사용 한도).
+  - Claude Code: 제작자가 로컬에서 `claude setup-token`으로 만든 토큰을 `judge-claude` environment에 둔다(10.4절). 토큰은 **한 줄로** 붙여 넣는다. 터미널에서 복사하면 터미널 폭 줄바꿈이 섞일 수 있고, 그러면 Claude Code가 인증 전에 거부해 판정 없이 실패한다(Q20). 토큰에는 만료가 있으므로 갱신을 정기 작업에 넣는다(12.2절).
+  - Codex: ChatGPT 로그인 인증 파일(`auth.json`)은 실행 중에 갱신될 수 있다. GitHub 호스팅 러너에서 실행할 때마다 `judge-codex` environment에서 복원하고, 갱신본은 LLM이 없는 별도 저장 job이 다시 저장한다(OpenAI의 임시 러너 가이드 방식). 흐름은 Q20에서 확인했다.
+    - **CI 전용 로그인**: CI용 `auth.json`은 제작자가 임시 `CODEX_HOME`에서 파일 저장 방식(`codex login -c cli_auth_credentials_store=file`)으로 새로 로그인해 만든다. 제작자 로컬 로그인과 토큰 계열이 나뉘어 CI 쪽 갱신이 실패해도 로컬 로그인이 풀리지 않는다. 공식 CI 문서도 `auth.json` 하나를 여러 머신·동시 작업이 공유하지 말라고 한다. 한 줄 JSON으로 시크릿에 넣은 뒤 로컬 사본은 지운다. `codex logout`은 토큰을 폐기할 수 있어 쓰지 않는다.
+    - **복원**: 판정 job이 임시 `CODEX_HOME`(`RUNNER_TEMP` 아래, 권한 0600)에 쓰고 비대화(`codex exec --json --ephemeral`)로 실행한다. 이 폴더는 판정 샌드박스의 읽기 거부 목록에 있다(10.4절).
+    - **봉인과 재저장**: 실행 뒤 판정 job이 `auth.json`을 `judge-codex` environment의 GitHub 공개키로 봉인해(libsodium sealed box, 시크릿 API 형식) job 출력으로 넘긴다. 저장 job은 풀지 않고 그 암호문을 그대로 등록한다. 공개키는 판정 job 앞의 조회 job(저장 자격증명, LLM 없음)이 가져오고, 저장 job은 공개키 id가 같을 때만 등록한다. 평문은 판정 러너 밖으로 나가지 않고, 풀 수 있는 것은 GitHub뿐이다. 저장용 자격증명은 판정 job이 참조하지 않는 `codex-auth-store` environment에 둔다. 같은 job에 두면 판정 job 안의 프로세스가 저장용 자격증명에도 닿을 수 있기 때문이다. 저장용 자격증명은 Environments 읽기·쓰기 권한만 가진 GitHub App(인증 저장 App, 0.2절)이다.
+    - 봉인·저장은 판정이나 유출 검사가 실패해도 실행한다. 실행 중 갱신된 토큰을 잃으면 다음 실행이 옛 토큰을 써서 CI 로그인이 풀릴 수 있다.
+    - **동시 실행 제한**: 동시에 실행하면 토큰 갱신이 충돌할 수 있으므로 Codex 작업은 워크플로 단위 concurrency group(`cancel-in-progress: false`, `queue: max`)으로 하나씩 실행한다. job 단위로 걸면 다음 실행의 판정이 앞 실행의 저장보다 먼저 시작해 옛 인증으로 돌고, 기본 `queue: single`은 기다리던 실행을 새 실행이 취소한다(GitHub 문서). Q20에서 동시에 연 PR 3개가 겹치지 않고 하나씩 돌았다.
+    - **갱신**: Q20에서는 실행 중 갱신을 관찰하지 못했다. `last_refresh`를 9일 전으로 바꿔도 access token이 유효하면 Codex는 갱신하지 않았다. 갱신은 access token이 만료된 뒤에 일어나는 것으로 보고(문서 근거), 2단계에서 첫 갱신과 재저장을 확인한다(TD-1). 갱신이 실패하면 판정 없이 실패하고(fail closed), 제작자가 CI 전용 로그인을 다시 만든다.
+  - **Codex 인증은 Q20에서 확인했다(2026-11-14, 조건부 통과).** 이 흐름은 단순한 구현 세부가 아니라 CI 인증 방식, 장기 자격증명 보관, 사용량·계정 잠금 위험을 정한다. 실제 구독 계정으로 비대화 실행, 재저장과 다음 실행 복원, 동시 실행 제한이 됐다. 실행 중 인증 갱신은 관찰하지 못했고(위 "갱신"), 사용량 한도는 제작자 사용과 한도를 공유해 일부러 소진하지 않았다. 한도·오류는 `codex exec --json`이 `turn.failed` 이벤트로 내고 판정 job의 유출 검사가 판정 없이 실패시킨다(fail closed). 그래서 E3는 유지한다. 2단계 운영에서 갱신이 안 되거나 유지 비용이 크면 E3를 다시 정한다(예: Codex만 CI 전용 인증 + 사용 한도).
   - self-hosted 러너는 쓰지 않는다(10.4절).
   - **사용량 한도 공유**: CI 검증은 제작자의 대화형 사용과 같은 구독 한도를 쓴다. 외주 개발자 PR의 검증도 제작자 구독을 쓴다. 한도에 걸리면 10.1절의 검증자 장애 규칙(다른 검증자로 대신하지 않고 보류)을 따른다.
 - **로컬 사전 점검**: 작성 도구의 서브에이전트와 다른 도구의 비대화 실행을 `scripts/cross-review`로 돌려볼 수 있다. 결과는 참고용이다.
@@ -1091,8 +1118,8 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 | 봇 토큰 | 에이전트 세션 환경(`GH_TOKEN`). revert용은 `revert` environment | 작성 에이전트, revert 워크플로 | contents·pull requests·issues 쓰기(구축 단계에는 `workflows` 쓰기) | 90일 이하, 정기 작업이 알림 | 브랜치 push·PR 생성. main은 브랜치 보호로 보호됨 |
 | 검증 App 키 | `recorder` environment | 기록 job | 커밋 상태·PR 댓글 쓰기 | 정기 교체 | 검증 결과 위조로 자동 병합 우회(치명) |
 | Claude 구독 토큰 | `judge-claude` environment | Claude 판정 job | 제작자의 Claude 구독 사용 | `setup-token` 만료 전 갱신 | 구독 한도 소진, 제작자 계정 사용 |
-| Codex 인증 파일 | `judge-codex` environment(실행마다 복원·저장) | Codex 판정 job | 제작자의 ChatGPT 구독 사용 | 실행마다 갱신 | 위와 같음 |
-| Codex 인증 저장용 자격증명 | `codex-auth-store` environment | 저장 job(LLM 없음) | 해당 environment 시크릿 쓰기 | 90일 이하 | environment 시크릿 덮어쓰기 |
+| Codex 인증 파일 | `judge-codex` environment(실행마다 복원·저장) | Codex 판정 job | 제작자의 ChatGPT 구독 사용(CI 전용 로그인, 13.3절) | access token 만료 뒤 실행 중 갱신, 저장 job이 재저장 | 위와 같음 |
+| Codex 인증 저장용 자격증명(인증 저장 App 키) | `codex-auth-store` environment | 공개키 조회·저장 job(LLM 없음) | Environments 읽기·쓰기(시크릿 쓰기) | 정기 교체 | environment 시크릿 덮어쓰기 |
 | 개발·테스트 키 | 리포 밖 파일 → worktree 연결 | 에이전트, 테스트 | 개발·테스트 환경만 | 필요 시 교체 | 개발 환경 한정 |
 | 제작자 GitHub 계정 | 제작자의 브라우저·모바일(E5) | 제작자 | 리포 관리자 | 패스키 2단계 인증 | 모든 보호 무력화 |
 
@@ -1287,7 +1314,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 | Q17 | (해소) Codex용 self-hosted 러너 위치 | self-hosted 러너를 쓰지 않기로 했다(10.4절). 모든 작업은 GitHub 호스팅 러너에서 돈다 |
 | Q18 | 시크릿 push를 GitHub 서버에서도 막아야 하는가 | 지금은 로컬 계층 + 키 교체로 충분하다. 실서비스 운영 키를 다루게 되면 조직(Team) + Secret Protection을 검토한다 |
 | Q19 | step당 총량 상한, 세션 시간 제한, runner 전체 실행 시간 상한, 작업자 수, 작업자당 열린 PR 수(WIP) | step당 실패한 `check` 10회 또는 세션 실행 시간 합계 2시간(대기 제외), 세션 시간 제한 30분, runner 실행 12시간, 작업자 2개, 작업자당 열린 PR 2개로 시작하고 파일럿에서 조정 |
-| Q20 | 개인 계정 리포에서 실제로 되는지: `pull_request_target`에서 적용되는 ref와 역할별 environment(가짜 토큰으로), 판정 job 격리(주입 문구를 담은 시험 PR이 가짜 토큰을 읽거나 출력하지 못하는지, 각 도구를 셸·MCP·웹 도구 없이 실행할 수 있는지), patch-id 결속, 체크 출처 지정, Codex 인증(비대화 실행·갱신·동시 실행·재저장·한도 도달), merge queue | **로드맵 2단계 착수 조건.** 빈 테스트 리포에서 시험하고, 통과하지 못한 항목은 설계를 고친 뒤 2단계를 시작한다. Codex 인증이 안 되면 E3를 다시 정한다(13.3절). 시험 리포 운영(봇 기간 한정 초대, 진짜 자격증명 조건)은 ADR-0004 |
+| Q20 | 개인 계정 리포에서 실제로 되는지: `pull_request_target`에서 적용되는 ref와 역할별 environment(가짜 토큰으로), 판정 job 격리(주입 문구를 담은 시험 PR이 가짜 토큰을 읽거나 출력하지 못하는지, 각 도구를 셸·MCP·웹 도구 없이 실행할 수 있는지), patch-id 결속, 체크 출처 지정, Codex 인증(비대화 실행·갱신·동시 실행·재저장·한도 도달), merge queue | **조건부 통과(2026-11-14).** 로드맵 2단계 착수 조건이다. 시험 리포에서 시험했고(ADR-0004), 통과하지 못한 항목은 아래처럼 설계를 고쳤다. 결과는 `lab/q20/results/`. ① patch-id 통과: main 병합 갱신·"Update branch" 모두 유지, 충돌 해결 시 변경(10.3절에 PR head 반영 지연 추가). ② env-ref 부분: `pull_request_target`은 main 정의로 돌고 main 전용 environment 비밀을 받으며, PR 쪽 정의는 기존 environment에 막힌다. 없는 environment 참조는 새로 생겨 돈다(비밀 없음). → 10.4절 문구, `base/`는 `github.sha`, `harness-guard` 표시. ③ check-source 부분: 출처를 App으로 고정하면 job 이름·`GITHUB_TOKEN`·봇 PAT 흉내가 모두 병합이 막힌다. 체크 요약 API는 출처를 보지 않는다. → 10.3절. App의 check run은 시험하지 않았다. ④ judge-claude 통과: 셸·웹·MCP 없이 실행, 주입 5종에서 유출 0. ⑤ judge-codex 부분: 셸은 끌 수 없어 권한 프로필 샌드박스 안에서 실행했고 인증 파일·환경·네트워크 차단, 주입 5종에서 유출 0. Linux에서 링크를 거쳐 읽는 경우는 확인하지 못했다. → 10.4절 Codex 샌드박스·심볼릭 링크 제거. ⑥ codex-auth 부분: 비대화 실행·봉인 재저장·동시 실행 제한 통과. 실행 중 갱신은 관찰하지 못했고 한도 도달은 시험하지 않았다. → 13.3절 fail closed, 첫 갱신은 2단계에서 확인(TD-1). E3 유지. ⑦ merge-queue 실패: 개인 계정 리포는 대상이 아니다. → 10.3절 대안 유지 |
 
 ---
 
@@ -1297,13 +1324,13 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 - 처음부터 모든 규칙을 구현하지 않는다. 최소 구성으로 시범 운영한 뒤 관찰된 실패를 보고 규칙을 키운다(B4). 다만 리뷰 수렴 규칙(R16)처럼 이미 겪은 문제는 처음부터 넣는다.
 - 자동 병합은 사람이 병합하는 섀도 모드 없이 1단계부터 시작한다(사용자 결정). 필수 체크를 하나씩 늘려 조인다(10.4절 부트스트랩). 1~2단계는 구축 단계이고, 2단계 끝에 운영 전환 체크리스트(10.4절)를 충족해 운영 단계로 전환한 뒤 파일럿을 시작한다(Q7).
 - 첫 실사용 프로파일은 웹이다. 게임 프로파일, Tier 2 관측성, 중앙 배포 같은 확장은 실제 필요가 생길 때 붙인다(15절, 부록 C).
-- **단계별 선행 결정**: 1단계 전 Q3(스크립트 언어)·Q4(Codex 훅·샌드박스 지원 확인), 2단계 전 Q20 시험, 3단계 전 Q10(DB·ORM)·Q13(개인 계정·조직)·운영 전환, 게임 프로파일 착수 전 Q1·Q16.
+- **단계별 선행 결정**: 1단계 전 Q3(스크립트 언어)·Q4(Codex 훅·샌드박스 지원 확인), 2단계 전 Q20 시험(2026-11-14 조건부 통과), 3단계 전 Q10(DB·ORM)·Q13(개인 계정·조직)·운영 전환, 게임 프로파일 착수 전 Q1·Q16.
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | 0 | 전제 조건(E1~E5)과 리포 설정(0.2절) | 에이전트가 제작자 권한 없이 봇 계정으로 PR을 만들 수 있다. 에이전트가 실행되는 모든 머신(macOS·Windows)에 제작자의 GitHub 토큰(`gh` 로그인, git 자격증명 도우미·OS 자격증명 저장소 등)이 없다(E5) |
 | 1 | 최소 구성: `AGENTS.md`, `CLAUDE.md`, `docs/` 구조, `workflow.md`, 계획·step 템플릿, `new-task`(claim 브랜치, step별 브랜치), 표준 명령(시간 제한 포함), **금지 훅(R4, R13, R14, R20)**, 무인 권한 프로필, **runner 최소 형태**(작업자 1개, step 실행·AC 판정·재시도·세션 시간 제한), CI `check`, `plan-gate`. 체크가 생길 때마다 필수 체크로 등록하고 자동 병합 시작 | 새 세션 에이전트가 S1을 만족하고, 계획 없는 PR이 막히고, 제작자 권한 명령이 실제로 차단된다. runner가 step 2개 이상인 계획을 사람 개입 없이 마지막 step까지 진행한다 |
-| 2 | 착수 조건: Q20 시험 통과. CI 교차 검증: 판정·기록·재현 job 분리(역할별 environment), `review/*`, `review-ledger`, `risk-gate`(경로별 위험도, `stage`), `deps-guard`, `harness-guard`, `revert-check`. runner와 PR 흐름 연결(CI 대기, 뒤처진 PR main 병합 갱신, 지적 대응, WIP 상한, 작업자 2개). 하네스 자체 테스트 기본 시나리오(12.4절) | 위험도별 검증이 같은 형식으로 동작하고, 작성자가 승인을 만들 수 없다. 운영 전환 체크리스트(10.4절)를 충족하고 운영 단계로 전환한다 |
+| 2 | 착수 조건: Q20 시험 통과(2026-11-14 조건부 통과. 시험 결과로 고친 10.3·10.4·13.3절 규칙을 따른다. 남은 확인: Codex 실행 중 인증 갱신과 재저장, check run을 쓰기로 하면 App check run의 출처 인정). CI 교차 검증: 판정·기록·재현 job 분리(역할별 environment), `review/*`, `review-ledger`, `risk-gate`(경로별 위험도, `stage`), `deps-guard`, `harness-guard`, `revert-check`. runner와 PR 흐름 연결(CI 대기, 뒤처진 PR main 병합 갱신, 지적 대응, WIP 상한, 작업자 2개). 하네스 자체 테스트 기본 시나리오(12.4절) | 위험도별 검증이 같은 형식으로 동작하고, 작성자가 승인을 만들 수 없다. 운영 전환 체크리스트(10.4절)를 충족하고 운영 단계로 전환한다 |
 | 3 | 파일럿(운영 단계): 웹 프로젝트 하나에서 실제 작업 5~10건. 버그 수정 PR은 `web-verify` 증거 필수. 하네스 조정 PR은 보호 경로 변경이라 제작자 승인으로 병합된다 | 17.2절 파일럿 판정 지표가 수집된다 |
 | 4 | 조정과 확장: 지표로 규칙과 기준값(Q9, Q14, Q15, Q19)을 고치고, L0 샌드박스, 가독성 Tier 1 확대, 정기 작업(하네스 자체 테스트 정기 실행 포함)을 붙이고, 보류 목록(부록 C)을 검토한다 | 리뷰가 대부분 3라운드 안에 수렴하고, 병합 후 결함이 기준 이하다 |
 | 5 | 프로파일 분기(웹 먼저, 이후 게임) | 코어 수정 없이 웹 프로파일을 적용한다(S5) |
