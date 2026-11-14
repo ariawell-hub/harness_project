@@ -7,6 +7,8 @@ import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.t
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
+import { githubGet, resolvePr } from './ci/pr.ts';
+import { parseReviews } from './gates/risk-gate.ts';
 import { githubStatusPoster, recordStatuses } from './ci/record.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
@@ -41,8 +43,10 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   doc-lint | bypass-scan [--ci] [--base <sha>] | secret-scan [--ci] [--base <sha>]
 
 CI(gates 워크플로, 10.4절):
+  ci-pr --event <이벤트 JSON> --body-out <파일>
+                                           판정할 PR을 정해 $GITHUB_OUTPUT에 쓴다(이벤트 이름·리포·토큰은 환경 변수)
   gates --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> --out <파일> [--summary <파일>]
-                                           기계 판정 결과 파일(판정 job, 비밀 없음)
+        [--reviews <리뷰 API JSON>]        기계 판정 결과 파일(판정 job, 비밀 없음)
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
@@ -91,6 +95,9 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   out: { type: 'string' },
   summary: { type: 'string' },
   results: { type: 'string' },
+  reviews: { type: 'string' },
+  event: { type: 'string' },
+  'body-out': { type: 'string' },
   'repo-slug': { type: 'string' },
   'target-url': { type: 'string' },
   mode: { type: 'string' },
@@ -215,6 +222,38 @@ async function main(argv: string[]): Promise<number> {
       );
       return r.problems.length ? 1 : 0;
     }
+    case 'ci-pr': {
+      const eventFile = str('event');
+      const bodyOut = str('body-out');
+      const output = process.env.GITHUB_OUTPUT;
+      const repo = process.env.GITHUB_REPOSITORY ?? '';
+      if (!eventFile || !bodyOut || !output || !repo) {
+        process.stderr.write(
+          'ci-pr: --event, --body-out과 환경 변수 GITHUB_OUTPUT, GITHUB_REPOSITORY가 필요하다\n',
+        );
+        return 2;
+      }
+      const r = await resolvePr({
+        eventName: process.env.GITHUB_EVENT_NAME ?? '',
+        event: JSON.parse(readFileSync(eventFile, 'utf8')),
+        repo,
+        api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+      });
+      if ('skip' in r) {
+        appendFileSync(output, 'skip=true\n');
+        log(`ci-pr: 판정하지 않는다 — ${r.skip}`);
+        return 0;
+      }
+      // head ref는 git ref라 줄바꿈이 없지만, 출력 파일 형식을 깨는 값은 거절한다
+      if (/[\r\n]/.test(r.headRef)) throw new Error('head ref에 줄바꿈이 있다');
+      writeFileSync(bodyOut, r.body);
+      appendFileSync(
+        output,
+        `skip=false\nnumber=${r.number}\nhead_sha=${r.headSha}\nhead_ref=${r.headRef}\nbase_sha=${r.baseSha}\n`,
+      );
+      log(`ci-pr: PR #${r.number} head ${r.headSha.slice(0, 12)}`);
+      return 0;
+    }
     case 'gates': {
       const root = path.resolve(str('repo') ?? repoInfo(cwd).root);
       const cfg = loadConfig(path.resolve(str('config-root') ?? root));
@@ -226,7 +265,9 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const headSha = git(['rev-parse', 'HEAD'], root);
-      const r = runGates({ root, cfg, base, branch, headSha });
+      const rf = str('reviews');
+      const reviews = rf && existsSync(rf) ? parseReviews(readFileSync(rf, 'utf8')) : null;
+      const r = runGates({ root, cfg, base, branch, headSha, reviews });
       writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
       const md = summaryMarkdown(r);
       const summary = str('summary');

@@ -4,6 +4,7 @@
 import type { HarnessConfig } from '../lib/config.ts';
 import { formatProblem } from '../lib/util.ts';
 import { planGate } from '../gates/plan-gate.ts';
+import { riskGate, type Review, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
 import { GATE_CONTEXTS, type GateResult, type GateResults } from './results.ts';
 
 export interface RunGatesOptions {
@@ -16,6 +17,8 @@ export interface RunGatesOptions {
   /** PR head 브랜치 이름 */
   branch: string;
   headSha: string;
+  /** PR 리뷰(제작자 승인 확인용). 조회하지 못했으면 null */
+  reviews?: Review[] | null;
 }
 
 function firstLine(e: unknown): string {
@@ -55,14 +58,19 @@ function planGateResult(o: RunGatesOptions): Omit<GateResult, 'context'> {
 }
 
 export function runGates(o: RunGatesOptions): GateResults {
+  const signals: RiskSignal[] = [];
+  let risk: Risk | undefined;
   const byContext: Record<(typeof GATE_CONTEXTS)[number], () => GateResult> = {
     'plan-gate': () => guarded('plan-gate', () => planGateResult(o)),
+    'risk-gate': () =>
+      guarded('risk-gate', () => {
+        const r = riskGate({ ...o, signals, reviews: o.reviews ?? null });
+        risk = r.risk;
+        return { state: r.state, description: r.description, details: r.details };
+      }),
   };
-  return {
-    version: 1,
-    headSha: o.headSha,
-    results: GATE_CONTEXTS.map((c) => byContext[c]()),
-  };
+  const results = GATE_CONTEXTS.map((c) => byContext[c]());
+  return { version: 1, headSha: o.headSha, results, ...(risk ? { risk } : {}) };
 }
 
 const STATE_MARK: Record<string, string> = { success: '통과', failure: '실패', error: '오류' };

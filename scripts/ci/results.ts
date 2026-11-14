@@ -2,7 +2,7 @@
 // 기록 job은 이 형식을 통과한 값만 커밋 상태로 쓴다. 결과가 없거나 깨지면 아는 context 모두 error(fail-closed).
 
 /** 기록 job이 쓰는 기계 판정 context. 검사를 더하는 step이 여기에 더한다 */
-export const GATE_CONTEXTS = ['plan-gate'] as const;
+export const GATE_CONTEXTS = ['plan-gate', 'risk-gate'] as const;
 
 export type GateState = 'success' | 'failure' | 'error';
 const STATES: readonly string[] = ['success', 'failure', 'error'];
@@ -20,6 +20,8 @@ export interface GateResults {
   version: 1;
   headSha: string;
   results: GateResult[];
+  /** risk-gate가 정한 위험도. 이후 검증자 수를 정하는 데 쓴다(10.1절) */
+  risk?: 'low' | 'normal' | 'high';
 }
 
 export interface StatusPayload {
@@ -46,6 +48,8 @@ export function validateResults(
     return no('headSha가 40자리 소문자 hex가 아니다');
   if (r.headSha !== o.headSha) return no('결과의 headSha가 기록 대상 head와 다르다');
   if (!Array.isArray(r.results)) return no('results가 배열이 아니다');
+  if (r.risk !== undefined && r.risk !== 'low' && r.risk !== 'normal' && r.risk !== 'high')
+    return no('risk 값이 low | normal | high가 아니다');
   const seen = new Set<string>();
   const out: GateResult[] = [];
   for (const x of r.results as unknown[]) {
@@ -67,7 +71,9 @@ export function validateResults(
       details: g.details as string[],
     });
   }
-  return { ok: true, value: { version: 1, headSha: r.headSha, results: out } };
+  const value: GateResults = { version: 1, headSha: r.headSha, results: out };
+  if (r.risk !== undefined) value.risk = r.risk;
+  return { ok: true, value };
 }
 
 export function cleanDescription(s: string): string {
