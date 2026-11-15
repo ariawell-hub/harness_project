@@ -25,6 +25,34 @@ review_cycle: quarterly
 | 개발·테스트 키           | 리포 밖 파일(`~/.config/harness/<repo>/.env.dev`) → worktree `.env` 링크                          | 에이전트, 테스트               | 개발·테스트 환경만                                                                                                                                                      | 필요 시 교체                                                  | 개발 환경 한정                                                                          |
 | 제작자 GitHub 계정       | 제작자의 브라우저·모바일                                                                          | 제작자                         | 리포 관리자                                                                                                                                                             | 패스키 2단계 인증                                             | 모든 보호 무력화                                                                        |
 
+## Codex CI 인증 등록 (제작자)
+
+`judge-codex` environment의 `CODEX_AUTH_JSON`에는 CI 전용으로 로그인한 `auth.json` **파일의 내용**을 넣는다(설계서 13.3절). 에이전트는 이 절차를 하지 않는다(R20).
+
+```bash
+export CODEX_HOME="$(mktemp -d)"                 # 로컬 로그인과 분리한 임시 폴더
+codex login -c cli_auth_credentials_store=file   # 출력된 주소를 브라우저에서 열어 로그인을 끝낸다
+ls -l "$CODEX_HOME/auth.json"                    # 파일이 생겼는지 확인
+pbcopy < "$CODEX_HOME/auth.json"                 # 파일에서 바로 복사(macOS)
+```
+
+GitHub → Settings → Environments → `judge-codex` → `CODEX_AUTH_JSON`에 붙여 넣고, 임시 폴더를 지운다.
+
+- 같은 터미널에서 끝까지 한다. 새 터미널에서는 `CODEX_HOME`이 없어 평소 쓰는 로컬 로그인 파일을 가리킨다.
+- `codex logout`은 쓰지 않는다. 토큰이 폐기될 수 있다.
+- 등록한 뒤에는 판정 job이 실행마다 인증을 봉인해 다시 저장한다. 손으로 다시 넣을 일은 로그인이 풀렸을 때뿐이다.
+
+흔한 실수:
+
+| 실수                                              | 증상(`judge-codex`의 `judge` job 로그)                                  |
+| ------------------------------------------------- | ----------------------------------------------------------------------- |
+| 로그인 주소(`https://auth.openai.com/…`)를 넣었다 | `codex-auth: 실패 — CODEX_AUTH_JSON: JSON이 아니다(… 첫 글자: 그 밖)`   |
+| 터미널 출력을 복사해 값 안에 줄바꿈이 섞였다      | 줄바꿈만 섞였으면 읽힌다. 글자가 빠졌으면 `JSON이 아니다(… 첫 글자: {)` |
+| API 키 로그인 파일이나 다른 JSON을 넣었다         | `tokens가 없다(ChatGPT 로그인 auth.json이 아니다)`                      |
+| 값을 비워 두었다                                  | `CODEX_AUTH_JSON: 비어 있다`                                            |
+
+정상이면 `codex-auth: restore sha8=… fields=…tokens.access_token,…` 줄이 나온다. 값은 로그에 나오지 않고, 필드 이름과 해시 앞 8자만 나온다.
+
 ## 유출 대응
 
 시크릿 스캔(로컬·CI)이나 감사에서 시크릿이 검출되면 이미 원격에 올라간 것으로 본다.
