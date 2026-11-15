@@ -10,7 +10,7 @@ import { runGates, summaryMarkdown } from './ci/gates.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
-import { githubStatusPoster, recordStatuses } from './ci/record.ts';
+import { githubStatusPoster, recordReview, recordStatuses } from './ci/record.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
@@ -51,6 +51,9 @@ CI(gates 워크플로, 10.4절):
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
+  record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
+                --head-sha <sha> --repo-slug <owner/name> --target-url <url>
+                                           검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
   required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
 
 설정:
@@ -98,6 +101,9 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   out: { type: 'string' },
   summary: { type: 'string' },
   results: { type: 'string' },
+  context: { type: 'string' },
+  needed: { type: 'string' },
+  verdict: { type: 'string' },
   reviews: { type: 'string' },
   'pr-body': { type: 'string' },
   event: { type: 'string' },
@@ -239,6 +245,33 @@ async function main(argv: string[]): Promise<number> {
           : 'required-checks: 실패 — 등록은 제작자가 리포 설정에서 한다(0.2절). 봇은 바꾸지 않는다(R20)',
       );
       return r.ok ? 0 : 1;
+    }
+    case 'record-review': {
+      const token = process.env.GH_TOKEN ?? '';
+      if (!token) {
+        process.stderr.write('record-review: 환경 변수 GH_TOKEN(검증 App 토큰)이 없다\n');
+        return 2;
+      }
+      const needed = str('needed');
+      if (needed !== 'true' && needed !== 'false') {
+        process.stderr.write('record-review: --needed true|false가 필요하다\n');
+        return 2;
+      }
+      const file = str('verdict');
+      const headSha = str('head-sha') ?? '';
+      const repo = str('repo-slug') ?? '';
+      const targetUrl = str('target-url') ?? '';
+      const p = await recordReview({
+        context: str('context') ?? '',
+        needed: needed === 'true',
+        raw: file && existsSync(file) ? readFileSync(file, 'utf8') : null,
+        secrets: (process.env.SCAN_SECRETS ?? '').split('\n').filter(Boolean),
+        headSha,
+        repo,
+        post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
+      });
+      log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
+      return p.state === 'error' ? 1 : 0;
     }
     case 'ci-pr': {
       const eventFile = str('event');
