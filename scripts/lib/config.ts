@@ -61,6 +61,8 @@ export interface HarnessConfig {
     claimExpiryHours: number;
     usageLimitMaxWaitMin: number;
     pollSec: number;
+    /** 같은 PR head에서 CI 대기·판정 없음이 이 시간을 넘으면 needs-human으로 알린다(4.5절). 없으면 24 */
+    ciStallHours: number;
   };
   failure: { switchAt: number; stopAt: number };
   commands: Record<StandardName, CommandDef | null>;
@@ -173,6 +175,9 @@ export function loadConfig(repoRoot: string): HarnessConfig {
     throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- ${problems.join('\n- ')}`);
   }
   cfg.github.collaborators ??= [];
+  cfg.limits.ciStallHours ??= 24;
+  if (!(typeof cfg.limits.ciStallHours === 'number' && cfg.limits.ciStallHours > 0))
+    throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- limits.ciStallHours는 양수(시간)`);
   cfg.github.botIssues ??= 'exclude'; // 제작자가 고르기 전에는 fail-closed(14.6절)
   cfg.agents ??= {};
   cfg.riskPaths ??= [];

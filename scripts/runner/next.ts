@@ -20,7 +20,16 @@ import type {
   IssueHistory,
   PullRequest,
 } from '../lib/github.ts';
-import { gitTry, harnessStateDir, listWorktrees, repoInfo, showFile } from '../lib/git.ts';
+import { readApprovalMarker } from '../lib/approval.ts';
+import {
+  gitTry,
+  harnessStateDir,
+  isBehind,
+  listWorktrees,
+  repoInfo,
+  revParse,
+  showFile,
+} from '../lib/git.ts';
 import {
   PLANS_DIR,
   findPlan,
@@ -32,6 +41,7 @@ import {
   type Frontmatter,
   type PlanRef,
 } from '../lib/plan.ts';
+import { classifyPr, requiredStates, type PrVerdict, type RequiredState } from './pr-state.ts';
 
 export interface LocalPlan {
   worktree: string;
@@ -48,6 +58,46 @@ export interface LocalPlan {
   pr: PullRequest | null;
   /** main 병합 충돌로 멈춰 제작자 답을 기다린다(`conflict.json`, TD-27). 이 PR은 다시 고르지 않는다 */
   conflictWaiting: boolean;
+  /**
+   * 열린 내 PR의 분류(10.3절, `pr-state.ts`). 필수 체크를 출처로 걸러 판정한 결과다.
+   * `ci.requiredChecks`가 빈 리포와 남의 계획에는 없다(그때는 체크 요약으로 판단한다)
+   */
+  prState?: PrVerdict;
+  /** `prState`를 낸 필수 체크 상태. 알림 문구(상태 설명, 실행 링크)에 쓴다 */
+  required?: RequiredState[];
+}
+
+/**
+ * PR 하나의 CI 대기 기록(4.5절). worktree 하네스 상태 폴더의 `pr-wait.json`(git이 추적하지 않는다).
+ * 같은 head에서 얼마나 기다렸는지와, 오래된 대기를 이미 알렸는지를 둔다. runner만 쓴다
+ */
+export interface PrWait {
+  /** 기다리기 시작한 PR head */
+  head: string;
+  /** 기다리기 시작한 시각(ISO) */
+  since: string;
+  /** 오래된 대기를 needs-human으로 알렸는가 */
+  reported: boolean;
+}
+
+function prWaitFile(worktree: string): string {
+  return path.join(harnessStateDir(repoInfo(worktree), 'worktree'), 'pr-wait.json');
+}
+
+/** 없거나 깨졌으면 null */
+export function readPrWait(worktree: string): PrWait | null {
+  try {
+    const raw = JSON.parse(readFileSync(prWaitFile(worktree), 'utf8')) as Partial<PrWait>;
+    if (typeof raw.head !== 'string' || typeof raw.since !== 'string') return null;
+    if (Number.isNaN(Date.parse(raw.since))) return null;
+    return { head: raw.head, since: raw.since, reported: raw.reported === true };
+  } catch {
+    return null;
+  }
+}
+
+export function writePrWait(worktree: string, w: PrWait): void {
+  writeFileSync(prWaitFile(worktree), JSON.stringify(w, null, 2) + '\n');
 }
 
 /**
@@ -86,7 +136,19 @@ export function writeConflictState(worktree: string, s: ConflictState): void {
 
 export type Task =
   | { kind: 'answered'; issue: number; answer: string; local: LocalPlan | null }
-  | { kind: 'fix-pr'; local: LocalPlan; pr: PullRequest }
+  /** `failing`: 고칠 체크와 상태 설명(체크 요약으로 판단한 경우 설명은 '') */
+  | {
+      kind: 'fix-pr';
+      local: LocalPlan;
+      pr: PullRequest;
+      failing: { context: string; description: string }[];
+    }
+  /** `risk-gate`만 남았다: 제작자에게 현재 head 승인을 요청한다(head마다 한 번) */
+  | { kind: 'request-approval'; local: LocalPlan; pr: PullRequest }
+  /** 같은 head에서 CI 대기·판정 없음이 `limits.ciStallHours`를 넘었다: needs-human으로 알린다(한 번) */
+  | { kind: 'report-stall'; local: LocalPlan; pr: PullRequest; waiting: string[] }
+  /** 필수 체크가 모두 통과했는데 자동 병합이 꺼져 있다: 다시 켠다 */
+  | { kind: 'arm-merge'; local: LocalPlan; pr: PullRequest }
   /** main에 뒤처지거나 충돌한 PR을 origin/main 병합으로 갱신(ADR-0006) */
   | { kind: 'update'; local: LocalPlan; pr: PullRequest }
   | { kind: 'plan'; local: LocalPlan }
@@ -109,6 +171,8 @@ export interface Pick {
   waiting: { ci: number; human: number };
   /** 작성자 때문에 새 Issue 후보에서 뺀 것. 5번까지 가지 않았으면 [] */
   excluded: ExcludedIssue[];
+  /** 이번에 읽은 계획 worktree 전체(runner가 대기 기록과 알림 정리에 다시 쓴다) */
+  locals: LocalPlan[];
 }
 
 export interface NextEnv {
@@ -116,6 +180,35 @@ export interface NextEnv {
   cfg: HarnessConfig;
   gh: GitHubPort;
   worker: string;
+  /** 지금 시각(ms). 테스트용. 없으면 Date.now() */
+  now?: () => number;
+}
+
+/**
+ * 열린 내 PR의 필수 체크를 읽어 분류한다. push한 커밋이 PR head에 아직 반영되지 않았으면(GitHub 반영 지연, Q20)
+ * 옛 head의 결과로 판단하지 않고 기다린다. 조회가 실패해도 기다린다(실패한 체크가 있다고 단정하지 않는다)
+ */
+function inspectPr(
+  env: NextEnv,
+  worktree: string,
+  branch: string,
+  pr: PullRequest,
+  stepCompleted: boolean,
+): { prState: PrVerdict; required: RequiredState[] } {
+  const { remote, defaultBranch } = env.cfg.github;
+  try {
+    const pushed = revParse(`${remote}/${branch}`, worktree);
+    if (!pr.headSha || (pushed && pushed !== pr.headSha))
+      return { prState: { kind: 'wait-ci', waiting: ['PR head 반영'] }, required: [] };
+    const required = requiredStates(env.gh.commitChecks(pr.headSha), env.cfg.ci);
+    const behind = isBehind(worktree, remote, defaultBranch, pr.headSha);
+    return { prState: classifyPr({ pr, required, behind, stepCompleted }), required };
+  } catch (e) {
+    return {
+      prState: { kind: 'wait-ci', waiting: [`체크 조회 실패(${firstLine(e)})`] },
+      required: [],
+    };
+  }
 }
 
 export function readLocalPlans(env: NextEnv): LocalPlan[] {
@@ -146,7 +239,20 @@ export function readLocalPlans(env: NextEnv): LocalPlan[] {
     } catch {
       pr = null;
     }
+    const inspected =
+      pr?.state === 'open' &&
+      env.cfg.ci.requiredChecks.length > 0 &&
+      String(fm.owner ?? '') === env.worker
+        ? inspectPr(
+            env,
+            wt.path,
+            wt.branch,
+            pr,
+            ref.kind === 'multi' ? stepStatus === 'completed' : fm.status === 'completed',
+          )
+        : null;
     out.push({
+      ...(inspected ?? {}),
       worktree: wt.path,
       branch: wt.branch,
       id: b.id,
@@ -363,9 +469,13 @@ export function filterTrustedIssues(
 }
 
 export function pickNext(env: NextEnv): Pick {
+  const locals = readLocalPlans(env);
+  return { ...pickFrom(env, locals), locals };
+}
+
+function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
   const { cfg, gh, worker } = env;
   const label = cfg.github.needsHumanLabel;
-  const locals = readLocalPlans(env);
   const mine = locals.filter((l) => String(l.fm.owner ?? '') === worker);
   const issues = gh.listOpenIssues();
   const humanIssues = new Set<number>();
@@ -387,6 +497,9 @@ export function pickNext(env: NextEnv): Pick {
 
   // 2. 내 PR 중 조치가 필요한 것
   let ci = 0;
+  /** 열린 차단 지적이 있어 사람 대기로 센 PR(대응은 계획 20261115-runner-pr-flow step3) */
+  const reviewPrs: number[] = [];
+  const now = env.now?.() ?? Date.now();
   for (const l of mine) {
     const pr = l.pr;
     if (!pr || pr.state !== 'open') continue;
@@ -398,9 +511,83 @@ export function pickNext(env: NextEnv): Pick {
       humanIssues.add(l.issue);
       continue;
     }
+    // 필수 체크를 출처로 걸러 분류한 결과가 있으면 그것으로 고른다(10.3절). 없으면 체크 요약으로 판단한다
+    const v = l.prState;
+    if (v) {
+      const act = (task: Task, reason: string): Omit<Pick, 'locals'> => ({
+        task,
+        reason,
+        waiting: { ci, human: humanIssues.size },
+        excluded: [],
+      });
+      switch (v.kind) {
+        case 'closed':
+          break;
+        case 'conflict':
+          return act({ kind: 'update', local: l, pr }, `PR #${pr.number}가 main과 충돌한다(DIRTY)`);
+        case 'behind':
+          // 필수 체크가 모두 통과한 뒤에만 갱신한다: 앞선 head의 승인을 이어받는다(10.3절)
+          return act(
+            { kind: 'update', local: l, pr },
+            `PR #${pr.number}가 main에 뒤처졌다(필수 체크 통과, 승인 이어받기)`,
+          );
+        case 'fix':
+          return act(
+            {
+              kind: 'fix-pr',
+              local: l,
+              pr,
+              failing: v.failing.map((f) => ({ context: f.context, description: f.description })),
+            },
+            `PR #${pr.number} 체크 실패: ${v.failing.map((f) => f.context).join(', ')}`,
+          );
+        case 'approval':
+          if (readApprovalMarker(repoInfo(l.worktree)) !== pr.headSha)
+            return act(
+              { kind: 'request-approval', local: l, pr },
+              `PR #${pr.number}에 제작자 승인이 필요하다(risk-gate)`,
+            );
+          humanIssues.add(l.issue);
+          break;
+        case 'review':
+          reviewPrs.push(pr.number);
+          humanIssues.add(l.issue);
+          break;
+        case 'wait-ci':
+        case 'infra-error': {
+          const w = readPrWait(l.worktree);
+          const same = w !== null && w.head === pr.headSha;
+          const waiting = v.kind === 'wait-ci' ? v.waiting : v.failing.map((f) => f.context);
+          if (same && w.reported) {
+            // 이미 알렸다: 제작자 답을 기다린다
+            humanIssues.add(l.issue);
+          } else if (same && now - Date.parse(w.since) >= cfg.limits.ciStallHours * 3_600_000) {
+            return act(
+              { kind: 'report-stall', local: l, pr, waiting },
+              `PR #${pr.number}의 CI 대기가 ${cfg.limits.ciStallHours}시간을 넘었다: ${waiting.join(', ')}`,
+            );
+          } else ci++;
+          break;
+        }
+        case 'ready':
+          if (!pr.autoMerge && !pr.isDraft)
+            return act(
+              { kind: 'arm-merge', local: l, pr },
+              `PR #${pr.number}의 필수 체크가 모두 통과했는데 자동 병합이 꺼져 있다`,
+            );
+          ci++;
+          break;
+      }
+      continue;
+    }
     if (pr.checks === 'failure')
       return {
-        task: { kind: 'fix-pr', local: l, pr },
+        task: {
+          kind: 'fix-pr',
+          local: l,
+          pr,
+          failing: pr.failingChecks.map((c) => ({ context: c, description: '' })),
+        },
         reason: `PR #${pr.number} 체크 실패: ${pr.failingChecks.join(', ')}`,
         waiting: { ci, human: humanIssues.size },
         excluded: [],
@@ -515,11 +702,14 @@ export function pickNext(env: NextEnv): Pick {
     }
   }
 
-  const idle = ci
+  const idleBase = ci
     ? `CI·병합 대기 ${ci}건`
     : humanIssues.size
       ? `사람 대기 ${humanIssues.size}건`
       : '할 일 없음';
+  const idle = reviewPrs.length
+    ? `${idleBase} (열린 차단 지적: ${reviewPrs.map((n) => `PR #${n}`).join(', ')} — 원장의 P0·P1에 대응해야 한다)`
+    : idleBase;
   return {
     task: { kind: 'idle' },
     reason: excluded.length

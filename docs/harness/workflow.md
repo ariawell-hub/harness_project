@@ -158,6 +158,7 @@ node scripts/harness.ts check              # worktree 안에서
 git -C <worktree> push origin <브랜치>
 ```
 
+- **언제 갱신하나**: 충돌은 바로 푼다(충돌한 PR에서는 `check`가 돌지 않는다). 뒤처지기만 했으면 필수 체크가 모두 통과한 뒤에 갱신한다. 검증자가 수정을 요청했거나 판정 중일 때 갱신하면 승인을 이어받지 못해 판정이 한 번 더 돈다. runner도 이 순서로 한다.
 - **rebase하지 않는다.** 이미 push한 브랜치를 rebase하면 원격 갱신에 force push가 필요하고, R14가 막는다. squash 병합이라 PR의 병합 커밋은 main 이력에 남지 않는다.
 - 이미 로컬에서 rebase했다면 원격 이력을 부모로 연결한 뒤 일반 push한다. 트리는 rebase 결과 그대로다.
   ```bash

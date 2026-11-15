@@ -27,7 +27,8 @@
     "wipPerWorker": 2,
     "claimExpiryHours": 24,
     "usageLimitMaxWaitMin": 180,
-    "pollSec": 120
+    "pollSec": 120,
+    "ciStallHours": 24
   },
   "failure": {
     "switchAt": 3,
