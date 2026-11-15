@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { approvalPending, planRiskOf } from '../lib/approval.ts';
 import { hasCommits, tryRepoInfo, type RepoInfo } from '../lib/git.ts';
 import { findPlan, parseDoc } from '../lib/plan.ts';
 import { formatProblem } from '../lib/util.ts';
@@ -135,6 +136,8 @@ export function buildContext(
     repoOf: repoOfPath,
     planOwner: planOwnerOf,
     worker,
+    approvalPending,
+    planRisk: planRiskOf,
     ...loadGuardConfig(repo?.root ?? null),
   };
 }

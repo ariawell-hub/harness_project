@@ -43,6 +43,13 @@ export interface GuardContext {
   planOwner?: (root: string, id: string) => string | null;
   /** 현재 작업자 이름(HARNESS_WORKER, 없으면 session) */
   worker?: string;
+  /**
+   * 승인 요청 표시가 있는 브랜치면 표시 뒤에 더한 병합이 아닌 커밋 수. 표시가 없거나 모르면 null.
+   * branch가 null이면 dir의 현재 브랜치다(Issue #78 step2)
+   */
+  approvalPending?: (dir: string, branch: string | null) => number | null;
+  /** 브랜치 계획의 위험도(low|normal|high). 모르면 null */
+  planRisk?: (dir: string, branch: string | null) => string | null;
 }
 
 const D = 'docs/harness/design.md';
@@ -131,6 +138,27 @@ function gitSplit(argv: string[]): { configs: string[]; sub: string; args: strin
   return { configs, sub: argv[i] ?? '', args: argv.slice(i + 1) };
 }
 
+/** `git -C <dir>`가 가리키는 폴더. 없으면 cwd */
+function gitWorkDir(argv: string[], cwd: string): string {
+  let dir = cwd;
+  for (let i = 1; i < argv.length && argv[i].startsWith('-'); i++) {
+    if (argv[i] === '-C' && argv[i + 1]) dir = path.resolve(dir, argv[i + 1]);
+    if (GIT_GLOBAL_WITH_VALUE.has(argv[i])) i++;
+  }
+  return dir;
+}
+
+/** push refspec의 원본 브랜치. `HEAD`나 빈 값이면 null(현재 브랜치) */
+function refSource(ref: string): string | null {
+  const src = ref
+    .replace(/^\+/, '')
+    .split(':')[0]
+    .replace(/^refs\/heads\//, '');
+  return src === '' || src === 'HEAD' ? null : src;
+}
+
+const APPROVAL_DOC = 'docs/harness/workflow.md 5절 "승인 요청 전 조건", AGENTS.md 작업 루프 6번';
+
 function shortCluster(a: string, letter: string): boolean {
   return /^-[a-zA-Z]+$/.test(a) && a.slice(1).includes(letter);
 }
@@ -218,6 +246,22 @@ function gitRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | n
         '작업 브랜치에서 push하고 PR을 열어라. 브랜치·worktree는 `node scripts/harness.ts new-task`가 만든다',
         `${D} R2`,
       );
+    }
+    if (ctx.approvalPending) {
+      const dir = gitWorkDir(c.argv, cwd);
+      for (const branch of refs.length ? refs.map(refSource) : [null]) {
+        const extra = ctx.approvalPending(dir, branch);
+        if (extra) {
+          return v(
+            '승인 요청 뒤 push',
+            `승인을 요청한 PR 브랜치(${branch ?? '현재 브랜치'})에 새 커밋 ${extra}개를 push하려 했다. head가 바뀌면 승인이 철회된다`,
+            '미룰 수 있는 변경은 다음 PR에 넣어라. 꼭 올려야 하면 제작자에게 먼저 알리고 ' +
+              '`node scripts/harness.ts pr-ready --undo`로 승인 요청을 거둔 뒤 push하고, 끝나면 `pr-ready`로 다시 요청하라. ' +
+              'main 병합 갱신(병합 커밋만 더함)은 막지 않는다',
+            APPROVAL_DOC,
+          );
+        }
+      }
     }
   }
   if (sub === 'add' && args.some((a) => a === '--force' || shortCluster(a, 'f'))) {
@@ -314,7 +358,7 @@ function gitRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | n
 const SENSITIVE_API =
   /(?:^|\/)(?:branches\/[^/]+\/protection|rulesets|environments|actions\/(?:secrets|variables|permissions|runners)|dependabot\/secrets|codespaces\/secrets|collaborators|invitations|keys|hooks|autolinks|teams|installation|pulls\/\d+\/reviews|actions\/workflows\/[^/]+\/disable)(?:\/|$|\?)/;
 
-function ghRules(c: SimpleCommand): Problem | null {
+function ghRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | null {
   const a = c.argv.slice(1);
   const [g1, g2] = a;
   const r20 = (what: string) =>
@@ -394,6 +438,33 @@ function ghRules(c: SimpleCommand): Problem | null {
         return r20(`gh api ${method} ${endpoint}로 보호 설정·시크릿·승인을 바꾸려 했다`);
       if (/^repos\/[^/]+\/[^/]+\/?$/.test(endpoint) && method !== 'POST')
         return r20(`gh api ${method} ${endpoint}로 리포 설정을 바꾸려 했다`);
+    }
+  }
+  if (g1 === 'pr' && g2 === 'ready') {
+    return v(
+      '승인 요청 순서',
+      'gh pr ready를 직접 실행하려 했다. 초안 해제는 승인 요청이라 조건 확인이 먼저다',
+      'worktree 안에서 `node scripts/harness.ts pr-ready`를 써라(완료 처리·push·main 병합을 확인하고 초안을 해제한다). ' +
+        '초안으로 되돌릴 때는 `node scripts/harness.ts pr-ready --undo`',
+      APPROVAL_DOC,
+    );
+  }
+  if (g1 === 'pr' && g2 === 'create' && ctx.planRisk) {
+    let head: string | null = null;
+    let draft = false;
+    for (let i = 2; i < a.length; i++) {
+      const x = a[i];
+      if (x === '--head' || x === '-H') head = a[++i] ?? null;
+      else if (x.startsWith('--head=')) head = x.slice(7);
+      else if (x === '--draft' || x === '-d') draft = true;
+    }
+    if (!draft && ctx.planRisk(cwd, head) === 'high') {
+      return v(
+        '승인 요청 순서',
+        '위험도 높음 계획의 PR을 초안이 아닌 상태로 만들려 했다. 만들자마자 승인 요청이 된다',
+        '`gh pr create --draft`로 올리고, 끝난 뒤 `node scripts/harness.ts pr-ready`로 초안을 해제하라',
+        APPROVAL_DOC,
+      );
     }
   }
   return null;
@@ -816,18 +887,21 @@ export function evaluateBash(
 ): Problem | null {
   const raw = rawRules(command);
   if (raw) return raw;
+  let procedural: Problem | null = null;
   for (const c of parseShell(command, dialect)) {
     const head = c.argv.length ? commandName(c.argv[0]) : '';
     const r =
       secretRules(c, ctx) ??
       (head === 'git' ? gitRules(c, cwd, ctx) : null) ??
-      (head === 'gh' ? ghRules(c) : null) ??
+      (head === 'gh' ? ghRules(c, cwd, ctx) : null) ??
       (c.argv.length ? dbRules(c, ctx) : null) ??
       (c.argv.length ? rmRule(c, cwd, ctx) : null) ??
       (c.argv.length ? externalRules(c) : null);
-    if (r) return r;
+    // 금지 규칙(R…)이 먼저다. 승인 요청 순서 같은 절차 안내는 뒤 명령의 금지 규칙과 검사 순서 규칙을 가리지 않는다
+    if (r && /^R\d/.test(r.rule)) return r;
+    procedural ??= r;
   }
-  return dialect === 'posix' ? sequenceRules(command) : null;
+  return (dialect === 'posix' ? sequenceRules(command) : null) ?? procedural;
 }
 
 /**
