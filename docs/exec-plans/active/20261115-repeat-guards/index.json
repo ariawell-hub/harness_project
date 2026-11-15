@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "command-guard",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T15:16:38+09:00"
     },
     {
       "step": 2,
