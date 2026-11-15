@@ -16,6 +16,7 @@
 //          "계획 검증 단계"면 계획 파일의 진행 로그에 한 줄을 더해 커밋한다(계획 폴더 파일만 바꾼다)
 //   fail : 아무것도 하지 않는다
 //   break: step의 AC가 확인하는 파일을 지워 커밋한다(판정 실패)
+//   break-dirty: step의 AC가 확인하는 파일을 지우기만 하고 커밋하지 않는다(판정 실패)
 //   rebut    : 파일을 바꾸지 않고 절차서 8절 형식의 반박 문단을 마지막 출력에 적는다. 근거는 리포 안 파일 경로다
 //              (step의 AC가 확인하는 파일. 계획 검증 단계이거나 그 파일이 없으면 계획 파일)
 //   rebut-bad: 파일을 바꾸지 않고 형식이 틀린 반박(근거 줄 없음)을 적는다
@@ -84,6 +85,8 @@ if (action === 'timeout') {
   if (action === 'rebut-bad') said = `- 지적: ${target}\n- 요지: 근거 줄이 없다\n`;
   if (action === 'rebut' || action === 'rebut-bad') {
     // 파일을 바꾸지 않는다
+  } else if (action === 'break-dirty') {
+    rmSync(acFile, { force: true });
   } else if (action === 'break') {
     rmSync(acFile, { force: true });
     git('add', '-A');
