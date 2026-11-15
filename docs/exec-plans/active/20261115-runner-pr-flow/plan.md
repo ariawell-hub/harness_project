@@ -117,6 +117,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-16 step5: 테스트 먼저. `node --test scripts/test/divergence.test.ts` 종료 코드 1(`scripts/runner/divergence.ts` 없음). 구현 뒤 7개 통과. runner 테스트(되돌리기, 한 번만 평가, 되돌린 head 면제, `check` 실패 회귀, 3회·5회, 로컬 회귀)는 구현 전에 썼지만 구현 전에 실행해 실패를 보지는 않았다. 구현 뒤 `divergence`·`runner-review` 31개 통과. 그래서 아래처럼 구현을 깨뜨려 확인했다. AC 명령(`divergence`·`runner-review`·`runner` 테스트 44개, `grep` 3개) 종료 코드 0.
 - 2026-11-16 step5: 구현 뒤에만 통과를 본 runner 테스트가 동작을 잡는지 확인하려고 여섯 곳을 일부러 깨뜨렸다: 같은 head 재평가 막기(`evaluated`), 되돌린 head에서 시작한 라운드의 평가 면제, 로컬 회귀 되돌리기, 대응 head의 `check` 실패 처리, `review-round` 3회 방법 전환, 계획 전용 커밋 건너뛰기. 깨뜨린 구현에서 `node --test scripts/test/runner-review.test.ts` 종료 코드 1이고 여섯 곳 모두 해당 테스트가 실패했다. 원본으로 되돌린 뒤 통과.
 - 2026-11-16 step5: step4의 테스트 하나를 새 동작에 맞게 고쳤다. "판정에 실패한 수정이 push되지 않은 채 남아 있으면 반박을 올리지 않는다"는 이제 일어나지 않는다(판정에 실패한 수정은 그 자리에서 되돌린다). 같은 시나리오가 "되돌린 뒤 온 반박은 판정을 한 번 거쳐 올라가고, 올라간 코드는 대응 전과 같다"를 확인한다.
+- 2026-11-16 step5: 전체 `check` 종료 코드 0(fmt·lint·test·doc-lint·우회 탐지·시크릿 스캔). doc-lint의 R8 경고는 ADR의 `related_code`가 문서보다 나중에 바뀌었다는 것이고, 이 step에서 바꾼 파일은 그 목록에 없다.
 
 ## 의사결정 로그
 
