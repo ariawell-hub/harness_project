@@ -16,7 +16,8 @@
     {
       "step": 2,
       "name": "judge-codex",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T11:23:34+09:00"
     },
     {
       "step": 3,
