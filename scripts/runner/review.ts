@@ -252,11 +252,19 @@ export function sessionRebuttal(o: {
   return gitTry(['ls-files', '--error-unmatch', '--', file], o.worktree).ok ? r : null;
 }
 
-/** 라운드의 반박을 담은 PR 댓글 본문: 절차서 8절의 세 줄 문단들뿐이다(세션의 다른 글은 넣지 않는다) */
+/**
+ * 라운드의 반박을 담은 PR 댓글 본문: 절차서 8절의 세 줄 문단들을 코드 블록 하나에 넣는다(세션의 다른 글은 넣지 않는다).
+ * 요지는 세션이 쓴 글이다. 코드 블록 안이라 GitHub이 멘션(`@계정`)·마크다운·`#번호` 참조로 해석하지 않는다(PR #96 원장 F1).
+ * 값은 바꾸지 않는다: 여는 줄·문단·닫는 줄 사이에 빈 줄을 둬서 판정 워크플로(`parseRebuttals`)는 빈 줄로 나뉜
+ * 세 줄 문단을 그대로 읽고, 여는 줄과 닫는 줄은 세 줄 문단이 아니라 버려진다.
+ * 문단의 줄은 모두 `- `로 시작해 코드 블록을 닫지 못한다
+ */
 export function rebuttalComment(list: readonly Rebuttal[]): string {
-  return list
-    .map((r) => `- 지적: ${r.id}\n- 근거: ${r.evidence}\n- 요지: ${r.summary}`)
-    .join('\n\n');
+  return [
+    '```text',
+    ...list.map((r) => `- 지적: ${r.id}\n- 근거: ${r.evidence}\n- 요지: ${r.summary}`),
+    '```',
+  ].join('\n\n');
 }
 
 const freshRebuttals = (list: readonly ReviewResponse[]) =>

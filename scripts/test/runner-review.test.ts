@@ -12,6 +12,7 @@ import {
   type Ledger,
   type Reviewer,
 } from '../ci/ledger.ts';
+import { parseRebuttals } from '../ci/rebuttal.ts';
 import { reviewLogLines } from '../ci/record.ts';
 import type { Finding, Resolution, Severity, Verdict } from '../ci/verdict.ts';
 import { describeTask } from '../commands/start.ts';
@@ -33,6 +34,7 @@ import {
   openBlocking,
   parseReviewLog,
   readReviewState,
+  rebuttalComment,
   sessionRebuttal,
   settledResponses,
   type ReviewState,
@@ -638,6 +640,51 @@ const prCommentsBy = (t: T, pr: number, author: string) =>
 
 const paragraph = (id: string, evidence: string, summary: string) =>
   `- 지적: ${id}\n- 근거: ${evidence}\n- 요지: ${summary}`;
+/** runner가 다는 반박 댓글: 형식 문단들을 코드 블록 안에 둔다(문단 앞뒤는 빈 줄) */
+const fenced = (...paragraphs: string[]) => ['```text', ...paragraphs, '```'].join('\n\n');
+
+test('rebuttalComment: 반박 문단을 코드 블록 안에 달아 GitHub이 멘션·마크다운을 해석하지 않고, 판정 워크플로는 같은 값을 읽는다', () => {
+  const ledger = judged(emptyLedger(BASE), 'codex', BASE, [
+    finding('P1', 'src/a.ts', 1, '첫째'),
+    finding('P1', 'src/a.ts', 2, '둘째'),
+  ]);
+  const list = [
+    {
+      id: 'F1',
+      evidence: 'src/a.ts:3',
+      summary: '@maker 확인 바람 ![x](http://e.example/p.png) #1 other/repo#2 ``` <b>굵게</b>',
+    },
+    { id: 'F2', evidence: 'c'.repeat(40), summary: '둘째 요지' },
+  ];
+  const body = rebuttalComment(list);
+  assert.equal(
+    body,
+    fenced(
+      paragraph('F1', list[0].evidence, list[0].summary),
+      paragraph('F2', list[1].evidence, '둘째 요지'),
+    ),
+  );
+  const lines = body.split('\n');
+  // 코드 블록은 첫 줄에서 열리고 마지막 줄에서만 닫힌다: 세션이 쓴 글은 모두 그 안에 있다
+  assert.match(lines[0], /^```text$/);
+  assert.equal(lines.at(-1), '```');
+  assert.ok(
+    lines.slice(1, -1).every((l) => !/^ {0,3}(```|~~~)/.test(l)),
+    '안쪽 줄은 코드 블록을 닫지 못한다',
+  );
+  // 판정 워크플로(plan job)가 PR 작성자의 이 댓글에서 읽는 값은 runner가 받은 반박 그대로다
+  assert.deepEqual(
+    parseRebuttals({
+      comments: [{ user: { login: 'harness-bot' }, body }],
+      ledger,
+      author: 'harness-bot',
+      recorderBot: BOT,
+      repo: 'fake/repo',
+    }),
+    list,
+  );
+  assert.equal(rebuttalComment([list[1]]), fenced(paragraph('F2', list[1].evidence, '둘째 요지')));
+});
 
 test('parseReviewLog: reviewLogLines가 만든 줄을 그대로 읽고, 제목·근거의 줄바꿈이나 [P1] 같은 글자로 지적 수가 달라지지 않는다', () => {
   const v: Verdict = {
@@ -843,8 +890,8 @@ test('runner: 형식이 맞고 근거 파일이 있는 반박은 형식 문단�
     assert.equal(mine.length, 1);
     assert.equal(
       mine[0].body,
-      paragraph('F1', 'out/demo-feature-s0.txt', 'F1는 이 step의 범위 밖이다'),
-      '댓글 본문은 형식 문단뿐이다(세션의 다른 글은 넣지 않는다)',
+      fenced(paragraph('F1', 'out/demo-feature-s0.txt', 'F1는 이 step의 범위 밖이다')),
+      '댓글 본문은 코드 블록에 넣은 형식 문단뿐이다(세션의 다른 글은 넣지 않는다)',
     );
     const h1 = pr.head();
     assert.notEqual(h1, h0, '수정 커밋이 없어도 새 커밋을 올린다(다음 판정은 새 커밋에서 돈다)');
@@ -979,7 +1026,7 @@ test('runner: 계획 검증 단계의 반박은 계획 폴더 파일만 바꾼 �
     assert.equal(await run(t.fx.root), 'idle');
     const mine = prCommentsBy(t, pr.number, 'harness-bot');
     assert.equal(mine.length, 1);
-    assert.equal(mine[0].body, paragraph('F1', file, 'F1는 이 step의 범위 밖이다'));
+    assert.equal(mine[0].body, fenced(paragraph('F1', file, 'F1는 이 step의 범위 밖이다')));
     const h1 = pr.head();
     assert.notEqual(h1, h0);
     const files = sh('git', ['diff', '--name-only', h0, h1], pr.worktree).split('\n');
