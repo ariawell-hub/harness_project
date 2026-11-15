@@ -2,7 +2,7 @@
 id: 20261115-check-exit-code
 issue: 72 # GitHub Issue 번호
 type: docs # 브랜치 접두어
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: normal # low | normal | high
 author: claude-code
