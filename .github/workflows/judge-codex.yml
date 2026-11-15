@@ -52,6 +52,8 @@ jobs:
       prompt_base: ${{ steps.plan.outputs.prompt_base }}
       round_changed: ${{ steps.plan.outputs.round_changed }}
       ledger: ${{ steps.plan.outputs.ledger }}
+      # 형식 검사를 통과한 작성자 반박(절차서 8절)
+      rebuttals: ${{ steps.plan.outputs.rebuttals }}
     steps:
       - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,11 +171,13 @@ jobs:
           BASE_SHA: ${{ needs.plan.outputs.base_sha }}
           # plan job이 읽은 지적 원장(검증 App 봇 댓글의 자료). 판정 job은 GitHub 토큰 없이 이것으로 입력을 만든다
           LEDGER: ${{ needs.plan.outputs.ledger }}
+          REBUTTALS: ${{ needs.plan.outputs.rebuttals }}
         run: |
           cd pr
           BASE=$(git merge-base "$BASE_SHA" HEAD)
           node ../base/scripts/harness.ts review-plan --repo . --config-root ../base \
-            --base "$BASE" --head-ref "$HEAD_REF" --ledger "$LEDGER" --reviewer codex
+            --base "$BASE" --head-ref "$HEAD_REF" --ledger "$LEDGER" --reviewer codex \
+            --rebuttals "$REBUTTALS"
 
       - name: 도구 설치 (버전 고정, 설치 스크립트 없이 libsodium)
         run: |

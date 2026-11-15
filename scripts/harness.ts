@@ -22,7 +22,21 @@ import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
 import { REVIEWERS, ledgerData, parseLedgerData, type Ledger, type Reviewer } from './ci/ledger.ts';
-import { githubLedgerApi, loadLedger, recordCiFailure, recordLedger } from './ci/ledger-store.ts';
+import {
+  checkWhere,
+  githubLedgerApi,
+  ledgerFromComments,
+  listComments,
+  recordCiFailure,
+  recordLedger,
+} from './ci/ledger-store.ts';
+import {
+  parseRebuttalData,
+  parseRebuttals,
+  rebuttalData,
+  writeRebuttalInput,
+  type Rebuttal,
+} from './ci/rebuttal.ts';
 import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
 import { pinnedPrompt, writeRoundInput } from './ci/review-round.ts';
 import type { Verdict } from './ci/verdict.ts';
@@ -76,7 +90,7 @@ CI(gates 워크플로, 10.4절):
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
                                            PR 번호를 주면 지적 원장 댓글을 고치고 review-ledger도 기록한다(토큰은 LEDGER_TOKEN)
   review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N>] [--base-sha <sha>]
-              [--reviewer <claude|codex>] [--ledger <base64 JSON>]
+              [--reviewer <claude|codex>] [--ledger <base64 JSON>] [--rebuttals <base64 JSON>]
                                            위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
                                            PR 번호와 base SHA를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
                                            검증자와 PR 번호(원장을 API로 읽고 ledger 출력) 또는 --ledger(받은 원장)를 주면
@@ -161,6 +175,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   files: { type: 'string' },
   'run-url': { type: 'string' },
   ledger: { type: 'string' },
+  rebuttals: { type: 'string' },
   home: { type: 'string' },
   auth: { type: 'string' },
   snap: { type: 'string' },
@@ -440,17 +455,24 @@ async function main(argv: string[]): Promise<number> {
           return 2;
         }
         let ledger: Ledger | null = null;
+        let rebuttals: Rebuttal[] = [];
         if (fromApi) {
           // plan job: 검증 App 봇의 원장 댓글을 읽어 판정 job에 넘긴다(판정 job에는 GitHub 토큰을 주지 않는다)
+          const repoSlug = process.env.GITHUB_REPOSITORY ?? '';
+          const recorderBot = cfg.ci.recorderBot ?? '';
           try {
-            ledger = (
-              await loadLedger({
-                get: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
-                repo: process.env.GITHUB_REPOSITORY ?? '',
-                number,
-                recorderBot: cfg.ci.recorderBot ?? '',
-              })
-            ).ledger;
+            const get = githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL);
+            checkWhere({ repo: repoSlug, number, recorderBot });
+            const comments = await listComments({ get, repo: repoSlug, number });
+            ledger = ledgerFromComments(comments, recorderBot).ledger;
+            if (ledger) {
+              // 반박(10.2절 (4)): PR 작성자의 댓글에서 형식에 맞는 것만 넘긴다
+              const pr = (await get(`repos/${repoSlug}/pulls/${number}`)) as {
+                user?: { login?: unknown };
+              };
+              const author = typeof pr?.user?.login === 'string' ? pr.user.login : '';
+              rebuttals = parseRebuttals({ comments, ledger, author, recorderBot, repo: repoSlug });
+            }
           } catch (e) {
             // 원장이 있는데 읽지 못한 채 판정하면 프롬프트 버전 고정과 라운드 규칙이 조용히 풀린다. 판정 없이 실패한다(fail-closed)
             process.stderr.write(
@@ -458,7 +480,10 @@ async function main(argv: string[]): Promise<number> {
             );
             return 1;
           }
-          appendFileSync(output, `ledger=${ledger ? ledgerData(ledger) : ''}\n`);
+          appendFileSync(
+            output,
+            `ledger=${ledger ? ledgerData(ledger) : ''}\nrebuttals=${rebuttalData(rebuttals)}\n`,
+          );
         } else if (passed) {
           ledger = parseLedgerData(passed);
           if (!ledger) {
@@ -466,7 +491,23 @@ async function main(argv: string[]): Promise<number> {
             return 1;
           }
         }
+        if (!fromApi) {
+          // 판정 job: plan job이 넘긴 반박을 같은 규칙으로 다시 검사한다
+          const parsed = parseRebuttalData(
+            str('rebuttals') ?? '',
+            ledger,
+            process.env.GITHUB_REPOSITORY ?? '',
+          );
+          if (!parsed) {
+            process.stderr.write('review-plan: --rebuttals 값이 반박 형식이 아니다\n');
+            return 1;
+          }
+          rebuttals = parsed;
+        }
         const round = writeRoundInput({ root, ledger, reviewer: reviewer as Reviewer });
+        writeRebuttalInput(root, rebuttals);
+        if (rebuttals.length)
+          log(`review-plan: 반박 ${rebuttals.length}건(${rebuttals.map((r) => r.id).join(', ')})`);
         // 명령 인자 하나의 길이 한도(약 128KB) 안에서만 넘긴다. 넘으면 모르는 것으로 본다(새 P1은 동결된다)
         const encoded = round.changed
           ? Buffer.from(JSON.stringify(round.changed)).toString('base64')
