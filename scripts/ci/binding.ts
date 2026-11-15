@@ -234,7 +234,8 @@ export async function planCarry(o: {
   const keys = (['claude', 'codex'] as const).filter((k) => o.need[k]);
   try {
     out.patch = patchId(o.root, o.base);
-    const lookup = Boolean(o.recorderBot) && out.patch !== '' && o.risk !== 'high' && keys.length;
+    const lookup =
+      Boolean(o.recorderBot) && out.patch !== '' && o.risk !== 'high' && keys.length > 0;
     const candidates = lookup
       ? await fetchCandidates({
           api: o.api,
