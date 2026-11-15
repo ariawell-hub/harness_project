@@ -8,6 +8,8 @@
 node scripts/harness.ts start
 ```
 
+Claude Code 대화 세션은 SessionStart 훅이 이 명령을 실행해 결과를 세션에 넣는다. 결과가 보이면 다시 실행하지 않는다. 보이지 않으면(재개한 세션, 다른 도구, 훅 실패) 직접 실행한다.
+
 1. 열린 `needs-human` 항목을 **가장 먼저** 사용자에게 보고한다. 답변은 제작자 계정의 댓글만 인정한다.
 2. main 체크아웃이 깨끗하고 fast-forward가 되면 `origin/main`까지 당기고(안 되면 이유를 출력한다), 병합된 브랜치의 worktree를 정리하고, 닫힌 Issue의 `claim/<N>` 브랜치를 지운다(스크립트가 한다).
 3. 출력된 "다음 할 일"부터 시작한다. 우선순위: 답을 받은 항목 → 내 PR 조치 → 진행 중인 step → 다음 step → 선점되지 않은 Issue.

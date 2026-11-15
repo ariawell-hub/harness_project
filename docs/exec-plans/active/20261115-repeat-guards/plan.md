@@ -48,6 +48,8 @@ claimed_at: 2026-11-15T14:55:04+09:00 # new-task가 채운다
 
 - 2026-11-15 15:25 step1: 먼저 실패한 테스트(guard 16번 `검사 출력을 파이프로…` not ok, shell.test.ts `parseSequence` export 없음 SyntaxError) → 구현 뒤 guard·shell 30개 통과.
 - 2026-11-15 15:55 step2: 먼저 실패한 테스트(guard 19·20번 not ok, `pr-ready.test.ts`는 `commands/pr-ready.ts` 없음) → 구현 뒤 guard·pr-ready·shell 36개 통과. 도중에 step1 테스트 1건이 깨져(`check; gh pr ready`가 R4가 아닌 승인 요청 규칙으로 판정) 판정 순서를 고쳤다.
+- 2026-11-15 16:25 step3: 먼저 실패한 테스트(`session-hook.test.ts`: `hooks/session.ts` 없음) → 구현 뒤 session-hook·guard 30개 통과. 훅 형식은 Claude Code 훅 문서(code.claude.com/docs/en/hooks)로 확인했다.
+- 2026-11-15 16:35 step3: 문서 갱신 스크립트가 실패했는데 `;`로 이어 둔 탓에 코드만 커밋됐고, 이어진 `check`가 lint(타입 오류 1건)로 실패했다. 완료 처리 전이라 push된 것은 없다. 타입 오류와 문서를 고쳐 다시 커밋했다.
 
 ## 의사결정 로그
 
@@ -62,8 +64,13 @@ claimed_at: 2026-11-15T14:55:04+09:00 # new-task가 채운다
 - 결정(step2): 판정 순서는 금지 규칙(R…) → 검사 순서(R4) → 승인 요청 순서. 승인 요청 규칙은 뒤 명령의 금지 규칙을 가리지 않는다. / 이유: 절차 안내가 R20·R14 같은 차단 메시지를 덮으면 안 된다. step1 테스트(`check; gh pr ready`는 R4)도 그대로 통과한다. / 버린 대안: 명령 순서대로 첫 문제를 반환(step1 테스트의 단언을 바꿔야 한다).
 - 결정(step2): `git -C <worktree> push`(인자 없음)는 지금처럼 세션 위치 기준 R2로 둔다. / 이유: step 금지사항(기존 push 판정을 바꾸지 않는다). 절차서도 브랜치 이름을 적어 push하라고 한다. / 버린 대안: `-C`를 R2 판정에 반영.
 - 결정(step2): 승인 요청 표시 뒤의 병합 커밋은 내용과 무관하게 허용한다. / 이유: 훅에서 병합 대상을 가려내려면 조회가 늘고, 이 규칙은 실수 방지용이다. 승인이 유효한지는 GitHub과 `risk-gate`가 판정한다. / 버린 대안: `origin/main`과의 병합만 허용.
+- 결정(step3): runner 세션은 기존 환경 변수 `HARNESS_SESSION=1`로 구분한다. runner는 `--setting-sources user`와 자체 설정 파일을 써서 프로젝트 훅을 읽지 않지만, 훅 쪽에서도 한 번 더 거른다. / 이유: 설정이 바뀌어도 runner step 세션에서 `start`가 돌지 않게. / 버린 대안: runner 코드에 새 환경 변수 추가.
+- 결정(step3): Stop 훅은 `systemMessage`만 내보낸다. `decision`·`additionalContext`·종료 코드 2는 쓰지 않는다. / 이유: 종료를 막거나 턴을 이어 가게 하면 무한 반복 위험이 있다. / 버린 대안: 봇 차례인 대기(충돌·뒤처짐)면 종료를 막고 계속 일하게 하기.
 
 ## 발견 사항
+
+- Claude Code 훅 문서에서 Stop 훅의 `systemMessage` 표시 여부는 Stop 절 본문으로 확인하지 못했다(공통 필드 설명만 확인). 실제 표시는 병합 뒤 대화 세션에서 확인해야 한다. 표시되지 않아도 세션에는 영향이 없다 → 처리: #78
+- 검사 순서 훅(step1)은 `harness.ts check`·`test` 뒤만 본다. 다른 준비 명령(문서 갱신 스크립트 등)이 실패한 뒤 `;`로 커밋이 이어지는 것은 잡지 못한다(이 step에서 실제로 발생) → 처리: 해당 없음(명령 작성 규칙의 `&&` 원칙으로 다룬다. 훅으로 넓히면 오탐이 많다)
 
 ## 열린 질문
 

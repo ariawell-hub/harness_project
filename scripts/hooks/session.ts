@@ -83,7 +83,7 @@ const realDeps: SessionDeps = {
   runStart: (cwd) => {
     const r = runSync(process.execPath, [HARNESS, 'start'], { cwd, timeoutMs: 100_000 });
     const out = `${r.stdout}\n${r.stderr}`.trim();
-    if (r.timedOut || !out) throw new Error('start 실패');
+    if (!out) throw new Error('start 실패');
     return out;
   },
   listPRs: (cwd) => getGitHub(cwd).listMyOpenPRs(),
