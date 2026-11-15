@@ -61,6 +61,7 @@ review_cycle: quarterly
   - v0.7.26 (2026-11-15): 승인 요청 순서를 도구로 지키게 함. `pr-ready` 명령이 조건(완료 처리, push, main 병합)을 확인한 뒤 초안을 해제하고 worktree에 승인 요청 표시를 남긴다. L1 훅이 `gh pr ready` 직접 실행, 위험도 높음 계획의 초안 아닌 PR 생성, 표시 뒤 새 커밋 push를 막는다. 빠른 피드백이며 보장 수준은 바뀌지 않는다(10.3절 승인은 head에 묶임, 13.2절, Issue #78)
   - v0.7.27 (2026-11-15): Claude Code 세션 훅. 새 세션(`startup`)에서 SessionStart 훅이 `start`를 실행해 결과를 세션 문맥에 넣고, Stop 훅이 열린 내 PR의 대기 상태를 사용자에게 알린다. 알림용이라 실패해도 세션을 막지 않고(fail-open), runner 세션(`HARNESS_SESSION`)에서는 돌지 않는다. L1 금지 훅과 권한 설정은 그대로다(13.1절, Issue #78)
   - v0.7.28 (2026-11-15): 교차 검증 실제 확인 결과와 필수 체크 목록. `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록한다(0.2절). Codex 판정·사전 측정·봉인 재저장·승인 이어받기를 실제 PR에서 확인했다(10.3절, 13.3절, Issue #54)
+  - v0.7.29 (2026-11-15): 지적 원장 연결. 기록 job이 판정을 원장 댓글에 반영하고 `review-ledger`를 기록한다. 원장은 검증 App 봇의 댓글만 인정하고, 두 판정 워크플로의 기록 job은 PR마다 차례로 돈다. 검증자 입력에 원장과 직전 판정 이후 diff를 넣고, 2라운드부터 원장의 1라운드 base SHA의 프롬프트를 쓴다. 검증 App 권한에 Pull requests 쓰기를 더한다(0.2절, 10.1절, 10.2절 (4)·(5), Issue #55)
 
 ### 0.1 전제 조건
 
@@ -94,7 +95,7 @@ review_cycle: quarterly
   - "Actions가 PR을 만들고 승인하도록 허용" 끔
   - 리포 수준 시크릿은 두지 않는다. 모든 시크릿은 역할별 environment(10.4절)에 두고, 각 environment는 main 브랜치에서만 쓰도록 제한한다
 - **일반**: 자동 병합 허용, "Automatically delete head branches" 켬, Dependabot 알림 켬
-- **GitHub App(2단계, 검증 App·인증 저장 App)**: 역할마다 App을 따로 만든다. webhook 끔, "이 계정에만 설치", 대상 리포에만 설치. 권한은 검증 App이 Commit statuses 쓰기·Pull requests 읽기·Contents 읽기(check run을 쓰면 Checks 쓰기), 인증 저장 App이 Environments 읽기·쓰기뿐이다(13.3절). environment에는 Client ID를 변수로, 개인 키를 시크릿으로 넣는다. 개인 키는 App 설정의 Credentials → Key pairs → New key에서 만든다. 옛 Callback URL 칸은 "Redirect URI"로 이름이 바뀌었고, 사용자 로그인을 쓰지 않으므로 필요 없다(2026-11 화면, Q20)
+- **GitHub App(2단계, 검증 App·인증 저장 App)**: 역할마다 App을 따로 만든다. webhook 끔, "이 계정에만 설치", 대상 리포에만 설치. 권한은 검증 App이 Commit statuses 쓰기·Pull requests 읽기와 쓰기(지적 원장 댓글, 10.2절 (4))·Contents 읽기(check run을 쓰면 Checks 쓰기), 인증 저장 App이 Environments 읽기·쓰기뿐이다(13.3절). environment에는 Client ID를 변수로, 개인 키를 시크릿으로 넣는다. 개인 키는 App 설정의 Credentials → Key pairs → New key에서 만든다. 옛 Callback URL 칸은 "Redirect URI"로 이름이 바뀌었고, 사용자 로그인을 쓰지 않으므로 필요 없다(2026-11 화면, Q20)
 - **협업자**: 외주 개발자만 초대한다. 외부 테스터는 초대하지 않는다(14.6절)
 - **운영 단계에 추가**: CODEOWNERS와 코드 오너 리뷰 필수, 봇의 `workflows` 쓰기 권한 회수(10.4절 운영 전환 체크리스트)
 
@@ -697,7 +698,7 @@ pnpm test src/auth/login-guard.spec.ts
 **실행 방식 (CI)**
 - PR head에서 `check`가 통과하면(R16) 판정 job이 위험도에 맞는 검증자를 새 세션으로 실행한다(예: `claude -p`, `codex exec`). 검증자는 셸·MCP·웹 도구 없이, 체크아웃한 PR 범위 안의 읽기 도구만 쓴다(10.4절 판정 job 규칙).
 - **검증자에게 넘기는 입력**: 계획, 수용 기준, diff, `check`·`verify` 결과, 관련 문서, 지적 원장, 정해진 형식의 반박. 작성자의 대화와 추론 과정은 넘기지 않는다.
-- **결과 기록**: 판정 job은 `verdict.json`만 산출물로 낸다. 기록 job이 이를 검사한 뒤 head SHA에 커밋 상태(`review/claude`, `review/codex`)를 기록하고 지적 원장 댓글을 갱신한다. 작성 에이전트는 이 상태를 만들 수 없다(10.4절). 위험도 때문에 실행하지 않은 검증자의 상태는 기록 job이 "해당 없음(통과)"으로 기록한다. 원장(로드맵 2단계③)이 생기기 전에는 기록 job이 검사를 통과한 판정의 요약과 지적을 로그에 한 줄씩 낸다(제어 문자는 공백으로 바꾼다).
+- **결과 기록**: 판정 job은 `verdict.json`만 산출물로 낸다. 기록 job이 이를 검사한 뒤 head SHA에 커밋 상태(`review/claude`, `review/codex`)를 기록하고 지적 원장 댓글을 갱신한다. 작성 에이전트는 이 상태를 만들 수 없다(10.4절). 위험도 때문에 실행하지 않은 검증자의 상태는 기록 job이 "해당 없음(통과)"으로 기록한다. 기록 job은 검사를 통과한 판정의 요약과 지적 본문(근거·제안)을 로그에 한 줄씩 낸다(제어 문자는 공백으로 바꾼다). 원장에는 지적의 위치와 제목만 남는다.
 - **검증 항목**
   - 수용 기준을 충족하는가
   - 정확성: 버그, 엣지 케이스
@@ -749,7 +750,7 @@ pnpm test src/auth/login-guard.spec.ts
 - 중·대 규모 계획은 구현 전에 교차 검증한다(10.1절). 설계 결함을 코드보다 먼저 잡는다.
 - 작성자는 PR을 준비 완료로 바꾸기 전에 10.1절의 검증 항목과 **같은 체크리스트**로 자체 리뷰하고, 결과를 PR에 남긴다.
 - 체크리스트와 검증 프롬프트는 `scripts/cross-review/`에 두고 버전 관리한다. 로컬 점검과 CI 검증이 같은 버전을 쓴다.
-- **버전 고정**: 판정 job은 main의 정의로 돌기 때문에, PR 도중 main의 프롬프트가 바뀔 수 있다. 그래서 1라운드 때의 base SHA를 원장에 적고, 그 PR의 모든 라운드는 그 버전의 프롬프트를 쓴다.
+- **버전 고정**: 판정 job은 main의 정의로 돌기 때문에, PR 도중 main의 프롬프트가 바뀔 수 있다. 그래서 1라운드 때의 base SHA를 원장에 적고, 그 PR의 모든 라운드는 그 버전의 프롬프트를 쓴다. 판정 job이 base 체크아웃에서 그 커밋의 프롬프트 파일을 읽고(`review-prompt`), 읽지 못하면 판정 없이 실패한다. 고정하는 것은 프롬프트뿐이고 스키마와 스크립트는 지금 main의 것이다. 원장이 생기기 전(지적 없는 라운드)에는 지금 프롬프트를 쓴다.
 
 **(3) 지적 등급과 차단 기준**
 
@@ -784,7 +785,14 @@ pnpm test src/auth/login-guard.spec.ts
   - `deferred`: P2·P3이거나, (5)의 동결 규칙에 따라 후속 PR·tech-debt로 넘겼다.
   - `open`: 그 밖의 모든 경우.
 - **반박 형식**: 작성자의 반박은 지적 ID, 근거(커밋·테스트·로그 링크), 길이 제한을 지킨 정해진 형식으로만 받는다. 자유 글은 검증자에게 전달하지 않는다. 주입된 문장이 반박을 타고 검증자에게 가는 것을 막기 위해서다.
-- 병합 조건: P0·P1 지적이 모두 `fixed` 또는 `rejected`이다(`review-ledger`, R16).
+- 병합 조건: P0·P1 지적이 모두 `fixed` 또는 `rejected`이다(`review-ledger`, R16). (5)의 동결 규칙으로 `deferred`로 등록된 P1은 후속으로 넘긴 것이라 막지 않고, 그 수를 상태 설명에 적는다.
+- **구현**(`scripts/ci/ledger.ts`, `ledger-store.ts`, 형식은 `scripts/cross-review/ledger.md`)
+  - 원장 댓글은 사람이 읽는 표와 기계가 읽는 숨은 자료(base64 JSON)로 이뤄진다. 기계는 숨은 자료만 읽는다.
+  - 원장으로 인정하는 댓글은 작성자가 검증 App 봇(`ci.recorderBot`)인 것뿐이다. 봇 PAT과 PR 작성자도 같은 표식의 댓글을 쓸 수 있기 때문이다(ADR-0003). 봇 원장이 여럿이면 가장 오래된 것을 쓴다.
+  - 두 판정 워크플로의 기록 job이 판정을 검사한 뒤 원장을 읽고-고치고-쓰고, 지금 원장으로 `review-ledger`를 head에 기록한다. 판정이 없는 기록(해당 없음, 이어받음, error)도 `review-ledger`를 다시 기록한다. 한 댓글을 고치므로 기록 job은 PR마다 차례로 돈다(job 단위 concurrency `ledger-<PR 번호>`, 취소 없음).
+  - 원장이 없고 지적도 없으면 댓글을 만들지 않고 통과다. 원장을 읽거나 쓰지 못하면 `review-ledger`는 `error`다(fail-closed). 그때도 `review/*`는 기록한다. 원장 댓글용 토큰(Pull requests 쓰기)은 상태용 토큰과 따로 받는다.
+  - 판정 job에는 GitHub 토큰을 주지 않는다. plan job(비밀 없음)이 원장을 읽어 job 출력으로 넘기고, 판정 job은 그 값으로 검증 입력(`.harness-review/ledger.md`, `round-changed.txt`, `round-diff.patch`)을 만든다. plan job이 원장을 읽지 못하면 판정 없이 실패한다(읽지 못한 채 판정하면 프롬프트 버전 고정과 라운드 규칙이 풀린다). 그때 `review/*`는 `error`로 남고 다시 실행하면 된다.
+  - `check`가 실패로 끝나면 기록 전용 job(`ci-failure`)이 실패한 실행을 원장에 남긴다(최근 30건). 이 job도 같은 concurrency 그룹에서 돈다.
 
 **(5) 라운드 규칙 (지적 동결)**
 
@@ -795,6 +803,7 @@ pnpm test src/auth/login-guard.spec.ts
   - 재현 job으로 재현된 P1
   - 테스트로 재현하기 어려운 보안·정적 분석 P1 중, 구체 근거가 있고 다른 검증자가 동의한 것
 - 나머지는 `deferred`로 등록한다. 이렇게 하면 뒤늦게 발견한 실제 결함은 놓치지 않으면서, 라운드마다 목표가 움직이는 것은 막는다.
+- 라운드는 검증자마다 센다(앞 라운드에 판정을 내지 못한 검증자의 첫 판정은 1라운드다). "바뀌지 않은 코드"는 그 검증자의 직전 판정 head 이후 바뀌지 않은 파일로 판정한다. 바뀐 파일 목록을 알 수 없으면(직전 head가 없어졌거나 목록이 너무 크다) 새 P1을 모두 동결한다.
 
 **(6) 수정 규칙**
 
@@ -839,7 +848,7 @@ pnpm test src/auth/login-guard.spec.ts
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
 | `revert-check` | revert PR 전용. diff가 대상 커밋을 정확히 되돌리는지 확인하고, 통과하면 `review/*`를 대신한다 | 아래 "병합 후 main CI가 실패하면" |
 
-- `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`·`review-ledger`·`revert-check`는 Issue #54·#55·#57에서 같은 방식으로 더한다.
+- `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`(Issue #54)와 `review-ledger`(Issue #55)는 판정 워크플로의 기록 job이 같은 방식으로 쓴다. `revert-check`는 Issue #57에서 더한다.
 - `risk-gate`의 제작자 승인은 리뷰가 달리거나 철회될 때 다시 판정한다: `review-trigger` 워크플로(`pull_request_review`, PR 쪽 정의라 비밀·권한 없음)가 끝나면 `gates`가 `workflow_run`(main 정의)으로 돌고, 페이로드 대신 head SHA로 API를 조회해 열린 같은 리포 PR의 현재 head에만 판정한다.
 
 **승인 결속 기준**

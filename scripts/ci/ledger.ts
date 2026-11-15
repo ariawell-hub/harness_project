@@ -240,10 +240,20 @@ export function renderLedger(l: Ledger): string {
     for (const f of l.ciFailures) lines.push(`- \`${f.head.slice(0, 12)}\` ${cell(f.run)}`);
     lines.push('');
   }
-  lines.push(
-    `<!-- harness-ledger-data:${Buffer.from(JSON.stringify(l), 'utf8').toString('base64')} -->`,
-  );
+  lines.push(`<!-- harness-ledger-data:${ledgerData(l)} -->`);
   return lines.join('\n');
+}
+
+/** 숨은 자료만: base64 JSON. job 사이에 원장을 넘길 때 쓴다 */
+export function ledgerData(l: Ledger): string {
+  return Buffer.from(JSON.stringify(l), 'utf8').toString('base64');
+}
+
+/** ledgerData가 만든 값을 읽는다. 형식이 다르면 null */
+export function parseLedgerData(data: string): Ledger | null {
+  return /^[A-Za-z0-9+/=]+$/.test(data)
+    ? parseLedger(`<!-- harness-ledger-data:${data} -->`)
+    : null;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>

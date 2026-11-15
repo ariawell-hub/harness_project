@@ -425,15 +425,18 @@ test('judge-claude.yml: check 완료로 시작, SHA 고정, 최상위 권한 없
   for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
   assert.match(JUDGE_CLAUDE, /^permissions: \{\}$/m);
   assert.doesNotMatch(JUDGE_CLAUDE, /cache/i);
-  // 쓰기는 검증 App 토큰의 statuses뿐이다
+  // 쓰기는 검증 App 토큰의 statuses와 원장 댓글(pull-requests)뿐이다
   const writes = [...JUDGE_CLAUDE.matchAll(/^\s*(\S+): write\s*$/gm)].map((m) => m[1]);
-  assert.deepEqual(writes, ['permission-statuses']);
+  assert.deepEqual([...new Set(writes)].sort(), [
+    'permission-pull-requests',
+    'permission-statuses',
+  ]);
   assert.doesNotMatch(JUDGE_CLAUDE, /upload-artifact/);
 });
 
 test('judge-claude.yml: environment는 job마다 하나, 비밀은 자기 job에만', () => {
   const j = jobs(JUDGE_CLAUDE);
-  assert.deepEqual([...j.keys()], ['plan', 'judge', 'record']);
+  assert.deepEqual([...j.keys()], ['plan', 'judge', 'record', 'failed', 'ci-failure']);
   assert.doesNotMatch(j.get('plan')!, /environment:|secrets\.|vars\./);
   assert.match(j.get('judge')!, /^ {4}environment: judge-claude$/m);
   assert.match(j.get('record')!, /^ {4}environment: recorder$/m);
@@ -464,7 +467,10 @@ test('judge-claude.yml: 허용 목록 도구·설정 무시 인자로 실행하�
     assert.ok(judge.includes(flag), flag);
   assert.doesNotMatch(judge, /disallowedTools|bypassPermissions|dangerously/);
   assert.match(judge, /@anthropic-ai\/claude-code@\d+\.\d+\.\d+\b/);
-  assert.match(judge, /base\/scripts\/cross-review\/prompt\.md/);
+  // 프롬프트는 base 체크아웃에서만 읽는다(원장이 있으면 1라운드 base SHA의 버전)
+  assert.match(judge, /review-prompt --base-dir base --files prompt\.md/);
+  assert.match(judge, /--prompt-base "\$PROMPT_BASE"/);
+  assert.match(judge, /claude -p "\$\(cat "\$RUNNER_TEMP\/prompt\.md"\)"/);
   assert.match(judge, /base\/scripts\/cross-review\/verdict\.schema\.json/);
   assert.match(judge, /claude-scan/);
   assert.match(judge, /core\.symlinks false/);
@@ -490,7 +496,8 @@ test('judge-codex.yml: check 완료로 시작, 워크플로 단위 직렬화, SH
     JUDGE_CODEX,
     /^concurrency:\n {2}group: codex-auth\n {2}cancel-in-progress: false\n {2}queue: max$/m,
   );
-  assert.equal([...JUDGE_CODEX.matchAll(/concurrency:/g)].length, 1);
+  // 그 밖의 concurrency는 기록 job의 원장 직렬화 하나뿐이다
+  assert.equal([...JUDGE_CODEX.matchAll(/concurrency:/g)].length, 2);
   const uses = [...JUDGE_CODEX.matchAll(/^\s*(?:- )?uses:\s*(\S+)/gm)].map((m) => m[1]);
   assert.ok(uses.length >= 10);
   for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
@@ -498,7 +505,11 @@ test('judge-codex.yml: check 완료로 시작, 워크플로 단위 직렬화, SH
   assert.doesNotMatch(JUDGE_CODEX, /cache/i);
   assert.doesNotMatch(JUDGE_CODEX, /upload-artifact/);
   const writes = [...JUDGE_CODEX.matchAll(/^\s*(\S+): write\s*$/gm)].map((m) => m[1]);
-  assert.deepEqual(writes.sort(), ['permission-environments', 'permission-statuses']);
+  assert.deepEqual(writes.sort(), [
+    'permission-environments',
+    'permission-pull-requests',
+    'permission-statuses',
+  ]);
   for (const b of runBlocks(JUDGE_CODEX)) assert.doesNotMatch(b, /\$\{\{/, b);
 });
 
@@ -561,7 +572,8 @@ test('judge-codex.yml: 설정 → 사전 측정 → 판정 → 유출 검사 →
   assert.match(judge, /libsodium-wrappers@\d+\.\d+\.\d+ /);
   assert.match(judge, /--ignore-scripts/);
   assert.match(judge, /core\.symlinks false/);
-  assert.match(judge, /base\/scripts\/cross-review\/prompt\.md/);
+  assert.match(judge, /review-prompt --base-dir base --files prompt\.md,prompt-codex\.md/);
+  assert.match(judge, /--prompt-base "\$PROMPT_BASE"/);
   // 봉인 단계
   const seal = judge.slice(judge.lastIndexOf('- name', judge.indexOf('codex-auth seal')));
   assert.match(seal, /if: always\(\) && needs\.pubkey\.outputs\.key != ''/);
@@ -590,4 +602,74 @@ test('judge-*.yml: 이어받으면 판정 job을 돌리지 않고 기록 job이 
     // 판정 job은 토큰이 없어 이어받기를 판정하지 않는다(입력만 다시 만든다)
     assert.doesNotMatch(j.get('judge')!, /--pr-number/);
   }
+});
+
+// ---------- 지적 원장 연결 (10.2절 (4)·(5)) ----------
+
+test('judge-*.yml: 기록 job이 PR마다 차례로 원장을 고치고, 원장 토큰이 없어도 review/*는 기록한다', () => {
+  for (const [wf, who] of [
+    [JUDGE_CLAUDE, 'claude'],
+    [JUDGE_CODEX, 'codex'],
+  ] as const) {
+    const j = jobs(wf);
+    const record = j.get('record')!;
+    assert.match(
+      record,
+      /^ {4}concurrency:\n {6}group: ledger-\$\{\{ needs\.plan\.outputs\.number \|\| github\.run_id \}\}\n {6}cancel-in-progress: false\n {6}queue: max$/m,
+    );
+    // 원장 토큰은 따로 받고, 실패해도 다음 단계(review/* 기록)가 돈다
+    const ledgerStep = record.slice(
+      record.indexOf('id: ledger'),
+      record.indexOf('- name: record-review'),
+    );
+    assert.match(ledgerStep, /continue-on-error: true/);
+    assert.match(ledgerStep, /permission-pull-requests: write/);
+    assert.doesNotMatch(ledgerStep, /permission-statuses/);
+    const statusStep = record.slice(record.indexOf('id: app'), record.indexOf('id: ledger'));
+    assert.doesNotMatch(statusStep, /continue-on-error|pull-requests/);
+    assert.match(record, /LEDGER_TOKEN: \$\{\{ steps\.ledger\.outputs\.token \}\}/);
+    assert.match(record, /PROMPT_BASE: \$\{\{ github\.sha \}\}/);
+    assert.match(
+      record,
+      /--config-root base --pr-number "\$PR_NUMBER" --prompt-base "\$PROMPT_BASE" \\\n\s+--round-changed "\$ROUND_CHANGED"/,
+    );
+    assert.match(record, /harness\.config\.json/);
+    // plan job이 원장을 읽어 넘기고, 판정 job은 토큰 없이 그 값으로 입력을 만든다
+    const plan = j.get('plan')!;
+    assert.match(plan, new RegExp(`--reviewer ${who}\\n`));
+    assert.match(plan, /ledger: \$\{\{ steps\.plan\.outputs\.ledger \}\}/);
+    const judge = j.get('judge')!;
+    assert.match(judge, new RegExp(`--ledger "\\$LEDGER" --reviewer ${who}`));
+    assert.match(judge, /LEDGER: \$\{\{ needs\.plan\.outputs\.ledger \}\}/);
+    assert.doesNotMatch(judge, /pull-requests|LEDGER_TOKEN/);
+    // 프롬프트 버전을 읽으려면 base의 전체 이력이 필요하다
+    assert.match(judge, /path: base\n(?:\s+#[^\n]*\n)*\s+fetch-depth: 0/);
+  }
+});
+
+test('judge-claude.yml: check가 실패하면 기록 전용 job이 원장에 실패를 남긴다(LLM·PR 트리 없음)', () => {
+  const j = jobs(JUDGE_CLAUDE);
+  // PR을 정하는 job은 비밀이 없다
+  const failed = j.get('failed')!;
+  assert.match(failed, /workflow_run\.conclusion == 'failure'/);
+  assert.match(failed, /workflow_run\.event == 'pull_request'/);
+  assert.match(failed, /head_repository\.full_name == github\.repository/);
+  assert.doesNotMatch(failed, /environment:|secrets\.|vars\.|: write|path: pr\b/);
+  const ci = j.get('ci-failure')!;
+  assert.match(ci, /^ {4}needs: failed$/m);
+  assert.match(ci, /^ {4}if: needs\.failed\.outputs\.skip == 'false'$/m);
+  assert.match(ci, /^ {4}environment: recorder$/m);
+  // 기록 job과 같은 그룹에서 차례로 돈다
+  assert.match(
+    ci,
+    /^ {4}concurrency:\n {6}group: ledger-\$\{\{ needs\.failed\.outputs\.number \}\}\n {6}cancel-in-progress: false\n {6}queue: max$/m,
+  );
+  assert.deepEqual(
+    [...new Set([...ci.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]))],
+    ['RECORDER_APP_KEY'],
+  );
+  assert.match(ci, /ledger-ci-failure --config-root base/);
+  assert.doesNotMatch(ci, /path: pr\b|claude -p|npm install|permission-statuses|GH_TOKEN/);
+  // 실패한 실행의 URL은 run 블록이 아니라 env로 넘긴다
+  assert.match(ci, /RUN_URL: .*github\.event\.workflow_run\.id/);
 });
