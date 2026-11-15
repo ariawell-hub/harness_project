@@ -84,6 +84,9 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
   - main이 PR #76 병합으로 나아간 뒤 `origin/main`을 병합한 head 26876ba: 두 워크플로 모두 `plan`이 `이어받음 ← 0220bd33c5b0`을 내고 판정 job(`judge`, Codex는 `pubkey`·`store`도)은 건너뛰었다. `record`가 `이어받음 0220bd33c5b0 patch:c0070d71…`을 success로 기록했다(작성자 `harness-recorder[bot]`). PR API의 `base.sha`는 main 최신이었다(merge-base가 병합한 main 커밋이라 patch가 같았다).
   - 공백만 바꾼 head ce86556(로컬에서 잰 patch-id는 전과 같음): `다시 검증 — PR 파일의 내용이 다르다`로 두 검증자가 다시 판정했다. 공백은 되돌렸다.
 - 2026-11-15 step4: 문서 갱신. 설계서 0.2절 필수 체크 목록, 10.3절·13.3절 실제 확인 결과(v0.7.28, main 병합 때 v0.7.25에서 다시 매김), 절차서 5절 필수 체크 문장, TD-1 비고. Codex 실행 중 인증 갱신은 관찰하지 못했다(모든 실행에서 `changed=false`). TD-1 비고에 확인 방법을 남겼다.
+- 2026-11-15 step4: 제작자가 `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록했다(제작자 대화 통보). 첫 통보 때는 보호 규칙에 반영되지 않아(`required-checks` 실패, 등록 5개) 저장을 다시 요청했고, 두 번째 통보 뒤 확인했다.
+- 2026-11-15 step4: AC 실행 결과. `node --test scripts/test/protection.test.ts scripts/test/binding.test.ts` 종료 코드 0(테스트 23개, 실패 0개). `node scripts/harness.ts required-checks` 종료 코드 0, 7개 모두 통과(`check` 출처 actions 15368, `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex` 출처 recorder 5764201). `origin/main`(#79~#82) 병합 뒤 `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step4: 제작자가 완료 처리 전의 head 625ddf0을 두 번 승인했다. 그 head는 main과 충돌했고 완료 처리 전이라 병합할 수 없어, 제작자에게 먼저 알린 뒤 main 병합·완료 처리 커밋을 올렸다(승인은 새 head에서 다시 받는다).
 
 ## 의사결정 로그
 
