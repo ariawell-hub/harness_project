@@ -74,6 +74,8 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step3: 고친 뒤 로컬 사전 점검을 다시 돌려 P1 하나를 더 받았다: `samePrContent`가 PR 파일 이름을 `git diff -- <파일>`의 pathspec으로 넘겨, 이름이 `:!a.txt`인 파일 하나로 비교 대상이 비어 검사가 무력화된다. 테스트를 먼저 더해 실패를 확인하고, 파일 이름을 인자로 넘기지 않고 두 head 사이의 변경 목록과 비교하게 고쳤다. 함께 받은 P2도 반영했다: 이어받기용 PR 파일은 `--no-renames` 기준, patch-id는 diff를 바이트 그대로 넘김(UTF-8이 아닌 텍스트 테스트), 판정 기록이 없는 head를 건너뛰는 이유를 주석·설계서에 적음. 계획 수정(수용 기준 6 문구, step4 추가)은 구축 단계라 계획 재검증(G1, `planReview.required: false`)이 돌지 않는다. `loadConfig` 테스트의 위치(P3)는 그대로 뒀다(설정 테스트 파일이 따로 없다).
 - 2026-11-15 step3: 세 번째 로컬 사전 점검은 승인(P0·P1 없음, P2 4, P3 2)이었다. P2 중 "같은 head를 다시 돌릴 때 그 head의 실패 판정을 보지 않고 옛 승인을 이어받는다"는 테스트를 먼저 더해 고쳤다(`fetchCandidates`가 지금 head도 후보에 넣는다). 나머지(`review-plan` 연결부 테스트, `base.sha` 최신 여부 확인, `init` 안내의 필수 체크 목록)는 step4 작업 4로 넘겼다. 복원 실패 문구의 길이·줄 수 출력(P3)은 진단에 필요해 그대로 둔다.
 - 2026-11-15 step3: AC 실행 결과 — `node --test scripts/test/binding.test.ts scripts/test/verdict.test.ts scripts/test/protection.test.ts` 통과, `grep -q "export function carryOver" scripts/ci/binding.ts`·`grep -q "recorderBot" harness.config.json` 통과. 이어받기는 이 PR(위험도 높음)에서 일어나지 않는다. `review-plan`을 이 브랜치에 돌려 `patch=<40자>`, `carry_claude=`, `carry_codex=`(높음이라 다시 검증)를 확인했다. 실제 이어받기 확인과 필수 체크 등록은 step4.
+- 2026-11-15: PR #68(step3)이 제작자 승인 뒤 병합됐다. 제작자가 `CODEX_AUTH_JSON`을 다시 등록했다(봇 API의 갱신 시각 2026-11-15T03:40:16Z). 앞서 들어 있던 값은 인증 파일이 아니라 로그인 URL이었다(제작자 확인).
+- 2026-11-15 step4: `planCarry` 테스트를 먼저 써서 실패 확인(export 없음) → `review-plan`의 이어받기 연결부를 `scripts/ci/binding.ts`의 `planCarry`로 옮기고 가짜 API로 성공·위험도 높음·봇 설정 없음·조회 실패를 테스트했다. `init` 안내의 필수 체크 목록에 `review/*`를 더했다.
 
 ## 의사결정 로그
 

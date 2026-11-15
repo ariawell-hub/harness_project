@@ -7,13 +7,7 @@ import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.t
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
-import {
-  carryOver,
-  changedOnBaseSince,
-  fetchCandidates,
-  patchId,
-  samePrContent,
-} from './ci/binding.ts';
+import { planCarry } from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
   diffAuth,
@@ -26,7 +20,7 @@ import {
 import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
-import { changedFiles as prChangedFiles, parseReviews } from './gates/risk-gate.ts';
+import { parseReviews } from './gates/risk-gate.ts';
 import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
@@ -356,50 +350,21 @@ async function main(argv: string[]): Promise<number> {
       const number = Number(str('pr-number'));
       const baseSha = str('base-sha');
       if (Number.isInteger(number) && number > 0 && baseSha) {
-        const carried = { claude: '', codex: '' };
-        let patch = '';
-        try {
-          patch = patchId(root, base);
-          const bot = cfg.ci.recorderBot ?? '';
-          const need = (['claude', 'codex'] as const).filter((k) => r[k]);
-          const candidates =
-            bot && patch && r.risk !== 'high' && need.length
-              ? await fetchCandidates({
-                  api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
-                  repo: process.env.GITHUB_REPOSITORY ?? '',
-                  number,
-                  headSha: git(['rev-parse', 'HEAD'], root),
-                  recorderBot: bot,
-                  contexts: need.map((k) => `review/${k}`),
-                })
-              : [];
-          // rename의 원본 경로도 PR 파일이다(겹침 검사와 같은 기준: --no-renames)
-          const prFiles = prChangedFiles(root, base).map((f) => f.path);
-          for (const k of need) {
-            const c = carryOver({
-              patch,
-              risk: r.risk,
-              prFiles,
-              candidates,
-              changedOnBaseSince: (old) => changedOnBaseSince(root, baseSha, old),
-              samePrContent: (old) => samePrContent(root, old, prFiles),
-              recorderBot: bot,
-              context: `review/${k}`,
-            });
-            if ('from' in c) carried[k] = c.from;
-            log(
-              `review-plan: review/${k} ${'from' in c ? `이어받음 ← ${c.from.slice(0, 12)}` : `다시 검증 — ${c.no}`}`,
-            );
-          }
-        } catch (e) {
-          const msg = (e instanceof Error ? e.message : String(e)).split('\n')[0].slice(0, 200);
-          log(`review-plan: 이어받기를 판정하지 못했다(다시 검증) — ${msg}`);
-          carried.claude = '';
-          carried.codex = '';
-        }
+        const c = await planCarry({
+          root,
+          base,
+          baseSha,
+          number,
+          repo: process.env.GITHUB_REPOSITORY ?? '',
+          risk: r.risk,
+          need: { claude: r.claude, codex: r.codex },
+          recorderBot: cfg.ci.recorderBot ?? '',
+          api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+        });
+        for (const n of c.notes) log(`review-plan: ${n}`);
         appendFileSync(
           output,
-          `patch=${patch}\ncarry_claude=${carried.claude}\ncarry_codex=${carried.codex}\n`,
+          `patch=${c.patch}\ncarry_claude=${c.claude}\ncarry_codex=${c.codex}\n`,
         );
       }
       log(
