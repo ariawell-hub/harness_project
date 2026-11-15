@@ -1,0 +1,12 @@
+{
+  "plan": "20261115-runner-pr-flow",
+  "steps": [
+    { "step": 0, "name": "pr-state", "status": "pending" },
+    { "step": 1, "name": "pick-by-state", "status": "pending" },
+    { "step": 2, "name": "plan-review", "status": "pending" },
+    { "step": 3, "name": "review-fix", "status": "pending" },
+    { "step": 4, "name": "rebuttal-evidence", "status": "pending" },
+    { "step": 5, "name": "divergence", "status": "pending" },
+    { "step": 6, "name": "workers-notify", "status": "pending" }
+  ]
+}
