@@ -8,7 +8,6 @@ import { runSync } from '../lib/exec.ts';
 import { git, gitTry } from '../lib/git.ts';
 import { SHA_RE } from './results.ts';
 
-const TAG_LEN = 16;
 const MAX_DESCRIPTION = 140;
 
 /** merge-base 대비 diff의 patch-id. 변경이 없으면 '' */
@@ -24,17 +23,20 @@ export function patchId(root: string, base: string): string {
   return /^[0-9a-f]{40}$/.test(id) ? id : '';
 }
 
-const validPatch = (patch: string) => /^[0-9a-f]{16,40}$/.test(patch);
+const validPatch = (patch: string) => /^[0-9a-f]{40}$/.test(patch);
 
-/** description 끝에 ` patch:<앞 16자>`를 붙인다. 상태 description 상한(140자) 안에 들도록 앞을 줄인다 */
+/**
+ * description 끝에 ` patch:<id 전체>`를 붙인다. 상태 description 상한(140자) 안에 들도록 앞을 줄인다.
+ * id를 줄여 적지 않는다. PR 작성자는 두 diff를 모두 정할 수 있어, 앞부분만 같은 쌍을 만들 수 있다
+ */
 export function withPatch(description: string, patch: string): string {
   if (!validPatch(patch)) return description;
-  const tag = ` patch:${patch.slice(0, TAG_LEN)}`;
+  const tag = ` patch:${patch}`;
   return description.slice(0, MAX_DESCRIPTION - tag.length) + tag;
 }
 
 export function patchOf(description: string): string | null {
-  return /(?:^| )patch:([0-9a-f]{16})$/.exec(description)?.[1] ?? null;
+  return /(?:^| )patch:([0-9a-f]{40})$/.exec(description)?.[1] ?? null;
 }
 
 /**
@@ -96,7 +98,7 @@ export function carryOver(o: CarryOptions): { from: string } | { no: string } {
     // 가장 최근에 판정된 head의 마지막 상태만 근거로 쓴다
     const last = mine[0];
     if (last.state !== 'success') return { no: `앞선 head의 마지막 판정이 success가 아니다` };
-    if (patchOf(last.description) !== o.patch.slice(0, TAG_LEN))
+    if (patchOf(last.description) !== o.patch)
       return { no: '앞선 승인의 patch가 다르다(또는 적혀 있지 않다)' };
     const changed = o.changedOnBaseSince(c.sha);
     if (changed === null)

@@ -45,7 +45,7 @@ test('restoreAuth: auth.json을 0600으로, 폴더를 0700으로 쓰고 값 없�
 
 test('restoreAuth: JSON이 아니거나 tokens가 없으면 거부하고 오류에 값을 넣지 않는다', () => {
   const home = tmp('codex-auth-');
-  assert.throws(() => restoreAuth('', home), /JSON이 아니다/);
+  assert.throws(() => restoreAuth('', home), /비어 있다/);
   assert.throws(
     () => restoreAuth(`{"k":"${fake('x')}"`, home),
     (e: Error) => {
@@ -138,4 +138,27 @@ test('sealAuth: 공개키 형식과 모듈 폴더를 확인한다(봉인 자체�
     sealAuth(f, Buffer.alloc(32).toString('base64'), path.join(home, 'none')),
     /libsodium/,
   );
+});
+
+test('restoreAuth: 터미널 폭 줄바꿈이 값 안에 섞인 붙여넣기는 줄바꿈을 빼고 읽는다', () => {
+  const home = path.join(tmp('codex-auth-'), 'codex-home');
+  const one = JSON.stringify(AUTH);
+  const cut = one.indexOf('FAKEFAKE') + 4;
+  const wrapped = `${one.slice(0, cut)}\r\n${one.slice(cut)}\n`;
+  assert.throws(() => JSON.parse(wrapped));
+  restoreAuth(wrapped, home);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(home, 'auth.json'), 'utf8')), AUTH);
+});
+
+test('restoreAuth: 읽지 못하면 값 없이 모양(길이, 줄 수, 첫 글자 종류)만 알려 준다', () => {
+  const home = tmp('codex-auth-');
+  assert.throws(() => restoreAuth('  ', home), /비어 있다/);
+  assert.throws(
+    () => restoreAuth(`/Users/x/${fake('p')}/auth.json`, home),
+    (e: Error) => {
+      assert.ok(!e.message.includes('FAKEFAKE'));
+      return /JSON이 아니다\(길이 \d+자, 줄 1개, 첫 글자: 그 밖\)/.test(e.message);
+    },
+  );
+  assert.throws(() => restoreAuth('{"tokens": {"a": "b"', home), /첫 글자: \{/);
 });

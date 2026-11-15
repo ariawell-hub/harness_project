@@ -57,17 +57,20 @@ test('patchId: 충돌을 해결하며 PR 변경이 바뀌면 달라진다', () =
   assert.notEqual(patchId(root, mergeBase(root)), before);
 });
 
-test('withPatch·patchOf: description 끝에 patch 앞 16자를 붙이고 140자를 넘기지 않는다', () => {
+test('withPatch·patchOf: description 끝에 patch 전체(40자)를 붙이고 140자를 넘기지 않는다', () => {
   const id = 'ab12'.repeat(10);
   const d = withPatch('승인 (지적 없음)', id);
-  assert.equal(d, '승인 (지적 없음) patch:ab12ab12ab12ab12');
-  assert.equal(patchOf(d), 'ab12ab12ab12ab12');
+  assert.equal(d, `승인 (지적 없음) patch:${id}`);
+  assert.equal(patchOf(d), id);
+  // 잘린 id는 붙이지도 읽지도 않는다(앞부분만 같은 다른 diff를 만들 수 있다)
+  assert.equal(withPatch('승인', id.slice(0, 16)), '승인');
+  assert.equal(patchOf(`승인 patch:${id.slice(0, 16)}`), null);
   const long = withPatch('가'.repeat(200), id);
   assert.ok(long.length <= 140);
-  assert.equal(patchOf(long), 'ab12ab12ab12ab12');
+  assert.equal(patchOf(long), id);
   assert.equal(patchOf('승인 (지적 없음)'), null);
-  assert.equal(patchOf('patch:ab12ab12ab12ab12 뒤에 글'), null);
-  assert.equal(patchOf('x patch:ZZ12ab12ab12ab12'), null);
+  assert.equal(patchOf(`patch:${id} 뒤에 글`), null);
+  assert.equal(patchOf(`x patch:ZZ${id.slice(2)}`), null);
   assert.equal(withPatch('승인', ''), '승인');
 });
 
@@ -124,6 +127,8 @@ test('carryOver: 위험도 높음, patch 없음·다름, 겹침, 조회 실패�
   assert.match(no(carry({ risk: 'high' })), /높음/);
   assert.match(no(carry({ patch: '' })), /patch/);
   assert.match(no(carry({ patch: 'deadbeef'.repeat(5) })), /patch/);
+  // 앞 16자만 같은 patch는 다른 변경이다
+  assert.match(no(carry({ patch: PATCH.slice(0, 16) + 'deadbeef'.repeat(3) })), /patch/);
   assert.match(no(carry({ changedOnBaseSince: () => ['x.txt', 'a.txt'] })), /겹친다/);
   assert.match(no(carry({ changedOnBaseSince: () => null })), /조회|조상/);
   assert.match(no(carry({ candidates: [] })), /없다/);
@@ -193,7 +198,7 @@ function rec(over: Partial<Parameters<typeof recordReview>[0]>): Promise<StatusP
 test('recordReview: 승인에는 patch를 붙이고, 실패에는 붙이지 않는다', async () => {
   const a = await rec({ patch: PATCH });
   assert.equal(a.state, 'success');
-  assert.equal(patchOf(a.description), PATCH.slice(0, 16));
+  assert.equal(patchOf(a.description), PATCH);
   const f = await rec({
     patch: PATCH,
     raw: JSON.stringify({ verdict: 'request_changes', risk: 'low', summary: 'x', findings: [] }),
@@ -209,11 +214,41 @@ test('recordReview: 승인에는 patch를 붙이고, 실패에는 붙이지 않�
 test('recordReview: 이어받기는 판정 없이 success, 원래 SHA와 patch를 적는다', async () => {
   const c = await rec({ raw: null, carriedFrom: '1'.repeat(40), patch: PATCH });
   assert.equal(c.state, 'success');
-  assert.match(c.description, /^이어받음 111111111111 patch:c0ffee00c0ffee00$/);
+  assert.equal(c.description, `이어받음 111111111111 patch:${PATCH}`);
   // 원래 SHA나 patch가 없거나 틀리면 error
   assert.equal((await rec({ raw: null, carriedFrom: 'zzz', patch: PATCH })).state, 'error');
   assert.equal((await rec({ raw: null, carriedFrom: '1'.repeat(40) })).state, 'error');
   // 필요 없는 검증자는 이어받기보다 "해당 없음"이 먼저다
   const n = await rec({ needed: false, raw: null, carriedFrom: '1'.repeat(40), patch: PATCH });
   assert.match(n.description, /해당 없음/);
+});
+
+test('recordReview: 검사를 통과한 판정의 지적을 onVerdict로 넘긴다(기록 job 로그용)', async () => {
+  const seen: unknown[] = [];
+  const raw = JSON.stringify({
+    verdict: 'request_changes',
+    risk: 'normal',
+    summary: '요약',
+    findings: [
+      {
+        severity: 'P1',
+        file: 'a.ts',
+        line: 3,
+        title: '제목',
+        evidence: '근거',
+        suggestion: '제안',
+      },
+    ],
+  });
+  await rec({ raw, onVerdict: (v) => seen.push(v) });
+  assert.equal(seen.length, 1);
+  // 형식 오류·이어받기·해당 없음에서는 부르지 않는다
+  await rec({ raw: '{"verdict":"x"}', onVerdict: (v) => seen.push(v) });
+  await rec({
+    raw: null,
+    carriedFrom: '1'.repeat(40),
+    patch: PATCH,
+    onVerdict: (v) => seen.push(v),
+  });
+  assert.equal(seen.length, 1);
 });

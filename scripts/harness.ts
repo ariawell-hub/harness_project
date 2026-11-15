@@ -315,6 +315,15 @@ async function main(argv: string[]): Promise<number> {
         post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
         patch: str('patch') || undefined,
         carriedFrom: str('carried-from') || undefined,
+        // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장(#55) 전에는 기록 job 로그가 지적을 보는 곳이다
+        onVerdict: (v) => {
+          log(`record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${v.summary}`);
+          for (const f of v.findings) {
+            log(`  [${f.severity}] ${f.file}:${f.line} ${f.title}`);
+            log(`    근거: ${f.evidence}`);
+            log(`    제안: ${f.suggestion}`);
+          }
+        },
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
       return p.state === 'error' ? 1 : 0;
@@ -379,7 +388,7 @@ async function main(argv: string[]): Promise<number> {
         }
         appendFileSync(
           output,
-          `patch=${patch.slice(0, 16)}\ncarry_claude=${carried.claude}\ncarry_codex=${carried.codex}\n`,
+          `patch=${patch}\ncarry_claude=${carried.claude}\ncarry_codex=${carried.codex}\n`,
         );
       }
       log(
