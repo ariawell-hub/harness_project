@@ -7,10 +7,13 @@ import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.t
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
+import { scanClaudeRun } from './ci/claude-scan.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
 import { githubStatusPoster, recordReview, recordStatuses } from './ci/record.ts';
+import { writeReviewInput } from './ci/review-input.ts';
+import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
@@ -54,6 +57,10 @@ CI(gates 워크플로, 10.4절):
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
                 --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
+  review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치>
+                                           위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
+  claude-scan --log <stream-json> --pr <pr 폴더> --out <verdict.json>
+                                           Claude 실행 기록 유출 검사. 문제가 없을 때만 판정을 쓴다(비밀은 SCAN_SECRETS)
   required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
 
 설정:
@@ -108,6 +115,8 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'pr-body': { type: 'string' },
   event: { type: 'string' },
   'body-out': { type: 'string' },
+  log: { type: 'string' },
+  pr: { type: 'string' },
   'repo-slug': { type: 'string' },
   'target-url': { type: 'string' },
   mode: { type: 'string' },
@@ -272,6 +281,50 @@ async function main(argv: string[]): Promise<number> {
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
       return p.state === 'error' ? 1 : 0;
+    }
+    case 'review-plan': {
+      const root = path.resolve(str('repo') ?? repoInfo(cwd).root);
+      const cfg = loadConfig(path.resolve(str('config-root') ?? root));
+      const base = str('base');
+      const branch = str('head-ref');
+      const output = process.env.GITHUB_OUTPUT;
+      if (!base || !branch || !output) {
+        process.stderr.write(
+          'review-plan: --base, --head-ref와 환경 변수 GITHUB_OUTPUT이 필요하다\n',
+        );
+        return 2;
+      }
+      const r = planReview({ root, cfg, base, branch });
+      writeReviewInput({ root, base, branch, risk: r.risk, reasons: r.reasons });
+      appendFileSync(output, `risk=${r.risk}\nclaude=${r.claude}\ncodex=${r.codex}\n`);
+      log(
+        `review-plan: 위험도 ${r.risk}, 작성 도구 ${r.author || '알 수 없음'} → claude=${r.claude} codex=${r.codex}`,
+      );
+      for (const why of r.reasons) log(`  - ${why}`);
+      return 0;
+    }
+    case 'claude-scan': {
+      const logFile = str('log');
+      const prDir = str('pr');
+      const out = str('out');
+      if (!logFile || !prDir || !out) {
+        process.stderr.write('claude-scan: --log, --pr, --out이 필요하다\n');
+        return 2;
+      }
+      const r = scanClaudeRun({
+        log: existsSync(logFile) ? readFileSync(logFile, 'utf8') : '',
+        prDir,
+        secrets: (process.env.SCAN_SECRETS ?? '').split('\n').filter(Boolean),
+      });
+      for (const l of r.report) log(`claude-scan: ${l}`);
+      if (!r.ok) {
+        log(`claude-scan: 실패 — ${r.reason}`);
+        if (r.errorText !== undefined) log(`claude-scan: 오류 문구: ${r.errorText}`);
+        return 1;
+      }
+      writeFileSync(out, JSON.stringify(r.verdict) + '\n');
+      log('claude-scan: 통과, 판정을 냈다');
+      return 0;
     }
     case 'ci-pr': {
       const eventFile = str('event');

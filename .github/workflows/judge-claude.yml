@@ -1,0 +1,204 @@
+# L3 교차 검증: Claude 판정(10.1·10.4절, 계획 20261115-cross-review). `check`가 통과한 커밋에서만 돈다(R16).
+# workflow_run은 main의 정의로 돌고, 판정할 PR은 페이로드가 아니라 head SHA로 API를 다시 조회해 정한다.
+# plan:   비밀 없음. base/(github.sha)의 스크립트로 위험도와 필요한 검증자를 계산한다.
+# judge:  judge-claude environment(Claude 구독 토큰만). base/의 프롬프트·스키마·스크립트만 실행하고 pr/는 데이터로 읽는다.
+#         Claude Code는 셸·웹·MCP 없이 Read·Grep·Glob만 쓴다. 같은 job의 유출 검사(LLM 없음)를 통과해야 판정이 나간다.
+#         실행 기록은 출력하지도 올리지도 않는다. GitHub 쓰기 권한·검증 App 키·Codex 인증은 없다.
+# record: recorder environment(검증 App 키만). PR 트리를 받지 않고 판정을 검사한 뒤 review/claude를 쓴다.
+#         판정이 없거나 깨졌으면 error, 이 검증자가 필요 없으면 "해당 없음(통과)"이다.
+# PR 유래 값은 run 스크립트에 직접 넣지 않고 env로만 넘긴다. Actions 캐시는 복원하지 않는다. 액션은 커밋 SHA로 고정한다.
+name: judge-claude
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: judge-claude-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: plan
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      skip: ${{ steps.pr.outputs.skip }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      risk: ${{ steps.plan.outputs.risk }}
+      claude: ${{ steps.plan.outputs.claude }}
+    steps:
+      - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: 판정할 PR 정하기 (head SHA로 API 재조회)
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node base/scripts/harness.ts ci-pr --event "$GITHUB_EVENT_PATH" --body-out "$RUNNER_TEMP/pr-body.md"
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        if: steps.pr.outputs.skip == 'false'
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (데이터로만 읽음)
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 위험도와 필요한 검증자 (base 스크립트만 실행)
+        id: plan
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          cd pr
+          BASE=$(git merge-base "$BASE_SHA" HEAD)
+          node ../base/scripts/harness.ts review-plan --repo . --config-root ../base \
+            --base "$BASE" --head-ref "$HEAD_REF"
+
+  judge:
+    name: judge
+    needs: plan
+    if: needs.plan.outputs.skip == 'false' && needs.plan.outputs.claude == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: judge-claude
+    permissions:
+      contents: read
+    outputs:
+      verdict: ${{ steps.scan.outputs.verdict }}
+    steps:
+      - name: main 정의 체크아웃 (프롬프트·스키마·스크립트, github.sha)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (plan job이 정한 head, 데이터로만 읽음)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 검증 입력 만들기 (pr/.harness-review/, job 사이에 pr/를 넘기지 않는다)
+        env:
+          HEAD_REF: ${{ needs.plan.outputs.head_ref }}
+          BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+        run: |
+          cd pr
+          BASE=$(git merge-base "$BASE_SHA" HEAD)
+          node ../base/scripts/harness.ts review-plan --repo . --config-root ../base \
+            --base "$BASE" --head-ref "$HEAD_REF"
+
+      - name: Claude Code 설치 (버전 고정)
+        run: |
+          npm install -g --no-audit --no-fund @anthropic-ai/claude-code@2.1.314
+          claude --version
+
+      - name: 판정 (LLM. 셸·웹·MCP 없음, PR 트리의 설정 무시)
+        working-directory: pr
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          timeout 20m claude -p "$(cat ../base/scripts/cross-review/prompt.md)" \
+            --restricted \
+            --tools Read,Grep,Glob \
+            --allowedTools Read,Grep,Glob \
+            --permission-mode dontAsk \
+            --strict-mcp-config \
+            --disable-slash-commands \
+            --no-session-persistence \
+            --json-schema "$(cat ../base/scripts/cross-review/verdict.schema.json)" \
+            --output-format stream-json --verbose > "$RUNNER_TEMP/claude-stream.jsonl"
+          echo "judge-claude: claude 종료 코드 $?"
+
+      - name: 유출 검사 (LLM 없음. 통과해야 판정이 나간다)
+        id: scan
+        env:
+          SCAN_SECRETS: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          OUT="$RUNNER_TEMP/verdict.json"
+          node base/scripts/harness.ts claude-scan --log "$RUNNER_TEMP/claude-stream.jsonl" \
+            --pr "$GITHUB_WORKSPACE/pr" --out "$OUT"
+          echo "verdict=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
+
+  record:
+    name: record
+    needs: [plan, judge]
+    if: ${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: recorder
+    permissions:
+      contents: read
+    steps:
+      - name: main 정의 체크아웃 (기록 스크립트만)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: 검증 App 토큰 (커밋 상태 쓰기만)
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RECORDER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RECORDER_APP_KEY }}
+          permission-statuses: write
+
+      - name: record-review (판정 검사 뒤 review/claude 기록)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERDICT_B64: ${{ needs.judge.outputs.verdict }}
+          # plan job이 계산하지 못했으면 필요한 것으로 보고 error를 남긴다(fail-closed)
+          NEEDED: ${{ needs.plan.outputs.claude }}
+          # plan job이 PR을 정하기 전에 죽었으면 check가 돈 head에 error를 남긴다
+          HEAD_SHA: ${{ needs.plan.outputs.head_sha || github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ "$NEEDED" = "false" ] || NEEDED=true
+          F="$RUNNER_TEMP/verdict.json"
+          printf '%s' "$VERDICT_B64" | base64 -d > "$F" 2>/dev/null || : > "$F"
+          node base/scripts/harness.ts record-review --context review/claude --needed "$NEEDED" \
+            --verdict "$F" --head-sha "$HEAD_SHA" --repo-slug "$REPO" --target-url "$RUN_URL"
