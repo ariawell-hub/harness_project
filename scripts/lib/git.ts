@@ -210,6 +210,21 @@ export function remoteBranchDiverged(worktree: string, remote: string, branch: s
 }
 
 /**
+ * `head`(기본 HEAD)가 `<remote>/<branch>`에 뒤처졌는가: 원격 기준 브랜치가 head의 조상이 아니면 true.
+ * 로컬에 있는 마지막 원격 상태로 본다(fetch하지 않는다). 판단하지 못하면(ref 없음, git 실패) false.
+ * GitHub의 mergeStateStatus는 다른 막힘과 겹칠 때 뒤처짐을 알려 주지 않을 수 있어 로컬 git으로 본다
+ */
+export function isBehind(cwd: string, remote: string, branch: string, head = 'HEAD'): boolean {
+  try {
+    const base = `${remote}/${branch}`;
+    if (!revParse(base, cwd) || !revParse(head, cwd)) return false;
+    return !gitTry(['merge-base', '--is-ancestor', base, head], cwd).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * PR 브랜치(worktree의 HEAD)에 <remote>/<base>를 병합하고 일반 push로 <remote>/<branch>를 갱신한다(ADR-0006).
  * rebase·force push는 하지 않는다. 충돌하면 병합을 취소해 worktree와 HEAD를 호출 전으로 둔다
  * (`keepConflict`면 취소하지 않고 병합 진행 중으로 남긴다. 호출한 쪽이 끝내거나 `git merge --abort`한다).

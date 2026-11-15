@@ -105,14 +105,93 @@ export interface PullRequest {
   title: string;
   body: string;
   head: string;
+  /** PR head 커밋 SHA. 알 수 없으면 '' */
+  headSha: string;
   state: 'open' | 'merged' | 'closed';
   isDraft: boolean;
+  /** 자동 병합이 켜져 있는가 */
+  autoMerge: boolean;
   labels: string[];
   url: string;
   /** BEHIND면 main에 뒤처짐 */
   mergeState: string;
+  /** 체크 요약(출처를 보지 않는다, 10.3절). 필수 체크 판정은 commitChecks와 runner/pr-state.ts를 쓴다 */
   checks: ChecksState;
   failingChecks: string[];
+}
+
+/**
+ * 커밋에 달린 커밋 상태 하나 또는 check run 하나. 출처(creator·appId)를 함께 담는다.
+ * 같은 이름의 결과를 다른 계정·App도 쓸 수 있으므로(ADR-0003, Q20) 판정은 출처로 거른 뒤에 한다
+ */
+export interface CommitCheck {
+  /** 커밋 상태의 context 또는 check run 이름 */
+  context: string;
+  kind: 'status' | 'check-run';
+  state: 'success' | 'failure' | 'error' | 'pending';
+  description: string;
+  /** 커밋 상태를 쓴 계정 login. check run은 '' */
+  creator: string;
+  /** check run을 만든 App id. 커밋 상태는 null */
+  appId: number | null;
+  targetUrl: string;
+  /** 기록 시각(ISO) */
+  at: string;
+}
+
+const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
+const STATUS_STATES: readonly string[] = ['success', 'failure', 'error', 'pending'];
+
+/** `GET commits/{sha}/statuses` 항목에서 뽑은 값: [context, state, description, creator, target_url, created_at] */
+export type RawStatusRow = [string, string, string | null, string | null, string | null, string];
+
+export function statusToCheck(r: RawStatusRow): CommitCheck {
+  return {
+    context: r[0],
+    kind: 'status',
+    // 모르는 값은 통과로 보지 않는다
+    state: STATUS_STATES.includes(r[1]) ? (r[1] as CommitCheck['state']) : 'error',
+    description: r[2] ?? '',
+    creator: r[3] ?? '',
+    appId: null,
+    targetUrl: r[4] ?? '',
+    at: r[5],
+  };
+}
+
+/** `GET commits/{sha}/check-runs` 항목에서 뽑은 값: [name, status, conclusion, app id, url, 끝난·시작 시각, 제목] */
+export type RawCheckRunRow = [
+  string,
+  string,
+  string | null,
+  number | null,
+  string | null,
+  string | null,
+  string | null,
+];
+
+/** 끝나지 않았으면 pending. success·neutral·skipped만 통과이고(GitHub 필수 체크 기준) 나머지 결론은 failure다 */
+export function checkRunToCheck(r: RawCheckRunRow): CommitCheck {
+  const done = r[1] === 'completed';
+  const passed = r[2] === 'success' || r[2] === 'neutral' || r[2] === 'skipped';
+  return {
+    context: r[0],
+    kind: 'check-run',
+    state: !done ? 'pending' : passed ? 'success' : 'failure',
+    description: r[6] ?? '',
+    creator: '',
+    appId: typeof r[3] === 'number' ? r[3] : null,
+    targetUrl: r[4] ?? '',
+    at: r[5] ?? '',
+  };
+}
+
+/** 최신순. 시각이 같으면 받은 순서를 지킨다 */
+export function newestFirst(list: CommitCheck[]): CommitCheck[] {
+  return list
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => (a.c.at < b.c.at ? 1 : a.c.at > b.c.at ? -1 : a.i - b.i))
+    .map((x) => x.c);
 }
 
 export interface GitHubPort {
@@ -130,6 +209,14 @@ export interface GitHubPort {
   reopenIssue(n: number): void;
   listMyOpenPRs(): PullRequest[];
   findPRByBranch(branch: string): PullRequest | null;
+  /** 번호로 PR을 찾는다. 없으면 null */
+  getPR(n: number): PullRequest | null;
+  /**
+   * 그 커밋의 커밋 상태 전체 기록(같은 context의 옛 기록 포함)과 check run 전체, 최신순.
+   * context별 최신 하나만 주는 API(체크 요약, combined status)로 만들지 않는다: 출처가 다른 같은 이름의 결과가
+   * 뒤에 쓰이면 앞선 결과가 가려진다(10.3절)
+   */
+  commitChecks(sha: string): CommitCheck[];
   createPR(p: {
     head: string;
     base: string;
@@ -182,15 +269,17 @@ export function summarizeChecks(rollup: RawCheck[] | null | undefined): {
 }
 
 const PR_FIELDS =
-  'number,title,body,headRefName,state,isDraft,labels,url,mergeStateStatus,statusCheckRollup';
+  'number,title,body,headRefName,headRefOid,state,isDraft,autoMergeRequest,labels,url,mergeStateStatus,statusCheckRollup';
 
 interface RawPR {
   number: number;
   title: string;
   body: string;
   headRefName: string;
+  headRefOid?: string | null;
   state: string;
   isDraft: boolean;
+  autoMergeRequest?: unknown;
   labels: { name: string }[];
   url: string;
   mergeStateStatus: string;
@@ -204,8 +293,10 @@ function toPR(r: RawPR): PullRequest {
     title: r.title,
     body: r.body ?? '',
     head: r.headRefName,
+    headSha: r.headRefOid ?? '',
     state: r.state === 'MERGED' ? 'merged' : r.state === 'CLOSED' ? 'closed' : 'open',
     isDraft: r.isDraft,
+    autoMerge: !!r.autoMergeRequest,
     labels: (r.labels ?? []).map((l) => l.name),
     url: r.url,
     mergeState: r.mergeStateStatus ?? '',
@@ -381,6 +472,37 @@ export class GhCli implements GitHubPort {
       ),
     ) as RawPR[];
     return raw.length ? toPR(raw[0]) : null;
+  }
+  getPR(n: number): PullRequest | null {
+    if (!Number.isInteger(n) || n <= 0) return null;
+    const r = runSync('gh', ['pr', 'view', String(n), '--json', PR_FIELDS], {
+      cwd: this.cwd,
+      timeoutMs: 120_000,
+    });
+    if (r.code !== 0) {
+      // 없는 번호는 null, 그 밖의 실패(인증, 네트워크)는 예외다
+      if (/not found|Could not resolve|no pull requests found/i.test(r.stderr)) return null;
+      throw new GitHubError(`gh pr view 실패: ${r.stderr.trim()}`);
+    }
+    return toPR(JSON.parse(r.stdout) as RawPR);
+  }
+  commitChecks(sha: string): CommitCheck[] {
+    if (!COMMIT_SHA_RE.test(sha)) throw new GitHubError(`커밋 SHA 형식 오류: ${sha}`);
+    // 한 줄에 항목 하나(JSON 배열)로 받는다. 페이지를 넘겨도 줄 단위로 이어진다
+    const rows = <T>(pathAndQuery: string, jq: string): T[] =>
+      gh(['api', '--paginate', pathAndQuery, '--jq', jq], this.cwd)
+        .split('\n')
+        .filter((l) => l.trim() !== '')
+        .map((l) => JSON.parse(l) as T);
+    const statuses = rows<RawStatusRow>(
+      `repos/{owner}/{repo}/commits/${sha}/statuses?per_page=100`,
+      '.[] | [.context, .state, .description, .creator.login, .target_url, .created_at] | @json',
+    );
+    const runs = rows<RawCheckRunRow>(
+      `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`,
+      '.check_runs[] | [.name, .status, .conclusion, .app.id, .details_url, (.completed_at // .started_at), .output.title] | @json',
+    );
+    return newestFirst([...statuses.map(statusToCheck), ...runs.map(checkRunToCheck)]);
   }
   createPR(p: {
     head: string;

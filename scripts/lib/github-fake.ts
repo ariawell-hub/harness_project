@@ -4,7 +4,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runSync } from './exec.ts';
-import type { Change, Comment, GitHubPort, Issue, IssueHistory, PullRequest } from './github.ts';
+import {
+  newestFirst,
+  type Change,
+  type Comment,
+  type CommitCheck,
+  type GitHubPort,
+  type Issue,
+  type IssueHistory,
+  type PullRequest,
+} from './github.ts';
 
 /**
  * 상태 파일의 댓글. `changes`가 없으면 만든 것 하나뿐이다(고친 적 없음).
@@ -41,9 +50,9 @@ function stamp(s: FakeState): string {
   return new Date(t).toISOString();
 }
 
-interface FakePR extends PullRequest {
+/** 상태 파일의 PR. `headSha`는 저장하지 않고 읽을 때 원격 브랜치 끝으로 채운다 */
+interface FakePR extends Omit<PullRequest, 'headSha'> {
   base: string;
-  autoMerge: boolean;
 }
 
 export interface FakeState {
@@ -61,6 +70,8 @@ export interface FakeState {
   prs: FakePR[];
   /** branchInfo가 돌려줄 필수 체크(선택) */
   requiredChecks?: { context: string; app_id: number | null }[];
+  /** 커밋 SHA → 그 커밋의 커밋 상태·check run 기록(setCheck가 쓴다) */
+  checks?: Record<string, CommitCheck[]>;
 }
 
 export function initFakeState(file: string, s: Partial<FakeState> & { remote: string }): FakeState {
@@ -219,16 +230,48 @@ export class FakeGitHub implements GitHubPort {
     this.issue(s, n).state = 'open';
     this.save(s);
   }
+  /** 상태 파일의 PR → 포트의 PR. headSha는 원격 브랜치 끝(브랜치가 없으면 '') */
+  private toPR(s: FakeState, { base: _b, ...p }: FakePR): PullRequest {
+    const r = runSync('git', ['rev-parse', '--verify', '-q', `refs/heads/${p.head}`], {
+      cwd: s.remote,
+    });
+    return { ...p, headSha: r.code === 0 ? r.stdout.trim() : '' };
+  }
   listMyOpenPRs(): PullRequest[] {
-    return this.load()
-      .prs.filter((p) => p.state === 'open')
-      .map(({ base: _b, autoMerge: _a, ...p }) => p);
+    const s = this.load();
+    return s.prs.filter((p) => p.state === 'open').map((p) => this.toPR(s, p));
   }
   findPRByBranch(branch: string): PullRequest | null {
-    const list = this.load().prs.filter((p) => p.head === branch);
-    if (!list.length) return null;
-    const { base: _b, autoMerge: _a, ...p } = list[list.length - 1];
-    return p;
+    const s = this.load();
+    const list = s.prs.filter((p) => p.head === branch);
+    return list.length ? this.toPR(s, list[list.length - 1]) : null;
+  }
+  getPR(n: number): PullRequest | null {
+    const s = this.load();
+    const pr = s.prs.find((p) => p.number === n);
+    return pr ? this.toPR(s, pr) : null;
+  }
+  commitChecks(sha: string): CommitCheck[] {
+    return newestFirst([...(this.load().checks?.[sha] ?? [])]);
+  }
+  /** 테스트용: 커밋에 커밋 상태(기본)나 check run을 하나 더한다. 시각은 앞 기록보다 늘 뒤다 */
+  setCheck(
+    sha: string,
+    c: Partial<Omit<CommitCheck, 'context' | 'at'>> & { context: string },
+  ): void {
+    const s = this.load();
+    s.checks ??= {};
+    (s.checks[sha] ??= []).push({
+      kind: 'status',
+      state: 'success',
+      description: '',
+      creator: '',
+      appId: null,
+      targetUrl: '',
+      ...c,
+      at: stamp(s),
+    });
+    this.save(s);
   }
   createPR(p: {
     head: string;
@@ -258,8 +301,7 @@ export class FakeGitHub implements GitHubPort {
     };
     s.prs.push(pr);
     this.save(s);
-    const { base: _b, autoMerge: _a, ...out } = pr;
-    return out;
+    return this.toPR(s, pr);
   }
   setDraft(n: number, draft: boolean): void {
     const s = this.load();

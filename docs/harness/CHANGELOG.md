@@ -60,6 +60,7 @@ review_cycle: on-change
 - 설계서 v0.7.33 · G1 켜기와 `review-ledger` 필수 체크(Issue #55 step5): `harness.config.json`의 `planReview.required`를 `true`로 켜고 `ci.requiredChecks`에 `review-ledger`(출처 검증 App)를 더했다(등록은 제작자가 리포 설정에서 한다). `init` 안내의 필수 체크 목록을 설정에서 만든다(`requiredCheckGuide`). 절차서에 "실행 중인 step에 일을 더해야 하면 새 step을 더한다"를 적었다. TD-3 해결. 검사를 약화하지 않는다(필수 체크와 계획 검증을 더한다).
 - 설계서 v0.7.34 · 금지사항을 계획 승인에 묶기(Issue #55 step6): `scripts/lib/plan.ts`에 `STEP_BOUND_SECTIONS`("작업"·"Acceptance Criteria"·"금지사항"). `planHash`가 step의 금지사항을 해시에 넣고, `plan-gate`의 자기 step 불변 규칙이 같은 목록을 쓴다(자기 step의 금지사항을 고치거나 지운 PR은 실패). runner 프롬프트의 "고치지 마라" 문구에 금지사항을 더했다. 해시 정의가 바뀌어 그 전의 계획 승인은 무효가 되지만, 원장에 계획 승인이 기록된 채 열린 PR이 없었다. 검사를 약화하지 않는다(해시와 불변 규칙의 대상을 넓힌다, PR #87 원장 F2).
 - 설계서 머리말 표기 정리(Issue #90): 머리말의 버전·최종 갱신을 변경 이력의 최신 항목(v0.7.34, 2026-11-15)과 맞췄다. 내용 변경은 없다. 기술 부채 TD-31(`init`의 `--repo`), TD-32(실행 중인 step의 계획 수정 경로) 등록, TD-1 비고 갱신. 검사를 약화하지 않는다.
+- 설계서 v0.7.35 · PR 상태의 출처 기준 판정(Issue #56 step0): `scripts/lib/github.ts`에 `commitChecks`(커밋의 커밋 상태 전체 기록과 check run을 작성자·App과 함께 읽는다), `getPR`, `PullRequest.headSha`·`autoMerge`. `scripts/runner/pr-state.ts`(`requiredStates`: 설정의 필수 체크마다 기대 출처가 쓴 가장 최근 결과, `classifyPr`: PR 분류). `scripts/lib/git.ts`의 `isBehind`. 읽기 전용 명령 `pr-state`. runner의 판단(`pickNext`)은 바꾸지 않았다. 검사를 약화하지 않는다: 흉내 체크를 통과로 보지 않게 하는 읽기 쪽 변경이다. 기술 부채 TD-33 등록.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

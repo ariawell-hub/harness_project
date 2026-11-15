@@ -120,7 +120,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 
 - 제목: `<type>(<계획 id>): step<N> <이름>`. 본문 첫 줄은 마지막 step만 `Closes #<issue>`, 나머지는 `Refs #<issue>`.
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
-- 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약은 출처를 보지 않으니, 병합 가능 여부는 `mergeStateStatus`로 본다.
+- 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약과 `gh pr checks`는 출처를 보지 않는다. 필수 체크별 상태(기대 출처가 쓴 결과만)와 지금 무엇을 기다리는지는 worktree에서 `node scripts/harness.ts pr-state`로 본다(`--pr <번호>`로 다른 PR. 읽기만 한다). 병합 가능 여부는 `mergeStateStatus`로 본다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
 - **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 worktree 안에서 `node scripts/harness.ts pr-ready`로 초안을 해제하며 승인을 요청한다.
   - `complete-step` 커밋까지 push했다.

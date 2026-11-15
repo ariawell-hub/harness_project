@@ -75,6 +75,14 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-15 step0: 계획 작성. #55(PR #89) 병합과 마무리(PR #91) 뒤 제작자 대화 지시("#56부터 시작하라")로 시작. 위험도는 제작자 결정(2026-11-15 대화: #55·#56·#57은 보통)에 따라 `normal`이다. `planReview.required: true`라 이 계획부터 계획만 담은 커밋을 먼저 올려 검증받는다.
+- 2026-11-15 step0: 계획 검증(PR #92, 계획만 담은 커밋 `98e6395`). `review/claude` 승인(P2 1), `review/codex` 승인(지적 없음). 원장에 `계획 검증(G1): 해시 4215e28f88b8 · 승인: claude, codex`. 미룬 지적 F1(P2, step3의 중단과 `reopenStep` 순서)은 의사결정 로그에 반영했다.
+- 2026-11-15 step0: 테스트 먼저. `node --test scripts/test/pr-state.test.ts` 종료 코드 1(`scripts/runner/pr-state.ts` 없음). 구현 뒤 16개 통과. AC 테스트(`pr-state`·`next`·`runner`·`cli`) 종료 코드 0(73개 통과. 변환 함수 `statusToCheck`·`checkRunToCheck`·`newestFirst` 테스트 2개를 더한 뒤 75개 통과). 전체 `check` 종료 코드 0. 도중에 `pr-state` 명령 테스트가 한 번 실패했다: 테스트가 없는 Issue의 댓글을 읽었다. "읽기만 한다"는 가짜 GitHub 상태 파일이 그대로인지로 확인하게 고쳤다.
+- 2026-11-15 step0: `--pr <번호>`에 번호로 PR을 찾는 포트 메서드가 필요해 `getPR`을 더했다. 분류를 한 줄로 적는 `describeVerdict`와 명령 구현(`scripts/commands/pr-state.ts`)을 따로 뒀다(`pr-state.ts`는 순수 함수만 둔다).
+- 2026-11-15 step0: 실제 PR 확인(수용 기준 11). PR #92의 계획 전용 head `98e6395`에서 `node scripts/harness.ts pr-state`:
+  - 판정 진행 중: `check [actions]: success`, `plan-gate [recorder]: failure — 이 PR의 step0 상태가 pending이다(완료 처리 전) 외 1건`, `risk-gate`·`deps-guard`·`harness-guard` success, `review/claude`·`review/codex`·`review-ledger`는 `missing` → `분류: wait-ci (대기: review/claude, review/codex, review-ledger) · 뒤처짐: 아니오 · step 완료: 아니오`.
+  - 판정 뒤: `review/claude [recorder]: success — 승인 (P2 1) patch:…`, `review/codex [recorder]: success — 승인 (지적 없음) patch:…`, `review-ledger [recorder]: success — 차단 지적 없음 (전체 1, 미룸 1)` → `분류: ready (조치할 것 없음)`. `plan-gate` 실패는 step이 끝나지 않은 PR이라 보지 않는다(규칙 5).
+  - 병합된 PR #91(`--pr 91`): 8개 모두 success, `mergeStateStatus=UNKNOWN`, `분류: closed`.
+  - 실제 응답에서 확인한 것: 커밋 상태의 작성자(`harness-recorder[bot]`)와 `check`의 check run App(GitHub Actions)으로 고르기, 진행 중 → 통과 전이, 초안·자동 병합 여부. 보지 못한 것: 흉내 상태가 섞인 커밋, check run 다시 실행, `error` 상태, 100개를 넘는 기록(페이지 넘김).
 
 ## 의사결정 로그
 
@@ -91,9 +99,13 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 결정: 충돌 자동 해결을 넣는다(수용 기준 8). / 이유: TD-9 항목이고 설계서 4.5절이 2단계로 미뤄 둔 것이다. 충돌 해결로 PR 변경이 바뀌면 patch-id가 달라져 두 검증자가 다시 판정하므로(10.3절) 사람 답 없이 풀어도 검증이 남는다.
 - 결정: runner는 PR 본문의 보호 경로 체크 줄을 적지 않는다(비범위). / 이유: 그 줄은 작성자가 보호 경로 변경을 확인했다는 표시다. runner가 기계로 채우면 `harness-guard` 검사의 뜻이 달라져 하네스 규칙 변경이 된다(9.1절). 대상 프로젝트에서 runner가 보호 경로를 바꾸는 일은 드물다.
 
+- 결정: `code` 단계에서 실패 한도(5회)로 멈출 때는 step을 먼저 `reopenStep`으로 되돌린 뒤 `blockPlan`한다. 5회 중단 테스트는 계획 상태(`blocked`)와 step 상태를 함께 단언한다(step3 구현 때 따른다). / 이유: 완료된 step의 PR에 `blocked`를 올리면 `plan-gate`가 "완료된 step" 검사로도 실패해 열린 지적과 별개의 실패가 생긴다(4.5절, PR #29). step3 작업 2의 3번·4번은 순서를 정한 것이 아니다(PR #92 원장 F1). / 버린 대안: step3.md를 고쳐 다시 계획 검증받기(비차단 지적이고 구현 순서로 풀린다).
+
 ## 발견 사항
 
 - PR #91에서 Claude 검증자가 낸 미룬 지적(P2): 설계서 머리말 버전이 변경 이력과 반복해 어긋났는데 재발 방지(`doc-lint`가 머리말 버전과 변경 이력의 마지막 항목을 비교)가 기술 부채로 등록되지 않았다. step0에서 등록한다. → 처리: TD-33
+- PR #92 계획 검증에서 Claude 검증자가 낸 미룬 지적 F1(P2): step3의 `doReview`가 한도에 닿아 `blockPlan`을 부르는 것(3번)과 완료된 step을 `reopenStep`으로 되돌리는 것(4번)의 순서가 모호하다. 완료 상태에서 `blocked`가 올라가면 `plan-gate`가 따로 실패한다. → 처리: [계획 의사결정 로그](plan.md)
+- `gh pr view`의 `autoMergeRequest`와 `headRefOid`로 자동 병합 여부와 PR head를 읽을 수 있다. 병합된 PR의 `mergeStateStatus`는 `UNKNOWN`이다. → 처리: 해당 없음
 
 ## 열린 질문
 
