@@ -158,11 +158,11 @@ export function findingLine(e: Entry): string {
   return `${e.id} [${e.severity}, ${e.reviewer}] ${where} — ${cell(e.title)}`;
 }
 
-/** 커밋 메시지 제목에 쓸 지적 제목 앞부분: 한 줄, 제어 문자 없음 */
+/** 커밋 메시지 제목에 쓸 지적 제목 앞부분: 한 줄(제어 문자와 유니코드 줄 구분자 없음) */
 export function commitSubject(title: string, max = 60): string {
   return (
     title
-      .replace(/\p{Cc}+/gu, ' ')
+      .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
       .replace(/ {2,}/g, ' ')
       .trim()
       .slice(0, max) || '지적 대응'

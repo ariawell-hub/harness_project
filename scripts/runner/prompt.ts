@@ -164,12 +164,18 @@ const FINDING_OPEN = '<<<지적';
 const FINDING_CLOSE = '지적>>>';
 
 /**
- * 지적 블록에 넣을 값: 한 줄로 만들고(제어 문자 제거) 블록 구분자를 지운다.
+ * 줄바꿈으로 보일 수 있는 문자: 제어 문자(Cc. CR·LF·NEL 포함)와 유니코드 줄·단락 구분자(Zl·Zp: U+2028, U+2029).
+ * 검증자 출력을 한 줄로 만들 때 공백으로 바꾼다
+ */
+export const LINE_BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]+/gu;
+
+/**
+ * 지적 블록에 넣을 값: 한 줄로 만들고(제어 문자와 유니코드 줄 구분자 제거) 블록 구분자를 지운다.
  * 검증자 출력이 블록을 일찍 닫고 그 뒤 글이 블록 밖 지시처럼 보이는 것을 막는다
  */
 export function blockText(s: string, max = 300): string {
   return s
-    .replace(/\p{Cc}+/gu, ' ')
+    .replace(LINE_BREAKS, ' ')
     .replaceAll(FINDING_OPEN, '(구분자)')
     .replaceAll(FINDING_CLOSE, '(구분자)')
     .replace(/ {2,}/g, ' ')

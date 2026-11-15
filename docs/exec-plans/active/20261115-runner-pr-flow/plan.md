@@ -102,6 +102,8 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15 step3: PR #95 1차 판정. `review/claude` 승인(P2 2, 원장 F1·F2 미룸: 지적 제목이 프롬프트의 데이터 블록을 닫을 수 있다, 실패 기록 detail의 지적 제목이 "직전 실패"로 블록 밖에 들어간다), `review/codex` 수정 요청(P1 1, 원장 F3): 수정 세션 뒤 AC·`check`가 실패해도 변경을 되돌리지 않는다(수용 기준 7).
 - 2026-11-15 step3: F3은 반박한다(의사결정 로그). Claude의 F1·F2는 고쳤다: 지적 블록에 넣는 값은 한 줄로 만들고 구분자를 지운다(`blockText`), 실패 기록 detail에는 지적 ID와 검증자만 적는다, 중단 보고에 넣는 지적 한 줄은 원장 표와 같은 `cell`로 멘션·마크다운 문자를 바꾼다. 테스트와 구현을 함께 썼고, 그 뒤 옛 구현(`git stash`로 `prompt.ts`·`review.ts`·`run.ts`·`ledger.ts`만 되돌림)으로 새 테스트를 돌려 실패를 확인했다: `node --test scripts/test/runner-review.test.ts` 종료 코드 1(`prompt.ts`에 `blockText` export가 없어 파일 전체가 실패. 테스트별 실패는 따로 보지 못했다). 새 구현에서 AC 테스트와 `ledger.test.ts` 종료 코드 0(107개 통과).
 - 2026-11-15T23:13:04+09:00 step3 재작업: PR #95 원장 F4(Codex P1) 수정
+- 2026-11-15 step3: PR #95 2차 판정. `review/claude` 승인(지적 없음, F1·F2 수정 확인). `review/codex`는 F3 반박을 받아들였고("승인된 step 분할과 일치") 새 P1을 냈다(원장 F4, 재현 job "재현됨"): `blockText`가 `\p{Cc}`만 지워 유니코드 줄 구분자(U+2028, U+2029)가 남는다. 2라운드에서 바뀐 파일(`prompt.ts`)의 새 P1이라 동결되지 않고 `open`으로 등록됐다.
+- 2026-11-15 step3: F4 반영. 테스트 먼저: `node --test scripts/test/runner-review.test.ts` 종료 코드 1(9개 중 1개 실패: U+2028·U+2029가 `blockText`·`commitSubject` 출력과 프롬프트에 남는다). `[\p{Cc}\p{Zl}\p{Zp}]`로 고친 뒤 통과.
 
 ## 의사결정 로그
 
@@ -145,6 +147,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 원장 댓글이 보이지 않는데 `review-ledger`가 실패인 상태(기록 직후의 짧은 순간, 원장 읽기 실패)에서 지적 대응은 세션 없이 환경 대기로 넘긴다. 대기 간격이 0인 테스트 설정에서는 대기 없이 같은 작업을 다시 고르므로, 그런 테스트는 한 바퀴만(`once`) 돌린다. 실제 설정에서는 `pollSec`만큼 쉬고 다시 본다. → 처리: 해당 없음
 - PR #93의 Codex 지적 F2에는 재현 테스트가 붙었고 재현 job이 "재현됨"을 기록했다. PR #94의 반박은 plan job 로그 `review-plan: 반박 1건(F3)`으로 전달이 확인됐고 검증자가 `rejected`로 답했다. → 처리: TD-1
 - 검증자 출력(지적 제목·위치)이 runner를 거쳐 나가는 길이 셋이다: 세션 프롬프트의 지적 블록, 실패 기록 detail(다음 프롬프트의 "직전 실패"), Issue 댓글(중단 보고). 첫 구현은 블록 구분자와 댓글의 멘션·마크다운을 막지 않았고 detail에 제목을 넣었다(PR #95 원장 F1·F2). 셋 다 막았다. → 처리: [설계서 10.2절 (6) "runner의 지적 대응"](../../../harness/design.md)
+- "한 줄로 만든다"를 제어 문자(`\p{Cc}`)만으로 구현하면 유니코드 줄·단락 구분자(U+2028, U+2029)가 남는다(PR #95 원장 F4). 원장을 쓰는 쪽(`scripts/ci/ledger.ts`의 `oneLine`)과 판정 로그(`scripts/ci/record.ts`의 `oneLine`)도 `\p{Cc}`만 지운다. 그쪽은 CI 스크립트라 이 step에서 바꾸지 않았다. step4에서 판정 로그를 읽을 때 runner 쪽 정리(`blockText`)를 거치게 하고, CI 쪽은 기술 부채로 남긴다. → 처리: TD-35
 - 가짜 GitHub의 PR 번호는 댓글을 단 적이 없으면 Issue 목록에 없어 `prComments`가 따로 빈 목록을 돌려줘야 했다. → 처리: 해당 없음
 
 ## 열린 질문
