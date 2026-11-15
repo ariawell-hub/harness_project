@@ -60,6 +60,9 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-15: 계획 작성(대화 세션). 제작자가 `judge-claude`(시크릿 `CLAUDE_CODE_OAUTH_TOKEN`), `judge-codex`(시크릿 `CODEX_AUTH_JSON`), `codex-auth-store`(변수 `STORE_APP_CLIENT_ID`, 시크릿 `STORE_APP_KEY`) environment를 준비했다. 셋 다 `main`만 허용임을 봇 API로 확인했다. Q20 소스(커밋 7b837e7의 `lab/q20/repo/`)를 읽었다.
+- 2026-11-15 step0: `scripts/test/verdict.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → 스키마·프롬프트, `scripts/ci/{verdict,review-plan}.ts`, `recordReview`, `record-review` 명령 구현 뒤 `verdict`·`ci` 테스트 24개 통과.
+- 2026-11-15 step0: 첫 `check`가 secret-scan에서 실패했다(테스트의 가짜 토큰 리터럴이 실제 토큰 형식으로 검출). 실패한 채 `complete-step`까지 이어 실행한 것은 명령을 `;`로 이은 실수였다. push 전이라 로컬 커밋을 계획 커밋 위에서 다시 만들고(`reset --soft`), 테스트 값은 런타임에 조각을 이어 붙이게 바꿨다. `check` 통과를 확인한 뒤 완료 처리했다.
+- 2026-11-15: #53의 마지막 PR #62가 제작자 재승인 뒤 병합됐다.
 
 ## 의사결정 로그
 
@@ -71,8 +74,12 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 검증자 입력 중 diff와 변경 파일 목록은 base 스크립트가 `pr/.harness-review/`에 써 준다. 이유: 검증자는 셸이 없고 읽기 범위가 `pr/`뿐이다. PR이 같은 이름의 폴더를 넣었으면 base 스크립트가 지우고 다시 만든다.
 - 도구 버전은 Q20에서 확인한 버전으로 고정한다(Claude Code 2.1.314, Codex 0.167.2, libsodium-wrappers 0.8.4). 올릴 때는 격리 동작을 다시 확인한다.
 - 승인의 patch-id는 커밋 상태 description에 적고, 이어받을 때는 그 상태의 작성자가 검증 App 봇(`ci.recorderBot`)인지 확인한다. 이유: 별도 저장소 없이 head SHA에 묶이고, 봇 PAT이 쓴 같은 이름의 상태를 거를 수 있다.
+- 고엔트로피 검사는 40자 이상 이어진 base64/hex 꼴 조각 중 대문자·소문자·숫자가 섞이고 문자 엔트로피 4.3비트 이상인 것만 잡는다. 이유: 커밋 SHA(소문자 hex)와 긴 경로·식별자를 지적에 적는 일이 흔해 오탐이면 판정 전체가 error가 된다. 놓치는 토큰이 있을 수 있지만 이 검사는 보조 수단이다(10.4절).
+- 판정에 비밀이 보이면 failure가 아니라 error로 기록하고 사유에 값을 넣지 않는다. 이유: 유출은 검증 결과가 아니라 판정 job의 장애이고, 다시 돌려야 한다.
 
 ## 발견 사항
+
+- 테스트에 실제 토큰 형식(`sk-ant-…`, `gho_…`, JWT 머리)의 가짜 값을 리터럴로 적으면 gitleaks가 검출해 `check`가 실패한다. 시크릿 스캔 테스트 값은 조각을 런타임에 이어 붙인다. → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -83,4 +90,4 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step0 verdict-core 구현.
+- step1 judge-claude.

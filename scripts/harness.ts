@@ -9,7 +9,7 @@ import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { parseReviews } from './gates/risk-gate.ts';
-import { githubStatusPoster, recordStatuses } from './ci/record.ts';
+import { githubStatusPoster, recordReview, recordStatuses } from './ci/record.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
@@ -95,6 +95,9 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   out: { type: 'string' },
   summary: { type: 'string' },
   results: { type: 'string' },
+  context: { type: 'string' },
+  needed: { type: 'string' },
+  verdict: { type: 'string' },
   reviews: { type: 'string' },
   'pr-body': { type: 'string' },
   event: { type: 'string' },
@@ -222,6 +225,33 @@ async function main(argv: string[]): Promise<number> {
           : `plan-gate: 통과 (${branch}, ${r.plan?.file})`,
       );
       return r.problems.length ? 1 : 0;
+    }
+    case 'record-review': {
+      const token = process.env.GH_TOKEN ?? '';
+      if (!token) {
+        process.stderr.write('record-review: 환경 변수 GH_TOKEN(검증 App 토큰)이 없다\n');
+        return 2;
+      }
+      const needed = str('needed');
+      if (needed !== 'true' && needed !== 'false') {
+        process.stderr.write('record-review: --needed true|false가 필요하다\n');
+        return 2;
+      }
+      const file = str('verdict');
+      const headSha = str('head-sha') ?? '';
+      const repo = str('repo-slug') ?? '';
+      const targetUrl = str('target-url') ?? '';
+      const p = await recordReview({
+        context: str('context') ?? '',
+        needed: needed === 'true',
+        raw: file && existsSync(file) ? readFileSync(file, 'utf8') : null,
+        secrets: (process.env.SCAN_SECRETS ?? '').split('\n').filter(Boolean),
+        headSha,
+        repo,
+        post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
+      });
+      log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
+      return p.state === 'error' ? 1 : 0;
     }
     case 'ci-pr': {
       const eventFile = str('event');
