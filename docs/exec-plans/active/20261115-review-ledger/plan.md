@@ -79,6 +79,12 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step1: PR #84 병합(제작자 head 승인). 제작자가 검증 App의 Pull requests 쓰기 권한을 수락했다(대화 통보). 2차 판정의 Claude P2(권한 수락 전에는 `ci-failure` job이 실패로 보인다)는 권한이 수락돼 해당하지 않는다.
 - 2026-11-15 step2: 병합 직후 main의 `check`(push) 완료로 `judge-claude`·`judge-codex`가 새 정의로 시작해 `skipped`로 끝났다(실행 43695743048, 43695743049. PR이 아니라 건너뜀). 워크플로 문법 오류는 없다(job 단위 `queue: max` 포함).
 - 2026-11-15 step2: 테스트 먼저. `node --test scripts/test/rebuttal.test.ts` 종료 코드 1(`scripts/ci/rebuttal.ts` 없음). 구현 뒤 10개 중 1개 실패: 짧은 SHA(`abc1234`)는 리포 안 경로 형식과 구분할 수 없어 근거로 받는다. 테스트에서 그 사례를 뺐다(의사결정 로그).
+- 2026-11-15 step2: step1의 원장 연결이 PR #85(head 438413e)에서 실제로 돌았다.
+  - `judge-claude`(실행 43696393704): `review/claude = success — 승인 (P2 1)` 뒤 `review-ledger = success — 차단 지적 없음 (전체 1, 미룸 1)`. PR에 원장 댓글이 생겼다(작성자 `harness-recorder`, 프롬프트 버전 `40e38e7a40ce`, F1 P2 claude `deferred`).
+  - `judge-codex`(실행 43696393657): 30초 뒤 `review/codex = success — 승인 (지적 없음)`과 `review-ledger = success`. 같은 댓글이 `라운드: claude 1, codex 1`로 고쳐졌다(두 기록 job이 한 댓글을 차례로 고쳤다).
+  - 상태 작성자는 모두 `harness-recorder[bot]`이다. 원장 토큰 단계가 성공했으므로 검증 App의 Pull requests 쓰기 권한이 적용됐다.
+  - 아직 실제로 보지 못한 것: 2라운드 입력(`ledger.md`, 직전 판정 이후 diff)과 프롬프트 버전 고정, `ci-failure` job, 반박 전달. 2라운드와 프롬프트 고정은 이 PR의 다음 push에서, 반박은 step3 PR에서 확인한다.
+- 2026-11-15 step2: AC 실행 결과. `node --test scripts/test/rebuttal.test.ts scripts/test/ledger.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep` 2개 통과, `node scripts/harness.ts check` 종료 코드 0.
 
 ## 의사결정 로그
 
@@ -106,6 +112,7 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - #54 step4의 Claude 검증자 P2: `planCarry`의 patch-id 측정 실패 경로에 테스트가 없다. step0에서 테스트를 더한다. → 처리: 해당 없음
 - 원장의 지적 ID는 `F1`~`F9999`만 형식에 맞다. 차단 지적이 그보다 많이 쌓이면 원장을 읽지 못해 `review-ledger`가 `error`가 된다(PR #83 Claude P2). 한 PR에서 일어나기 어렵고 fail-closed라 그대로 둔다. → 처리: 해당 없음
 - 라운드 기록은 자르지 않아 판정이 아주 많이 쌓이면 원장 본문이 댓글 상한을 넘는다(PR #83 Codex P2). 그때는 `saveLedger`가 쓰지 않고 예외를 던져 `review-ledger = error`가 된다. → 처리: 해당 없음
+- PR #85 Claude P2(원장 F1): `loadLedger`가 원장을 찾은 뒤에도 댓글을 끝까지 읽는다. 반박을 고르려면 모든 댓글이 필요해 plan job은 어차피 전부 읽는다. 기록 job의 읽기만 일찍 끝낼 수 있지만 댓글 수가 적어 그대로 둔다. → 처리: 해당 없음
 - `Ledger`에 `dropped` 필드가 있다(step0 본문의 정의에는 없다, PR #83 Claude P3). 형식 문서에 적혀 있다. → 처리: [ledger.md](../../../../scripts/cross-review/ledger.md)
 - 판정 워크플로의 `record` job은 `scripts`만 받아 `harness.config.json`이 없었다. 원장은 `ci.recorderBot`이 필요해 설정 파일도 받게 했다. → 처리: 해당 없음
 - #54 step4의 Claude 검증자 P3: `CHANGELOG`의 설계서 v0.7.28 항목이 v0.7.24 항목 앞에 있다(main 병합 때 번호만 다시 매겼다). step0에서 순서를 맞춘다. → 처리: [CHANGELOG](../../../harness/CHANGELOG.md)
