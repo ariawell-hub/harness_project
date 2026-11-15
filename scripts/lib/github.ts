@@ -234,6 +234,25 @@ export interface GitHubPort {
   setDraft(n: number, draft: boolean): void;
   /** `GET repos/{repo}/branches/{branch}` 원본(필수 체크 등록 확인용, 봇 토큰으로 읽을 수 있다) */
   branchInfo(branch: string): unknown;
+  /** 이 저장소의 이름(`owner/name`) */
+  repoSlug(): string;
+  /**
+   * Actions 실행의 로그 전문(줄마다 job·step·시각이 앞에 붙는다). 지적의 근거·제안을 읽는 데 쓴다(10.1절).
+   * URL이 이 리포의 실행 URL 형식이 아니거나 읽지 못하면 null이다(예외를 던지지 않는다)
+   */
+  runLog(runUrl: string): string | null;
+}
+
+/**
+ * 이 리포의 Actions 실행 URL(`https://github.com/<owner>/<name>/actions/runs/<번호>`, 뒤에 `/job/…`·`/attempts/…`가
+ * 붙어도 된다)에서 실행 번호를 얻는다. 형식이 다르면 null. 커밋 상태의 링크는 기록 job이 쓰지만,
+ * 다른 리포나 다른 주소의 값을 `gh` 인자로 넘기지 않게 여기서 거른다
+ */
+export function runIdOf(runUrl: string, repo: string): string | null {
+  const prefix = `https://github.com/${repo}/actions/runs/`;
+  if (!repo || !runUrl.startsWith(prefix)) return null;
+  const m = /^(\d{1,20})(?:\/(?:job|attempts)\/\d{1,20})?\/?$/.exec(runUrl.slice(prefix.length));
+  return m ? m[1] : null;
 }
 
 export class GitHubError extends Error {}
@@ -385,8 +404,26 @@ export class GhCli implements GitHubPort {
   readonly kind = 'gh' as const;
   private cwd: string;
   private login: string | null = null;
+  private slug: string | null = null;
   constructor(cwd: string) {
     this.cwd = cwd;
+  }
+  repoSlug(): string {
+    this.slug ??= gh(
+      ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
+      this.cwd,
+    ).trim();
+    return this.slug;
+  }
+  runLog(runUrl: string): string | null {
+    try {
+      const id = runIdOf(runUrl, this.repoSlug());
+      if (!id) return null;
+      const r = runSync('gh', ['run', 'view', id, '--log'], { cwd: this.cwd, timeoutMs: 120_000 });
+      return r.code === 0 && r.stdout.trim() !== '' ? r.stdout : null;
+    } catch {
+      return null;
+    }
   }
   branchInfo(branch: string): unknown {
     return JSON.parse(

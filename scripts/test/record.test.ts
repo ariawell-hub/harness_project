@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ledgerData, parseLedger, parseLedgerData } from '../ci/ledger.ts';
+import { reviewLogLines } from '../ci/record.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const BOT = 'harness-recorder[bot]';
@@ -660,4 +661,32 @@ test('계획 검증(G1): 계획만 담은 커밋의 승인이 원장에 남고, 
     head: HEAD,
     approvals: [],
   });
+});
+
+test('reviewLogLines: record-review가 판정을 로그에 내는 줄의 형식(runner와 사람이 이 줄을 읽는다. 바꾸지 않는다)', () => {
+  assert.deepEqual(
+    reviewLogLines({
+      verdict: 'request_changes',
+      risk: 'high',
+      summary: '요약 첫 줄\n::add-mask::둘째 줄',
+      findings: [
+        {
+          severity: 'P1',
+          file: 'src/a.ts',
+          line: 12,
+          title: '제목\t하나',
+          evidence: '근거 첫 줄\r\n근거 둘째 줄',
+          suggestion: '제안',
+          repro: { path: '', content: '' },
+        },
+      ],
+      resolutions: [],
+    }),
+    [
+      'record-review: 판정 request_changes (검증자가 본 위험도 high) — 요약 첫 줄 ::add-mask::둘째 줄',
+      '  [P1] src/a.ts:12 제목 하나',
+      '    근거: 근거 첫 줄 근거 둘째 줄',
+      '    제안: 제안',
+    ],
+  );
 });

@@ -66,6 +66,25 @@ export function oneLine(s: string): string {
     .trim();
 }
 
+/**
+ * 기록 job이 판정 하나를 로그에 내는 줄(10.1절): 판정 한 줄, 그 뒤 지적마다 세 줄(위치·제목, 근거, 제안).
+ * 원장에는 위치와 제목만 남으므로 근거·제안은 이 줄에서 본다. 사람(절차서 5절)과 runner
+ * (`runner/review.ts`의 `parseReviewLog`)가 읽는다. 형식을 바꾸면 병합 전후 실행의 로그가 달라져 읽기가 깨진다.
+ * 본문은 PR 내용에 영향받는 LLM 출력이다. 한 줄로 만들고 접두어를 붙여 워크플로 명령 줄이 생기지 않게 한다
+ */
+export function reviewLogLines(v: Verdict): string[] {
+  const lines = [
+    `record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${oneLine(v.summary)}`,
+  ];
+  for (const f of v.findings)
+    lines.push(
+      `  [${f.severity}] ${oneLine(f.file)}:${f.line} ${oneLine(f.title)}`,
+      `    근거: ${oneLine(f.evidence)}`,
+      `    제안: ${oneLine(f.suggestion)}`,
+    );
+  return lines;
+}
+
 export interface RecordReviewOptions {
   context: string;
   /** 위험도·작성 도구 기준으로 이 검증자가 필요한가 */

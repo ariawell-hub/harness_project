@@ -16,6 +16,8 @@ export interface SessionResult {
   timedOut: boolean;
   durationMs: number;
   output: string;
+  /** 세션의 마지막 출력 글(`sessionText`). 반박 문단을 여기서 고른다(10.2절 (4)) */
+  text: string;
   /** 사용량 한도·네트워크 등 환경 장애(실패로 세지 않음, 9.2절) */
   envFailure: boolean;
   /** 자르지 않은 원본 출력(stdout, stderr). runner가 세션 로그 파일로 남긴다 */
@@ -78,6 +80,15 @@ export function parseSessionSummary(stdout: string): SessionSummary | null {
       input: JSON.stringify(d.tool_input ?? null).slice(0, 200),
     })),
   };
+}
+
+/**
+ * 세션의 마지막 출력 글. Claude 결과 JSON(`--output-format json`)이면 결과 객체의 `result`(자르지 않는다),
+ * 그 밖(Codex, 텍스트 출력)은 stdout 그대로다. stderr는 넣지 않는다
+ */
+export function sessionText(stdout: string): string {
+  const r = resultObject(stdout);
+  return typeof r?.result === 'string' ? r.result : stdout;
 }
 
 const ENV_FAILURE =
@@ -189,6 +200,7 @@ export async function runSession(
     timedOut: r.timedOut,
     durationMs: r.durationMs,
     output: (r.stdout + '\n' + r.stderr).slice(-20000),
+    text: sessionText(r.stdout),
     envFailure: isEnvFailure(r),
     raw: r.stdout + (r.stderr ? `\n--- stderr ---\n${r.stderr}` : ''),
     summary: parseSessionSummary(r.stdout),
