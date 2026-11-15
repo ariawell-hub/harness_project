@@ -72,6 +72,14 @@ export interface HarnessConfig {
   protectedPaths: string[];
   /** CI 판정 기준. environments: 워크플로가 참조해도 되는 역할별 environment(10.4절) */
   ci: { environments: string[] };
+  /** 의존성 통제 기준(R17, Q14). deps-guard가 쓴다 */
+  deps: {
+    lockfiles: string[];
+    minReleaseAgeDays: number;
+    licenses: string[];
+    registry: string;
+    osvApi: string;
+  };
   agents: Record<string, AgentDef>;
 }
 
@@ -83,6 +91,15 @@ export const DEFAULT_ENVIRONMENTS = [
   'recorder',
   'revert',
 ];
+
+/** 의존성 기준 기본값(Q14: 게시 후 14일, 허용 라이선스. ISC는 제작자 결정 2026-11-14) */
+export const DEFAULT_DEPS: HarnessConfig['deps'] = {
+  lockfiles: ['pnpm-lock.yaml'],
+  minReleaseAgeDays: 14,
+  licenses: ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD', 'ISC'],
+  registry: 'https://registry.npmjs.org',
+  osvApi: 'https://api.osv.dev/v1/querybatch',
+};
 
 export const CONFIG_FILE = 'harness.config.json';
 
@@ -145,6 +162,7 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   cfg.planReview ??= { required: false };
   cfg.ci ??= { environments: [...DEFAULT_ENVIRONMENTS] };
   cfg.ci.environments ??= [...DEFAULT_ENVIRONMENTS];
+  cfg.deps = { ...DEFAULT_DEPS, ...(cfg.deps ?? {}) };
   return cfg;
 }
 

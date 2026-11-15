@@ -163,9 +163,9 @@ test('riskGate: 보통은 통과, 높음은 제작자 head 승인이 있어야 �
   assert.equal(riskGate({ ...o, reviews: null }).state, 'error');
 });
 
-test('runGates: risk-gate 결과와 risk를 담고 결과 검사를 통과한다', () => {
+test('runGates: risk-gate 결과와 risk를 담고 결과 검사를 통과한다', async () => {
   const hi = repo({ 'migrations/1.sql': 'a\n' });
-  const r = runGates({ ...hi, branch: BRANCH, headSha: hi.head, reviews: [] });
+  const r = await runGates({ ...hi, branch: BRANCH, headSha: hi.head, reviews: [] });
   assert.equal(r.risk, 'high');
   assert.equal(r.results.find((x) => x.context === 'risk-gate')!.state, 'failure');
   assert.equal(validateResults(r, { headSha: hi.head, contexts: GATE_CONTEXTS }).ok, true);

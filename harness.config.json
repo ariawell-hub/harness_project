@@ -116,6 +116,13 @@
   "ci": {
     "environments": ["judge-claude", "judge-codex", "codex-auth-store", "recorder", "revert"]
   },
+  "deps": {
+    "lockfiles": ["pnpm-lock.yaml"],
+    "minReleaseAgeDays": 14,
+    "licenses": ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "ISC"],
+    "registry": "https://registry.npmjs.org",
+    "osvApi": "https://api.osv.dev/v1/querybatch"
+  },
   "agents": {
     "claude": {
       "cmd": "claude",

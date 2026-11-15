@@ -270,7 +270,7 @@ async function main(argv: string[]): Promise<number> {
       const reviews = rf && existsSync(rf) ? parseReviews(readFileSync(rf, 'utf8')) : null;
       const bf = str('pr-body');
       const prBody = bf && existsSync(bf) ? readFileSync(bf, 'utf8') : null;
-      const r = runGates({ root, cfg, base, branch, headSha, reviews, prBody });
+      const r = await runGates({ root, cfg, base, branch, headSha, reviews, prBody });
       writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
       const md = summaryMarkdown(r);
       const summary = str('summary');

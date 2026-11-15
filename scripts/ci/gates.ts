@@ -3,6 +3,7 @@
 // 설정(cfg)은 반드시 main 쪽에서 읽는다. PR이 판정 기준을 함께 바꿀 수 있기 때문이다.
 import type { HarnessConfig } from '../lib/config.ts';
 import { formatProblem } from '../lib/util.ts';
+import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
 import { planGate } from '../gates/plan-gate.ts';
 import { riskGate, type Review, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
@@ -22,6 +23,9 @@ export interface RunGatesOptions {
   reviews?: Review[] | null;
   /** PR 본문(보호 경로 체크리스트 확인용). 읽지 못했으면 null */
   prBody?: string | null;
+  /** 레지스트리·OSV 조회. 기본은 실제 HTTP(lockfile이 바뀌었을 때만 부른다) */
+  registry?: Registry;
+  now?: Date;
 }
 
 function firstLine(e: unknown): string {
@@ -60,35 +64,53 @@ function planGateResult(o: RunGatesOptions): Omit<GateResult, 'context'> {
   };
 }
 
-export function runGates(o: RunGatesOptions): GateResults {
+export async function runGates(o: RunGatesOptions): Promise<GateResults> {
   const signals: RiskSignal[] = [];
   let risk: Risk | undefined;
-  const byContext: Record<(typeof GATE_CONTEXTS)[number], () => GateResult> = {
-    'plan-gate': () => guarded('plan-gate', () => planGateResult(o)),
-    'harness-guard': () => {
-      const g = guarded('harness-guard', () => {
-        const r = harnessGuard({
-          root: o.root,
-          base: o.base,
-          cfg: o.cfg,
-          prBody: o.prBody ?? null,
+  const byContext: Record<(typeof GATE_CONTEXTS)[number], () => GateResult | Promise<GateResult>> =
+    {
+      'plan-gate': () => guarded('plan-gate', () => planGateResult(o)),
+      'harness-guard': () => {
+        const g = guarded('harness-guard', () => {
+          const r = harnessGuard({
+            root: o.root,
+            base: o.base,
+            cfg: o.cfg,
+            prBody: o.prBody ?? null,
+          });
+          signals.push(...r.signals);
+          return r.result;
         });
-        signals.push(...r.signals);
-        return r.result;
-      });
-      // 검사가 죽어 신호를 알 수 없으면 위험도를 높음으로 본다(fail-closed)
-      if (g.state === 'error' && !signals.length)
-        signals.push({ risk: 'high', reason: 'harness-guard가 판정하지 못했다' });
-      return g;
-    },
-    'risk-gate': () =>
-      guarded('risk-gate', () => {
-        const r = riskGate({ ...o, signals, reviews: o.reviews ?? null });
-        risk = r.risk;
-        return { state: r.state, description: r.description, details: r.details };
-      }),
-  };
-  const results = GATE_CONTEXTS.map((c) => byContext[c]());
+        // 검사가 죽어 신호를 알 수 없으면 위험도를 높음으로 본다(fail-closed)
+        if (g.state === 'error' && !signals.length)
+          signals.push({ risk: 'high', reason: 'harness-guard가 판정하지 못했다' });
+        return g;
+      },
+      'deps-guard': async () => {
+        try {
+          const r = await depsGuard({
+            root: o.root,
+            base: o.base,
+            cfg: o.cfg,
+            registry: o.registry ?? httpRegistry(o.cfg.deps),
+            now: o.now ?? new Date(),
+          });
+          return { context: 'deps-guard', ...r };
+        } catch (e) {
+          return guarded('deps-guard', () => {
+            throw e;
+          });
+        }
+      },
+      'risk-gate': () =>
+        guarded('risk-gate', () => {
+          const r = riskGate({ ...o, signals, reviews: o.reviews ?? null });
+          risk = r.risk;
+          return { state: r.state, description: r.description, details: r.details };
+        }),
+    };
+  const results: GateResult[] = [];
+  for (const c of GATE_CONTEXTS) results.push(await byContext[c]());
   return { version: 1, headSha: o.headSha, results, ...(risk ? { risk } : {}) };
 }
 
