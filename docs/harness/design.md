@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.36 · 상태: 초안 · 최종 갱신: 2026-11-15
+> 버전 v0.7.37 · 상태: 초안 · 최종 갱신: 2026-11-15
 
 ---
 
@@ -69,6 +69,7 @@ review_cycle: quarterly
   - v0.7.34 (2026-11-15): 계획 해시와 자기 step 불변 규칙에 step의 금지사항을 더한다. 승인 뒤 금지사항을 지우는 것은 AC를 약하게 고치는 것과 같은 우회다. 묶는 섹션 목록은 한 곳(`STEP_BOUND_SECTIONS`)에 둔다(8.2절, 8.3절, 10.3절, Issue #55)
   - v0.7.35 (2026-11-15): PR의 필수 체크를 출처 기준으로 판정한다. 설정의 context마다 기대 출처(검증 App 봇의 커밋 상태, GitHub Actions의 check run)가 쓴 가장 최근 결과만 보고, PR 상태를 분류하는 함수와 `pr-state` 명령을 둔다. runner 연결은 다음 변경이다(10.3절, Issue #56 step0)
   - v0.7.36 (2026-11-15): runner가 내 PR을 출처 기준 분류로 다룬다. `check` 실패와 기계 판정 실패만 수정 세션으로 보내고, 제작자 승인 대기(`risk-gate`)는 head마다 한 번 요청하며, 뒤처진 PR은 필수 체크가 모두 통과한 뒤에만 갱신해 승인을 이어받는다. 같은 head의 CI 대기가 `limits.ciStallHours`를 넘으면 알린다(4.5절, 10.3절, Issue #56 step1)
+  - v0.7.37 (2026-11-15): runner가 계획 검증(G1)을 따른다. 계획 검증 대상 계획은 계획만 담은 커밋으로 초안 PR을 열고, 원장(검증 App 봇 댓글)의 계획 승인을 확인한 뒤에만 step 세션을 띄운다. step이 끝나면 같은 PR의 초안을 해제한다(4.1절, 4.5절, 10.3절, Issue #56 step2)
 
 ### 0.1 전제 조건
 
@@ -220,13 +221,19 @@ review_cycle: quarterly
 ```
 
 - **step 하나 = 세션 하나 = PR 하나.** 계획은 첫 step의 PR에 실려 들어간다(G1). 이후 step은 앞 step이 병합된 main에서 새 브랜치로 시작한다(8.1절).
-- 무인 실행에서는 runner가 ⑤~⑩을 step마다 새 세션으로 반복한다(4.5절).
+- 무인 실행에서는 runner가 ⑤~⑩을 step마다 새 세션으로 반복한다(4.5절). 계획 검증 대상 계획은 runner도 ④에서 계획만 담은 커밋으로 초안 PR을 열고, 원장의 계획 승인을 확인한 뒤에 ⑤로 간다(아래 G1 확인 내용의 "runner의 계획 검증").
 
 - **G1 확인 내용**: 계획 파일 존재, 필수 섹션(목표·수용 기준, 범위, 검증 방법) 작성, `size`·`risk` 지정. 중·대 규모는 draft PR에서 CI가 계획을 교차 검증한 결과가 있고, 그 검증이 코드 변경이 없는 커밋에서 이뤄졌는지까지 확인한다. 최종 판정은 `plan-gate` 필수 체크가 한다(10.3절).
   - **계획만 담은 커밋을 먼저 올린다.** 판정 워크플로의 plan job이 PR의 merge-base 대비 변경을 보고, 바뀐 파일이 그 계획의 폴더 안뿐이면 `mode=plan`으로 판정한다(`scripts/ci/plan-hash.ts`의 `planMode`). 커밋 하나가 아니라 PR 전체 변경으로 본다. 검증자가 보는 것이 PR 전체 diff이기 때문이다. 코드를 이미 올렸으면 되돌리는 커밋으로 계획만 남긴 뒤 검증받는다.
   - `mode=plan`이면 판정 job이 공통 프롬프트 뒤에 계획 검증 항목(`scripts/cross-review/prompt-plan.md`: 수용 기준의 검증 가능성, step 분할과 AC, 범위, 위험도, 설계 결함)을 덧붙인다. 지적은 코드 검증과 같은 원장에 등록되고 P0·P1은 `review-ledger`를 막는다.
   - 기록 job은 `mode=plan`인 head에서 `review/<검증자>`가 success일 때(승인, 위험도 기준 "해당 없음", 이어받음) 원장의 `planReview`(`{ hash, head, approvals }`)에 그 검증자를 넣는다. 해시가 바뀌면 이전 승인을 지우고, 수정 요청이면 그 검증자의 승인을 지운다. 코드가 섞인 head의 판정은 계획 승인으로 남기지 않는다. 계획 승인이 있으면 지적이 없어도 원장 댓글을 만든다.
   - `plan-gate`의 판정과 해시 대상은 10.3절 승인 결속 기준에 있다. 설정 `planReview.required`가 `true`면 G1 실패가 `plan-gate`를 실패시킨다. 이 리포는 실제 PR(#88)에서 계획 전용 커밋의 계획 검증과 원장의 계획 승인을 확인한 뒤 켰다(Issue #55). `false`면 같은 판정을 하되 결과를 참고(`G1(꺼짐)`)로만 남긴다. 하네스를 새로 들이는 리포는 판정 워크플로가 동작하는 것을 확인한 뒤 켠다.
+  - **runner의 계획 검증**(`scripts/runner/next.ts`의 `planReviewHash`, `scripts/runner/run.ts`의 `doPlanPush`, `scripts/runner/ledger-read.ts`)
+    - 대상: `planReview.required`가 켜져 있고, step 폴더 형식 계획이고, 계획 해시가 base(main)의 것과 다른 경우다. 소규모 계획과 둘째 step부터(계획이 main에 같은 해시로 있다)는 대상이 아니다. 필수 체크(`ci.requiredChecks`)나 검증 App 봇(`ci.recorderBot`) 설정이 없는 리포도 대상이 아니다(승인을 기록할 CI가 없어 runner가 기다리기만 하게 된다).
+    - 계획 작성 세션이 끝나면 runner가 PR 전체 변경이 계획 폴더 안뿐인지(`planMode`) 확인하고, 일반 push한 뒤 초안 PR을 연다. 제목은 그 step의 PR 제목이고 자동 병합은 켜지 않는다. 계획 폴더 밖 변경이 커밋돼 있으면 push하지 않고 `plan:scope` 실패로 센 뒤 계획을 `draft`로 되돌린다. 다음 계획 작성 세션이 직전 실패를 보고 그 파일을 되돌린다(runner는 `reset`하지 않는다, R14).
+    - 계획 검증 중인 PR(PR head의 step이 끝나지 않았다)은 CI가 끝난 뒤에 원장을 읽는다. 원장으로 인정하는 댓글은 작성자가 `ci.recorderBot`인 것뿐이고(10.2절 (4). runner가 만든 PR의 작성자는 runner 자신이다), `planReview.hash`가 지금 계획의 해시와 같고 두 검증자가 모두 `approvals`에 있어야 승인이다(`plan-gate`와 같은 기준). 승인이 기록된 head가 지금 head와 같은지는 보지 않는다: 승인은 해시에 묶이고(10.3절 결속 기준), 지금 head의 `review/*`·`review-ledger`가 통과한 뒤에만 원장을 읽으므로 지금 head에서 나온 수정 요청은 그 앞에서 걸린다. 승인을 확인하면 step 세션을 띄운다. 승인이 없거나 원장을 읽지 못하면 CI 대기로 세고, 같은 head에서 `limits.ciStallHours`를 넘으면 알린다(4.5절).
+    - 계획만 담은 커밋의 `check`가 실패하면 수정 세션이 아니라 계획 작성 세션을 다시 띄운다(실패 내용을 직전 실패로 넣는다). 계획 검증에서 나온 차단 지적의 대응은 Issue #56 step3이고, 그전에는 사람 대기로 센다.
+    - step이 끝나 push할 때 runner는 그 PR의 초안을 해제하고 자동 병합을 켠다. 계획 검증 대상이 아닌 계획의 초안 PR(사람이 초안으로 돌려 둔 것)은 해제하지 않는다. runner는 계획 승인을 스스로 판정하거나 원장을 쓰지 않는다(R12).
 - **G2**: 로컬에서 push·PR 직전에 `check` 전체를 실행한다(R7). CI가 같은 검사를 다시 실행한다.
 - **G3**: 10.3절의 필수 상태 체크가 모두 통과해야 GitHub이 병합한다.
 
@@ -272,7 +279,7 @@ review_cycle: quarterly
 1. 다음 할 일을 고른다(아래 우선순위).
 2. 그 step의 worktree에서 새 세션을 띄운다(`claude -p` 또는 `codex exec`, 무인 권한 프로필). 프롬프트는 `AGENTS.md` 지도 + step 파일 + 완료된 앞 step들의 summary + (재시도면) 직전 실패 내용이다. `docs/` 전체를 넣지 않는다. 필요한 문서는 step 파일의 "읽어야 할 파일"이 가리킨다(B2).
 3. 세션이 끝나면 runner가 **직접 판정**한다. step의 AC 명령과 `check`를 실행하고, 통과해야만 완료로 본다. 세션이 스스로 적은 "완료"는 판정 근거가 아니다.
-4. 통과하면 push·PR·자동 병합 켜기(4.1절 ⑦~⑨)를 하고 다음 바퀴로 간다. 실패하면 실패 기록(8.3절)에 남기고 같은 step을 다시 고른다.
+4. 통과하면 push·PR·자동 병합 켜기(4.1절 ⑦~⑨)를 하고 다음 바퀴로 간다. 실패하면 실패 기록(8.3절)에 남기고 같은 step을 다시 고른다. 계획 검증 때 연 초안 PR이 있으면 새 PR을 만들지 않고 그 PR에 올린 뒤 초안을 해제한다.
 
 **다음 할 일 우선순위** (S1. 대화 세션의 세션 시작 절차도 같은 순서를 쓴다, 7.1절)
 1. 답을 받은 `needs-human` 항목(`blocked` 해제)
@@ -890,7 +897,7 @@ pnpm test src/auth/login-guard.spec.ts
   - `plan-gate`는 중·대 규모 계획에서 차례로 본다. (a) merge-base에 있는 같은 계획의 해시가 지금 해시와 같으면 통과(이미 main에 들어간 계획이다. 뒤 step의 PR이 여기에 해당한다). (b) 아니면 원장의 `planReview.hash`가 지금 해시와 같고 두 검증자가 모두 `approvals`에 있으면 통과. (c) 그 밖은 실패. 뒤 step의 PR에서 핵심 섹션을 고치면 (a)가 성립하지 않아 그 PR에서 다시 검증받는다(8.2절).
   - 필요한 검증자는 판정 워크플로의 plan job이 계획 전용 head에서 위험도로 정한다. 실행하지 않은 검증자("해당 없음")도 `approvals`에 들어가므로 `plan-gate`는 두 검증자를 모두 요구한다. `plan-gate`가 뒤 커밋에서 필요한 검증자를 다시 계산하지 않는다(코드가 섞인 diff의 위험도로 바뀐다).
   - 원장은 `gates` 워크플로의 판정 job이 읽기 권한(`pull-requests: read`)으로 읽고, 작성자가 검증 App 봇인 댓글만 인정한다(10.2절 (4)). 계획이 merge-base와 같으면 읽지 않는다. 읽지 못하면 `plan-gate`는 `error`다(fail-closed). `planReview.required`가 꺼져 있으면 참고만 남긴다.
-  - 해시는 base 스크립트가 PR 트리를 데이터로 읽어 계산한다. 로컬(`node scripts/harness.ts plan-gate`, runner)은 원장을 보지 않고, 계획이 base와 다르면 "CI에서 계획 승인이 필요하다"를 참고로 알린다.
+  - 해시는 base 스크립트가 PR 트리를 데이터로 읽어 계산한다. 로컬 `plan-gate`(`node scripts/harness.ts plan-gate`, runner가 push 전에 부르는 것 포함)는 원장을 보지 않고, 계획이 base와 다르면 "CI에서 계획 승인이 필요하다"를 참고로 알린다. runner는 step을 시작하기 전에 따로 원장을 읽어 계획 승인을 확인한다(4.1절 "runner의 계획 검증").
 - PR 갱신은 rebase가 아니라 `origin/main` 병합이다(ADR-0006). 병합 뒤 PR head와 main의 merge-base는 병합한 main 커밋이라, "merge-base 대비 diff"는 PR이 main에 더하는 변경과 같다. 충돌 없이 병합했으면 patch-id가 같아 승인을 이어받고, 충돌을 해결하며 PR 변경이 바뀌면 patch-id가 달라져 다시 검증한다. Q20에서 main 병합 갱신과 GitHub "Update branch" 모두 patch-id가 같고, 충돌 해결로 PR 변경이 바뀌면 달라짐을 확인했다.
 - 기록 job이 새 head로 승인을 옮길 때는 PR ref(`refs/pull/<n>/head`, `headRefOid`)가 아니라 이벤트의 head SHA로 patch-id를 잰다. GitHub은 push 직후 PR head를 늦게 반영해서 PR ref가 옛 head를 가리킬 수 있다(Q20).
 - **구현**(`scripts/ci/binding.ts`): 판정 워크플로의 `plan` job이 base 스크립트로 patch-id(`git diff --binary --full-index <merge-base>...HEAD | git patch-id --stable`)를 재고 이어받기를 판정한다. 기록 job은 승인 상태의 description 끝에 ` patch:<id 40자>`를 적는다(예: `승인 (P2 1) patch:…`). 이어받으면 판정 job은 돌지 않고 기록 job이 `이어받음 <원래 head 앞 12자> patch:<id>`를 success로 쓴다.

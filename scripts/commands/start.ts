@@ -32,6 +32,8 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
       return `PR #${t.pr.number} 자동 병합 켜기: \`gh pr merge ${t.pr.number} --auto --squash\``;
     case 'update':
       return `PR #${t.pr.number}를 origin/main 병합으로 갱신 (rebase·force push 없이, worktree ${t.local.worktree}, 절차서 5절)`;
+    case 'plan-push':
+      return `계획 ${t.local.id}: 계획만 담은 커밋을 push하고 초안 PR을 연다(계획 검증 G1, 절차서 2절. worktree ${t.local.worktree})`;
     case 'plan':
       return `계획 ${t.local.id} 작성 (worktree ${t.local.worktree}, 파일 ${t.local.ref.file})`;
     case 'step':

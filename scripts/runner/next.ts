@@ -10,6 +10,7 @@
 //   6. 없으면 idle (CI·사람 대기 수 포함)
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { planHashes } from '../ci/plan-hash.ts';
 import { stepCompletedAt } from '../commands/pr-state.ts';
 import { listRemoteClaims } from '../commands/task.ts';
 import type { HarnessConfig } from '../lib/config.ts';
@@ -23,6 +24,7 @@ import type {
 } from '../lib/github.ts';
 import { readApprovalMarker } from '../lib/approval.ts';
 import {
+  defaultBase,
   gitTry,
   harnessStateDir,
   isBehind,
@@ -42,6 +44,7 @@ import {
   type Frontmatter,
   type PlanRef,
 } from '../lib/plan.ts';
+import { planApproved, readPrLedger } from './ledger-read.ts';
 import { classifyPr, requiredStates, type PrVerdict, type RequiredState } from './pr-state.ts';
 
 export interface LocalPlan {
@@ -66,6 +69,36 @@ export interface LocalPlan {
   prState?: PrVerdict;
   /** `prState`를 낸 필수 체크 상태. 알림 문구(상태 설명, 실행 링크)에 쓴다 */
   required?: RequiredState[];
+  /** PR head의 계획에서 이 step이 completed인가(`prState`와 함께 채운다) */
+  prStepCompleted?: boolean;
+  /**
+   * 계획 검증(G1, 4.1절) 대상이면 지금 계획의 핵심 섹션 해시와 원장의 승인 여부.
+   * 대상: `planReview.required`가 켜져 있고, step 폴더 형식 계획이고, 해시가 base(main)의 것과 다르다.
+   * `approved`는 PR이 열려 있고 step이 끝나지 않았고 CI가 끝났을 때만 원장을 읽어 채운다(읽지 못하면 null)
+   */
+  planReview?: { hash: string; approved: boolean | null };
+}
+
+/**
+ * 계획 검증(G1) 대상이면 지금 계획의 해시, 아니면 null(소규모 계획, 검증이 꺼진 리포, 계획이 base와 같은 해시).
+ * 계획이 main에 이미 같은 해시로 있으면(둘째 step부터) 다시 검증받지 않는다(10.3절).
+ * 필수 체크(`ci.requiredChecks`)나 검증 App 봇(`ci.recorderBot`) 설정이 없는 리포도 null이다: 승인을 기록할 CI가 없어
+ * runner가 승인을 확인할 수 없다(기다리기만 하게 된다). 그런 리포는 지금까지처럼 step을 바로 진행한다
+ */
+export function planReviewHash(
+  cfg: HarnessConfig,
+  worktree: string,
+  branch: string,
+): string | null {
+  if (!cfg.planReview.required) return null;
+  if (cfg.ci.requiredChecks.length === 0 || !cfg.ci.recorderBot) return null;
+  try {
+    const base = defaultBase(worktree, cfg.github.remote, cfg.github.defaultBranch);
+    const h = base ? planHashes(worktree, base, branch) : null;
+    return h && h.hash !== h.baseHash ? h.hash : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -154,6 +187,8 @@ export type Task =
   | { kind: 'report-stall'; local: LocalPlan; pr: PullRequest; waiting: string[] }
   /** 필수 체크가 모두 통과했는데 자동 병합이 꺼져 있다: 다시 켠다 */
   | { kind: 'arm-merge'; local: LocalPlan; pr: PullRequest }
+  /** 계획 검증 대상 계획을 다 썼다: 계획만 담은 커밋을 push하고 초안 PR을 연다(G1, 4.1절) */
+  | { kind: 'plan-push'; local: LocalPlan }
   /** main에 뒤처지거나 충돌한 PR을 origin/main 병합으로 갱신(ADR-0006) */
   | { kind: 'update'; local: LocalPlan; pr: PullRequest }
   | { kind: 'plan'; local: LocalPlan }
@@ -201,20 +236,29 @@ function inspectPr(
   branch: string,
   pr: PullRequest,
   localCompleted: boolean,
-): { prState: PrVerdict; required: RequiredState[] } {
+): { prState: PrVerdict; required: RequiredState[]; prStepCompleted: boolean } {
   const { remote, defaultBranch } = env.cfg.github;
   try {
     const pushed = revParse(`${remote}/${branch}`, worktree);
     if (!pr.headSha || (pushed && pushed !== pr.headSha))
-      return { prState: { kind: 'wait-ci', waiting: ['PR head 반영'] }, required: [] };
+      return {
+        prState: { kind: 'wait-ci', waiting: ['PR head 반영'] },
+        required: [],
+        prStepCompleted: localCompleted,
+      };
     const required = requiredStates(env.gh.commitChecks(pr.headSha), env.cfg.ci);
     const behind = isBehind(worktree, remote, defaultBranch, pr.headSha);
     const stepCompleted = stepCompletedAt(worktree, pr.headSha, branch) ?? localCompleted;
-    return { prState: classifyPr({ pr, required, behind, stepCompleted }), required };
+    return {
+      prState: classifyPr({ pr, required, behind, stepCompleted }),
+      required,
+      prStepCompleted: stepCompleted,
+    };
   } catch (e) {
     return {
       prState: { kind: 'wait-ci', waiting: [`체크 조회 실패(${firstLine(e)})`] },
       required: [],
+      prStepCompleted: localCompleted,
     };
   }
 }
@@ -259,8 +303,29 @@ export function readLocalPlans(env: NextEnv): LocalPlan[] {
             ref.kind === 'multi' ? stepStatus === 'completed' : fm.status === 'completed',
           )
         : null;
+    // 계획 검증(G1) 대상인가. 승인은 CI가 끝난(ready) 계획 검증 중인 PR에서만 원장을 읽어 확인한다
+    let planReview: LocalPlan['planReview'];
+    if (ref.kind === 'multi' && String(fm.owner ?? '') === env.worker && !needsPlanning) {
+      const hash = planReviewHash(env.cfg, wt.path, wt.branch);
+      if (hash) {
+        let approved: boolean | null = null;
+        if (
+          pr?.state === 'open' &&
+          inspected?.prStepCompleted === false &&
+          inspected.prState.kind === 'ready'
+        ) {
+          try {
+            approved = planApproved(readPrLedger(env.gh, env.cfg, pr.number), hash);
+          } catch {
+            approved = null; // 원장을 읽지 못했다: 승인으로 보지 않고 기다린다
+          }
+        }
+        planReview = { hash, approved };
+      }
+    }
     out.push({
       ...(inspected ?? {}),
+      ...(planReview ? { planReview } : {}),
       worktree: wt.path,
       branch: wt.branch,
       id: b.id,
@@ -476,6 +541,14 @@ export function filterTrustedIssues(
   return { trusted, excluded };
 }
 
+/** 원장의 계획 승인을 기다릴 때 대기 목록에 적는 이름 */
+export const PLAN_APPROVAL_WAIT = '계획 승인(G1)';
+
+/** 계획 검증 중인 PR인가: 계획 검증 대상이고, PR이 열려 있고, PR head의 step이 끝나지 않았다 */
+export function inPlanReview(l: LocalPlan): boolean {
+  return !!l.planReview && l.pr?.state === 'open' && l.prStepCompleted === false;
+}
+
 export function pickNext(env: NextEnv): Pick {
   const locals = readLocalPlans(env);
   return { ...pickFrom(env, locals), locals };
@@ -505,6 +578,34 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
 
   // 2. 내 PR 중 조치가 필요한 것
   let ci = 0;
+  const act = (task: Task, reason: string): Omit<Pick, 'locals'> => ({
+    task,
+    reason,
+    waiting: { ci, human: humanIssues.size },
+    excluded: [],
+  });
+  /**
+   * CI를 기다리는 PR: 같은 head에서 `limits.ciStallHours`를 넘겼으면 알림 작업을 돌려주고,
+   * 이미 알렸으면 사람 대기로, 아니면 CI 대기로 센다(null)
+   */
+  const waitOrStall = (
+    l: LocalPlan,
+    pr: PullRequest,
+    waiting: string[],
+  ): Omit<Pick, 'locals'> | null => {
+    const w = readPrWait(l.worktree);
+    const same = w !== null && w.head === pr.headSha;
+    if (same && w.reported) {
+      // 이미 알렸다: 제작자 답을 기다린다
+      humanIssues.add(l.issue);
+    } else if (same && now - Date.parse(w.since) >= cfg.limits.ciStallHours * 3_600_000) {
+      return act(
+        { kind: 'report-stall', local: l, pr, waiting },
+        `PR #${pr.number}의 CI 대기가 ${cfg.limits.ciStallHours}시간을 넘었다: ${waiting.join(', ')}`,
+      );
+    } else ci++;
+    return null;
+  };
   /** 열린 차단 지적이 있어 사람 대기로 센 PR(대응은 계획 20261115-runner-pr-flow step3) */
   const reviewPrs: number[] = [];
   const now = env.now?.() ?? Date.now();
@@ -522,12 +623,9 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
     // 필수 체크를 출처로 걸러 분류한 결과가 있으면 그것으로 고른다(10.3절). 없으면 체크 요약으로 판단한다
     const v = l.prState;
     if (v) {
-      const act = (task: Task, reason: string): Omit<Pick, 'locals'> => ({
-        task,
-        reason,
-        waiting: { ci, human: humanIssues.size },
-        excluded: [],
-      });
+      // 계획 검증 중인 PR(계획만 올렸고 step이 끝나지 않았다)의 check 실패와 "CI 끝남"은 3번에서 다룬다:
+      // 수정 세션이 아니라 계획 작성 세션, 자동 병합이 아니라 계획 승인 확인이다
+      if (inPlanReview(l) && (v.kind === 'fix' || v.kind === 'ready')) continue;
       switch (v.kind) {
         case 'closed':
           break;
@@ -563,18 +661,12 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
           break;
         case 'wait-ci':
         case 'infra-error': {
-          const w = readPrWait(l.worktree);
-          const same = w !== null && w.head === pr.headSha;
-          const waiting = v.kind === 'wait-ci' ? v.waiting : v.failing.map((f) => f.context);
-          if (same && w.reported) {
-            // 이미 알렸다: 제작자 답을 기다린다
-            humanIssues.add(l.issue);
-          } else if (same && now - Date.parse(w.since) >= cfg.limits.ciStallHours * 3_600_000) {
-            return act(
-              { kind: 'report-stall', local: l, pr, waiting },
-              `PR #${pr.number}의 CI 대기가 ${cfg.limits.ciStallHours}시간을 넘었다: ${waiting.join(', ')}`,
-            );
-          } else ci++;
+          const stall = waitOrStall(
+            l,
+            pr,
+            v.kind === 'wait-ci' ? v.waiting : v.failing.map((f) => f.context),
+          );
+          if (stall) return stall;
           break;
         }
         case 'ready':
@@ -620,6 +712,26 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
       if (l.fm.status === 'blocked') humanIssues.add(l.issue);
       continue;
     }
+    // 계획 검증 중인 PR(G1): 승인 전에는 step을 시작하지 않는다
+    if (inPlanReview(l) && l.pr && l.prState) {
+      if (l.pr.labels.includes(label)) continue;
+      if (l.prState.kind === 'fix')
+        return act(
+          { kind: 'plan', local: l },
+          `계획 ${l.id}의 계획 전용 커밋에서 ${l.prState.failing.map((f) => f.context).join(', ')} 실패: 계획을 다시 쓴다`,
+        );
+      if (l.prState.kind === 'ready') {
+        if (l.planReview?.approved === true)
+          return act(
+            { kind: 'step', local: l },
+            `계획 ${l.id}가 승인됐다(G1): step${l.step ?? ''} 진행`,
+          );
+        // CI는 끝났는데 원장에 지금 계획의 승인이 없다(기록 지연, 원장을 읽지 못함)
+        const stall = waitOrStall(l, l.pr, [PLAN_APPROVAL_WAIT]);
+        if (stall) return stall;
+      }
+      continue; // 그 밖(CI 대기, 열린 지적, 충돌)은 2번에서 셌다
+    }
     if (l.pr && l.pr.state !== 'closed') continue; // PR이 열렸거나 병합됨
     if (l.needsPlanning)
       return {
@@ -628,6 +740,12 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
         waiting: { ci, human: humanIssues.size },
         excluded: [],
       };
+    // 계획 검증 대상인데 아직 올리지 않았다: 계획만 담은 커밋을 먼저 올린다
+    if (l.planReview && l.stepStatus !== 'completed')
+      return act(
+        { kind: 'plan-push', local: l },
+        `계획 ${l.id}를 계획만 담은 커밋으로 올려 검증받는다(G1)`,
+      );
     if (l.stepStatus !== 'completed')
       return {
         task: { kind: 'step', local: l },

@@ -17,6 +17,7 @@ import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { runShell, tail } from '../lib/exec.ts';
 import { getGitHub, type GitHubPort, type PullRequest } from '../lib/github.ts';
 import {
+  changedFiles,
   defaultBase,
   fastForwardMain,
   git,
@@ -53,12 +54,15 @@ import {
   slugFor,
 } from '../commands/task.ts';
 import { planGate } from '../gates/plan-gate.ts';
+import { planMode } from '../ci/plan-hash.ts';
 import { resolveAgentCommand, runSession, type AgentTool, type SessionResult } from './agents.ts';
 import {
   BOT_ISSUE_ACCEPT,
   allowedAccounts,
   clearPrWait,
+  inPlanReview,
   issueTrust,
+  planReviewHash,
   pickNext,
   readConflictState,
   readLocalPlans,
@@ -441,6 +445,105 @@ async function doPlanning(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env'
   return 'ok';
 }
 
+// ---------- 계획 검증(G1, 4.1절): 계획만 담은 커밋을 먼저 올린다 ----------
+
+/**
+ * 계획 검증 대상 계획을 다 쓴 뒤: PR 전체 변경이 계획 폴더 안뿐인지 확인하고, 일반 push한 뒤 초안 PR을 연다.
+ * 계획 폴더 밖 변경이 커밋돼 있으면 push하지 않고 `plan:scope` 실패로 센 뒤 계획을 draft로 되돌린다
+ * (다음 계획 작성 세션이 직전 실패를 보고 그 파일을 base와 같게 되돌린다. runner는 reset하지 않는다, R14).
+ * 승인은 CI 검증자가 만들고 runner는 원장을 읽기만 한다(R12)
+ */
+async function doPlanPush(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'fail' | 'env' | 'blocked'> {
+  const { remote, defaultBranch } = ctx.cfg.github;
+  const ref = findPlan(l.worktree, l.id) ?? l.ref;
+  if (!ref.dir || !planReviewHash(ctx.cfg, l.worktree, l.branch)) return 'ok';
+  const fm = parseDoc(readFileSync(path.join(l.worktree, ref.file), 'utf8')).frontmatter;
+  if (fm?.status !== 'active') return 'ok'; // 질문을 올리고 멈췄거나 아직 쓰는 중이다
+  const info = repoInfo(l.worktree);
+  const base = defaultBase(l.worktree, remote, defaultBranch);
+  if (!base) return 'env';
+  if (planMode({ root: l.worktree, base, branch: l.branch }).mode !== 'plan') {
+    let outside: string[] = [];
+    try {
+      outside = changedFiles(l.worktree, base).filter((f) => !f.startsWith(`${ref.dir}/`));
+    } catch {
+      outside = [];
+    }
+    const detail = `계획 폴더(${ref.dir}) 밖 변경이 커밋돼 있다: ${outside.join(', ') || '(목록을 읽지 못함)'}\n계획 검증(G1)은 계획만 담은 커밋에서 받는다. 이 파일들의 내용을 ${remote}/${defaultBranch}와 같게 되돌려 커밋하라(코드는 계획이 승인된 뒤 step에서 쓴다)`;
+    recordAttempt(info, {
+      plan: l.id,
+      step: null,
+      key: 'plan:scope',
+      ok: false,
+      kind: 'plan',
+      detail,
+    });
+    setPlanStatus(l.worktree, 'draft', '계획 폴더 밖 변경이 있어 올리지 않았다: 계획을 다시 쓴다');
+    event(ctx, 'plan-scope-fail', { plan: l.id, detail: outside.join(', ') });
+    return 'fail';
+  }
+  recordAttempt(info, { plan: l.id, step: null, key: 'plan:scope', ok: true, kind: 'plan' });
+  const push = gitTry(['push', '--quiet', '-u', remote, `HEAD:refs/heads/${l.branch}`], l.worktree);
+  if (!push.ok) {
+    // force push하지 않는다(14.4절, ADR-0006). 원격과 갈라졌으면 어느 쪽을 남길지 사람이 판단한다
+    if (remoteBranchDiverged(l.worktree, remote, l.branch)) {
+      recordAttempt(info, {
+        plan: l.id,
+        step: null,
+        key: 'pr:push',
+        ok: false,
+        kind: 'pr',
+        detail: tail(push.stderr, 5),
+      });
+      await blockPlan(
+        ctx,
+        l,
+        `원격 브랜치 ${l.branch}에 로컬에 없는 커밋이 있어 계획 push가 거부됐다. 덮어쓰지 않는다(R14). 절차서 5절대로 원격 이력을 확인해 병합하거나 정리한다`,
+      );
+      return 'blocked';
+    }
+    event(ctx, 'push-fail', { plan: l.id, detail: push.stderr });
+    return 'env';
+  }
+  let pr = ctx.gh.findPRByBranch(l.branch);
+  if (!pr || pr.state !== 'open') {
+    const idx = readIndex(l.worktree, ref);
+    const step = l.step ?? 0;
+    const entry = idx.steps[step];
+    const close = step === idx.steps.length - 1 ? `Closes #${l.issue}` : `Refs #${l.issue}`;
+    pr = ctx.gh.createPR({
+      head: l.branch,
+      base: defaultBranch,
+      draft: true,
+      title: `${String(l.fm.type ?? 'feat')}(${l.id}): ${entry ? `step${entry.step} ${entry.name}` : '작업'}`,
+      body: `${close}
+
+- 계획: \`${l.id}\` step ${step}${entry ? ` (${entry.name})` : ''}
+- 계획 검증(G1): 지금은 계획만 담은 커밋이다. 두 검증자가 계획을 승인하면 runner가 이 PR에 구현을 올리고 초안을 해제한다(설계서 4.1절).
+- 자체 리뷰: scripts/cross-review/checklist.md
+
+🤖 harness runner (${ctx.o.worker}, ${ctx.o.tool})`,
+    });
+  }
+  event(ctx, 'plan-pushed', { plan: l.id, pr: pr.number });
+  return 'ok';
+}
+
+/** 계획만 담은 커밋의 필수 체크 실패를 계획 작성 세션의 직전 실패로 남긴다(실패 키는 체크마다 `pr:<context>`) */
+function notePlanCheckFailure(l: LocalPlan): void {
+  if (l.prState?.kind !== 'fix') return;
+  const info = repoInfo(l.worktree);
+  for (const f of l.prState.failing)
+    recordAttempt(info, {
+      plan: l.id,
+      step: null,
+      key: `pr:${f.context}`,
+      ok: false,
+      kind: 'pr',
+      detail: `계획만 담은 커밋의 CI 체크 ${f.context}가 실패했다${f.description ? `: ${f.description}` : ''}\n로컬에서 \`node scripts/harness.ts check\`로 재현해 계획 파일을 고쳐라`,
+    });
+}
+
 // ---------- step 실행·판정 ----------
 
 async function doStep(
@@ -641,6 +744,12 @@ async function doStep(
     return 'env';
   }
   let pr = ctx.gh.findPRByBranch(l.branch);
+  // 계획 검증 때 runner가 연 초안 PR이면 그 PR에 구현을 올린 것이다: 초안을 해제한다(4.1절).
+  // 계획 검증 대상이 아닌 계획의 초안 PR(사람이 연 것)은 건드리지 않는다
+  if (pr?.state === 'open' && pr.isDraft && planReviewHash(ctx.cfg, l.worktree, l.branch)) {
+    ctx.gh.setDraft(pr.number, false);
+    pr = { ...pr, isDraft: false };
+  }
   if (!pr || pr.state !== 'open') {
     const idx = ref.kind === 'multi' ? readIndex(l.worktree, findPlan(l.worktree, l.id)!) : null;
     const entry = idx?.steps[l.step ?? 0];
@@ -660,7 +769,9 @@ async function doStep(
       body,
     });
   }
-  ctx.gh.enableAutoMerge(pr.number);
+  // 초안 PR에는 자동 병합을 켤 수 없다. 사람이 초안을 해제하면 다음 바퀴가 켠다(arm-merge)
+  if (pr.isDraft) event(ctx, 'draft-kept', { plan: l.id, pr: pr.number });
+  else ctx.gh.enableAutoMerge(pr.number);
   if (existsSync(answerFile)) unlinkSync(answerFile);
   event(ctx, 'pr-ready', { plan: l.id, step: l.step, pr: pr.number, last: completed.last });
   return 'ok';
@@ -1058,7 +1169,11 @@ function trackPrs(ctx: Ctx, locals: LocalPlan[]): void {
   for (const l of locals) {
     if (!l.prState || l.pr?.state !== 'open' || !sameWorker(ctx, l)) continue;
     try {
-      const waiting = l.prState.kind === 'wait-ci' || l.prState.kind === 'infra-error';
+      const waiting =
+        l.prState.kind === 'wait-ci' ||
+        l.prState.kind === 'infra-error' ||
+        // 계획 검증 중인 PR의 CI는 끝났는데 원장에 승인이 아직 없다
+        (inPlanReview(l) && l.prState.kind === 'ready' && l.planReview?.approved !== true);
       const w = readPrWait(l.worktree);
       if (waiting && l.pr.headSha && w?.head !== l.pr.headSha)
         writePrWait(l.worktree, { head: l.pr.headSha, since: nowIso(), reported: false });
@@ -1218,7 +1333,13 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
             outcome = await doUpdate(ctx, t.local);
             break;
           case 'plan':
+            notePlanCheckFailure(t.local);
             outcome = await doPlanning(ctx, t.local);
+            // 계획 검증 대상이면 계획만 담은 커밋을 바로 올린다(G1)
+            if (outcome === 'ok') outcome = await doPlanPush(ctx, t.local);
+            break;
+          case 'plan-push':
+            outcome = await doPlanPush(ctx, t.local);
             break;
           case 'step':
             outcome = await doStep(ctx, t.local);
