@@ -65,6 +65,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15: #53의 마지막 PR #62가 제작자 재승인 뒤 병합됐다.
 - 2026-11-15 step1: `scripts/test/claude-scan.test.ts`와 `ci.test.ts`의 입력 폴더·워크플로 테스트를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`: `claude-scan.ts`, `review-input.ts`) → `scanClaudeRun`, `writeReviewInput`, `planReview`, 명령 `review-plan`·`claude-scan`, `judge-claude.yml` 구현 뒤 `claude-scan`·`ci`·`verdict` 테스트 42개 통과. `review-plan`을 이 브랜치에 직접 돌려 출력(`risk=high`, `claude=true`, `codex=true`)과 입력 폴더를 확인했다. 워크플로는 `workflow_run`이라 이 PR에서는 돌지 않는다. 실제 판정은 step2 PR에서 확인한다.
 - 2026-11-15 step2: `scripts/test/codex-auth.test.ts`·`codex-scan.test.ts`와 `ci.test.ts`의 `judge-codex.yml` 불변식을 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`: `codex-auth.ts`, `codex-scan.ts`, `ENOENT`: `judge-codex.yml`) → 구현 뒤 통과. 새 명령(`codex-auth restore|snapshot|diff|config|seal`, `codex-schema`, `codex-scan`)을 가짜 값으로 직접 돌려 출력에 값이 없는 것(필드 이름·해시 앞 8자)을 확인했다. 봉인은 libsodium 0.8.4를 임시 폴더에 받아 임의 키쌍으로 봉인→풀기 왕복이 원문과 같음을 확인했다(리포 밖 임시 스크립트). `codex-probe.sh`는 로컬에서 문법 검사(`bash -n`)만 했다. Linux 샌드박스 동작은 CI에서만 확인할 수 있다.
+- 2026-11-15 step2: `judge-claude`(step1) 첫 실제 실행을 이 step의 PR #67에서 확인했다(실행 43666809569, head 초안 커밋). `check` 성공 → `plan`(위험도 high, claude=true) → `judge`(Claude Code 2.1.314, 모델 claude-sonnet-5-5, 약 40초, 세션 도구 4개·허용 밖 0·MCP 0, Read 9·Grep 2·StructuredOutput 1, `pr/` 밖 시도 0, 비밀 0, 유출 검사 통과) → `record`가 `review/claude = success — 승인 (P2 3)`을 기록했다. 상태 작성자는 `harness-recorder[bot]`이다. main push의 `check` 완료에서는 `plan`이 건너뛰어 아무것도 기록하지 않았다. 판정의 지적 본문(P2 3건)은 아직 어디에도 게시되지 않는다(원장은 #55).
 
 ## 의사결정 로그
 
@@ -92,6 +93,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 발견 사항
 
+- `workflow_run`으로 도는 실행은 `gh run list`의 `headBranch`가 PR 브랜치가 아니라 `main`이다. PR의 판정 실행을 찾을 때는 브랜치 이름이 아니라 PR head의 커밋 상태(`review/*`의 target URL)로 찾는다. → 처리: 해당 없음
 - 테스트에 실제 토큰 형식(`sk-ant-…`, `gho_…`, JWT 머리)의 가짜 값을 리터럴로 적으면 gitleaks가 검출해 `check`가 실패한다. 시크릿 스캔 테스트 값은 조각을 런타임에 이어 붙인다. → 처리: 해당 없음
 
 ## 열린 질문
@@ -103,4 +105,4 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step2 judge-codex. 그 PR에서 `judge-claude` 실제 동작(판정, `review/claude` 작성자 = 검증 App)을 확인해 진행 로그에 남긴다.
+- step3 approval-binding. 그 PR에서 `judge-codex` 첫 실제 실행(사전 측정, 판정, 봉인·저장, `review/codex` 작성자 = 검증 App)을 확인해 진행 로그에 남긴다. 실패하면 step3 안에서 고친다.
