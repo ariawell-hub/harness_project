@@ -32,9 +32,8 @@
     {
       "step": 4,
       "name": "rebuttal-evidence",
-      "status": "completed",
-      "summary": "`runner/review.ts`: `sessionRebuttal`(형식은 `ci/rebuttal.ts`의 `parseRebuttals`, 근거는 원격 브랜치의 커밋·추적되는 파일만, 링크 거부)·`rebuttalComment`·`deadlocked`·`deadlockRebuttals`·`markEscalated`·`parseReviewLog`(`RECORD_JOB` 줄만)·`findingHead`·`loggedFor`, `ReviewResponse`에 `evidence`·`summary`·`escalated`, `ReviewState.rebuttals`(아직 push하지 않은 반박, `posted`). `run.ts`의 `doReview`: 변경 없는 세션의 반박 받기(`s.text`), push 전 PR 댓글, 반박만 있는 라운드는 진행 로그 한 줄의 계획 전용 커밋, 교착은 `blockPlan`(실패 한도보다 먼저), `evidenceReader`(지적 → 등록 head의 `review/*` 링크 → `runLog`), push하지 않은 커밋이 있으면 반박 전에 판정(`unjudged`). `ci/record.ts` `reviewLogLines`. `lib/github.ts` `repoSlug`·`runLog`·`runIdOf`(가짜: 상태 파일 `repo`·`runLogs`·`runLogReads`). `agents.ts` `sessionText`·`SessionResult.text`. `prompt.ts`: `ReviewFinding.logged`, `canRebut`. 가짜 에이전트 `review` 순서에 `rebut`·`rebut-bad`·`fix-rebut`. 판정 실패 뒤 남은 커밋 되돌리기는 step5",
-      "completed_at": "2026-11-16T00:01:15+09:00"
+      "status": "in_progress",
+      "summary": "`runner/review.ts`: `sessionRebuttal`(형식은 `ci/rebuttal.ts`의 `parseRebuttals`, 근거는 원격 브랜치의 커밋·추적되는 파일만, 링크 거부)·`rebuttalComment`·`deadlocked`·`deadlockRebuttals`·`markEscalated`·`parseReviewLog`(`RECORD_JOB` 줄만)·`findingHead`·`loggedFor`, `ReviewResponse`에 `evidence`·`summary`·`escalated`, `ReviewState.rebuttals`(아직 push하지 않은 반박, `posted`). `run.ts`의 `doReview`: 변경 없는 세션의 반박 받기(`s.text`), push 전 PR 댓글, 반박만 있는 라운드는 진행 로그 한 줄의 계획 전용 커밋, 교착은 `blockPlan`(실패 한도보다 먼저), `evidenceReader`(지적 → 등록 head의 `review/*` 링크 → `runLog`), push하지 않은 커밋이 있으면 반박 전에 판정(`unjudged`). `ci/record.ts` `reviewLogLines`. `lib/github.ts` `repoSlug`·`runLog`·`runIdOf`(가짜: 상태 파일 `repo`·`runLogs`·`runLogReads`). `agents.ts` `sessionText`·`SessionResult.text`. `prompt.ts`: `ReviewFinding.logged`, `canRebut`. 가짜 에이전트 `review` 순서에 `rebut`·`rebut-bad`·`fix-rebut`. 판정 실패 뒤 남은 커밋 되돌리기는 step5"
     },
     {
       "step": 5,
