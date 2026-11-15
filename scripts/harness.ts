@@ -7,6 +7,13 @@ import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.t
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
+import {
+  carryOver,
+  changedOnBaseSince,
+  fetchCandidates,
+  patchId,
+  samePrContent,
+} from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
   diffAuth,
@@ -19,8 +26,8 @@ import {
 import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
-import { parseReviews } from './gates/risk-gate.ts';
-import { githubStatusPoster, recordReview, recordStatuses } from './ci/record.ts';
+import { changedFiles as prChangedFiles, parseReviews } from './gates/risk-gate.ts';
+import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
@@ -64,10 +71,11 @@ CI(gates 워크플로, 10.4절):
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
-                --head-sha <sha> --repo-slug <owner/name> --target-url <url>
+                --head-sha <sha> --repo-slug <owner/name> --target-url <url> [--patch <id>] [--carried-from <sha>]
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
-  review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치>
+  review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N> --base-sha <sha>]
                                            위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
+                                           PR 번호를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
   claude-scan --log <stream-json> --pr <pr 폴더> --out <verdict.json>
                                            Claude 실행 기록 유출 검사. 문제가 없을 때만 판정을 쓴다(비밀은 SCAN_SECRETS)
   codex-auth restore --home <CODEX_HOME>   시크릿(CODEX_AUTH_JSON) → auth.json(0600). 값은 출력하지 않는다
@@ -132,6 +140,10 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   event: { type: 'string' },
   'body-out': { type: 'string' },
   log: { type: 'string' },
+  'pr-number': { type: 'string' },
+  'base-sha': { type: 'string' },
+  patch: { type: 'string' },
+  'carried-from': { type: 'string' },
   home: { type: 'string' },
   auth: { type: 'string' },
   snap: { type: 'string' },
@@ -307,6 +319,20 @@ async function main(argv: string[]): Promise<number> {
         headSha,
         repo,
         post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
+        patch: str('patch') || undefined,
+        carriedFrom: str('carried-from') || undefined,
+        // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장(#55) 전에는 기록 job 로그가 지적을 보는 곳이다
+        onVerdict: (v) => {
+          // 본문은 PR 내용에 영향받는 LLM 출력이다. 한 줄로 만들고 접두어를 붙여 워크플로 명령 줄이 생기지 않게 한다
+          log(
+            `record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${oneLine(v.summary)}`,
+          );
+          for (const f of v.findings) {
+            log(`  [${f.severity}] ${oneLine(f.file)}:${f.line} ${oneLine(f.title)}`);
+            log(`    근거: ${oneLine(f.evidence)}`);
+            log(`    제안: ${oneLine(f.suggestion)}`);
+          }
+        },
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
       return p.state === 'error' ? 1 : 0;
@@ -326,6 +352,56 @@ async function main(argv: string[]): Promise<number> {
       const r = planReview({ root, cfg, base, branch });
       writeReviewInput({ root, base, branch, risk: r.risk, reasons: r.reasons });
       appendFileSync(output, `risk=${r.risk}\nclaude=${r.claude}\ncodex=${r.codex}\n`);
+      // 승인 이어받기(10.3절). plan job만 PR 번호를 준다. 판정하지 못하면 이어받지 않는다(다시 검증)
+      const number = Number(str('pr-number'));
+      const baseSha = str('base-sha');
+      if (Number.isInteger(number) && number > 0 && baseSha) {
+        const carried = { claude: '', codex: '' };
+        let patch = '';
+        try {
+          patch = patchId(root, base);
+          const bot = cfg.ci.recorderBot ?? '';
+          const need = (['claude', 'codex'] as const).filter((k) => r[k]);
+          const candidates =
+            bot && patch && r.risk !== 'high' && need.length
+              ? await fetchCandidates({
+                  api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                  repo: process.env.GITHUB_REPOSITORY ?? '',
+                  number,
+                  headSha: git(['rev-parse', 'HEAD'], root),
+                  recorderBot: bot,
+                  contexts: need.map((k) => `review/${k}`),
+                })
+              : [];
+          // rename의 원본 경로도 PR 파일이다(겹침 검사와 같은 기준: --no-renames)
+          const prFiles = prChangedFiles(root, base).map((f) => f.path);
+          for (const k of need) {
+            const c = carryOver({
+              patch,
+              risk: r.risk,
+              prFiles,
+              candidates,
+              changedOnBaseSince: (old) => changedOnBaseSince(root, baseSha, old),
+              samePrContent: (old) => samePrContent(root, old, prFiles),
+              recorderBot: bot,
+              context: `review/${k}`,
+            });
+            if ('from' in c) carried[k] = c.from;
+            log(
+              `review-plan: review/${k} ${'from' in c ? `이어받음 ← ${c.from.slice(0, 12)}` : `다시 검증 — ${c.no}`}`,
+            );
+          }
+        } catch (e) {
+          const msg = (e instanceof Error ? e.message : String(e)).split('\n')[0].slice(0, 200);
+          log(`review-plan: 이어받기를 판정하지 못했다(다시 검증) — ${msg}`);
+          carried.claude = '';
+          carried.codex = '';
+        }
+        appendFileSync(
+          output,
+          `patch=${patch}\ncarry_claude=${carried.claude}\ncarry_codex=${carried.codex}\n`,
+        );
+      }
       log(
         `review-plan: 위험도 ${r.risk}, 작성 도구 ${r.author || '알 수 없음'} → claude=${r.claude} codex=${r.codex}`,
       );

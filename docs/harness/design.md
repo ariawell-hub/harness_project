@@ -55,6 +55,7 @@ review_cycle: quarterly
   - v0.7.20 (2026-11-15): 필수 체크 출처 전환 순서와 `required-checks` 확인 명령(0.2절), 기계 판정 네 개의 기록 위치와 리뷰 뒤 `risk-gate` 재판정 경로(10.3절). 옛 `plan-gate` job 제거(Issue #53, TD-2 해결)
   - v0.7.21 (2026-11-15): Claude 판정 워크플로(`judge-claude`). 판정은 `check` 워크플로 완료(`workflow_run`, 성공)로 시작하고, 첫 job(비밀 없음)이 위험도와 필요한 검증자를 다시 계산한다. 검증 입력은 base 스크립트가 `pr/.harness-review/`에 쓴다(10.1·10.4절, Issue #54)
   - v0.7.22 (2026-11-15): Codex 판정 워크플로(`judge-codex`)와 인증 수명주기 구현 위치. 판정·저장 job도 `check` 완료(`workflow_run`)로 시작한다. 사전 측정이 기대와 다르면 판정 없이 실패, `pr/` 밖을 가리킨 셸 명령은 세어 보고만 한다(10.4절, 13.3절, Issue #54)
+  - v0.7.23 (2026-11-15): 승인 결속 구현. 승인 상태 description에 patch-id 전체를 적고, 이어받기는 검증 App 봇이 쓴 가장 최근 판정만 근거로 삼는다. 조건에 "PR 파일이 바이트 단위로 같다"를 더했다(patch-id는 공백을 무시한다). 기록 job이 판정 지적을 로그에 낸다(10.3절, 10.1절, Issue #54)
 
 ### 0.1 전제 조건
 
@@ -690,7 +691,7 @@ pnpm test src/auth/login-guard.spec.ts
 **실행 방식 (CI)**
 - PR head에서 `check`가 통과하면(R16) 판정 job이 위험도에 맞는 검증자를 새 세션으로 실행한다(예: `claude -p`, `codex exec`). 검증자는 셸·MCP·웹 도구 없이, 체크아웃한 PR 범위 안의 읽기 도구만 쓴다(10.4절 판정 job 규칙).
 - **검증자에게 넘기는 입력**: 계획, 수용 기준, diff, `check`·`verify` 결과, 관련 문서, 지적 원장, 정해진 형식의 반박. 작성자의 대화와 추론 과정은 넘기지 않는다.
-- **결과 기록**: 판정 job은 `verdict.json`만 산출물로 낸다. 기록 job이 이를 검사한 뒤 head SHA에 커밋 상태(`review/claude`, `review/codex`)를 기록하고 지적 원장 댓글을 갱신한다. 작성 에이전트는 이 상태를 만들 수 없다(10.4절). 위험도 때문에 실행하지 않은 검증자의 상태는 기록 job이 "해당 없음(통과)"으로 기록한다.
+- **결과 기록**: 판정 job은 `verdict.json`만 산출물로 낸다. 기록 job이 이를 검사한 뒤 head SHA에 커밋 상태(`review/claude`, `review/codex`)를 기록하고 지적 원장 댓글을 갱신한다. 작성 에이전트는 이 상태를 만들 수 없다(10.4절). 위험도 때문에 실행하지 않은 검증자의 상태는 기록 job이 "해당 없음(통과)"으로 기록한다. 원장(로드맵 2단계③)이 생기기 전에는 기록 job이 검사를 통과한 판정의 요약과 지적을 로그에 한 줄씩 낸다(제어 문자는 공백으로 바꾼다).
 - **검증 항목**
   - 수용 기준을 충족하는가
   - 정확성: 버그, 엣지 케이스
@@ -839,7 +840,7 @@ pnpm test src/auth/login-guard.spec.ts
 
 | 대상 | 묶는 기준 | 재검증 없이 이어받는 경우 |
 |---|---|---|
-| 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다. 위험도 높음은 patch-id가 같아도 다시 검증 |
+| 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다, PR이 바꾼 파일의 내용이 옛 head와 바이트 단위로 같다. 위험도 높음은 patch-id가 같아도 다시 검증 |
 | 계획 전용 커밋 | — | 진행 로그·상태·위치만 바뀌었으면 LLM 재검증 없이 `plan-gate`만 실행 |
 | 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
 | 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
@@ -847,6 +848,12 @@ pnpm test src/auth/login-guard.spec.ts
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
 - PR 갱신은 rebase가 아니라 `origin/main` 병합이다(ADR-0006). 병합 뒤 PR head와 main의 merge-base는 병합한 main 커밋이라, "merge-base 대비 diff"는 PR이 main에 더하는 변경과 같다. 충돌 없이 병합했으면 patch-id가 같아 승인을 이어받고, 충돌을 해결하며 PR 변경이 바뀌면 patch-id가 달라져 다시 검증한다. Q20에서 main 병합 갱신과 GitHub "Update branch" 모두 patch-id가 같고, 충돌 해결로 PR 변경이 바뀌면 달라짐을 확인했다.
 - 기록 job이 새 head로 승인을 옮길 때는 PR ref(`refs/pull/<n>/head`, `headRefOid`)가 아니라 이벤트의 head SHA로 patch-id를 잰다. GitHub은 push 직후 PR head를 늦게 반영해서 PR ref가 옛 head를 가리킬 수 있다(Q20).
+- **구현**(`scripts/ci/binding.ts`): 판정 워크플로의 `plan` job이 base 스크립트로 patch-id(`git diff --binary --full-index <merge-base>...HEAD | git patch-id --stable`)를 재고 이어받기를 판정한다. 기록 job은 승인 상태의 description 끝에 ` patch:<id 40자>`를 적는다(예: `승인 (P2 1) patch:…`). 이어받으면 판정 job은 돌지 않고 기록 job이 `이어받음 <원래 head 앞 12자> patch:<id>`를 success로 쓴다.
+  - id는 줄여 적지 않는다. PR 작성자는 승인받을 diff와 바꿔 넣을 diff를 모두 정할 수 있어, 앞부분만 같은 쌍을 만들 수 있다.
+  - 근거로 쓰는 상태는 작성자가 검증 App 봇(`ci.recorderBot`)인 것뿐이다. 봇 PAT도 같은 이름의 상태를 쓸 수 있기 때문이다(ADR-0003). 설정이 없으면 이어받지 않는다.
+  - 후보는 이 PR의 앞선 head 중 가장 최근에 판정된 것 하나다(판정 기록이 없는 head는 건너뛴다. 중간 커밋이거나 판정이 아직 줄 서 있는 head다). 그 head의 마지막 판정이 success가 아니거나 patch가 다르면 더 옛 승인으로 거슬러 가지 않는다.
+  - `git patch-id`는 공백을 무시한다. 승인 뒤 들여쓰기나 따옴표 안 공백만 바꾼 커밋을 걸러 내려고, PR이 바꾼 파일이 옛 head와 새 head에서 바이트 단위로 같은지도 본다(옛 head와 새 head 사이에 바뀐 파일 목록에 PR 파일이 없어야 한다. PR 파일 이름은 git 인자로 넘기지 않는다. pathspec으로 해석되기 때문이다). main 병합 갱신은 PR 파일을 건드리지 않아 항상 성립한다.
+  - 옛 head가 새 head의 조상이 아니거나 조회에 실패하면 이어받지 않고 다시 검증한다.
 - patch-id가 같다는 것은 패치가 같다는 뜻이지, 새 base와 합쳐진 코드의 의미까지 같다는 증거는 아니다. 그래서 승인을 이어받을 때도 `check`는 항상 새 head에서 다시 돈다. 최신 브랜치가 필수이므로 squash 결과의 트리는 head와 같고, 이 `check`가 최종 병합 대상에 대한 검증이 된다.
 - merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
 - **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다. 지금 runner는 요약을 실패를 찾는 데만 쓰고 병합은 GitHub 자동 병합에 맡기므로 영향이 없다.

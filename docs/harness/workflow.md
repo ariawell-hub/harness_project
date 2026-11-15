@@ -96,6 +96,11 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`다. 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약은 출처를 보지 않으니, 병합 가능 여부는 `mergeStateStatus`로 본다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
 - **보호 경로를 바꾼 PR**(`harness-guard`): `docs/harness/CHANGELOG.md`에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
+- **교차 검증**(`review/claude`, `review/codex`): `check`가 통과하면 판정 워크플로(`judge-claude`, `judge-codex`)가 main의 정의로 돈다. 위험도 낮음은 작성 도구와 다른 검증자 1명, 보통·높음은 둘 다 판정하고, 돌지 않은 쪽은 "해당 없음(통과)"으로 기록된다. 승인이고 P0·P1 지적이 없어야 success다.
+  - 지적 본문은 판정 실행의 `record` job 로그(`record-review:` 줄)에서 본다. 실행은 PR head 커밋 상태의 링크로 찾는다(`workflow_run` 실행은 브랜치가 `main`으로 표시된다). P0·P1을 고쳐 push하면 `check` 통과 뒤 다시 판정한다.
+  - `error`(판정 없음)는 검증자 장애다. 판정 job 로그의 오류 문구를 보고, 인증·한도 문제면 제작자에게 알린다. 다른 검증자로 대신하지 않는다.
+  - **승인 이어받기**: 위험도 낮음·보통 PR을 `origin/main` 병합으로 갱신했을 때, 변경이 그대로면(patch-id 같음, PR 파일이 바이트 단위로 같음, main에서 바뀐 파일과 겹치지 않음) 판정 없이 `이어받음 <sha>`가 기록된다. 위험도 높음과 그 밖의 경우는 다시 판정한다.
+  - 로컬 사전 점검: push 전에 CI 검증자의 지적을 미리 보려면 worktree에서 `review-plan`으로 입력 폴더(`.harness-review/`)를 만든 뒤 `judge-claude.yml`의 판정 단계와 같은 인자로 `claude -p`를 돌린다. 병합 판단에는 CI 결과만 쓴다.
 - 무관한 검사 실패는 별도 PR로 먼저 고친다. flaky 테스트는 같은 커밋에서 한 번만 재실행하고, 통과하면 TD로 등록한 뒤 격리한다.
 
 ```ts

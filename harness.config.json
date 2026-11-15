@@ -120,9 +120,12 @@
       { "context": "plan-gate", "source": "recorder" },
       { "context": "risk-gate", "source": "recorder" },
       { "context": "deps-guard", "source": "recorder" },
-      { "context": "harness-guard", "source": "recorder" }
+      { "context": "harness-guard", "source": "recorder" },
+      { "context": "review/claude", "source": "recorder" },
+      { "context": "review/codex", "source": "recorder" }
     ],
-    "recorderAppId": 5764201
+    "recorderAppId": 5764201,
+    "recorderBot": "harness-recorder[bot]"
   },
   "deps": {
     "lockfiles": ["pnpm-lock.yaml"],

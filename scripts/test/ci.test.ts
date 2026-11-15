@@ -572,3 +572,20 @@ test('judge-codex.yml: 설정 → 사전 측정 → 판정 → 유출 검사 →
   for (const b of runBlocks(JUDGE_CODEX))
     assert.doesNotMatch(b, /node (\.\/)?pr\/|(bash|sh) (\.\/)?pr\//, b);
 });
+
+// ---------- 승인 이어받기 연결 (10.3절) ----------
+
+test('judge-*.yml: 이어받으면 판정 job을 돌리지 않고 기록 job이 원래 SHA와 patch를 넘긴다', () => {
+  for (const [wf, first] of [
+    [JUDGE_CLAUDE, 'judge'],
+    [JUDGE_CODEX, 'pubkey'],
+  ] as const) {
+    const j = jobs(wf);
+    assert.match(j.get(first)!, /if: .*needs\.plan\.outputs\.carry == ''/);
+    assert.match(j.get('plan')!, /--pr-number "\$PR_NUMBER" --base-sha "\$BASE_SHA"/);
+    assert.match(j.get('plan')!, /^ {6}statuses: read$/m);
+    assert.match(j.get('record')!, /--patch "\$PATCH" --carried-from "\$CARRIED"/);
+    // 판정 job은 토큰이 없어 이어받기를 판정하지 않는다(입력만 다시 만든다)
+    assert.doesNotMatch(j.get('judge')!, /--pr-number/);
+  }
+});

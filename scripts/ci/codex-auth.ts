@@ -26,11 +26,21 @@ function leaves(obj: Auth): [string, unknown][] {
 
 /** 오류에는 위치만 적는다(값을 넣지 않는다) */
 function parseAuth(text: string, where: string): Auth {
+  if (!text.trim()) throw new Error(`${where}: 비어 있다`);
   let obj: unknown;
   try {
     obj = JSON.parse(text);
   } catch {
-    throw new Error(`${where}: JSON이 아니다`);
+    // 터미널에서 복사하면 터미널 폭 줄바꿈이 값 안에 섞인다(13.3절). 토큰에는 줄바꿈이 없으므로 빼고 다시 읽는다
+    try {
+      obj = JSON.parse(text.replace(/\r?\n/g, ''));
+    } catch {
+      const first = text.trimStart()[0];
+      const lines = text.trim().split('\n').length;
+      throw new Error(
+        `${where}: JSON이 아니다(길이 ${text.length}자, 줄 ${lines}개, 첫 글자: ${first === '{' ? '{' : '그 밖'})`,
+      );
+    }
   }
   const o = obj as Auth | null;
   if (!o || typeof o !== 'object' || !o.tokens || typeof o.tokens !== 'object')

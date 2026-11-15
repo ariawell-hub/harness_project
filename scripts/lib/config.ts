@@ -77,6 +77,8 @@ export interface HarnessConfig {
     requiredChecks: { context: string; source: 'actions' | 'recorder' }[];
     /** 검증 App ID(제작자가 알려 준 값). 없으면 출처를 확인할 수 없다 */
     recorderAppId: number | null;
+    /** 검증 App 봇의 login(예: `harness-recorder[bot]`). 승인 이어받기에서 상태의 작성자를 확인한다(10.3절) */
+    recorderBot: string | null;
   };
   /** 의존성 통제 기준(R17, Q14). deps-guard가 쓴다 */
   deps: {
@@ -171,7 +173,12 @@ export function loadConfig(repoRoot: string): HarnessConfig {
     environments: ci.environments ?? [...DEFAULT_ENVIRONMENTS],
     requiredChecks: ci.requiredChecks ?? [],
     recorderAppId: ci.recorderAppId ?? null,
+    recorderBot: ci.recorderBot ?? null,
   };
+  if (cfg.ci.recorderBot !== null && typeof cfg.ci.recorderBot !== 'string')
+    throw new ConfigError(
+      `${CONFIG_FILE} 검증 실패:\n- ci.recorderBot은 문자열(검증 App 봇의 login)`,
+    );
   for (const c of cfg.ci.requiredChecks) {
     if (typeof c?.context !== 'string' || (c.source !== 'actions' && c.source !== 'recorder'))
       throw new ConfigError(
