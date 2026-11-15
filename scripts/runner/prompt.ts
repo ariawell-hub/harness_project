@@ -168,6 +168,11 @@ export interface ReviewPromptInput {
    * 차단 지적 없는 수정 요청(미룬 지적 여럿)에는 반박을 안내하지 않는다
    */
   canRebut?: boolean;
+  /**
+   * 이 PR의 대응 라운드가 `failure.switchAt`회 이상 수렴하지 않았다(`review-round` 실패, 10.2절 (7)).
+   * 지적별 방법 전환과 따로 넣는다: 수정 방식을 버리고, 계획 수정·PR 분할이 필요하면 열린 질문으로 남기게 한다
+   */
+  roundSwitch?: boolean;
   extra?: string;
 }
 
@@ -265,6 +270,11 @@ export function reviewPrompt(i: ReviewPromptInput): string {
   if (i.switchApproach) {
     parts.push(
       `## 방법 전환 지시 (9.2절 3회 규칙)\n같은 지적에 대한 대응이 3회 이상 통하지 않았다. 지금까지의 수정 방식을 버리고 다른 방법으로 전환하라.\n먼저 계획의 "의사결정 로그"에 가설, 시도한 방법, 폐기 이유, 새 방법을 적은 뒤 고쳐라.`,
+    );
+  }
+  if (i.roundSwitch) {
+    parts.push(
+      `## 방법 전환 지시 (10.2절 (7) 수렴하지 않은 라운드 3회)\n이 PR의 지적 대응이 3회 이상 수렴하지 않았다: 대응을 올릴 때마다 새 차단 지적이 해소보다 많이 생기거나, 같은 자리에 지적이 다시 나오거나, 회귀가 났다. runner가 그 대응을 되돌렸다. 지금까지의 수정 방식에 덧대지 마라.\n- 계획을 고쳐야 하거나 PR을 나눠야 한다고 판단하면 고치지 말고 계획의 "열린 질문"에 \`### 질문:\` 형식(선택지·영향·추천)으로 남기고 멈춰라. runner가 제작자에게 올린다.\n- 그렇지 않으면 계획의 "의사결정 로그"에 가설, 지금까지의 방식, 폐기 이유, 새 방식을 먼저 적은 뒤 고쳐라.`,
     );
   }
   if (i.extra) parts.push(i.extra);

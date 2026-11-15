@@ -35,13 +35,34 @@ export interface ReviewState {
    * 검증자에 대한 대응이면 `review:<검증자>`다
    */
   responses: Record<string, ReviewResponse[]>;
-  /** 마지막 대응 라운드: 대응 전 head와 push한 head, 대응 전 열린 차단 지적, 대응 전 원장의 가장 큰 지적 번호 */
-  round: { base: string; head: string; open: string[]; maxId: number } | null;
+  /** 마지막 대응 라운드. 없으면 null(옛 형식의 파일도 없는 것으로 읽는다) */
+  round: ReviewRound | null;
   /** 지금 라운드에서 판정을 통과했지만 아직 push하지 않은 대응 키. push하면 비운다 */
   pending: string[];
   /** `pending` 가운데 반박으로 대응한 지적 ID → 그 반박. 없는 키는 수정이다. push하면 비운다 */
   rebuttals: Record<string, PendingRebuttal>;
+  /**
+   * 발산한 대응을 되돌려 push한 head(10.2절 (7)). 이 head에서 시작한 다음 라운드는 발산을 평가하지 않는다:
+   * 되돌려서 다시 열린 지적을 새 지적이나 "같은 위치"로 세지 않기 위해서다. 그 라운드를 올리면 null로 돌아간다
+   */
+  reverted: string | null;
 }
+
+/**
+ * 대응 라운드 하나: 대응 전 head(`base`)와 push한 head, 대응 전 열린 차단 지적(ID·파일·줄),
+ * 대응 전 원장의 가장 큰 지적 번호. 발산 판정(`divergence.ts`의 `RoundBefore`)에 쓴다.
+ * `evaluated`는 이 라운드의 발산을 이미 평가했는가(같은 head를 두 번 평가하지 않는다)
+ */
+export interface ReviewRound {
+  base: string;
+  head: string;
+  open: { id: string; file: string; line: number }[];
+  maxId: number;
+  evaluated: boolean;
+}
+
+/** 수렴하지 않은 라운드의 실패 키(9.2절, 10.2절 (7)). `목표 + review-round`로 센다 */
+export const REVIEW_ROUND_KEY = 'review-round';
 
 function stateFile(worktree: string): string {
   return path.join(harnessStateDir(repoInfo(worktree), 'worktree'), 'review.json');
@@ -76,18 +97,35 @@ export function readReviewState(worktree: string): ReviewState {
       if (r && isStr(r.evidence) && isStr(r.summary))
         rebuttals[k] = { evidence: r.evidence, summary: r.summary, posted: r.posted === true };
     const r = raw.round;
+    const isOpen = (o: unknown): o is ReviewRound['open'][number] => {
+      const x = o as Partial<ReviewRound['open'][number]> | null;
+      return !!x && isStr(x.id) && isStr(x.file) && Number.isInteger(x.line);
+    };
+    // 옛 형식(open이 ID 문자열 목록)은 발산 판정에 필요한 위치가 없다: 라운드가 없는 것으로 읽는다
     const round =
-      r && isStr(r.base) && isStr(r.head) && Array.isArray(r.open) && Number.isInteger(r.maxId)
-        ? { base: r.base, head: r.head, open: r.open.filter(isStr), maxId: r.maxId }
+      r &&
+      isStr(r.base) &&
+      isStr(r.head) &&
+      Array.isArray(r.open) &&
+      r.open.every(isOpen) &&
+      Number.isInteger(r.maxId)
+        ? {
+            base: r.base,
+            head: r.head,
+            open: r.open.map((o) => ({ id: o.id, file: o.file, line: o.line })),
+            maxId: r.maxId,
+            evaluated: r.evaluated === true,
+          }
         : null;
     return {
       responses,
       round,
       pending: Array.isArray(raw.pending) ? raw.pending.filter(isStr) : [],
       rebuttals,
+      reverted: isStr(raw.reverted) ? raw.reverted : null,
     };
   } catch {
-    return { responses: {}, round: null, pending: [], rebuttals: {} };
+    return { responses: {}, round: null, pending: [], rebuttals: {}, reverted: null };
   }
 }
 
@@ -387,4 +425,46 @@ export function findingHead(ledger: Ledger, e: Entry): string | null {
 export function loggedFor(list: readonly LoggedFinding[], e: Entry): LoggedFinding | null {
   const want = `${e.file}:${e.line} ${e.title}`;
   return list.find((f) => `${f.file}:${f.line} ${f.title}` === want) ?? null;
+}
+
+// ---------- 되돌리기 (10.2절 (7), R14) ----------
+// 되돌리기는 `git revert` 커밋으로만 한다. 이력을 고치거나 작업 트리를 버리는 명령은 쓰지 않는다:
+// 되돌린 것도 이력에 남고, 올릴 때는 일반 push다(squash 병합이라 PR 안의 되돌림 커밋은 main 이력에 남지 않는다)
+
+const PLAN_PREFIX = 'docs/exec-plans/';
+
+/** `base..head`의 커밋(병합 커밋 제외), 최신순 */
+export function commitsBetween(worktree: string, base: string, head: string): string[] {
+  const r = gitTry(['rev-list', '--no-merges', `${base}..${head}`], worktree);
+  return r.ok ? r.stdout.split('\n').filter(Boolean) : [];
+}
+
+/**
+ * `base..head`의 커밋 중 계획 폴더 밖 파일을 바꾼 커밋, 최신순. 계획 전용 커밋(진행 로그·상태)은 뺀다:
+ * 되돌리면 기록이 사라지고 step 상태가 어긋난다
+ */
+export function codeCommits(worktree: string, base: string, head: string): string[] {
+  return commitsBetween(worktree, base, head).filter((c) => {
+    const r = gitTry(['diff-tree', '--no-commit-id', '--name-only', '-r', c], worktree);
+    return !r.ok || r.stdout.split('\n').some((f) => f !== '' && !f.startsWith(PLAN_PREFIX));
+  });
+}
+
+/**
+ * 커밋들을 받은 순서대로(최신순으로 넘긴다) `git revert --no-edit`한다. 충돌하면 그 되돌리기를 취소(`git revert --abort`)하고
+ * 멈춘다. `reverted`는 되돌린 커밋, `failed`는 충돌한 커밋(없으면 null)이다
+ */
+export function revertCommits(
+  worktree: string,
+  commits: readonly string[],
+): { reverted: string[]; failed: string | null } {
+  const reverted: string[] = [];
+  for (const c of commits) {
+    if (!gitTry(['revert', '--no-edit', c], worktree).ok) {
+      gitTry(['revert', '--abort'], worktree);
+      return { reverted, failed: c };
+    }
+    reverted.push(c);
+  }
+  return { reverted, failed: null };
 }

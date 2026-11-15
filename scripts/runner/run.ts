@@ -74,6 +74,7 @@ import {
   type LocalPlan,
   type Pick,
 } from './next.ts';
+import { divergence } from './divergence.ts';
 import { readPrLedger } from './ledger-read.ts';
 import { requiredStates } from './pr-state.ts';
 import {
@@ -84,7 +85,10 @@ import {
   type ReviewFinding,
 } from './prompt.ts';
 import {
+  REVIEW_ROUND_KEY,
+  codeCommits,
   commitSubject,
+  commitsBetween,
   deadlockRebuttals,
   deadlocked,
   failedResponses,
@@ -99,6 +103,7 @@ import {
   parseReviewLog,
   readReviewState,
   rebuttalComment,
+  revertCommits,
   reviewerJudgedResponse,
   reviewerKey,
   reviewerOfContext,
@@ -736,6 +741,8 @@ async function publishStep(
   l: LocalPlan,
   ref: PlanRef,
   acCount: number,
+  /** keepAnswer: 제작자 답변 파일을 지우지 않는다(되돌림 push 뒤의 대응 세션이 답을 써야 한다) */
+  opts: { keepAnswer?: boolean } = {},
 ): Promise<'ok' | 'fail' | 'env' | 'blocked'> {
   const info = repoInfo(l.worktree);
   const cfg = loadConfig(l.worktree);
@@ -841,7 +848,7 @@ async function publishStep(
   // 초안 PR에는 자동 병합을 켤 수 없다. 사람이 초안을 해제하면 다음 바퀴가 켠다(arm-merge)
   if (pr.isDraft) event(ctx, 'draft-kept', { plan: l.id, pr: pr.number });
   else ctx.gh.enableAutoMerge(pr.number);
-  if (existsSync(answerFile)) unlinkSync(answerFile);
+  if (!opts.keepAnswer && existsSync(answerFile)) unlinkSync(answerFile);
   event(ctx, 'pr-ready', { plan: l.id, step: l.step, pr: pr.number, last: completed.last });
   return 'ok';
 }
@@ -1130,6 +1137,19 @@ async function doFixPR(
   failing: { context: string; description: string }[],
 ): Promise<'ok' | 'fail' | 'env' | 'blocked'> {
   const info = repoInfo(l.worktree);
+  // 회귀(10.2절 (7)): 지적 대응을 올린 바로 그 head에서 CI `check`가 실패했다. 수정 세션을 덧대지 않고 그 대응을 되돌린다.
+  // `check`가 실패하면 판정 워크플로가 돌지 않아 이 head는 지적 대응(doReview)으로 오지 않는다. 여기서 한 번 평가한다
+  const rs = readReviewState(l.worktree);
+  if (
+    l.pr &&
+    rs.round &&
+    !rs.round.evaluated &&
+    l.pr.headSha === rs.round.head &&
+    (l.required ?? []).some((r) => r.source === 'actions' && r.state === 'failure')
+  ) {
+    writeReviewState(l.worktree, { ...rs, round: { ...rs.round, evaluated: true } });
+    return revertRound(ctx, l, l.pr, 'code', ['대응을 올린 head의 CI check가 실패했다(회귀)']);
+  }
   const names = failing.map((f) => f.context);
   const keys = l.prState ? names.map((n) => `pr:${n}`) : ['pr:checks'];
   for (const key of keys)
@@ -1231,6 +1251,116 @@ function judgePlanOnly(ctx: Ctx, l: LocalPlan): string | null {
 }
 
 /**
+ * 수렴하지 않은 라운드의 대응(10.2절 (7)): 덧대지 않고 마지막 대응 묶음을 되돌린다.
+ * - `round.base..round.head`의 커밋 중 계획 폴더 밖 파일을 바꾼 커밋을 최신순으로 `git revert`한다(계획 전용 커밋은 그대로 둔다).
+ *   되돌리기가 충돌하면 그 되돌리기를 취소하고 계획을 멈춰 보고한다
+ * - 진행 로그에 한 줄(신호, 되돌린 커밋)을 남기고 `review-round` 키로 실패 1회를 센다(9.2절)
+ * - 구현을 올린 PR은 step을 다시 완료 처리하고 `plan-gate`를 거쳐 일반 push한다. force push와 reset은 없다(R14).
+ *   되돌린 뒤의 코드는 대응 전 head와 같아(그 head는 CI `check`를 통과했다) AC·`check`를 다시 돌리지 않는다
+ * - 되돌린 head를 `review.json`에 적는다. 그 head에서 시작한 다음 라운드는 발산을 평가하지 않는다
+ * - 되돌릴 수정 커밋이 없으면(반박이나 계획 수정만 있는 라운드) 실패로 세고 진행 로그만 남긴다. 올릴 것이 없다
+ * 이 바퀴에서는 새 대응 세션을 띄우지 않는다. 호출하는 쪽이 `round.evaluated`를 먼저 적는다(같은 head를 두 번 평가하지 않는다)
+ */
+async function revertRound(
+  ctx: Ctx,
+  l0: LocalPlan,
+  pr: PullRequest,
+  phase: 'plan' | 'code',
+  signals: string[],
+): Promise<'ok' | 'fail' | 'env' | 'blocked'> {
+  let l = l0;
+  const info = repoInfo(l.worktree);
+  const round = readReviewState(l.worktree).round;
+  if (!round) return 'ok';
+  const why = signals.join(' / ');
+  const short = (c: string) => c.slice(0, 7);
+  const record = (detail: string) =>
+    recordAttempt(info, {
+      plan: l.id,
+      step: l.step,
+      key: REVIEW_ROUND_KEY,
+      ok: false,
+      kind: 'review',
+      // 신호에는 지적 ID만 있다(검증자 출력 없음): detail은 다음 세션 프롬프트의 "직전 실패"에 들어간다
+      detail,
+    });
+  /** 진행 로그 한 줄을 계획 전용 커밋으로 남긴다 */
+  const note = (line: string) => {
+    appendProgress(l.worktree, findPlan(l.worktree, l.id) ?? l.ref, line);
+    git(['add', '-A', '--', 'docs/exec-plans'], l.worktree);
+    gitTry(
+      ['commit', '--quiet', '-m', `plan(${l.id}): 발산 기록`, '--', 'docs/exec-plans'],
+      l.worktree,
+    );
+  };
+  const commits = codeCommits(l.worktree, round.base, round.head);
+  if (!commits.length) {
+    record(
+      `수렴하지 않은 라운드: ${why}\n되돌릴 수정 커밋이 없다(반박이나 계획 수정만 있는 라운드)`,
+    );
+    note(`발산(review-round): ${why}. 되돌릴 수정 커밋이 없다`);
+    event(ctx, 'review-diverged', { plan: l.id, pr: pr.number, reason: why });
+    return 'ok';
+  }
+  // 완료된 step을 먼저 되돌린다: 완료 상태에서 코드를 바꾸지 않는다(8.3절)
+  if (phase === 'code') {
+    const ref = findPlan(l.worktree, l.id) ?? l.ref;
+    const done =
+      ref.kind === 'multi'
+        ? readIndex(l.worktree, ref).steps[l.step ?? 0]?.status === 'completed'
+        : ref.where === 'completed';
+    if (done) {
+      reopenStep(l.worktree, '발산: 마지막 대응을 되돌린다');
+      l = { ...l, ref: findPlan(l.worktree, l.id) ?? l.ref, stepStatus: 'in_progress' };
+    }
+  }
+  const r = revertCommits(l.worktree, commits);
+  if (r.failed) {
+    record(`수렴하지 않은 라운드: ${why}\n되돌리기가 충돌했다(커밋 ${short(r.failed)})`);
+    await blockPlan(
+      ctx,
+      l,
+      `수렴하지 않은 대응을 되돌리다 충돌했다(커밋 ${short(r.failed)}). 그 되돌리기는 취소했다${
+        r.reverted.length
+          ? `. 앞서 되돌린 커밋(${r.reverted.map(short).join(', ')})의 되돌림 커밋은 브랜치에 남아 있다`
+          : ''
+      }. 발산 신호: ${why}`,
+      'A) worktree에서 남은 커밋을 직접 되돌리거나 고쳐 push한 뒤 답한다(추천) / B) 되돌리지 않고 이어서 대응하게 한다 / C) 포기(abandoned). 이 Issue에 제작자 계정으로 답을 달면 runner가 이어 간다.',
+    );
+    return 'blocked';
+  }
+  record(
+    `수렴하지 않은 라운드: ${why}\nrunner가 마지막 대응을 되돌렸다(커밋 ${r.reverted.length}개)`,
+  );
+  note(`발산(review-round): ${why}. 되돌린 커밋: ${r.reverted.map(short).join(', ')}`);
+  if (phase === 'code') {
+    const pub = await publishStep(ctx, l, findPlan(l.worktree, l.id) ?? l.ref, 0, {
+      keepAnswer: true,
+    });
+    if (pub !== 'ok') return pub;
+  } else {
+    const push = gitTry(
+      ['push', '--quiet', ctx.cfg.github.remote, `HEAD:refs/heads/${l.branch}`],
+      l.worktree,
+    );
+    if (!push.ok) {
+      event(ctx, 'push-fail', { plan: l.id, detail: push.stderr });
+      return 'env';
+    }
+  }
+  const head = revParse('HEAD', l.worktree) ?? '';
+  writeReviewState(l.worktree, { ...readReviewState(l.worktree), reverted: head || null });
+  event(ctx, 'review-reverted', {
+    plan: l.id,
+    pr: pr.number,
+    head,
+    reason: why,
+    detail: `되돌린 커밋: ${r.reverted.map(short).join(', ')}`,
+  });
+  return 'ok';
+}
+
+/**
  * 검증자의 수정 요청이나 원장의 열린 차단 지적에 대응한다.
  * - 원장은 읽기만 한다(작성자가 검증 App 봇인 댓글). 상태는 검증자 판정으로만 바뀐다
  * - 대응한 뒤 그 검증자가 다시 판정했는데도 열려 있는 지적은 실패 키 `F<번호>`로 한 번 센다. 닫히면 0으로 돌아간다
@@ -1242,6 +1372,8 @@ function judgePlanOnly(ctx: Ctx, l: LocalPlan): string | null {
  *   진행 로그에 한 줄을 더한 계획 전용 커밋을 올린다(다음 판정은 새 커밋에서 돈다). 반박은 원장 상태를 바꾸지 않는다
  * - 교착(9.1절): 같은 지적에 반박을 2회 냈고 둘째 반박을 그 검증자가 판정한 뒤에도 열려 있으면 계획을 멈추고 사람에게 넘긴다
  * - 지적의 근거·제안은 판정 실행 로그에서 읽어 프롬프트의 데이터 블록에 넣는다. 읽지 못하면 위치·제목만으로 진행한다
+ * - 발산(10.2절 (7)): 마지막 대응 라운드를 그 head의 판정이 끝난 지금 한 번 평가한다. 수렴하지 않았으면 그 대응을
+ *   되돌리고(`revertRound`) 이 바퀴에서는 새 세션을 띄우지 않는다. 수정 세션 뒤 AC·check가 실패하면 그 세션의 변경을 되돌린다
  */
 async function doReview(
   ctx: Ctx,
@@ -1281,6 +1413,16 @@ async function doReview(
   for (const id of settled)
     recordAttempt(info, { plan: l.id, step: l.step, key: id, ok: true, kind: 'review' });
   state = markCounted(state, [...failed, ...settled]);
+
+  // ---- 발산(10.2절 (7)): 마지막 대응을 올린 head의 판정이 끝났다. 그 라운드를 한 번만 평가한다 ----
+  // 이 작업은 필수 체크가 모두 끝난 뒤에만 온다(분류 review): 두 검증자의 판정이 이 head에 기록돼 있다
+  const round = state.round;
+  if (round && !round.evaluated && pr.headSha === round.head) {
+    state = { ...state, round: { ...round, evaluated: true } };
+    writeReviewState(l.worktree, state);
+    const d = divergence({ open: round.open, maxId: round.maxId, head: round.head }, ledger);
+    if (d.diverged) return revertRound(ctx, l, pr, phase, d.signals);
+  }
 
   // ---- 이번에 대응할 것 ----
   const blocking = openBlocking(ledger);
@@ -1417,6 +1559,8 @@ async function doReview(
       attempts,
       attemptNo: fails + 1,
       switchApproach: fails >= ctx.cfg.failure.switchAt,
+      roundSwitch:
+        (keyFailures(attempts, l.id).get(REVIEW_ROUND_KEY) ?? 0) >= ctx.cfg.failure.switchAt,
       canRebut: rebuttable(t),
       extra: answer,
     });
@@ -1516,10 +1660,27 @@ async function doReview(
       if (problem) return fail(`${what} 계획 판정 실패:\n${problem}`);
     } else if (changed || unjudged) {
       const judged = await judgeStep(ctx, l, ref);
-      if (!judged.ok)
+      if (!judged.ok) {
+        // 로컬 회귀(10.2절 (7)): 덧대지 않고 이 세션의 변경을 되돌린다. 작업 트리에 남은 변경도 먼저 커밋한 뒤
+        // 세션 시작 전 HEAD 이후의 커밋을 최신순으로 git revert한다(reset·checkout으로 버리지 않는다, R14)
+        let undone = '';
+        if (changed && before) {
+          if (!isClean(l.worktree)) {
+            git(['add', '-A'], l.worktree);
+            git(
+              ['commit', '--quiet', '-m', `fix(${t.findings[0].id}): 판정 실패(되돌림)`],
+              l.worktree,
+            );
+          }
+          const r = revertCommits(l.worktree, commitsBetween(l.worktree, before, 'HEAD'));
+          undone = r.failed
+            ? `. 이 세션의 변경을 되돌리다 충돌했다(커밋 ${r.failed.slice(0, 7)}). 일부 변경이 worktree에 남아 있다`
+            : '. runner가 이 세션의 변경을 되돌렸다(git revert). 같은 수정을 다시 하지 마라';
+        }
         return fail(
-          `${what} 판정(AC·check)이 실패했다. 실패한 검사는 같은 기록의 ac·check 항목에 있다`,
+          `${what} 판정(AC·check)이 실패했다. 실패한 검사는 같은 기록의 ac·check 항목에 있다${undone}`,
         );
+      }
       acCount = judged.acs;
       unjudged = false;
       commitRest();
@@ -1615,11 +1776,14 @@ async function doReview(
     round: {
       base: pr.headSha,
       head,
-      open: blocking.map((e) => e.id),
+      open: blocking.map((e) => ({ id: e.id, file: e.file, line: e.line })),
       maxId: maxFindingId(ledger),
+      // 되돌린 head에서 시작한 라운드는 발산을 평가하지 않는다(되돌려서 다시 열린 지적을 새 지적으로 세지 않는다)
+      evaluated: state.reverted !== null && state.reverted === pr.headSha,
     },
     pending: [],
     rebuttals: {},
+    reverted: null,
   });
   if (existsSync(answerFile)) unlinkSync(answerFile);
   event(ctx, 'review-pushed', {

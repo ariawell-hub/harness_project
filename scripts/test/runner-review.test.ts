@@ -1,6 +1,7 @@
 // runner의 지적 대응(10.2절 (4)·(6), 9.2절). 계획 20261115-runner-pr-flow step3.
 // 원장(검증 App 봇 댓글)의 열린 P0·P1마다 세션 하나, 한 라운드의 대응은 한 번만 push, 실패 키는 F<번호>.
 // step4: 반박(형식·근거 검사 뒤 PR 댓글), 교착, 판정 실행 로그에서 근거·제안 읽기.
+// step5: 발산 감지와 되돌리기(git revert + 일반 push), review-round 실패 키, 로컬 회귀 되돌리기.
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -16,7 +17,7 @@ import { parseRebuttals } from '../ci/rebuttal.ts';
 import { reviewLogLines } from '../ci/record.ts';
 import type { Finding, Resolution, Severity, Verdict } from '../ci/verdict.ts';
 import { describeTask } from '../commands/start.ts';
-import { keyFailures, readAttempts } from '../lib/attempts.ts';
+import { keyFailures, readAttempts, recordAttempt } from '../lib/attempts.ts';
 import { loadConfig } from '../lib/config.ts';
 import { listWorktrees, repoInfo } from '../lib/git.ts';
 import { getGitHub, runIdOf, type CommitCheck } from '../lib/github.ts';
@@ -190,6 +191,7 @@ test('openBlocking·failedResponses·settledResponses: 대응 대상과 대응 �
     round: null,
     pending: [],
     rebuttals: {},
+    reverted: null,
   };
   // 검증자가 대응 head를 아직 판정하지 않았다
   assert.deepEqual(failedResponses(state, l), []);
@@ -353,7 +355,16 @@ test('runner: 열린 P1 두 건에 지적마다 세션을 하나씩 띄우고, �
     assert.match(log, /fix\(F2\)/);
     const state = readReviewState(pr.worktree);
     assert.deepEqual(state.pending, []);
-    assert.deepEqual(state.round, { base: h0, head: h1, open: ['F1', 'F2'], maxId: 3 });
+    assert.deepEqual(state.round, {
+      base: h0,
+      head: h1,
+      open: [
+        { id: 'F1', file: 'out/demo-feature-s0.txt', line: 1 },
+        { id: 'F2', file: 'out/demo-feature-s0.txt', line: 2 },
+      ],
+      maxId: 3,
+      evaluated: false,
+    });
     assert.deepEqual(state.responses.F1, [{ head: h1, kind: 'fix', counted: false }]);
     // 새 head의 판정 전에는 기다린다
     assert.equal(pick(t.fx.root).task.kind, 'idle');
@@ -486,7 +497,7 @@ test('runner: F<번호> 실패가 3회면 방법 전환을 지시하고, 5회면
   }
 });
 
-test('runner: 수정 세션 뒤 AC가 실패하면 push하지 않고 F<번호> 실패로 센다', async () => {
+test('runner: 수정 세션 뒤 AC가 실패하면 그 수정을 git revert로 되돌리고, push하지 않고 F<번호> 실패로 센다', async () => {
   const t = setup();
   try {
     const pr = await openPr(t);
@@ -497,17 +508,42 @@ test('runner: 수정 세션 뒤 AC가 실패하면 push하지 않고 F<번호> �
       judged(emptyLedger(BASE), 'codex', h0, [finding('P1', 'out/demo-feature-s0.txt', 1, '지적')]),
     );
     reviewChecks(t, h0, 'codex');
-    writeFileSync(t.behavior, JSON.stringify({ 'demo-feature': { steps: 1, review: ['break'] } }));
+    // break: AC 파일을 지워 커밋한다. break-dirty: 지우기만 하고 커밋하지 않는다
+    writeFileSync(
+      t.behavior,
+      JSON.stringify({ 'demo-feature': { steps: 1, review: ['break', 'break-dirty'] } }),
+    );
+    const codeDiff = () =>
+      sh(
+        'git',
+        ['diff', '--name-only', h0, 'HEAD', '--', '.', ':(exclude)docs/exec-plans'],
+        pr.worktree,
+      ).trim();
+    const subjects = () => sh('git', ['log', '--format=%s', `${h0}..HEAD`], pr.worktree);
     await run(t.fx.root, true);
     assert.equal(pr.head(), h0, 'push하지 않는다');
     assert.equal(t.events('review-pushed').length, 0);
-    const fails = readAttempts(repoInfo(pr.worktree)).filter((a) => a.key === 'F1' && !a.ok);
+    assert.equal(codeDiff(), '', '계획 파일 밖은 세션 전과 같은 내용으로 돌아간다');
+    assert.equal(sh('git', ['status', '--porcelain'], pr.worktree).trim(), '');
+    assert.match(subjects(), /^Revert "fix\(F1\): 깨뜨림"$/m, '되돌리기는 git revert 커밋이다');
+    let fails = readAttempts(repoInfo(pr.worktree)).filter((a) => a.key === 'F1' && !a.ok);
     assert.equal(fails.length, 1);
     assert.match(fails[0].detail ?? '', /판정/);
+    assert.match(fails[0].detail ?? '', /되돌렸다/);
     assert.deepEqual(readReviewState(pr.worktree).pending, []);
-    // 다음 세션이 고치면 그때 push한다
+    // 커밋하지 않은 변경도 먼저 커밋한 뒤 되돌린다(reset·checkout으로 버리지 않는다)
+    await run(t.fx.root, true);
+    assert.equal(codeDiff(), '');
+    assert.equal(sh('git', ['status', '--porcelain'], pr.worktree).trim(), '');
+    assert.match(subjects(), /^fix\(F1\): 판정 실패\(되돌림\)$/m);
+    assert.match(subjects(), /^Revert "fix\(F1\): 판정 실패\(되돌림\)"$/m);
+    fails = readAttempts(repoInfo(pr.worktree)).filter((a) => a.key === 'F1' && !a.ok);
+    assert.equal(fails.length, 2);
+    assert.equal(pr.head(), h0);
+    // 다음 세션이 고치면 그때 push한다. 되돌린 커밋과 되돌림 커밋이 함께 올라가도 force push는 없다
     await run(t.fx.root);
     assert.notEqual(pr.head(), h0);
+    sh('git', ['merge-base', '--is-ancestor', h0, pr.head()], pr.worktree);
     assert.equal(t.events('review-pushed').length, 1);
   } finally {
     t.fx.cleanup();
@@ -845,6 +881,7 @@ test('deadlocked: 같은 지적에 반박 2회, 둘째 반박 head를 그 검증
     round: null,
     pending: [],
     rebuttals: {},
+    reverted: null,
   });
   const twice = state([reb(h('1')), reb(h('2'))]);
   l = judged(l, 'codex', h('1'), [], [{ id: 'F1', status: 'open', note: '' }]);
@@ -972,7 +1009,7 @@ test('runner: 형식이 틀린 반박은 댓글로 달지 않고 F<번호> 실�
   }
 });
 
-test('runner: 판정에 실패한 수정이 push되지 않은 채 남아 있으면 반박을 받기 전에 판정하고, 실패하면 올리지 않는다', async () => {
+test('runner: 판정에 실패해 되돌린 수정 뒤에 온 반박은 판정을 한 번 거친 뒤 올린다(올라간 코드는 대응 전과 같다)', async () => {
   const t = setup();
   try {
     const pr = await openPr(t);
@@ -983,24 +1020,34 @@ test('runner: 판정에 실패한 수정이 push되지 않은 채 남아 있으�
       judged(emptyLedger(BASE), 'codex', h0, [finding('P1', 'out/demo-feature-s0.txt', 1, '지적')]),
     );
     reviewChecks(t, h0, 'codex');
-    // 첫 세션이 AC를 깨뜨린 커밋을 남긴다(push하지 않는다). 다음 세션은 파일을 바꾸지 않고 반박한다
+    // 첫 세션이 AC를 깨뜨린다(runner가 되돌린다). 다음 세션은 파일을 바꾸지 않고 반박한다
     writeFileSync(
       t.behavior,
-      JSON.stringify({ 'demo-feature': { steps: 1, review: ['break', 'rebut', 'ok'] } }),
+      JSON.stringify({ 'demo-feature': { steps: 1, review: ['break', 'rebut'] } }),
     );
     await run(t.fx.root, true);
-    assert.notEqual(sh('git', ['rev-parse', 'HEAD'], pr.worktree), h0, '깨진 커밋이 로컬에 남는다');
-    await run(t.fx.root, true);
-    assert.equal(pr.head(), h0, '깨진 커밋을 반박과 함께 올리지 않는다');
-    assert.equal(prCommentsBy(t, pr.number, 'harness-bot').length, 0, '반박 댓글도 달지 않는다');
-    const fails = readAttempts(repoInfo(pr.worktree)).filter((a) => a.key === 'F1' && !a.ok);
-    assert.equal(fails.length, 2);
-    assert.match(fails[1].detail ?? '', /반박을 냈지만 push하지 않은 앞선 변경/);
-    assert.deepEqual(readReviewState(pr.worktree).pending, []);
-    // 다음 세션이 고치면 판정을 통과해 올라간다
+    assert.equal(pr.head(), h0);
+    assert.notEqual(
+      sh('git', ['rev-parse', 'HEAD'], pr.worktree).trim(),
+      h0,
+      'push하지 않은 커밋이 남는다',
+    );
     assert.equal(await run(t.fx.root), 'idle');
-    assert.notEqual(pr.head(), h0);
-    assert.equal(readReviewState(pr.worktree).responses.F1.at(-1)!.kind, 'fix');
+    const h1 = pr.head();
+    assert.notEqual(h1, h0, '반박을 올린다');
+    assert.equal(prCommentsBy(t, pr.number, 'harness-bot').length, 1);
+    assert.equal(
+      sh(
+        'git',
+        ['diff', '--name-only', h0, h1, '--', '.', ':(exclude)docs/exec-plans'],
+        pr.worktree,
+      ).trim(),
+      '',
+      '깨진 수정은 되돌려진 채 올라간다',
+    );
+    const judgedOk = readAttempts(repoInfo(pr.worktree)).filter((a) => a.kind === 'ac' && a.ok);
+    assert.ok(judgedOk.length >= 1, '반박을 받기 전에 AC를 다시 돌렸다');
+    assert.equal(readReviewState(pr.worktree).responses.F1.at(-1)!.kind, 'rebuttal');
   } finally {
     t.fx.cleanup();
   }
@@ -1178,5 +1225,269 @@ test('runner: 판정 실행 로그에서 근거·제안을 읽어 데이터 블�
     assert.notEqual(pr.head(), h0, '근거 없이도 대응을 올린다');
   } finally {
     u.fx.cleanup();
+  }
+});
+
+// ---------- step5: 발산 감지와 되돌리기 ----------
+
+const FILE = 'out/demo-feature-s0.txt';
+const roundFails = (worktree: string) =>
+  readAttempts(repoInfo(worktree)).filter((a) => a.key === 'review-round' && !a.ok);
+const codeDiff = (worktree: string, from: string, to: string) =>
+  sh(
+    'git',
+    ['diff', '--name-only', from, to, '--', '.', ':(exclude)docs/exec-plans'],
+    worktree,
+  ).trim();
+
+test('runner: 대응 뒤 새 차단 지적이 해소보다 많으면 마지막 대응을 git revert로 되돌려 일반 push하고 review-round 실패로 센다. 되돌린 head의 라운드는 평가하지 않는다', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    const h0 = pr.head();
+    let ledger = judged(emptyLedger(BASE), 'codex', h0, [finding('P1', FILE, 1, '첫째')]);
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, h0, 'codex');
+    assert.equal(await run(t.fx.root), 'idle');
+    const h1 = pr.head();
+    assert.notEqual(codeDiff(pr.worktree, h0, h1), '', '대응이 코드를 바꿨다');
+    // 검증자가 h1을 판정했다: F1은 해소, 새 P1 두 건(해소 1 < 새 2)
+    ledger = judged(
+      ledger,
+      'codex',
+      h1,
+      [finding('P1', FILE, 5, '새 하나'), finding('P1', FILE, 6, '새 둘')],
+      [{ id: 'F1', status: 'fixed', note: '' }],
+    );
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, h1, 'codex');
+    const sessions = reviewSessions(t).length;
+    await run(t.fx.root, true);
+    const h2 = pr.head();
+    assert.notEqual(h2, h1, '되돌림 커밋을 올린다');
+    sh('git', ['merge-base', '--is-ancestor', h1, h2], pr.worktree); // 옛 head가 새 head의 조상이다(force push 없음)
+    assert.equal(codeDiff(pr.worktree, h0, h2), '', '코드는 대응 전과 같다');
+    assert.match(
+      sh('git', ['log', '--format=%s', `${h1}..${h2}`], pr.worktree),
+      /^Revert "fix\(F1\)/m,
+      '되돌리기는 git revert 커밋이다',
+    );
+    assert.equal(
+      reviewSessions(t).length,
+      sessions,
+      '발산을 감지한 바퀴에서는 새 세션을 띄우지 않는다',
+    );
+    let fails = roundFails(pr.worktree);
+    assert.equal(fails.length, 1);
+    assert.equal(fails[0].kind, 'review');
+    assert.match(fails[0].detail ?? '', /새 차단 지적 2건\(F2, F3\)/);
+    assert.doesNotMatch(
+      fails[0].detail ?? '',
+      /새 하나|새 둘/,
+      '실패 기록에 지적 제목을 넣지 않는다',
+    );
+    const plan = sh(
+      'git',
+      ['show', `${h2}:docs/exec-plans/completed/${pr.id}/plan.md`],
+      pr.worktree,
+    );
+    assert.match(plan, /^- \S+ 발산\(review-round\): .*되돌린 커밋: [0-9a-f]{7}/m);
+    let state = readReviewState(pr.worktree);
+    assert.equal(state.round?.evaluated, true);
+    assert.equal(state.reverted, h2);
+    assert.equal(t.events('review-reverted').length, 1);
+    assert.equal(pick(t.fx.root).task.kind, 'idle', '되돌린 head의 판정을 기다린다');
+    assert.equal(t.raw().prs[0].state, 'open');
+
+    // 되돌린 head h2의 판정: 되돌려서 F1이 다시 열렸고 F2·F3은 사라졌다
+    ledger = judged(
+      ledger,
+      'codex',
+      h2,
+      [],
+      [
+        { id: 'F1', status: 'open', note: '' },
+        { id: 'F2', status: 'fixed', note: '' },
+        { id: 'F3', status: 'fixed', note: '' },
+      ],
+    );
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, h2, 'codex');
+    assert.equal(await run(t.fx.root), 'idle');
+    const h3 = pr.head();
+    assert.notEqual(h3, h2);
+    assert.equal(reviewSessions(t).length, sessions + 1, 'F1에 다시 대응한다');
+    assert.equal(roundFails(pr.worktree).length, 1, '되돌린 head 자체는 평가하지 않는다');
+    state = readReviewState(pr.worktree);
+    assert.equal(state.round?.base, h2);
+    assert.equal(
+      state.round?.evaluated,
+      true,
+      '되돌린 head에서 시작한 라운드는 발산을 평가하지 않는다',
+    );
+    assert.equal(state.reverted, null);
+    // h3 판정: 또 새 P1 두 건. 평가하지 않는 라운드라 되돌리지 않고 대응한다
+    ledger = judged(
+      ledger,
+      'codex',
+      h3,
+      [finding('P1', FILE, 7, '또 하나'), finding('P1', FILE, 8, '또 둘')],
+      [{ id: 'F1', status: 'fixed', note: '' }],
+    );
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, h3, 'codex');
+    assert.equal(await run(t.fx.root), 'idle');
+    const h4 = pr.head();
+    assert.notEqual(h4, h3);
+    assert.equal(roundFails(pr.worktree).length, 1);
+    assert.equal(reviewSessions(t).length, sessions + 3, '새 지적 두 건에 대응한다');
+    assert.doesNotMatch(sh('git', ['log', '--format=%s', `${h3}..${h4}`], pr.worktree), /^Revert/m);
+    // 그다음 라운드는 다시 평가한다
+    assert.equal(readReviewState(pr.worktree).round?.evaluated, false);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 되돌릴 수정 커밋이 없는 라운드(반박만)의 발산은 실패로 한 번만 세고, 같은 head를 두 번 평가하지 않는다', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    const h0 = pr.head();
+    let ledger = judged(emptyLedger(BASE), 'codex', h0, [finding('P1', FILE, 1, '첫째')]);
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, h0, 'codex');
+    writeFileSync(
+      t.behavior,
+      JSON.stringify({ 'demo-feature': { steps: 1, review: ['rebut', 'fail', 'fail'] } }),
+    );
+    assert.equal(await run(t.fx.root), 'idle');
+    const h1 = pr.head();
+    // 검증자가 반박을 받아들이지 않았고 새 P1 두 건을 냈다
+    ledger = judged(
+      ledger,
+      'codex',
+      h1,
+      [finding('P1', FILE, 5, '새 하나'), finding('P1', FILE, 6, '새 둘')],
+      [{ id: 'F1', status: 'open', note: '' }],
+    );
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, h1, 'codex');
+    const sessions = reviewSessions(t).length;
+    await run(t.fx.root, true);
+    assert.equal(roundFails(pr.worktree).length, 1);
+    assert.match(roundFails(pr.worktree)[0].detail ?? '', /되돌릴 수정 커밋이 없다/);
+    assert.equal(pr.head(), h1, '되돌릴 것이 없으면 올리지 않는다');
+    assert.equal(reviewSessions(t).length, sessions, '감지한 바퀴에서는 세션을 띄우지 않는다');
+    assert.equal(t.events('review-reverted').length, 0);
+    // 같은 head, 같은 원장으로 다시 돌아도 한 번만 센다. 이제 대응 세션을 띄운다
+    await run(t.fx.root, true);
+    await run(t.fx.root, true);
+    assert.equal(roundFails(pr.worktree).length, 1, '같은 head를 두 번 평가하지 않는다');
+    assert.equal(reviewSessions(t).length, sessions + 2);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 대응을 올린 head에서 CI check가 실패하면 수정 세션을 덧대지 않고 그 대응을 되돌린다', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    const h0 = pr.head();
+    postLedger(
+      t,
+      pr.number,
+      judged(emptyLedger(BASE), 'codex', h0, [finding('P1', FILE, 1, '첫째')]),
+    );
+    reviewChecks(t, h0, 'codex');
+    assert.equal(await run(t.fx.root), 'idle');
+    const h1 = pr.head();
+    // 대응 head에서 check가 실패했다(판정 워크플로는 돌지 않는다)
+    setAll(t, h1, {
+      check: 'failure',
+      'plan-gate': null,
+      'review/claude': null,
+      'review/codex': null,
+      'review-ledger': null,
+    });
+    assert.equal(pick(t.fx.root).task.kind, 'fix-pr');
+    const prompts = t.prompts().length;
+    await run(t.fx.root, true);
+    assert.equal(t.prompts().length, prompts, '세션을 띄우지 않는다');
+    const h2 = pr.head();
+    assert.notEqual(h2, h1);
+    sh('git', ['merge-base', '--is-ancestor', h1, h2], pr.worktree);
+    assert.equal(codeDiff(pr.worktree, h0, h2), '');
+    const fails = roundFails(pr.worktree);
+    assert.equal(fails.length, 1);
+    assert.match(fails[0].detail ?? '', /check.*실패/);
+    assert.equal(readReviewState(pr.worktree).reverted, h2);
+    // 대응 라운드가 아닌 head의 check 실패는 지금처럼 수정 세션이다
+    setAll(t, h2, {
+      check: 'failure',
+      'plan-gate': null,
+      'review/claude': null,
+      'review/codex': null,
+      'review-ledger': null,
+    });
+    await run(t.fx.root, true);
+    assert.equal(t.prompts().length, prompts + 1);
+    assert.match(t.prompts().at(-1)!.prompt, /## CI 실패/);
+    assert.equal(roundFails(pr.worktree).length, 1);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: review-round 실패가 3회면 프롬프트에 방법 전환 지시를 넣고, 5회면 계획을 멈추고 중단 보고를 올린다', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    let ledger = judged(emptyLedger(BASE), 'codex', pr.head(), [finding('P1', FILE, 1, '첫째')]);
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, pr.head(), 'codex');
+    const info = repoInfo(pr.worktree);
+    const diverged = (n: number) => {
+      for (let i = 0; i < n; i++)
+        recordAttempt(info, {
+          plan: pr.id,
+          step: 0,
+          key: 'review-round',
+          ok: false,
+          kind: 'review',
+          detail: '새 차단 지적 2건(F8, F9)이 해소 1건보다 많다',
+        });
+    };
+    diverged(2);
+    await run(t.fx.root);
+    assert.doesNotMatch(reviewSessions(t).at(-1)!.prompt, /방법 전환 지시/, '2회까지는 그대로');
+    const head = pr.head();
+    ledger = judged(ledger, 'codex', head, [], [{ id: 'F1', status: 'open', note: '' }]);
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, head, 'codex');
+    diverged(1);
+    await run(t.fx.root);
+    const prompt = reviewSessions(t).at(-1)!.prompt;
+    assert.match(prompt, /## 방법 전환 지시 \(10\.2절 \(7\)/);
+    assert.match(prompt, /열린 질문/);
+    assert.match(prompt, /### 질문:/);
+    // 5회: 멈춘다
+    const head2 = pr.head();
+    ledger = judged(ledger, 'codex', head2, [], [{ id: 'F1', status: 'open', note: '' }]);
+    postLedger(t, pr.number, ledger);
+    reviewChecks(t, head2, 'codex');
+    diverged(2);
+    const sessions = reviewSessions(t).length;
+    assert.equal(await run(t.fx.root), 'human');
+    assert.equal(reviewSessions(t).length, sessions);
+    const issue = t.raw().issues[0];
+    assert.ok(issue.labels.includes('needs-human'));
+    const report = issue.comments.find((c) => c.body.includes('## 중단 보고'))!;
+    assert.match(report.body, /실패 키: .*review-round\(5회\)/);
+    const dir = path.join(pr.worktree, 'docs/exec-plans/active', pr.id);
+    assert.match(readFileSync(path.join(dir, 'plan.md'), 'utf8'), /^status: blocked/m);
+  } finally {
+    t.fx.cleanup();
   }
 });
