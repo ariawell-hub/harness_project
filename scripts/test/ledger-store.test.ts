@@ -28,6 +28,7 @@ const finding = (over: Partial<Finding> = {}): Finding => ({
   title: '만료 토큰을 허용함',
   evidence: '근거',
   suggestion: '제안',
+  repro: { path: '', content: '' },
   ...over,
 });
 const verdict = (findings: Finding[] = [], resolutions: Resolution[] = []): Verdict => ({

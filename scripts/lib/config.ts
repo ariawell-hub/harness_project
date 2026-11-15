@@ -79,6 +79,16 @@ export interface HarnessConfig {
     recorderAppId: number | null;
     /** 검증 App 봇의 login(예: `harness-recorder[bot]`). 승인 이어받기에서 상태의 작성자를 확인한다(10.3절) */
     recorderBot: string | null;
+    /** 재현 job 설정(10.2절 (3)). null이면 재현 테스트를 실행하지 않는다 */
+    repro: {
+      /** 재현 테스트를 둘 폴더(리포 루트 기준) */
+      dir: string;
+      /** 테스트 하나를 실행하는 명령. 끝에 파일 경로가 붙는다 */
+      command: string[];
+      /** 실패 출력에 이 정규식이 보여야 재현으로 본다(단언 실패) */
+      failPattern: string;
+      timeoutSec: number;
+    } | null;
   };
   /** 의존성 통제 기준(R17, Q14). deps-guard가 쓴다 */
   deps: {
@@ -174,7 +184,27 @@ export function loadConfig(repoRoot: string): HarnessConfig {
     requiredChecks: ci.requiredChecks ?? [],
     recorderAppId: ci.recorderAppId ?? null,
     recorderBot: ci.recorderBot ?? null,
+    repro: ci.repro ?? null,
   };
+  if (cfg.ci.repro !== null) {
+    const r = cfg.ci.repro as Record<string, unknown>;
+    const okDir = typeof r.dir === 'string' && /^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*$/.test(r.dir);
+    const okCmd =
+      Array.isArray(r.command) &&
+      r.command.length > 0 &&
+      r.command.every((x) => typeof x === 'string' && x !== '');
+    let okPattern = typeof r.failPattern === 'string' && r.failPattern !== '';
+    try {
+      if (okPattern) new RegExp(r.failPattern as string);
+    } catch {
+      okPattern = false;
+    }
+    const okTimeout = Number.isInteger(r.timeoutSec) && (r.timeoutSec as number) > 0;
+    if (!okDir || !okCmd || !okPattern || !okTimeout || (r.dir as string).split('/').includes('..'))
+      throw new ConfigError(
+        `${CONFIG_FILE} 검증 실패:\n- ci.repro는 { dir(리포 안 상대 경로), command(문자열 배열), failPattern(정규식), timeoutSec(양의 정수) }`,
+      );
+  }
   if (cfg.ci.recorderBot !== null && typeof cfg.ci.recorderBot !== 'string')
     throw new ConfigError(
       `${CONFIG_FILE} 검증 실패:\n- ci.recorderBot은 문자열(검증 App 봇의 login)`,

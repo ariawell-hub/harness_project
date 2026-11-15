@@ -96,6 +96,8 @@ export interface ApplyOptions {
   headSha: string;
   /** 이 검증자의 직전 판정 head 이후 바뀐 파일. 모르면 null(2라운드부터는 모두 동결한다) */
   changedSinceLastRound: readonly string[] | null;
+  /** 재현 job 결과: 이 판정의 findings 순번 → 결과. PR 코드가 조작할 수 있는 값이다(10.4절) */
+  repro?: ReadonlyMap<number, ReproResult>;
 }
 
 /**
@@ -136,9 +138,11 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
     e.file === oneLine(f.file, LIMITS.file) &&
     e.line === f.line &&
     e.title === oneLine(f.title, LIMITS.title);
-  for (const f of o.verdict.findings) {
+  for (const [index, f] of o.verdict.findings.entries()) {
+    const repro = o.repro?.get(index) ?? '';
     const dup = out.findings.find((e) => same(e, f));
     if (dup) {
+      if (repro) dup.repro = repro;
       // 닫힌 지적을 낸 검증자가 같은 지적을 다시 냈다: 회귀로 보고 다시 연다. deferred는 그대로 둔다
       if (dup.status === 'fixed' || dup.status === 'rejected') {
         dup.status = 'open';
@@ -147,22 +151,31 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
       }
       continue;
     }
-    const blocking = BLOCKING.includes(f.severity);
+    // 근거(실패 시나리오와 위치)가 없는 P1은 P2로 내린다. P0은 내리지 않는다(10.2절 (3))
+    const unfounded = f.severity === 'P1' && (f.evidence.trim() === '' || f.file.trim() === '');
+    const severity: Severity = unfounded ? 'P2' : f.severity;
+    const blocking = BLOCKING.includes(severity);
     if (!blocking && out.findings.length >= MAX_ENTRIES) {
       out.dropped++;
       continue;
     }
-    const frozen = round >= 2 && f.severity === 'P1' && !changed.has(f.file);
+    // 동결: 재현 job이 재현한 P1은 예외로 받는다(10.2절 (5)). "재현 안 됨"은 상태를 바꾸지 않는다
+    const frozen =
+      round >= 2 && severity === 'P1' && !changed.has(f.file) && repro !== 'reproduced';
     out.findings.push({
       id: `F${next++}`,
-      severity: f.severity,
+      severity,
       reviewer: o.reviewer,
       file: oneLine(f.file, LIMITS.file),
       line: f.line,
       title: oneLine(f.title, LIMITS.title),
-      repro: '',
+      repro,
       status: blocking && !frozen ? 'open' : 'deferred',
-      note: frozen ? '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))' : '',
+      note: unfounded
+        ? '근거 없음: P1에서 P2로 내림(10.2절 (3))'
+        : frozen
+          ? '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'
+          : '',
       round,
       rejectedBy: [],
     });

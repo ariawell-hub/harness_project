@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { reproJobViolations } from '../gates/harness-guard.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { runGates, summaryMarkdown } from '../ci/gates.ts';
 import { recordStatuses } from '../ci/record.ts';
@@ -436,7 +437,7 @@ test('judge-claude.yml: check 완료로 시작, SHA 고정, 최상위 권한 없
 
 test('judge-claude.yml: environment는 job마다 하나, 비밀은 자기 job에만', () => {
   const j = jobs(JUDGE_CLAUDE);
-  assert.deepEqual([...j.keys()], ['plan', 'judge', 'record', 'failed', 'ci-failure']);
+  assert.deepEqual([...j.keys()], ['plan', 'judge', 'repro', 'record', 'failed', 'ci-failure']);
   assert.doesNotMatch(j.get('plan')!, /environment:|secrets\.|vars\./);
   assert.match(j.get('judge')!, /^ {4}environment: judge-claude$/m);
   assert.match(j.get('record')!, /^ {4}environment: recorder$/m);
@@ -515,13 +516,14 @@ test('judge-codex.yml: check 완료로 시작, 워크플로 단위 직렬화, SH
 
 test('judge-codex.yml: environment는 job마다 하나, 비밀은 자기 job에만', () => {
   const j = jobs(JUDGE_CODEX);
-  assert.deepEqual([...j.keys()], ['plan', 'pubkey', 'judge', 'store', 'record']);
+  assert.deepEqual([...j.keys()], ['plan', 'pubkey', 'judge', 'store', 'repro', 'record']);
   const envOf = (n: string) => /^ {4}environment: (\S+)$/m.exec(j.get(n)!)?.[1] ?? null;
-  assert.deepEqual(['plan', 'pubkey', 'judge', 'store', 'record'].map(envOf), [
+  assert.deepEqual(['plan', 'pubkey', 'judge', 'store', 'repro', 'record'].map(envOf), [
     null,
     'codex-auth-store',
     'judge-codex',
     'codex-auth-store',
+    null,
     'recorder',
   ]);
   const secretsOf = (n: string) => [
@@ -676,4 +678,61 @@ test('judge-claude.yml: check가 실패하면 기록 전용 job이 원장에 실
   assert.doesNotMatch(ci, /path: pr\b|claude -p|npm install|permission-statuses|GH_TOKEN/);
   // 실패한 실행의 URL은 run 블록이 아니라 env로 넘긴다
   assert.match(ci, /RUN_URL: .*github\.event\.workflow_run\.id/);
+});
+
+// ---------- 재현 job (10.2절 (3), 10.4절) ----------
+
+test('judge-*.yml: 재현 job은 비밀·environment·쓰기 권한 없이 base 스크립트로 PR 트리에서 테스트를 돌린다', () => {
+  for (const wf of [JUDGE_CLAUDE, JUDGE_CODEX]) {
+    const j = jobs(wf);
+    const repro = j.get('repro')!;
+    assert.doesNotMatch(
+      repro,
+      /environment:|secrets\.|vars\.|: write|create-github-app-token|GH_TOKEN/,
+    );
+    assert.match(repro, /^ {4}permissions:\n {6}contents: read$/m);
+    assert.match(repro, /^ {4}needs: \[plan, judge\]$/m);
+    assert.match(repro, /^ {4}if: needs\.judge\.outputs\.verdict != ''$/m);
+    assert.match(repro, /^ {4}timeout-minutes: \d+$/m);
+    // 스크립트와 설정은 base에서만 읽고, PR 트리의 스크립트를 직접 실행하지 않는다
+    assert.match(
+      repro,
+      /node base\/scripts\/harness\.ts repro --verdict "\$F" --repo pr --config-root base/,
+    );
+    assert.doesNotMatch(repro, /node (\.\/)?pr\/|npm (install|ci)|persist-credentials: true/);
+    assert.equal([...repro.matchAll(/persist-credentials: false/g)].length, 2);
+    // 기록 job은 재현 결과를 값으로만 받는다
+    const record = j.get('record')!;
+    assert.match(record, /^ {4}needs: \[plan, judge, repro\]$/m);
+    assert.match(record, /REPRO: \$\{\{ needs\.repro\.outputs\.results \}\}/);
+    assert.match(record, /--repro-results "\$REPRO"/);
+    assert.deepEqual(reproJobViolations(wf), []);
+  }
+});
+
+test('reproJobViolations: 재현 job에 environment·비밀·쓰기 권한이 있거나 권한을 적지 않으면 잡는다', () => {
+  const wf = (body: string) =>
+    `name: x\njobs:\n  repro:\n${body}\n  other:\n    environment: recorder\n`;
+  assert.deepEqual(
+    reproJobViolations(wf('    permissions:\n      contents: read\n    steps: []')),
+    [],
+  );
+  assert.deepEqual(reproJobViolations(wf('    permissions: {}\n    steps: []')), []);
+  assert.match(
+    reproJobViolations(wf('    permissions: {}\n    environment: recorder')).join(),
+    /environment/,
+  );
+  assert.match(
+    reproJobViolations(wf('    permissions: {}\n    env:\n      T: ${{ secrets.X }}')).join(),
+    /비밀/,
+  );
+  assert.match(
+    reproJobViolations(wf('    permissions:\n      contents: write')).join(),
+    /쓰기 권한/,
+  );
+  assert.match(reproJobViolations(wf('    steps: []')).join(), /권한을 적지 않았다/);
+  // 이름이 달라도 재현 명령을 실행하는 job이면 본다
+  const renamed = `jobs:\n  runner:\n    environment: recorder\n    steps:\n      - run: node base/scripts/harness.ts repro --verdict f\n`;
+  assert.match(reproJobViolations(renamed).join(), /runner: environment/);
+  assert.deepEqual(reproJobViolations('name: x\n'), []);
 });

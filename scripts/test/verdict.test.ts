@@ -100,6 +100,37 @@ test('validateVerdict: resolutions는 없으면 빈 배열, 있으면 ID·상태
     assert.equal(validateVerdict(raw).ok, false, JSON.stringify(raw)?.slice(0, 120));
 });
 
+test('validateVerdict: repro는 없으면 빈 값, 있으면 길이와 개수를 검사한다', () => {
+  const none = validateVerdict(verdict({ findings: [finding()] }));
+  assert.ok(none.ok);
+  assert.deepEqual(none.value.findings[0].repro, { path: '', content: '' });
+  const r = { path: 'scripts/test/harness-repro-a.test.ts', content: "test('x', () => {});" };
+  const some = validateVerdict(verdict({ findings: [finding({ repro: r })] }));
+  assert.ok(some.ok);
+  assert.deepEqual(some.value.findings[0].repro, r);
+  const bad: unknown[] = [
+    verdict({ findings: [finding({ repro: 'x' })] }),
+    verdict({ findings: [finding({ repro: { path: 'a' } })] }),
+    verdict({ findings: [finding({ repro: { ...r, extra: 1 } })] }),
+    verdict({ findings: [finding({ repro: { ...r, path: 'a'.repeat(LIMITS.reproPath + 1) } })] }),
+    verdict({
+      findings: [finding({ repro: { ...r, content: 'a'.repeat(LIMITS.reproContent + 1) } })],
+    }),
+    // 재현 테스트는 판정 하나에 LIMITS.repros개까지다(job 출력 크기)
+    verdict({
+      findings: Array.from({ length: LIMITS.repros + 1 }, () => finding({ repro: r })),
+    }),
+  ];
+  for (const raw of bad)
+    assert.equal(validateVerdict(raw).ok, false, JSON.stringify(raw)?.slice(0, 120));
+  assert.equal(
+    validateVerdict(
+      verdict({ findings: Array.from({ length: LIMITS.repros }, () => finding({ repro: r })) }),
+    ).ok,
+    true,
+  );
+});
+
 test('스키마 파일과 코드 규칙이 같다', () => {
   const s = JSON.parse(
     readFileSync(path.join(HARNESS_ROOT, 'scripts/cross-review/verdict.schema.json'), 'utf8'),
@@ -130,10 +161,16 @@ test('스키마 파일과 코드 규칙이 같다', () => {
     'evidence',
     'file',
     'line',
+    'repro',
     'severity',
     'suggestion',
     'title',
   ]);
+  const rp = f.properties.repro;
+  assert.equal(rp.additionalProperties, false);
+  assert.deepEqual([...rp.required].sort(), ['content', 'path']);
+  assert.equal(rp.properties.path.maxLength, LIMITS.reproPath);
+  assert.equal(rp.properties.content.maxLength, LIMITS.reproContent);
   assert.deepEqual(f.properties.severity.enum, [...SEVERITIES]);
   for (const k of ['file', 'title', 'evidence', 'suggestion'] as const)
     assert.equal(f.properties[k].maxLength, LIMITS[k], k);

@@ -85,6 +85,10 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
   - 상태 작성자는 모두 `harness-recorder[bot]`이다. 원장 토큰 단계가 성공했으므로 검증 App의 Pull requests 쓰기 권한이 적용됐다.
   - 아직 실제로 보지 못한 것: 2라운드 입력(`ledger.md`, 직전 판정 이후 diff)과 프롬프트 버전 고정, `ci-failure` job, 반박 전달. 2라운드와 프롬프트 고정은 이 PR의 다음 push에서, 반박은 step3 PR에서 확인한다.
 - 2026-11-15 step2: AC 실행 결과. `node --test scripts/test/rebuttal.test.ts scripts/test/ledger.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep` 2개 통과, `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step2: PR #85 병합(두 검증자 승인, 위험도 보통). 완료 처리 커밋의 판정에서 2라운드 입력과 프롬프트 버전 고정이 실제로 돌았다(실행 43696858234·43696858235): `review-plan: claude 2라운드, 프롬프트 버전 40e38e7a40ce, 직전 판정 이후 바뀐 파일 2`, `review-prompt: 프롬프트 버전 40e38e7a40ce`. Claude는 "직전 판정 이후 바뀐 것은 완료 표시와 로그뿐"이라고 판정했고, Codex는 "F1은 다른 검증자가 낸 지적이라 처리하지 않았다"고 적었다.
+- 2026-11-15 step3: 테스트 먼저. `node --test scripts/test/repro.test.ts scripts/test/ledger.test.ts scripts/test/verdict.test.ts` 종료 코드 1(28개 중 5개 실패: `scripts/ci/repro.ts` 없음, `repro` 필드와 원장 규칙 없음). 구현 뒤 34개 통과.
+- 2026-11-15 step3: `ci.repro` 설정을 더해 `harness-guard`가 `harness.config.json`의 `ci` 변경을 신호로 잡을 것이다(위험도 높음, 제작자 head 승인). PR 코드를 실행하는 job을 더하는 변경이라 초안으로 올리고 끝난 뒤 승인을 요청한다.
+- 2026-11-15 step3: AC 실행 결과. `node --test scripts/test/repro.test.ts scripts/test/ledger.test.ts scripts/test/verdict.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep` 2개 통과, `node scripts/harness.ts check` 종료 코드 0.
 
 ## 의사결정 로그
 
@@ -101,6 +105,10 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 반박은 PR 작성자 계정의 댓글만 본다. 이유: 요지 한 줄은 검증자에게 가는 글이라 쓸 수 있는 계정을 좁힌다. 제작자는 반박이 아니라 승인·Issue 댓글로 개입한다. 버린 대안: 모든 댓글(리포에 댓글을 달 수 있는 누구나 검증자 입력에 글을 넣는다).
 - 반박 블록은 빈 줄로 구분된 정확히 세 줄 문단이다. 같은 댓글의 다른 문단(자유 글)은 버리고 블록만 쓴다. 이유: 설명을 곁들인 댓글도 쓸 수 있게 하되 검증자에게는 형식에 맞는 줄만 간다.
 - 근거의 "리포 안 상대 경로"는 문자 집합과 `..` 금지만 본다(파일이 있는지는 보지 않는다). 짧은 SHA도 이 형식에 맞아 통과한다. 이유: 근거는 검증자가 직접 확인할 대상을 가리킬 뿐이고, 없는 경로면 검증자가 반박을 받아들이지 않는다.
+- 재현 job의 권한은 `permissions: {}`가 아니라 `contents: read`다(step3 본문과 다르다). 이유: 비공개 리포는 체크아웃에 읽기 권한이 필요하다. 체크아웃은 자격증명을 남기지 않고(`persist-credentials: false`), 그 토큰으로 할 수 있는 일은 PR 작성자가 이미 가진 읽기뿐이다.
+- "재현됨"은 테스트가 실패하고 출력에 단언 실패(`ci.repro.failPattern`)가 보일 때만이다. 이유: 검증자는 테스트를 실행해 볼 수 없어 문법·import 오류가 있는 테스트를 낼 수 있다. 그것을 재현으로 세면 동결 예외가 잘못 열린다.
+- 재현 테스트는 판정 하나에 3개, 파일 하나에 4000자까지다. 이유: 판정은 job 출력과 환경 변수로 넘어가 크기 한도(약 128KB)가 있다. 넘는 판정은 형식 오류(error)다.
+- 재현 job은 의존성을 설치하지 않는다. 이유: 이 리포는 의존성이 없다. 의존성이 필요한 프로파일은 `ci.repro`를 켤 때 설치 단계를 함께 설계한다(비밀이 없는 job이라 설치 스크립트 실행 자체는 허용할 수 있다).
 - 지적 ID는 원장 전체에서 `F<번호>`로 차례로 붙인다(설계서 10.2절 (4) 예시). 검증자는 다음 라운드에 판정 스키마의 `resolutions: [{ id, status, note }]`로 원장 지적의 상태를 낸다. 남의 지적에 대한 판정은 P0 `rejected` 동의로만 쓴다.
 - "바뀌지 않은 코드"는 직전 라운드 head와 지금 head 사이에 바뀌지 않은 파일로 판정한다(줄 단위가 아니다). 이유: 기계로 단순하게 판정할 수 있고, 수정된 파일의 새 결함은 놓치지 않는다. 한계: 수정된 파일 안의 옛 코드에 대한 뒤늦은 지적도 받는다.
 - 원장 댓글을 쓰려면 검증 App에 Pull requests 쓰기 권한이 필요하다(지금은 읽기, 설계서 0.2절). 제작자 작업이라 step1에서 필요한 다른 작업과 함께 한 번에 요청한다(R20). 권한이 오기 전까지 step0은 순수 로직만 만든다.
@@ -128,4 +136,4 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step3(재현 job). 시작할 때 step2의 실제 동작(반박 전달)을 확인한다.
+- step4(계획 검증, G1). 시작할 때 step3의 실제 동작(재현 job)을 확인한다. 반박 전달(step2)은 열린 P0·P1 지적이 있어야 실제로 볼 수 있다. 기회가 오면 진행 로그에 남기고, 없으면 step5에서 미확인으로 정리한다.

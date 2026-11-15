@@ -25,6 +25,7 @@ const finding = (over: Partial<Finding> = {}): Finding => ({
   title: '만료 토큰을 허용함',
   evidence: '근거',
   suggestion: '제안',
+  repro: { path: '', content: '' },
   ...over,
 });
 const verdict = (findings: Finding[] = [], resolutions: Resolution[] = []): Verdict => ({
@@ -416,4 +417,62 @@ test('라운드 기록은 자르지 않는다(라운드 번호와 동결 판정�
     });
   assert.equal(l.rounds.length, 210);
   assert.deepEqual(parseLedger(renderLedger(l)), l);
+});
+
+test('근거가 빈 P1은 P2로 내려 등록한다. P0은 내리지 않는다(10.2절 (3))', () => {
+  const l = round1([
+    finding({ title: '근거 없음', evidence: '  ' }),
+    finding({ title: '위치 없음', file: '' }),
+    finding({ title: 'P0 근거 없음', severity: 'P0', evidence: '' }),
+    finding({ title: '근거 있음' }),
+  ]);
+  assert.deepEqual(
+    l.findings.map((e) => [e.title, e.severity, e.status]),
+    [
+      ['근거 없음', 'P2', 'deferred'],
+      ['위치 없음', 'P2', 'deferred'],
+      ['P0 근거 없음', 'P0', 'open'],
+      ['근거 있음', 'P1', 'open'],
+    ],
+  );
+  assert.match(byId(l, 'F1').note, /근거 없음/);
+});
+
+test('재현 결과를 원장에 적는다. 재현된 P1은 동결하지 않고, 재현 안 됨은 상태를 바꾸지 않는다', () => {
+  const l = applyVerdict(round1([]), {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/old.ts', title: '재현됨' }),
+      finding({ file: 'src/old.ts', title: '재현 안 됨' }),
+      finding({ file: 'src/fix.ts', title: '바뀐 파일, 재현 안 됨' }),
+      finding({ file: 'src/old.ts', title: '실행 못 함' }),
+    ]),
+    headSha: H2,
+    changedSinceLastRound: ['src/fix.ts'],
+    repro: new Map([
+      [0, 'reproduced'],
+      [1, 'not-reproduced'],
+      [2, 'not-reproduced'],
+      [3, 'error'],
+    ]),
+  });
+  assert.deepEqual(
+    l.findings.map((e) => [e.title, e.repro, e.status]),
+    [
+      ['재현됨', 'reproduced', 'open'],
+      ['재현 안 됨', 'not-reproduced', 'deferred'],
+      ['바뀐 파일, 재현 안 됨', 'not-reproduced', 'open'],
+      ['실행 못 함', 'error', 'deferred'],
+    ],
+  );
+  assert.match(renderLedger(l), /재현됨.*\| 재현됨 \| open/);
+  // 이미 등록된 지적을 다시 내며 재현 결과가 오면 결과만 고친다
+  const again = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ file: 'src/fix.ts', title: '바뀐 파일, 재현 안 됨' })]),
+    headSha: H3,
+    changedSinceLastRound: [],
+    repro: new Map([[0, 'reproduced']]),
+  });
+  assert.deepEqual([byId(again, 'F3').repro, byId(again, 'F3').status], ['reproduced', 'open']);
 });

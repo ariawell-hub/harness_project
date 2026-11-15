@@ -9,6 +9,7 @@ import {
   parseLedger,
   renderLedger,
   type Ledger,
+  type ReproResult,
   type Reviewer,
 } from './ledger.ts';
 import { LEDGER_CONTEXT, SHA_RE, cleanDescription, type StatusPayload } from './results.ts';
@@ -117,6 +118,8 @@ export interface RecordLedgerOptions extends Where {
   promptBase: string;
   /** 이 검증자의 직전 판정 head 이후 바뀐 파일(plan job이 계산). 모르면 null */
   changedSinceLastRound: readonly string[] | null;
+  /** 재현 job 결과(판정 findings 순번 → 결과). 없으면 재현 표시 없이 등록한다 */
+  repro?: ReadonlyMap<number, ReproResult>;
   /** 원장 댓글을 읽고 쓸 API(Pull requests 쓰기 토큰). 토큰을 받지 못했으면 null */
   api: LedgerApi | null;
   post: (p: StatusPayload) => Promise<void>;
@@ -144,6 +147,7 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         verdict: v,
         headSha: o.headSha,
         changedSinceLastRound: o.changedSinceLastRound,
+        repro: o.repro,
       });
       await saveLedger({ ...o, send: o.api.send, commentId: stored.commentId, ledger });
     }
