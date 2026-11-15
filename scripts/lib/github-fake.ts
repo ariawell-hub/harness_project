@@ -59,6 +59,8 @@ export interface FakeState {
   clock?: number;
   issues: FakeIssue[];
   prs: FakePR[];
+  /** branchInfo가 돌려줄 필수 체크(선택) */
+  requiredChecks?: { context: string; app_id: number | null }[];
 }
 
 export function initFakeState(file: string, s: Partial<FakeState> & { remote: string }): FakeState {
@@ -111,6 +113,9 @@ export class FakeGitHub implements GitHubPort {
   constructor(file: string) {
     this.file = file;
     if (!existsSync(file)) throw new Error(`HARNESS_FAKE_GH 상태 파일이 없다: ${file}`);
+  }
+  branchInfo(): unknown {
+    return { protection: { required_status_checks: { checks: this.load().requiredChecks ?? [] } } };
   }
   private load(): FakeState {
     return JSON.parse(readFileSync(this.file, 'utf8')) as FakeState;

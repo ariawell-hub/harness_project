@@ -2,7 +2,7 @@
 id: 20261114-ci-gates
 issue: 53 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -70,6 +70,10 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 2026-11-15 step2: `scripts/test/harness-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/gates/harness-guard.ts`) → 구현 뒤 34개 통과. `ci.environments` 설정, `gates`의 `--pr-body`, PR 템플릿 항목. 이 PR은 `harness.config.json`에 `ci` 키를 더하므로 자기 규칙으로도 신호가 된다(계획 risk가 이미 high).
 - 2026-11-15: step2 PR #60 병합. 그 PR head(570450a)에 검증 App(`harness-recorder[bot]`)이 `plan-gate` = success, `risk-gate` = failure("위험도 높음: 제작자 head 승인 필요 — 계획 risk: high")를 기록했다. `risk-gate`가 필수 체크가 아니라 병합은 됐다.
 - 2026-11-15 step3: `scripts/test/deps-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → `scripts/lib/lockfile.ts`, `scripts/gates/deps-guard.ts`, 설정 `deps`, `runGates` async 전환 뒤 42개 통과. `gates.yml`은 바꾸지 않았다. 실제 레지스트리·OSV 구현(`httpRegistry`)은 로컬에서 한 번 호출해 응답 형식을 확인했다(`@types/node@22.20.5` 게시 시각·MIT, 없는 패키지 → null, `lodash@4.17.20` → GHSA 목록).
+- 2026-11-15: step3 PR #61 병합. 그 PR head에 검증 App이 `plan-gate`·`harness-guard`(보호 경로 변경 15개: 통과) = success, `risk-gate` = failure를 기록했다.
+- 2026-11-15 step4: `scripts/test/protection.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → `scripts/ci/protection.ts`, `GitHubPort.branchInfo`, `required-checks` 명령, 설정 `ci.requiredChecks`. 전체 테스트 189개 통과. 옛 `plan-gate.yml` 삭제. 지금 `required-checks` 출력은 실패(등록이 아직 `check`·`plan-gate` 둘 다 Actions 출처)다. 검증 App이 비공개라 봇은 App ID를 조회할 수 없다(`GET /apps/harness-recorder` 404). PR을 draft로 올려 네 상태가 처음 모두 보고되게 하고, 제작자에게 App ID와 등록을 요청한다. 등록 확인 전에는 자동 병합을 켜지 않는다.
+- 2026-11-15: draft PR #62 head(e773e7f)에 검증 App이 네 상태를 모두 기록했다(`deps-guard` "lockfile 변경 없음", `harness-guard` "보호 경로 변경 13개: 신호 2건", `risk-gate` failure, `plan-gate` failure(완료 처리 전)). 제작자가 그 head를 승인하자 `review-trigger` → `gates`(`workflow_run`)가 돌아 `risk-gate`가 "위험도 높음, 제작자 head 승인"으로 success가 됐다. 리뷰 뒤 재판정 경로의 첫 실제 확인이다.
+- 2026-11-15: 제작자가 검증 App ID(5764201)를 알려 주고 main 필수 체크를 등록했다. `ci.recorderAppId`에 적고 `required-checks`가 통과했다. `required-checks`가 main 체크아웃 설정을 읽어 worktree에서 확인할 수 없던 것을 현재 작업 트리 설정을 읽게 고쳤다.
 
 ## 의사결정 로그
 
@@ -91,6 +95,8 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 취약점은 `osv-scanner` 바이너리 대신 OSV `querybatch` API로 조회한다. 이유: 바이너리 내려받기·체크섬 관리가 없고 새 버전만 물으면 된다.
 - SPDX 식으로 읽히지 않는 라이선스 문자열(`SEE LICENSE IN …`, 없음)은 허용하지 않는다. 이유: fail-closed. 필요하면 제작자가 허용 목록이나 예외를 정한다.
 - 새 직접 의존성의 "ADR 링크"는 같은 PR에서 바뀐 `docs/decisions/ADR-*.md`가 패키지 이름을 언급하는지로 확인한다. 이유: PR 본문 링크는 내용을 보장하지 않고, ADR 파일은 리포에 남는다.
+- `ci.recorderAppId`는 보호 설정에서 읽어 오지 않고 제작자가 알려 준 값을 설정에 적는다. 이유: 등록된 값을 기준으로 삼으면 확인이 자기 자신과의 비교가 된다.
+- `required-checks`는 설정에 없는 등록(여분)도 실패로 본다. 이유: 아무도 채우지 않는 필수 체크가 남으면 모든 PR이 막히고, 운영 전환 체크리스트 1은 "정해진 체크가 정해진 출처로"를 확인해야 한다.
 - (제작자 결정, 2026-11-14 대화) 보호 경로의 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조를 탐지하면 `harness-guard`는 표시만 하고 `risk-gate`가 위험도를 "높음"으로 올린다. 제작자 head 승인이 있어야 병합된다. 캐시 사용·`CHANGELOG`·체크리스트 누락은 작성자가 고칠 수 있으므로 `harness-guard` 실패다. 이유: 10.1절 "위험도는 올릴 수만 있다"와 같은 방향이고, 정당한 변경을 막지 않으면서 사람 확인을 강제한다. 버린 대안: 탐지 즉시 실패(정당한 완화도 제작자가 보호 설정을 풀어야 함), 표시만(②가 생기기 전엔 아무도 막지 않음).
 - (제작자 결정, 2026-11-14 대화) `deps-guard` 라이선스 허용 목록: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC. SPDX 식은 `OR` 중 하나, `AND`는 모두 허용이어야 통과. 이유: ISC는 MIT 수준의 허용 라이선스이고 npm에서 흔하다. 버린 대안: Q14 그대로(ISC 전이 의존성마다 막힘). 설계서 18절 Q14에 반영한다(step3).
 
@@ -116,7 +122,11 @@ step0이 병합되기 전에 제작자가 준비한다. 봇은 관리자 권한�
 - step마다 AC 명령과 `node scripts/harness.ts check`.
 - step1부터 실제 PR에서 `gates` 실행과 기록된 상태의 작성자(`creator.login` = 검증 App 봇)를 `gh api repos/<리포>/commits/<head>/statuses`로 확인해 진행 로그에 남긴다.
 - step4에서 `branches/main`의 `required_status_checks.checks[].app_id`가 검증 App이고, 옛 Actions 출처 `plan-gate`가 없음을 확인한다.
+- 결과(2026-11-15, `node scripts/harness.ts required-checks`): `check` 출처 actions(15368), `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard` 출처 recorder(5764201) 모두 ✓, "required-checks: 통과".
+- 실제 PR 기록: #59(`plan-gate`), #60(`risk-gate`), #61(`harness-guard`), #62(`deps-guard`, 승인 뒤 `risk-gate` 재판정). 작성자는 모두 `harness-recorder[bot]`.
+- 실제로 돌지 않은 것: `deps-guard`의 CI 안 레지스트리·OSV 조회(lockfile을 바꾼 PR이 없었다. 로컬에서 한 번 호출해 응답 형식만 확인).
 
 ## 다음 할 일
 
-- step4 required-checks. 시작 전에 제작자에게 (1) 검증 App ID, (2) main 필수 체크를 `check`(Actions) + `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`(출처 = 검증 App)로 바꾸는 일을 요청한다. step3 PR 다음 PR부터 네 상태가 모두 보고된다.
+- 이 PR(#62)은 제작자가 새 head를 다시 승인하면 병합된다(완료 처리 커밋으로 head가 바뀌었다).
+- 다음은 #54(2단계② 교차 검증 판정 job). 시작 전에 제작자 준비가 필요하다: `judge-claude`(Claude 구독 토큰), `judge-codex`(CI 전용 `auth.json`), `codex-auth-store`(인증 저장 App) environment. 모두 `main`만 허용(설계서 13.3절).
