@@ -1,6 +1,7 @@
 // 계획 검증(G1)의 결속 기준(10.3절): 계획 핵심 섹션의 해시와 "계획만 바꾼 PR" 판정.
-// 해시에 넣는 것: plan.md의 목표·수용 기준, 범위, 관련 파일 섹션과 계획 폴더의 모든 step<N>.md의 작업·AC 섹션.
-// 넣지 않는 것: frontmatter, 진행·의사결정 로그, index.json, 폴더 위치(active/·completed/). 완료 처리로는 해시가 바뀌지 않는다.
+// 해시에 넣는 것: plan.md의 목표·수용 기준, 범위, 관련 파일 섹션과 계획 폴더의 모든 step<N>.md의 작업·AC·금지사항 섹션.
+// 넣지 않는 것: frontmatter, 진행·의사결정 로그, index.json, 폴더 위치(active/·completed/), step의 "읽어야 할 파일".
+// 완료 처리로는 해시가 바뀌지 않는다.
 // PR 트리는 데이터로만 읽는다(base 스크립트가 실행한다).
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -8,6 +9,7 @@ import path from 'node:path';
 import { changedFiles } from '../gates/risk-gate.ts';
 import { gitTry, showFile } from '../lib/git.ts';
 import {
+  STEP_BOUND_SECTIONS,
   findPlan,
   findPlanAt,
   parseBranch,
@@ -18,7 +20,6 @@ import {
 
 /** 제목이 이 말로 시작하는 섹션(lib/plan.ts의 section과 같은 규칙) */
 const PLAN_SECTIONS = ['목표와 수용 기준', '범위', '관련 파일'] as const;
-const STEP_SECTIONS = ['작업', 'Acceptance Criteria'] as const;
 const STEP_FILE_RE = /^step(0|[1-9]\d*)\.md$/;
 
 interface PlanSource {
@@ -54,7 +55,7 @@ function hashFrom(src: PlanSource, planDir: string): string | null {
     .sort((a, b) => a - b);
   for (const n of steps) {
     const text = parseDoc(src.read(`${planDir}/step${n}.md`) ?? '').body;
-    for (const s of STEP_SECTIONS) parts.push([`step${n}:${s}`, normalize(section(text, s))]);
+    for (const s of STEP_BOUND_SECTIONS) parts.push([`step${n}:${s}`, normalize(section(text, s))]);
   }
   // 이름과 본문의 경계가 섞이지 않게 목록을 JSON으로 만든다
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');

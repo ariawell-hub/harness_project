@@ -66,6 +66,7 @@ review_cycle: quarterly
   - v0.7.31 (2026-11-15): 재현 job 구현. 판정 워크플로(`workflow_run`) 안의 job으로 두고 비밀·environment·쓰기 권한 없이 검증자의 재현 테스트를 PR head에 붙여 실행한다. 단언 실패만 "재현됨"으로 센다. 근거 없는 P1은 P2로 내리고, 재현된 P1은 동결하지 않는다(10.2절 (3)·(5), 10.4절, Issue #55)
   - v0.7.32 (2026-11-15): 계획 검증(G1) 구현. 계획 핵심 섹션 해시, 계획만 바꾼 PR(`mode=plan`)의 판정에 계획 검증 프롬프트, 그 판정의 승인을 원장의 `planReview`에 기록, `plan-gate`가 merge-base 해시 또는 원장의 승인으로 확인한다. `planReview.required`는 아직 끈 채로 결과를 참고로만 남긴다(4.1절, 10.3절, Issue #55)
   - v0.7.33 (2026-11-15): 계획 검증(G1)을 켠다(`planReview.required: true`). `review-ledger`를 검증 App 출처의 필수 체크로 등록한다. 지적 원장·재현 job·계획 검증을 실제 PR에서 확인한 결과를 적었다. 계획 검증이 실행 중인 step에 일을 더하라고 지적하면 새 step을 더한다(0.2절, 4.1절, 8.2절, Issue #55)
+  - v0.7.34 (2026-11-15): 계획 해시와 자기 step 불변 규칙에 step의 금지사항을 더한다. 승인 뒤 금지사항을 지우는 것은 AC를 약하게 고치는 것과 같은 우회다. 묶는 섹션 목록은 한 곳(`STEP_BOUND_SECTIONS`)에 둔다(8.2절, 8.3절, 10.3절, Issue #55)
 
 ### 0.1 전제 조건
 
@@ -562,7 +563,7 @@ pnpm test src/auth/login-guard.spec.ts
 5. **AC는 실행 가능한 명령**: "동작해야 한다"가 아니라 실제로 실행하는 명령으로 쓴다. runner가 이 명령으로 판정한다(4.5절). POSIX `sh` 문법으로 쓰고 한 OS에만 있는 명령(`pbcopy`, `open`, PowerShell cmdlet 등)을 쓰지 않는다. macOS와 Windows runner가 같은 AC로 판정한다(6절).
 6. **금지사항은 구체적으로**: "X를 하지 마라. 이유: Y" 형식으로 쓴다.
 7. **이름**: kebab-case 한두 단어(예: `project-setup`, `api-layer`).
-- step을 실행하는 PR은 자기 step 파일의 작업·AC를 바꿀 수 없다(`plan-gate`가 확인). 다른 step 파일의 작업·AC를 바꾸는 것은 계획 수정이며, 계획 검증 해시(10.3절 결속 기준)에 들어가므로 계획을 다시 검증한다(G1). 앞 step에서 다음 step의 AC를 약하게 고쳐 통과시키는 것도 막기 위해서다. 계획 검증이 실행 중인 step에 일을 더하라고 지적해도 그 step의 작업·AC는 고치지 않고 새 step을 더한다(PR #88).
+- step을 실행하는 PR은 자기 step 파일의 작업·AC·금지사항을 바꿀 수 없다(`plan-gate`가 확인). 다른 step 파일의 작업·AC·금지사항을 바꾸는 것은 계획 수정이며, 계획 검증 해시(10.3절 결속 기준)에 들어가므로 계획을 다시 검증한다(G1). 앞 step에서 다음 step의 AC를 약하게 고쳐 통과시키는 것도 막기 위해서다. 금지사항도 같다. 검증자는 금지사항까지 읽고 계획을 승인하고 코드 검증도 금지사항을 기준으로 보므로, 승인 뒤 금지사항을 지우면 AC를 약하게 고친 것과 같다. "읽어야 할 파일"은 안내라 묶지 않는다. 계획 검증이 실행 중인 step에 일을 더하라고 지적해도 그 step의 작업·AC는 고치지 않고 새 step을 더한다(PR #88).
 
 **경량 템플릿 (소규모)**: frontmatter는 같고, 본문은 아래 세 줄과 "관련 파일"만 둔다. 이 파일 자체가 step 하나이며, "검증" 줄은 runner가 실행하는 명령으로 쓴다.
 
@@ -583,7 +584,7 @@ pnpm test src/auth/login-guard.spec.ts
 - **다음 할 일 고르기**(S1): 4.5절의 우선순위를 따른다.
 - **step·계획 완료 처리**
   - **순서**: 검증자 승인(`review/*`·`review-ledger` 통과) → 계획 전용 커밋 → (위험도 높음이면) 제작자의 head 승인 → 병합. 제작자 승인은 head SHA에 묶이므로(10.3절), 완료 커밋을 제작자 승인보다 먼저 넣어 승인을 두 번 받지 않게 한다.
-  - **계획 전용 커밋**: 이 PR이 맡은 step을 `index.json`에서 `completed`로 바꾼다. 마지막 step이면 계획 상태도 `completed`로 바꾸고 `completed/`로 옮긴다. 이 커밋은 LLM 재검증 없이 `plan-gate`만 다시 돈다(10.3절 결속 기준). 계획의 목표·수용 기준·범위·관련 파일이나 step 파일의 작업·AC를 바꾸면 계획 전용 커밋으로 보지 않는다.
+  - **계획 전용 커밋**: 이 PR이 맡은 step을 `index.json`에서 `completed`로 바꾼다. 마지막 step이면 계획 상태도 `completed`로 바꾸고 `completed/`로 옮긴다. 이 커밋은 LLM 재검증 없이 `plan-gate`만 다시 돈다(10.3절 결속 기준). 계획의 목표·수용 기준·범위·관련 파일이나 step 파일의 작업·AC·금지사항을 바꾸면 계획 전용 커밋으로 보지 않는다.
   - **의미**: 계획 파일은 병합으로만 main에 들어간다. 그래서 브랜치의 `completed`는 "이 PR이 병합되면 완료"를 뜻하고, main의 `completed/`에는 실제로 병합된 계획만 있다.
   - **되돌리기**: 완료 커밋 뒤에 코드를 다시 고쳐야 하면(제작자의 수정 요청, main 병합 갱신 후 재검증 실패 등) 그 step을 `in_progress`로 되돌리고(마지막 step이었으면 계획도 `active`로 되돌려 `active/`로 옮긴다) 진행 로그에 이유를 남긴다. 다시 승인되면 완료 커밋을 새로 넣는다. 병합 후 revert되면 계획 파일도 main에서 함께 빠지므로, revert 워크플로가 Issue를 다시 열고 다음 작업이 이전 계획을 `active`로 복원해 이어 간다(10.3절).
   - **step 진행**: `plan-gate`는 그 PR이 맡은 step의 상태를 확인한다. 앞 step이 병합되기 전에는 다음 step을 시작하지 않는다(4.5절).
@@ -850,7 +851,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 체크 | 확인 내용 | 규칙 |
 |---|---|---|
 | `check` | fmt·lint·test·build·doc-lint, 검사 우회 탐지, 테스트 실효성(R5), 시크릿 스캔(모든 커밋), 구조 테스트, 보안 린트·SAST | R4~R8, R10, R11, R19 |
-| `plan-gate` | 계획 파일·필수 섹션·`size`·`risk`. 중·대는 코드 없는 커밋에서 받은 계획 검증 결과와 핵심 섹션 해시 일치. 이 PR이 맡은 step이 `completed`(마지막 step이면 계획 전체, 8.3절). 자기 step 파일의 작업·AC를 바꾸지 않았는지, "발견 사항"마다 처리가 적혀 있는지(8.2~8.3절) | R1 |
+| `plan-gate` | 계획 파일·필수 섹션·`size`·`risk`. 중·대는 코드 없는 커밋에서 받은 계획 검증 결과와 핵심 섹션 해시 일치. 이 PR이 맡은 step이 `completed`(마지막 step이면 계획 전체, 8.3절). 자기 step 파일의 작업·AC·금지사항을 바꾸지 않았는지, "발견 사항"마다 처리가 적혀 있는지(8.2~8.3절) | R1 |
 | `review/claude`, `review/codex` | 위험도에 맞는 검증자의 승인(아래 결속 기준) | R12 |
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
 | `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
@@ -868,12 +869,12 @@ pnpm test src/auth/login-guard.spec.ts
 |---|---|---|
 | 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다, PR이 바꾼 파일의 내용이 옛 head와 바이트 단위로 같다. 위험도 높음은 patch-id가 같아도 다시 검증 |
 | 계획 전용 커밋 | — | 진행 로그·상태·위치만 바뀌었으면 LLM 재검증 없이 `plan-gate`만 실행 |
-| 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
+| 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC·금지사항 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
 | 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
 - **계획 검증(G1) 구현**(`scripts/ci/plan-hash.ts`, `scripts/gates/plan-gate.ts`)
-  - 계획 해시: `plan.md`의 "목표와 수용 기준"·"범위 / 비범위"·"관련 파일·문서" 섹션과 계획 폴더의 모든 `step<N>.md`(번호순)의 "작업"·"Acceptance Criteria" 섹션을 이름과 함께 이어 sha256(64자)을 낸다. 줄 끝 공백과 섹션 앞뒤 빈 줄은 뗀다. frontmatter, 진행·의사결정 로그, `index.json`, 폴더 위치(`active/`·`completed/`)는 넣지 않는다. 그래서 계획 전용 커밋(완료 처리)으로는 해시가 바뀌지 않는다.
+  - 계획 해시: `plan.md`의 "목표와 수용 기준"·"범위 / 비범위"·"관련 파일·문서" 섹션과 계획 폴더의 모든 `step<N>.md`(번호순)의 "작업"·"Acceptance Criteria"·"금지사항" 섹션을 이름과 함께 이어 sha256(64자)을 낸다. 줄 끝 공백과 섹션 앞뒤 빈 줄은 뗀다. frontmatter, 진행·의사결정 로그, `index.json`, 폴더 위치(`active/`·`completed/`), step의 "읽어야 할 파일"은 넣지 않는다. step에서 묶는 섹션 목록은 `scripts/lib/plan.ts`의 `STEP_BOUND_SECTIONS` 한 곳에 있고, 자기 step 불변 규칙도 같은 목록을 쓴다. 이 목록을 바꾸면 그 전에 기록된 계획 승인이 무효가 되므로, 원장에 계획 승인이 기록된 채 열려 있는 PR이 없을 때 바꾼다. 그래서 계획 전용 커밋(완료 처리)으로는 해시가 바뀌지 않는다.
   - `plan-gate`는 중·대 규모 계획에서 차례로 본다. (a) merge-base에 있는 같은 계획의 해시가 지금 해시와 같으면 통과(이미 main에 들어간 계획이다. 뒤 step의 PR이 여기에 해당한다). (b) 아니면 원장의 `planReview.hash`가 지금 해시와 같고 두 검증자가 모두 `approvals`에 있으면 통과. (c) 그 밖은 실패. 뒤 step의 PR에서 핵심 섹션을 고치면 (a)가 성립하지 않아 그 PR에서 다시 검증받는다(8.2절).
   - 필요한 검증자는 판정 워크플로의 plan job이 계획 전용 head에서 위험도로 정한다. 실행하지 않은 검증자("해당 없음")도 `approvals`에 들어가므로 `plan-gate`는 두 검증자를 모두 요구한다. `plan-gate`가 뒤 커밋에서 필요한 검증자를 다시 계산하지 않는다(코드가 섞인 diff의 위험도로 바뀐다).
   - 원장은 `gates` 워크플로의 판정 job이 읽기 권한(`pull-requests: read`)으로 읽고, 작성자가 검증 App 봇인 댓글만 인정한다(10.2절 (4)). 계획이 merge-base와 같으면 읽지 않는다. 읽지 못하면 `plan-gate`는 `error`다(fail-closed). `planReview.required`가 꺼져 있으면 참고만 남긴다.

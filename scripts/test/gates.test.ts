@@ -264,3 +264,45 @@ test('plan-gate: 자기 step의 AC를 바꾼 PR은 실패한다', () => {
   const r = planGate({ root, base, branch: 'feat/20261111-demo-s1', mode: 'pr', cfg });
   assert.ok(r.problems.some((p) => p.what.includes('step1의 Acceptance Criteria')));
 });
+
+test('plan-gate: 자기 step의 금지사항을 바꾼 PR은 실패한다. 다른 step이면 계획 수정으로 적는다', () => {
+  const BAN = '\n## 금지사항\n- X를 하지 마라. 이유: Y\n';
+  const { root } = planRepo();
+  writePlan(root, [{ status: 'completed' }, { status: 'pending' }]);
+  write(root, `${DIR}/step0.md`, STEP(0, 'test -f s0.txt') + BAN);
+  write(root, `${DIR}/step1.md`, STEP(1, 'test -f s1.txt') + BAN);
+  commitAll(root, 'step0');
+  sh('git', ['checkout', '-q', 'main'], root);
+  sh('git', ['merge', '-q', '--squash', 'feat/20261111-demo-s0'], root);
+  const base = commitAll(root, 'merge step0');
+  sh('git', ['checkout', '-q', '-b', 'feat/20261111-demo-s1'], root);
+  sh('git', ['rm', '-q', '-r', DIR], root);
+  const cdir = DIR.replace('/active/', '/completed/');
+  const head = (ban0: string, ban1: string) => {
+    writePlan(root, [{ status: 'completed' }, { status: 'completed' }], 'completed', 'completed');
+    write(root, `${cdir}/step0.md`, STEP(0, 'test -f s0.txt') + ban0);
+    write(root, `${cdir}/step1.md`, STEP(1, 'test -f s1.txt') + ban1);
+    return planGate({
+      root,
+      base,
+      branch: 'feat/20261111-demo-s1',
+      mode: 'pr',
+      cfg: loadConfig(root),
+    });
+  };
+  assert.deepEqual(head(BAN, BAN).problems, []);
+  // 자기 step(step1)의 금지사항을 지웠다
+  const own = head(BAN, '');
+  assert.ok(
+    own.problems.some((p) => p.what.includes('step1의 금지사항')),
+    JSON.stringify(own.problems),
+  );
+  // 고쳐 써도 같다
+  assert.ok(
+    head(BAN, BAN.replace('X', 'Z')).problems.some((p) => p.what.includes('step1의 금지사항')),
+  );
+  // 다른 step(step0)의 금지사항은 이 규칙으로 막지 않고 계획 수정으로 적는다(G1이 해시로 본다)
+  const other = head('', BAN);
+  assert.deepEqual(other.problems, []);
+  assert.match(other.notes.join('\n'), /step0의 금지사항/);
+});

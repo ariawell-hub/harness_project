@@ -73,7 +73,7 @@ export function stepPrompt(i: StepPromptInput): string {
         `## 앞 step 요약\n${done.map((s) => `- step${s.step} ${s.name}: ${s.summary ?? '(요약 없음)'}`).join('\n')}`,
       );
     parts.push(
-      `## step 마무리\n- \`${i.ref.dir}/index.json\`에서 이 step의 "summary"에 다음 step에 필요한 정보(만든 파일, 핵심 결정)를 한 줄로 적어라. "status"는 바꾸지 마라(runner가 바꾼다).\n- 이 step 파일의 "작업"·"Acceptance Criteria"는 고치지 마라(plan-gate가 막는다).`,
+      `## step 마무리\n- \`${i.ref.dir}/index.json\`에서 이 step의 "summary"에 다음 step에 필요한 정보(만든 파일, 핵심 결정)를 한 줄로 적어라. "status"는 바꾸지 마라(runner가 바꾼다).\n- 이 step 파일의 "작업"·"Acceptance Criteria"·"금지사항"은 고치지 마라(plan-gate가 막는다).`,
     );
   }
   parts.push(
@@ -163,7 +163,7 @@ export function conflictPrompt(i: ConflictPromptInput): string {
     `## 해야 할 일\n- 각 파일의 충돌 블록(\`<<<<<<<\` … \`=======\` … \`>>>>>>>\`)을 모두 없애고 양쪽 변경의 의도를 모두 살려라. ${i.base} 쪽 변경을 버리지 마라.\n- 여러 브랜치가 차례로 덧붙이는 자리(설계서 버전·이력, CHANGELOG, tech-debt-tracker의 TD 번호)는 ${i.base} 내용을 먼저 두고 이 브랜치 내용을 다음 번호로 옮겨라. 옮긴 번호를 가리키는 곳(코드 주석, 계획 파일)도 함께 고쳐라.\n- 계획 파일 "진행 로그"에 한 줄: 무엇이 충돌했고 어떻게 풀었는지.\n- 끝내기 전에 \`node scripts/harness.ts check\`가 통과하는지 확인하라.`,
   );
   parts.push(
-    `## 하지 마라\n- git 명령(add, commit, merge, reset, checkout, stash)을 쓰지 마라(아래 공통 규칙의 git add/commit도 이번에는 하지 않는다). runner가 충돌 표시·미병합 경로·AC·check를 직접 확인한 뒤에만 병합 커밋을 만들고 일반 push한다. 실패하면 runner가 병합을 취소한다.\n- 충돌과 무관한 변경을 하지 마라. step 파일의 "작업"·"Acceptance Criteria"도 고치지 마라.`,
+    `## 하지 마라\n- git 명령(add, commit, merge, reset, checkout, stash)을 쓰지 마라(아래 공통 규칙의 git add/commit도 이번에는 하지 않는다). runner가 충돌 표시·미병합 경로·AC·check를 직접 확인한 뒤에만 병합 커밋을 만들고 일반 push한다. 실패하면 runner가 병합을 취소한다.\n- 충돌과 무관한 변경을 하지 마라. step 파일의 "작업"·"Acceptance Criteria"·"금지사항"도 고치지 마라.`,
   );
   if (i.answer) parts.push(`## 제작자 답변 (9.1절, 이 지시를 따른다)\n${i.answer}`);
   const digest = attemptsDigest(i.attempts, i.id, i.step);

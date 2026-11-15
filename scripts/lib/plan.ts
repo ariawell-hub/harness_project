@@ -168,6 +168,13 @@ export function openQuestions(body: string): OpenQuestion[] {
   return out;
 }
 
+/**
+ * step 파일에서 승인에 묶이는 섹션(8.2절, 10.3절 결속 기준). 계획 해시에 들어가고(ci/plan-hash.ts),
+ * step을 실행하는 PR은 자기 step의 이 섹션을 바꿀 수 없다(gates/plan-gate.ts).
+ * "읽어야 할 파일"은 안내라 넣지 않는다
+ */
+export const STEP_BOUND_SECTIONS = ['작업', 'Acceptance Criteria', '금지사항'] as const;
+
 export function hashText(s: string): string {
   return createHash('sha256').update(s.replace(/\r\n/g, '\n').trim()).digest('hex').slice(0, 16);
 }

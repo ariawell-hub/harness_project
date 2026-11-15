@@ -118,6 +118,11 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step5: 제작자가 `review-ledger`를 필수 체크로 등록했다(대화 통보). 확인: `GET repos/ariawell-hub/harness_project/branches/main`의 `protection.required_status_checks.checks`에 `review-ledger`가 `app_id` 5764201(검증 App `harness-recorder`)로 있다. `node scripts/harness.ts required-checks` 종료 코드 0(`✓ review-ledger: 출처 recorder(5764201)` 포함 8개 모두 통과, `required-checks: 통과`). 수용 기준 9의 등록이 끝났다(PR #88 F4).
 - 2026-11-15 step5: AC 실행 결과. `node --test scripts/test/protection.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts` 종료 코드 0(33개 통과), `node scripts/harness.ts required-checks` 종료 코드 0, `grep -q '"required": true' harness.config.json` 통과.
 - 2026-11-15 step5: PR #88 판정(head 033e52d, 실행 43706570531·43706570542). 두 검증자 4라운드 승인(지적 없음). Codex가 F4를 `fixed`로 판정했고 `review-ledger`가 `failure`(Claude 기록 시점) → `success — 차단 지적 없음 (전체 4, 미룸 1)`로 바뀌었다. `review-ledger`가 필수 체크로 등록된 뒤의 첫 판정이다. `risk-gate`는 위험도 높음이라 완료 처리 뒤 제작자 head 승인을 요청한다.
+- 2026-11-15 step5: PR #88 병합(11:11, 제작자 head 승인 95e0138 뒤 `risk-gate` 통과, 자동 병합). 완료 커밋의 판정에서 두 검증자 승인, `plan-gate` 통과.
+- 2026-11-15 step6: 시작. GitHub 확인: 열린 PR 없음, `needs-human` 없음, Issue #55 열림, `required-checks` 통과(8개). 작업 6: 열린 PR이 없으므로 원장에 계획 승인이 기록된 채 열린 PR도 없다. 해시 정의를 바꿔도 무효가 되는 승인이 없다.
+- 2026-11-15 step6: 제작자 결정(대화): PR #88 F2(step5 작업 4의 괄호)는 step5.md를 고치지 않고 발견 사항에 남긴다. 켜진 상태의 `plan-gate` 통과는 이 PR에서 확인해 적는다.
+- 2026-11-15 step6: 테스트 먼저. `node --test scripts/test/plan-hash.test.ts scripts/test/plan-gate.test.ts scripts/test/gates.test.ts` 종료 코드 1(24개 중 3개 실패: 금지사항을 고쳐도 해시가 같다, 승인 뒤 금지사항을 고쳐도 G1이 통과한다, 자기 step의 금지사항을 지워도 통과한다). 구현 뒤 24개 통과. "금지사항을 고쳐도 해시가 같다"던 단언은 "읽어야 할 파일만 고치면 같다"로 바꾸고 금지사항은 "다르다" 쪽으로 옮겼다.
+- 2026-11-15 step6: AC 실행 결과. 위 테스트 명령 종료 코드 0, `grep -q "STEP_BOUND_SECTIONS"` 두 개 통과, `node scripts/harness.ts check` 종료 코드 0.
 
 ## 의사결정 로그
 
@@ -171,6 +176,8 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 원장이 생기기 전의 판정(지적 없음)은 라운드로 남지 않는다. 그 검증자의 다음 판정은 1라운드로 돌아 전체를 다시 검토한다(PR #86의 Claude). 계획 승인으로 원장이 먼저 생기는 PR(G1)에서는 첫 판정부터 라운드가 남는다. → 처리: 해당 없음
 - PR #87 Claude P2(원장 F2): 계획 검증 프롬프트는 step의 금지사항까지 읽으라고 하는데 계획 해시에는 금지사항이 없었다. 승인 뒤 금지사항을 지워도 다시 검증받지 않는다. step6에서 해시와 자기 step 불변 규칙에 넣는다(의사결정 로그). → 처리: [step6](step6.md)
 - 실행 중인 step의 작업·AC는 계획 전용 커밋으로 검증자 승인을 받아도 고칠 수 없다. 계획 검증이 "이 step에 일을 더하라"고 지적하면 새 step을 더하는 길뿐이다(PR #88). 규칙의 목적(실행 PR이 자기 AC를 약하게 고치는 것을 막는다)에는 맞지만, G1이 켜진 뒤에는 "계획 승인을 받은 자기 step 수정"을 허용할지 따로 정할 수 있다. → 처리: 해당 없음
+- PR #88 Claude P2(원장 F2): step5 작업 4의 "(이 계획은 main의 것과 해시가 같다)"는 그 PR에서 사실과 달랐다(수용 기준 8을 고쳐 해시가 달라졌고, G1은 계획 전용 커밋의 승인으로 확인됐다). 완료된 step의 지시문이고 해시 대상이라 고치지 않는다(제작자 결정 2026-11-15). 고치면 계획을 다시 검증받아야 하고 그 문장을 다시 실행할 세션이 없다. → 처리: 해당 없음
+- step5 작업 4의 "켠 뒤 `plan-gate`가 통과하는지 본다"는 PR #88에서 `G1(꺼짐)` 참고 줄로만 볼 수 있었다. CI의 `gates`가 main의 설정으로 돌기 때문이다. `planReview.required: true` 아래에서 도는 첫 PR은 step6의 PR이고 결과는 진행 로그에 적는다. → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -183,6 +190,5 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step5: 완료 처리 뒤 초안을 해제하고 제작자 head 승인을 기다린다(위험도 높음). 병합되면 `planReview.required: true`와 `review-ledger` 필수 체크가 main에 적용된다.
-- step6(금지사항을 해시와 자기 step 불변 규칙에): step5 병합 뒤 `new-task --plan 20261115-review-ledger --step 6`. 마지막 step이라 `Closes #55`. step5 세션에서 써 둔 구현과 테스트가 있었지만 리포에 남기지 않았다. step6.md의 작업대로 테스트부터 다시 쓴다.
+- step6(마지막 step): PR의 `plan-gate`가 `planReview.required: true` 아래에서 통과하는지 확인해 진행 로그에 적고, 두 검증자 승인 뒤 완료 처리한다(`Closes #55`).
 - 실제 PR에서 보지 못한 것(진행 로그 "작업 1 정리"): 재현 테스트의 실제 실행, 반박 전달, 2라운드 동결, `ci-failure` job. 뒤 Issue(#56, #57)의 PR에서 기회가 생기면 확인한다.
