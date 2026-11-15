@@ -5,8 +5,10 @@ import type { HarnessConfig } from '../lib/config.ts';
 import { formatProblem } from '../lib/util.ts';
 import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
-import { planGate } from '../gates/plan-gate.ts';
+import { planGate, type PlanG1 } from '../gates/plan-gate.ts';
 import { riskGate, type Review, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
+import { REVIEWERS, type PlanReview } from './ledger.ts';
+import { planHashes } from './plan-hash.ts';
 import { GATE_CONTEXTS, type GateResult, type GateResults } from './results.ts';
 
 export interface RunGatesOptions {
@@ -26,6 +28,11 @@ export interface RunGatesOptions {
   /** 레지스트리·OSV 조회. 기본은 실제 HTTP(lockfile이 바뀌었을 때만 부른다) */
   registry?: Registry;
   now?: Date;
+  /**
+   * 원장(검증 App 봇 댓글)의 계획 승인을 읽는다(G1). 없으면 null. 계획이 merge-base와 다를 때만 부른다.
+   * 주지 않으면(PR 번호를 모른다) 승인이 없는 것으로 본다
+   */
+  planReview?: () => Promise<PlanReview | null>;
 }
 
 function firstLine(e: unknown): string {
@@ -47,8 +54,26 @@ function guarded(context: string, fn: () => Omit<GateResult, 'context'>): GateRe
   }
 }
 
-function planGateResult(o: RunGatesOptions): Omit<GateResult, 'context'> {
-  const r = planGate({ root: o.root, base: o.base, branch: o.branch, mode: 'pr', cfg: o.cfg });
+/**
+ * G1 판정 자료(4.1·10.3절). 계획 폴더가 없으면(소규모, 계획 없음) undefined.
+ * 원장을 읽지 못하면: 켜져 있을 때는 예외(plan-gate = error, fail-closed), 꺼져 있을 때는 원장을 보지 않은 것으로 둔다
+ */
+async function planG1(o: RunGatesOptions): Promise<PlanG1 | undefined> {
+  const h = planHashes(o.root, o.base, o.branch);
+  if (!h) return undefined;
+  const g: PlanG1 = { ...h, review: null, reviewers: REVIEWERS };
+  if (h.hash === h.baseHash || !o.planReview) return g;
+  try {
+    return { ...g, review: await o.planReview() };
+  } catch (e) {
+    if (o.cfg.planReview.required)
+      throw new Error(`계획 승인을 확인할 원장을 읽지 못했다 — ${firstLine(e)}`, { cause: e });
+    return { ...h, reviewers: REVIEWERS };
+  }
+}
+
+function planGateResult(o: RunGatesOptions, g1: PlanG1 | undefined): Omit<GateResult, 'context'> {
+  const r = planGate({ root: o.root, base: o.base, branch: o.branch, mode: 'pr', cfg: o.cfg, g1 });
   if (!r.problems.length) {
     return {
       state: 'success',
@@ -69,7 +94,16 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
   let risk: Risk | undefined;
   const byContext: Record<(typeof GATE_CONTEXTS)[number], () => GateResult | Promise<GateResult>> =
     {
-      'plan-gate': () => guarded('plan-gate', () => planGateResult(o)),
+      'plan-gate': async () => {
+        try {
+          const g1 = await planG1(o);
+          return guarded('plan-gate', () => planGateResult(o, g1));
+        } catch (e) {
+          return guarded('plan-gate', () => {
+            throw e;
+          });
+        }
+      },
       'harness-guard': () => {
         const g = guarded('harness-guard', () => {
           const r = harnessGuard({

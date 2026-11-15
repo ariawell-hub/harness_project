@@ -63,6 +63,20 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 
 - step을 실행하는 PR은 **자기 step 파일의 "작업"·"Acceptance Criteria"를 바꿀 수 없다**(plan-gate). 계획을 고쳐야 하면 진행 로그에 이유를 적고 제작자에게 알린다.
 
+### 계획 검증 (중·대 규모, G1)
+
+중·대 규모 계획은 구현 전에 교차 검증을 받는다. `plan-gate`가 확인한다(`harness.config.json`의 `planReview.required`가 `true`일 때 병합을 막는다. 꺼져 있으면 결과를 참고로만 남긴다).
+
+1. **계획만 담은 커밋을 먼저 올린다.** 계획 폴더(`docs/exec-plans/active/<id>/`)의 파일만 커밋해 push하고 초안 PR을 연다(`gh pr create --draft`). 코드·문서·설정을 함께 올리면 계획 검증으로 판정되지 않는다.
+2. `check`가 통과하면 판정 워크플로가 계획 검증 항목(수용 기준의 검증 가능성, step 분할과 AC, 범위, 위험도)으로 판정한다. plan job 로그의 `review-plan: mode=plan` 줄로 확인한다.
+3. 필요한 검증자가 승인하면 원장 댓글에 `계획 검증(G1): 해시 … · 승인: claude, codex`가 남는다. 지적(P0·P1)이 나오면 계획을 고쳐 다시 계획만 push한다.
+4. 승인 뒤에 구현을 올린다. 진행 로그·의사결정 로그·발견 사항·상태는 승인 뒤에 바꿔도 된다.
+
+- 승인은 계획의 "목표와 수용 기준"·"범위 / 비범위"·"관련 파일·문서"와 모든 step 파일의 "작업"·"Acceptance Criteria"에 묶인다. 이 섹션을 고치면 승인이 무효가 되어 다시 검증받는다.
+- 코드를 이미 올린 PR에서 계획 검증이 필요해지면(계획 수정) 되돌리는 커밋으로 PR의 변경을 계획만 남긴 뒤 검증받고, 승인 뒤에 코드를 다시 올린다. force push는 하지 않는다(R14).
+- 계획이 이미 main에 있고 위 섹션이 그대로인 PR(둘째 step부터)은 다시 검증받지 않는다.
+- 소규모 계획(단일 파일)은 대상이 아니다.
+
 ### 계획 구조 확인
 
 ```bash

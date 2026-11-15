@@ -27,9 +27,12 @@ import {
   githubLedgerApi,
   ledgerFromComments,
   listComments,
+  loadLedger,
   recordCiFailure,
   recordLedger,
 } from './ci/ledger-store.ts';
+import { planHashes, planMode } from './ci/plan-hash.ts';
+import { PLAN_HASH_RE } from './ci/results.ts';
 import {
   parseRebuttalData,
   parseRebuttals,
@@ -39,7 +42,7 @@ import {
 } from './ci/rebuttal.ts';
 import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
 import { parseReproResults, reproResultsData, runRepro } from './ci/repro.ts';
-import { pinnedPrompt, writeRoundInput } from './ci/review-round.ts';
+import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
@@ -51,7 +54,7 @@ import { prReady } from './commands/pr-ready.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
 import { docLint, printDocLint } from './gates/doc-lint.ts';
-import { planGate } from './gates/plan-gate.ts';
+import { planGate, type PlanG1 } from './gates/plan-gate.ts';
 import { secretScan } from './gates/secret-scan.ts';
 import { getGitHub } from './lib/github.ts';
 import { pickNext } from './runner/next.ts';
@@ -81,26 +84,31 @@ CI(gates 워크플로, 10.4절):
   ci-pr --event <이벤트 JSON> --body-out <파일>
                                            판정할 PR을 정해 $GITHUB_OUTPUT에 쓴다(이벤트 이름·리포·토큰은 환경 변수)
   gates --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> --out <파일> [--summary <파일>]
-        [--reviews <리뷰 API JSON>] [--pr-body <본문 파일>]   기계 판정 결과 파일(판정 job, 비밀 없음)
+        [--reviews <리뷰 API JSON>] [--pr-body <본문 파일>] [--pr-number <N>]
+                                           기계 판정 결과 파일(판정 job, 비밀 없음)
+                                           PR 번호를 주면 plan-gate가 원장의 계획 승인을 읽는다(G1, 읽기 토큰은 GH_TOKEN)
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
                 --head-sha <sha> --repo-slug <owner/name> --target-url <url> [--patch <id>] [--carried-from <sha>]
                 [--pr-number <N> --config-root <base> --prompt-base <sha> --round-changed <base64 JSON>]
-                [--repro-results <base64 JSON>]
+                [--repro-results <base64 JSON>] [--mode <plan|code> --plan-hash <해시>]
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
                                            PR 번호를 주면 지적 원장 댓글을 고치고 review-ledger도 기록한다(토큰은 LEDGER_TOKEN)
+                                           mode가 plan이면 review/*가 success일 때 원장에 계획 승인을 남긴다(G1)
   review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N>] [--base-sha <sha>]
               [--reviewer <claude|codex>] [--ledger <base64 JSON>] [--rebuttals <base64 JSON>]
                                            위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
+                                           mode(plan: PR이 계획 폴더만 바꿨다 | code)와 plan_hash(계획 핵심 섹션 해시)도 낸다(G1)
                                            PR 번호와 base SHA를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
                                            검증자와 PR 번호(원장을 API로 읽고 ledger 출력) 또는 --ledger(받은 원장)를 주면
                                            원장·라운드 입력을 쓰고 round, prompt_base, round_changed를 낸다(10.2절)
   repro --verdict <verdict.json> --repo <pr> --config-root <base>
                                            판정의 재현 테스트를 PR 체크아웃에 붙여 실행하고 results를 $GITHUB_OUTPUT에 쓴다(재현 job)
-  review-prompt --base-dir <base> --files <a.md,b.md> --out <파일> [--prompt-base <sha>]
+  review-prompt --base-dir <base> --files <a.md,b.md> --out <파일> [--prompt-base <sha>] [--mode <plan|code>]
                                            검증 프롬프트를 이어 붙인다. 프롬프트 버전이 있으면 그 커밋의 파일을 쓴다(10.2절 (2))
+                                           mode가 plan이면 계획 검증 프롬프트(prompt-plan.md)를 첫 파일 뒤에 붙인다
   ledger-ci-failure --config-root <base> --pr-number <N> --head-sha <sha> --repo-slug <owner/name> --run-url <url> --prompt-base <sha>
                                            check 실패를 지적 원장에 남긴다(토큰은 LEDGER_TOKEN)
   claude-scan --log <stream-json> --pr <pr 폴더> --out <verdict.json>
@@ -181,6 +189,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   ledger: { type: 'string' },
   rebuttals: { type: 'string' },
   'repro-results': { type: 'string' },
+  'plan-hash': { type: 'string' },
   home: { type: 'string' },
   auth: { type: 'string' },
   snap: { type: 'string' },
@@ -309,7 +318,15 @@ async function main(argv: string[]): Promise<number> {
       const branch = str('head-ref') ?? repoInfo(root).branch;
       const base = str('base') ?? defaultBase(root, cfg.github.remote, cfg.github.defaultBranch);
       const mode = str('mode') === 'plan' ? 'plan' : 'pr';
-      const r = planGate({ root, base, branch, mode, cfg });
+      // G1: 로컬에서는 원장을 보지 않는다. 해시만 넘겨 "CI에서 계획 승인이 필요한가"를 알린다
+      let g1: PlanG1 | undefined;
+      try {
+        const h = base ? planHashes(root, base, branch) : null;
+        if (h) g1 = { ...h, reviewers: REVIEWERS };
+      } catch {
+        // 계획이 깨졌으면 plan-gate의 다른 검사가 알린다
+      }
+      const r = planGate({ root, base, branch, mode, cfg, g1 });
       for (const n of r.notes) log(`참고: ${n}`);
       for (const p of r.problems) process.stderr.write(formatProblem(p) + '\n');
       log(
@@ -399,6 +416,22 @@ async function main(argv: string[]): Promise<number> {
         const reproMap = new Map((outcomes ?? []).map((x) => [x.index, x.result] as const));
         for (const x of outcomes ?? [])
           log(`record-review: 재현 findings[${x.index}] = ${x.result}`);
+        // 계획 승인(G1): plan job이 "PR이 계획 폴더만 바꿨다"고 판정한 head에서만 남긴다. 코드가 섞인 판정은 남기지 않는다
+        const planHashArg = str('plan-hash') ?? '';
+        const isPlan = str('mode') === 'plan';
+        if (isPlan && !PLAN_HASH_RE.test(planHashArg))
+          log('record-review: 계획 해시 형식이 달라 계획 승인을 기록하지 않는다');
+        const plan =
+          isPlan && PLAN_HASH_RE.test(planHashArg)
+            ? {
+                hash: planHashArg,
+                approved: p.state === 'success' ? true : p.state === 'failure' ? false : null,
+              }
+            : undefined;
+        if (plan)
+          log(
+            `record-review: 계획 검증(G1) 해시 ${plan.hash.slice(0, 12)} — ${p.context} ${plan.approved === null ? '판정 없음' : plan.approved ? '승인' : '승인 아님'}`,
+          );
         const l = await recordLedger({
           reviewer: (p.context.split('/')[1] ?? '') as Reviewer,
           verdict: seen,
@@ -409,6 +442,7 @@ async function main(argv: string[]): Promise<number> {
           promptBase: str('prompt-base') ?? '',
           changedSinceLastRound: changed,
           repro: reproMap,
+          plan,
           api: ledgerToken ? githubLedgerApi(ledgerToken, process.env.GITHUB_API_URL) : null,
           post: githubStatusPoster({
             token,
@@ -437,6 +471,10 @@ async function main(argv: string[]): Promise<number> {
       const r = planReview({ root, cfg, base, branch });
       writeReviewInput({ root, base, branch, risk: r.risk, reasons: r.reasons });
       appendFileSync(output, `risk=${r.risk}\nclaude=${r.claude}\ncodex=${r.codex}\n`);
+      // 계획 검증(G1): PR이 바꾼 파일이 계획 폴더 안뿐이면 판정 job이 계획 검증 프롬프트를 덧붙이고 기록 job이 승인을 남긴다
+      const pm = planMode({ root, base, branch });
+      appendFileSync(output, `mode=${pm.mode}\nplan_hash=${pm.hash}\n`);
+      log(`review-plan: mode=${pm.mode}, 계획 해시 ${pm.hash.slice(0, 12) || '없음'}`);
       // 승인 이어받기(10.3절). plan job만 PR 번호를 준다. 판정하지 못하면 이어받지 않는다(다시 검증)
       const number = Number(str('pr-number'));
       const baseSha = str('base-sha');
@@ -578,8 +616,13 @@ async function main(argv: string[]): Promise<number> {
       }
       try {
         const promptBase = str('prompt-base') ?? '';
-        writeFileSync(out, pinnedPrompt({ baseDir, promptBase, files }));
-        log(`review-prompt: 프롬프트 버전 ${promptBase.slice(0, 12) || '지금(base 체크아웃)'}`);
+        writeFileSync(
+          out,
+          pinnedPrompt({ baseDir, promptBase, files: promptFiles(files, str('mode')) }),
+        );
+        log(
+          `review-prompt: 프롬프트 버전 ${promptBase.slice(0, 12) || '지금(base 체크아웃)'}, 파일 ${promptFiles(files, str('mode')).join(', ')}`,
+        );
       } catch (e) {
         process.stderr.write(`review-prompt: 실패 — ${e instanceof Error ? e.message : '오류'}\n`);
         return 1;
@@ -776,7 +819,21 @@ async function main(argv: string[]): Promise<number> {
       const reviews = rf && existsSync(rf) ? parseReviews(readFileSync(rf, 'utf8')) : null;
       const bf = str('pr-body');
       const prBody = bf && existsSync(bf) ? readFileSync(bf, 'utf8') : null;
-      const r = await runGates({ root, cfg, base, branch, headSha, reviews, prBody });
+      // G1: 원장(검증 App 봇 댓글)의 계획 승인. 판정 job의 읽기 토큰으로 읽는다. PR 번호가 없으면 읽지 않는다
+      const number = Number(str('pr-number'));
+      const planReview =
+        Number.isInteger(number) && number > 0
+          ? async () => {
+              const stored = await loadLedger({
+                get: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                repo: process.env.GITHUB_REPOSITORY ?? '',
+                number,
+                recorderBot: cfg.ci.recorderBot ?? '',
+              });
+              return stored.ledger?.planReview ?? null;
+            }
+          : undefined;
+      const r = await runGates({ root, cfg, base, branch, headSha, reviews, prBody, planReview });
       writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
       const md = summaryMarkdown(r);
       const summary = str('summary');

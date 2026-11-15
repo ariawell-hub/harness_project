@@ -9,6 +9,7 @@ import { runGates, summaryMarkdown } from '../ci/gates.ts';
 import { recordStatuses } from '../ci/record.ts';
 import { REVIEW_DIR, writeReviewInput } from '../ci/review-input.ts';
 import { planReview } from '../ci/review-plan.ts';
+import { pinnedPrompt, promptFiles } from '../ci/review-round.ts';
 import {
   GATE_CONTEXTS,
   toStatuses,
@@ -735,4 +736,70 @@ test('reproJobViolations: 재현 job에 environment·비밀·쓰기 권한이 �
   const renamed = `jobs:\n  runner:\n    environment: recorder\n    steps:\n      - run: node base/scripts/harness.ts repro --verdict f\n`;
   assert.match(reproJobViolations(renamed).join(), /runner: environment/);
   assert.deepEqual(reproJobViolations('name: x\n'), []);
+});
+
+// ---------- 계획 검증(G1, 4.1·10.3절. 계획 20261115-review-ledger step4) ----------
+
+test('judge-*.yml: plan job이 mode·plan_hash를 내고, 판정 job은 mode로 프롬프트를 고르고, 기록 job이 받아 넘긴다', () => {
+  for (const wf of [JUDGE_CLAUDE, JUDGE_CODEX]) {
+    const j = jobs(wf);
+    const plan = j.get('plan')!;
+    assert.match(plan, /^ {6}mode: \$\{\{ steps\.plan\.outputs\.mode \}\}$/m);
+    assert.match(plan, /^ {6}plan_hash: \$\{\{ steps\.plan\.outputs\.plan_hash \}\}$/m);
+    // 판정 job: 계획 전용이면 계획 검증 프롬프트를 덧붙인다(파일은 base 스크립트가 고른다)
+    const judge = j.get('judge')!;
+    assert.match(judge, /MODE: \$\{\{ needs\.plan\.outputs\.mode \}\}/);
+    assert.match(
+      judge,
+      /review-prompt --base-dir base --files prompt\.md[^\n]*\\\n\s+--prompt-base "\$PROMPT_BASE" --mode "\$MODE"/,
+    );
+    // 기록 job: plan job이 계산한 값만 받는다(판정 job의 출력이 아니다)
+    const record = j.get('record')!;
+    assert.match(record, /MODE: \$\{\{ needs\.plan\.outputs\.mode \}\}/);
+    assert.match(record, /PLAN_HASH: \$\{\{ needs\.plan\.outputs\.plan_hash \}\}/);
+    assert.match(record, /--mode "\$MODE" --plan-hash "\$PLAN_HASH"/);
+    assert.doesNotMatch(record, /needs\.judge\.outputs\.(mode|plan_hash)/);
+  }
+});
+
+test('gates.yml: 판정 job이 PR 번호를 넘겨 원장의 계획 승인을 읽는다(읽기 권한만, 비밀 없음)', () => {
+  const evaluate = jobs(WF).get('evaluate')!;
+  assert.match(evaluate, /^ {6}pull-requests: read$/m);
+  assert.match(evaluate, /--pr-number "\$PR_NUMBER"/);
+  assert.doesNotMatch(evaluate, /: write|environment:|secrets\.|vars\./);
+});
+
+test('promptFiles·prompt-plan.md: mode=plan일 때만 계획 검증 프롬프트를 첫 파일 바로 뒤에 붙인다', () => {
+  assert.deepEqual(promptFiles(['prompt.md'], 'plan'), ['prompt.md', 'prompt-plan.md']);
+  assert.deepEqual(promptFiles(['prompt.md', 'prompt-codex.md'], 'plan'), [
+    'prompt.md',
+    'prompt-plan.md',
+    'prompt-codex.md',
+  ]);
+  for (const mode of ['code', '', undefined, 'PLAN', 'plan '])
+    assert.deepEqual(promptFiles(['prompt.md', 'prompt-codex.md'], mode), [
+      'prompt.md',
+      'prompt-codex.md',
+    ]);
+  const text = pinnedPrompt({
+    baseDir: HARNESS_ROOT,
+    promptBase: '',
+    files: promptFiles(['prompt.md', 'prompt-codex.md'], 'plan'),
+  });
+  const at = (s: string) => {
+    const i = text.indexOf(s);
+    assert.ok(i >= 0, `프롬프트에 "${s}"가 없다`);
+    return i;
+  };
+  // 순서: 공통 프롬프트 → 계획 검증 → Codex 꼬리말
+  assert.ok(at('## 신뢰 경계') < at('## 계획 검증'));
+  assert.ok(at('## 계획 검증') < at('## Codex 실행 환경'));
+  // step4의 계획 검증 항목: 수용 기준의 검증 가능성, step 분할과 AC, 범위, 위험도
+  const plan = text.slice(at('## 계획 검증'), at('## Codex 실행 환경'));
+  for (const item of ['수용 기준', 'step 분할', 'Acceptance Criteria', '범위', '위험도'])
+    assert.ok(plan.includes(item), item);
+  // 계획 검증 항목은 공통 검증 항목을 대신하지 않고 더한다(PR #87 F1). 신뢰 경계와 공통 기준은 그대로다
+  assert.doesNotMatch(plan, /대신/);
+  assert.match(plan, /검증 항목[^\n]*그대로 적용/);
+  assert.match(plan, /추가로/);
 });

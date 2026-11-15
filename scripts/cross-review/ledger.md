@@ -33,6 +33,7 @@ PR마다 리뷰 지적의 등급과 처리 상태를 추적하는 PR 댓글이�
 | `findings`   | 지적 목록(아래)                                                                    |
 | `ciFailures` | `check` 실패 기록 `{ head, run }`                                                  |
 | `dropped`    | 원장이 가득 차(150건) 등록하지 않은 P2·P3 수. P0·P1은 가득 차도 등록한다           |
+| `planReview` | 계획 승인 `{ hash, head, approvals }`(아래 "계획 승인"). 없을 수 있다              |
 
 지적 하나: `id`(`F<번호>`), `severity`, `reviewer`(`claude` \| `codex`), `file`, `line`, `title`, `repro`(`''` \| `reproduced` \| `not-reproduced` \| `error`), `status`, `note`(처리), `round`(그 검증자의 몇 번째 판정에서 등록됐는가), `rejectedBy`(P0을 `rejected`로 보자고 한 검증자).
 
@@ -44,6 +45,17 @@ PR마다 리뷰 지적의 등급과 처리 상태를 추적하는 PR 댓글이�
 | `fixed`    | 지적을 낸 검증자가 수정을 확인했다                                       |
 | `rejected` | P1은 지적을 낸 검증자가 반박에 동의했다. P0은 두 검증자가 모두 동의했다  |
 | `deferred` | P2·P3이거나 동결된 지적이다. 후속 PR이나 `tech-debt-tracker.md`로 넘긴다 |
+
+## 계획 승인 (G1)
+
+중·대 규모 계획의 교차 검증 승인이다(설계서 4.1절, 10.3절 승인 결속 기준). `plan-gate`가 읽는다.
+
+- `hash`: 승인받은 계획 핵심 섹션 해시(sha256 64자, `scripts/ci/plan-hash.ts`). `head`: 승인이 마지막으로 기록된 PR head. `approvals`: 그 해시를 승인한 검증자.
+- PR이 계획 폴더만 바꾼 head(`mode=plan`)의 판정으로만 기록한다. 코드가 섞인 head의 판정은 이 필드를 바꾸지 않는다.
+- 그 head에서 `review/<검증자>`가 success면(승인, 위험도 기준 "해당 없음", 이어받음) `approvals`에 넣는다. failure면 그 검증자를 빼고, error면 그대로 둔다.
+- 판정한 head의 해시가 기록된 해시와 다르면 이전 승인을 모두 지우고 새 해시로 다시 시작한다.
+- 계획 승인이 있으면 지적이 없어도 원장 댓글을 만든다. 댓글에는 `계획 검증(G1): 해시 … · 승인: … · head …` 한 줄로 보인다.
+- 이 필드는 `review-ledger` 판정에 영향을 주지 않는다. 이 필드가 생기기 전에 만들어진 원장에는 없다.
 
 ## 판정 반영 규칙
 

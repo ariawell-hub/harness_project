@@ -37,6 +37,8 @@ export interface StatusPayload {
 }
 
 export const SHA_RE = /^[0-9a-f]{40}$/;
+/** 계획 핵심 섹션 해시(sha256 hex, plan-hash.ts) */
+export const PLAN_HASH_RE = /^[0-9a-f]{64}$/;
 /** GitHub 커밋 상태 description 한도 */
 export const DESCRIPTION_MAX = 140;
 
