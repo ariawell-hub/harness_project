@@ -3,7 +3,7 @@
 // 원장 상태는 검증자 판정으로만 바뀐다. runner는 원장을 읽기만 하고, 자기 대응이 통했는지는 다음 판정으로 안다.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { REVIEWERS, roundsOf, type Entry, type Ledger, type Reviewer } from '../ci/ledger.ts';
+import { REVIEWERS, cell, roundsOf, type Entry, type Ledger, type Reviewer } from '../ci/ledger.ts';
 import { harnessStateDir, repoInfo } from '../lib/git.ts';
 
 /** 대응 한 번. head는 그 대응을 push한 커밋 */
@@ -148,10 +148,14 @@ export function reviewerJudgedResponse(
   return !!last && ledger.rounds.some((r) => r.reviewer === reviewer && r.head === last.head);
 }
 
-/** 중단 보고의 "교차 검증 의견"과 실패 기록에 쓰는 지적 한 줄(ID·등급·검증자·위치·제목) */
+/**
+ * 중단 보고(Issue 댓글)의 "교차 검증 의견"에 쓰는 지적 한 줄(ID·등급·검증자·위치·제목).
+ * 위치와 제목은 검증자 출력이라 원장 표와 같은 방법으로 마크다운·멘션 문자를 문자 참조로 바꾼다.
+ * 실패 기록의 detail에는 쓰지 않는다: detail은 다음 세션 프롬프트의 "직전 실패"(데이터 블록 밖)에 들어간다
+ */
 export function findingLine(e: Entry): string {
-  const where = e.file ? `${e.file}${e.line > 0 ? `:${e.line}` : ''}` : '(위치 없음)';
-  return `${e.id} [${e.severity}, ${e.reviewer}] ${where} — ${e.title}`;
+  const where = e.file ? `${cell(e.file)}${e.line > 0 ? `:${e.line}` : ''}` : '(위치 없음)';
+  return `${e.id} [${e.severity}, ${e.reviewer}] ${where} — ${cell(e.title)}`;
 }
 
 /** 커밋 메시지 제목에 쓸 지적 제목 앞부분: 한 줄, 제어 문자 없음 */

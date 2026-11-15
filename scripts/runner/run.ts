@@ -1216,7 +1216,8 @@ async function doReview(
       key: id,
       ok: false,
       kind: 'review',
-      detail: `대응한 뒤에도 열려 있다: ${findingLine(byId.get(id)!)}`,
+      // 지적 제목(검증자 출력)은 넣지 않는다: detail은 다음 세션 프롬프트의 "직전 실패"에 들어간다
+      detail: `대응한 뒤에도 열려 있다(${id}, ${byId.get(id)!.reviewer} 검증자가 대응 커밋을 판정했다)`,
     });
   const settled = settledResponses(state, ledger);
   for (const id of settled)

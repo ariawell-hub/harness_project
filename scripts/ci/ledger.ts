@@ -248,8 +248,11 @@ export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; descrip
 export const LEDGER_MARKER = '<!-- harness-ledger:v1 -->';
 const DATA_RE = /<!-- harness-ledger-data:([A-Za-z0-9+/=]*) -->/g;
 
-/** 표 셀에 넣을 글: 한 줄로 만들고 마크다운·HTML·멘션으로 해석될 문자를 문자 참조로 바꾼다 */
-function cell(s: string): string {
+/**
+ * 표 셀에 넣을 글: 한 줄로 만들고 마크다운·HTML·멘션으로 해석될 문자를 문자 참조로 바꾼다.
+ * 검증자 출력(지적 제목·위치)을 GitHub 댓글에 넣는 곳은 모두 이 함수를 쓴다(원장 표, runner의 중단 보고)
+ */
+export function cell(s: string): string {
   return oneLine(s, 300).replace(/[&<>|[\]@`*_~\\!#:()]/g, (c) => `&#${c.codePointAt(0)};`);
 }
 
