@@ -97,6 +97,9 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step4: 테스트 먼저. `node --test scripts/test/plan-hash.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts scripts/test/ci.test.ts` 종료 코드 1(파일 4개 모두 실패: `scripts/ci/plan-hash.ts` 없음, `ledger.ts`에 `applyPlanReview` 없음, `review-round.ts`에 `promptFiles` 없음. 테스트별 실패는 따로 보지 못했다). 구현 뒤 64개 통과.
 - 2026-11-15 step4: 명령을 이어 붙인 테스트(`record.test.ts`, 가짜 GitHub API 서버)를 구현과 함께 썼다: `review-plan`(mode=plan, 해시) → `record-review --mode plan` 두 검증자 → 코드 추가 → `gates --pr-number`의 `plan-gate` 통과, 승인 뒤 다른 step의 AC를 고치면 실패, 원장 읽기 실패는 `error`. 처음에 한 번 실패했다(테스트가 `review-plan`이 쓴 `.harness-review/`를 함께 커밋해 계획 전용이 아니게 됐다. 테스트 리포에 `.gitignore`를 두어 고쳤다. CI는 매번 새로 체크아웃해 해당 없다).
 - 2026-11-15 step4: AC 실행 결과. `node --test scripts/test/plan-hash.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep`·`test -f` 통과, `node scripts/harness.ts check` 종료 코드 0. `planReview.required`는 `false` 그대로다.
+- 2026-11-15 step4: step3의 재현 job이 PR #87의 첫 판정(head 397f103)에서 처음 실제로 돌았다. 두 판정 워크플로 모두 `repro` job이 성공했고 로그는 `repro: 실행한 재현 테스트가 없다`다(실행 43701011453·43701011437). 판정 → 재현 → 기록 순서와 job 출력 연결은 확인됐다. 검증자가 재현 테스트를 붙인 지적이 없어 테스트를 실제로 붙여 실행하는 경로는 아직 보지 못했다(step5에서 정리한다).
+- 2026-11-15 step4: PR #87 1차 판정(head 397f103). `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 1: `prompt-plan.md`가 "위 검증 항목 대신 아래 항목으로 판정하라"고 해 공통 검증 기준을 바꾼다). 원장 F1(P1, codex, `open`), `review-ledger = failure`. `risk-gate`는 위험도 보통, `harness-guard` 통과(보호 경로 22개, 신호 없음), `plan-gate`는 완료 처리 전이라 실패. Claude의 판정은 원장이 생기기 전(09:50:09)이라 라운드로 남지 않았다(발견 사항의 그 경우다).
+- 2026-11-15 step4: F1 수정(반박하지 않았다. 공통 기준을 바꾸지 않고 더하는 쪽이 맞다). `prompt-plan.md`를 "위의 신뢰 경계·검증 항목·라운드 규칙·등급·출력 형식은 그대로 적용하고 아래를 추가로 본다"로 고치고, 구현이 아직 없다는 것만으로는 지적하지 않게 적었다. `ci.test.ts`에 단언을 먼저 더해 옛 문구에서 종료 코드 1(33개 중 1개 실패), 고친 뒤 33개 통과를 확인했다.
 
 ## 의사결정 로그
 
@@ -130,6 +133,7 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 원장의 `planReview`는 없어도 되는 필드다(버전은 1 그대로). 이유: 이 변경 전에 만들어진 원장 댓글을 그대로 읽어야 한다.
 - `planReview.required`가 `false`인 동안에도 `plan-gate`는 G1을 계산해 결과를 참고(`G1(꺼짐)`)로 남긴다. 이유: step5에서 켜기 전에 실제 PR에서 원장 읽기와 판정을 볼 수 있어야 한다(step4 금지사항). 꺼져 있을 때 원장을 읽지 못하면 참고로만 남기고, 켜져 있으면 `plan-gate`가 `error`다(fail-closed).
 - `prompt-plan.md`는 `review-prompt --mode plan`이 첫 파일 바로 뒤에 붙인다(Codex는 꼬리말 앞). 프롬프트 버전이 이 파일이 생기기 전 커밋으로 고정된 PR이 계획 전용이 되면 판정이 실패하는데, 지금 열린 PR이 없어 해당하는 PR이 없다(2026-11-15 확인).
+- 계획 검증 프롬프트는 공통 검증 항목을 대신하지 않고 더한다(PR #87 F1). 이유: 계획만 바꾼 PR에도 신뢰 경계·범위·문서·보안 항목은 그대로 해당한다. 구현이 없다는 것만으로 지적하지 않게 하는 문장만 따로 둔다. 버린 대안: 계획 전용 항목으로 바꿔 판정(검증자가 공통 기준을 건너뛸 수 있다).
 
 ## 발견 사항
 

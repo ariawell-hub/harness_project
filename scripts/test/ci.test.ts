@@ -798,4 +798,8 @@ test('promptFiles·prompt-plan.md: mode=plan일 때만 계획 검증 프롬프�
   const plan = text.slice(at('## 계획 검증'), at('## Codex 실행 환경'));
   for (const item of ['수용 기준', 'step 분할', 'Acceptance Criteria', '범위', '위험도'])
     assert.ok(plan.includes(item), item);
+  // 계획 검증 항목은 공통 검증 항목을 대신하지 않고 더한다(PR #87 F1). 신뢰 경계와 공통 기준은 그대로다
+  assert.doesNotMatch(plan, /대신/);
+  assert.match(plan, /검증 항목[^\n]*그대로 적용/);
+  assert.match(plan, /추가로/);
 });
