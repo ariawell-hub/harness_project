@@ -89,6 +89,9 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15T22:07:35+09:00 step1 재작업: PR #93 원장 F2(Codex P1) 수정
 - 2026-11-15 step1: PR #93 1차 판정. `review/claude` 승인(P2 1, 원장 F1 미룸), `review/codex` 수정 요청(P1 1, 원장 F2, 재현 job "재현됨"): step이 끝나지 않은 PR에서 `deps-guard`·`harness-guard` 실패를 보지 않고 `ready`로 분류한다. `pr-state`·`next` 명령이 실제 PR에서 `분류: review`, "사람 대기 1건 (열린 차단 지적: PR #93 …)"을 냈다(수용 기준 11: 수정 요청 상태의 실제 응답).
 - 2026-11-15 step1: F2 반영. 테스트 먼저: `node --test scripts/test/pr-state.test.ts scripts/test/runner-pr.test.ts` 종료 코드 1(새 테스트 3개 실패: 미완료 step의 `deps-guard`·`harness-guard`, 로컬에서만 되돌린 step, 대기 기록 지우기). 고친 뒤 AC 테스트 종료 코드 0(104개 통과). F2를 보다가 같은 뿌리의 결함을 찾았다: step 완료 여부를 worktree에서 읽어, 수정 세션이 실패해 step을 되돌린 커밋이 로컬에만 있으면 그 PR의 `plan-gate`·기계 판정 실패를 다시 고치지 않았다. PR head의 계획에서 읽게 했다(`stepCompletedAt`). Claude의 미룬 지적 F1(같은 head의 대기 시각이 비대기 구간에도 남는다)도 함께 고쳤다.
+- 2026-11-15 step1: PR #93 2차 판정에서 두 검증자 승인(지적 없음), 원장 F2 `fixed`. 병합(`0518dc1`). `pr-state`가 수정 push 뒤 `wait-ci` → `ready`, `mergeStateStatus=CLEAN`을 냈다.
+- 2026-11-15 step2: 테스트 먼저. `node --test scripts/test/runner-plan-review.test.ts` 종료 코드 1(`plan-push` 작업, `planReviewHash` 없음). 구현 뒤 9개 통과. AC 테스트(`runner-plan-review`·`runner-pr`·`runner`·`next`) 종료 코드 0(77개 통과).
+- 2026-11-15 step2: 실제 PR의 원장 읽기 확인(수용 기준 11). `readPrLedger`를 실제 `gh`로 불러 PR #92는 댓글 1개, `F1:deferred`, `planReview 4215e28f88b8 claude+codex`, `planApproved` true, PR #93은 `F1:deferred, F2:fixed`, 계획 승인 없음(계획이 main과 같은 해시라 계획 검증을 받지 않은 PR)을 읽었다. 보지 못한 것: 댓글이 100개를 넘는 PR(페이지 넘김), runner가 실제로 연 초안 PR.
 
 ## 의사결정 로그
 
@@ -109,6 +112,9 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 결정: "GitHub 반영 지연" 판단은 PR head를 worktree의 `HEAD`가 아니라 push한 커밋(원격 추적 브랜치 `<remote>/<브랜치>`)과 비교한다. / 이유: step1 작업 1은 `HEAD`와 비교한다고 적었지만, 수정 세션이 판정에 실패하면 push하지 않은 로컬 커밋이 남는다. 그때 `HEAD`와 비교하면 PR의 `check` 실패를 영영 CI 대기로 보고 다시 고치지 않는다. 의도(push한 커밋이 PR에 아직 안 보이는 경우만 기다린다)는 원격 추적 브랜치 비교로 맞는다. 뒤처짐도 PR head 기준으로 본다. / 버린 대안: 글자 그대로 `HEAD`와 비교.
 - 결정: 승인 요청·오래된 대기 알림으로 붙인 `needs-human`은 runner가 뗀다(PR이 병합됐거나 `ready`가 되면, 할 일이 없는 바퀴에서). 제작자가 그 Issue에 답하면 라벨만 떼고 계획·step 상태는 그대로 둔다. / 이유: 떼지 않으면 남은 step이 있는 Issue에 라벨이 계속 남아 `start`가 매번 답변 대기로 보고한다. 기존 답변 처리는 step을 `in_progress`로 되돌리는데, 완료된 step의 열린 PR에서 그러면 `plan-gate`가 실패한다. / 버린 대안: 라벨 없이 멘션만(절차서 5절이 승인 요청에 `needs-human`을 쓴다).
 - 결정: 오래된 대기를 알린 PR은 CI 대기가 아니라 사람 대기로 센다. / 이유: 알린 뒤에도 CI 대기로 세면 다른 할 일이 없을 때 runner가 끝없이 기다린다. 사람 대기로 세면 runner가 멈추고, 다시 시작하면 상태를 다시 읽는다.
+- 결정: 필수 체크(`ci.requiredChecks`)나 검증 App 봇(`ci.recorderBot`) 설정이 없는 리포에서는 `planReview.required`가 켜져 있어도 runner가 계획 검증 흐름을 쓰지 않는다. / 이유: 승인을 기록할 CI가 없으면 runner는 초안 PR을 열고 끝없이 기다린다. step2 지시서의 대상 조건(검증 켜짐, step 폴더 형식, 해시가 base와 다름)에 없던 조건이라 여기에 적는다. / 버린 대안: 설정 오류로 보고 runner를 멈추기(검증을 켜지 않은 프로파일과 같은 동작이 더 단순하다).
+- 결정: 계획 검증 중인 PR인지는 "계획 검증 대상이고, PR이 열려 있고, PR head의 step이 끝나지 않았다"로 본다(`inPlanReview`). 그런 PR의 `check` 실패와 "CI 끝남"은 2번(내 PR 조치)이 아니라 3번(진행 중인 step)에서 다룬다. / 이유: 같은 분류라도 뜻이 다르다. 계획 검증 중에는 `fix`가 수정 세션이 아니라 계획 작성 세션이고, `ready`가 자동 병합 대기가 아니라 계획 승인 확인이다.
+- 결정: 계획 폴더 밖 변경이 있으면 계획을 `draft`로 되돌려 계획 작성 세션을 다시 띄운다. / 이유: 되돌리지 않으면 다음 바퀴가 `plan-push`만 반복한다. 세션은 `git revert`·`reset`을 쓸 수 없지만(권한 프로필) 파일 내용을 base와 같게 고쳐 커밋하면 PR 전체 변경에서 빠진다(`planMode`는 merge-base 대비 변경으로 본다).
 - 결정: step이 끝나지 않은 PR에서 보지 않는 실패는 `plan-gate`와 `risk-gate`뿐이다. `deps-guard`·`harness-guard` 실패는 `fix`다. step 완료 여부는 PR head의 계획에서 읽는다. / 이유: `plan-gate`는 "step이 completed가 아니다"로 실패하는 것이 예상되지만, 다른 기계 판정 실패는 step 완료와 무관하게 고쳐야 병합된다(PR #93 원장 F2). step0 지시서의 규칙 5는 "그 밖은 ready"라고 적었는데 그 문장이 이 경우를 빠뜨렸다. step0은 이미 병합된 step이라 지시서는 고치지 않고(고치면 계획을 다시 검증받아야 한다) 구현과 설계서 10.3절을 맞췄다. / 버린 대안: 지시서 문장대로 두기.
 
 ## 발견 사항
@@ -119,6 +125,8 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 기존 답변 처리(`doAnswered`)는 답을 받으면 step을 `in_progress`로 되돌린다. 완료된 step의 열린 PR에 달린 알림(승인 요청, 오래된 대기)에 제작자가 답하면 step이 되돌려져 `plan-gate`가 실패할 수 있었다. 알림에 대한 답은 상태를 바꾸지 않게 했다. → 처리: [설계서 4.5절 "내 PR 다루기"](../../../harness/design.md)
 - 다른 세션(`start`)이 병합된 worktree를 먼저 지우면 runner가 알림 라벨을 떼지 못한다(표시가 worktree 상태 폴더에 있다). 마지막 step이면 Issue가 닫혀 문제가 없고, 남은 step이 있으면 라벨이 남는다. → 처리: TD-34
 - PR #93에서 Codex 검증자가 낸 F2(P1)와 그 뿌리: PR 분류가 worktree의 step 상태를 봤다. runner는 수정 세션을 띄우기 전에 step을 로컬에서 되돌리므로, 세션이 실패하면 worktree와 PR head의 step 상태가 달라진다. PR에 대한 판단은 PR head의 내용으로 해야 한다. → 처리: [설계서 10.3절 PR 분류](../../../harness/design.md)
+- `planReview.required`만 켜고 필수 체크·검증 App 봇 설정이 없는 리포에서는 runner가 승인을 확인할 길이 없다. step2 지시서의 대상 조건에 이 경우가 없었다. → 처리: [설계서 4.1절 "runner의 계획 검증"](../../../harness/design.md)
+- 가짜 GitHub의 PR 번호는 댓글을 단 적이 없으면 Issue 목록에 없어 `prComments`가 따로 빈 목록을 돌려줘야 했다. → 처리: 해당 없음
 
 ## 열린 질문
 

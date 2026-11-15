@@ -191,6 +191,12 @@ export class FakeGitHub implements GitHubPort {
   comment(n: number, body: string): void {
     this.commentAs(n, this.load().me, body);
   }
+  prComments(n: number): { id: number; author: string; body: string }[] {
+    const s = this.load();
+    // PR 번호는 댓글을 단 적이 없으면 Issue 목록에 없다
+    if (!s.issues.some((i) => i.number === n) && s.prs.some((p) => p.number === n)) return [];
+    return this.issue(s, n).comments.map((c, i) => ({ id: i + 1, author: c.author, body: c.body }));
+  }
   /** 테스트용: 제작자 답변 */
   ownerComment(n: number, body: string): void {
     this.commentAs(n, this.load().owner, body);

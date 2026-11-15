@@ -4,6 +4,8 @@
 //   fail    : 아무것도 하지 않고 "완료했다"고만 말한다(세션 주장은 판정 근거가 아님을 확인)
 //   timeout : 오래 멈춘다(세션 시간 제한 확인)
 //   limit   : 사용량 한도 메시지로 실패한다(환경 장애, 실패로 세지 않음)
+//   stray   : (계획 작성) ok처럼 계획을 채우고, 계획 폴더 밖 파일 stray.txt를 만들어 커밋한다(계획 전용 커밋 위반).
+//             그 뒤의 ok는 stray.txt를 지워 커밋한다
 //   question: 계획 작성이면 ok처럼 계획을 채우고 "열린 질문"에 `### 질문: 데모 질문` 블록을 남긴다.
 //             step이면 계획의 "열린 질문"에 `### 질문: 스텝 질문` 블록만 남기고 멈춘다(커밋하지 않는다)
 // 충돌 해결 프롬프트("# 이번 작업: 충돌 해결")는 behavior의 "conflict" 순서를 쓴다.
@@ -84,6 +86,14 @@ if (action === 'timeout') {
       path.join(dir, `step${i}.md`),
       `# Step ${i}: part-${i}\n\n## 읽어야 할 파일\n- AGENTS.md\n\n## 작업\n- out/${slug}-s${i}.txt를 만든다\n\n## Acceptance Criteria\n\`\`\`bash\ntest -f out/${slug}-s${i}.txt\n\`\`\`\n\n## 금지사항\n- 다른 파일을 고치지 마라. 이유: 범위\n`,
     );
+  }
+  if (action === 'stray') {
+    writeFileSync('stray.txt', 'x\n');
+    git('add', 'stray.txt');
+    git('commit', '-q', '-m', 'stray: 계획 폴더 밖 파일');
+  } else if (existsSync('stray.txt')) {
+    git('rm', '-q', 'stray.txt');
+    git('commit', '-q', '-m', 'stray 되돌림');
   }
 } else if (action === 'question') {
   const text = readFileSync(planFile, 'utf8').replace(

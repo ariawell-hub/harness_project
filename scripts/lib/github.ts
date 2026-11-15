@@ -204,6 +204,11 @@ export interface GitHubPort {
   /** 최근 댓글(오래된 것부터, 최대 100개)과 각 댓글의 편집 이력 */
   comments(n: number): Comment[];
   comment(n: number, body: string): void;
+  /**
+   * PR(또는 Issue)의 댓글 전체를 시간순으로. 지적 원장(10.2절 (4))을 읽는 데 쓴다.
+   * 끝까지 읽지 못하면 예외다(일부만 읽고 "원장이 없다"고 판단하지 않는다)
+   */
+  prComments(n: number): { id: number; author: string; body: string }[];
   addLabel(n: number, label: string): void;
   removeLabel(n: number, label: string): void;
   reopenIssue(n: number): void;
@@ -433,6 +438,26 @@ export class GhCli implements GitHubPort {
   }
   comment(n: number, body: string): void {
     gh(['api', `repos/{owner}/{repo}/issues/${n}/comments`, '-F', 'body=@-'], this.cwd, body);
+  }
+  prComments(n: number): { id: number; author: string; body: string }[] {
+    if (!Number.isInteger(n) || n <= 0) throw new GitHubError(`PR 번호 형식 오류: ${n}`);
+    // 한 줄에 댓글 하나(JSON 배열). --paginate가 마지막 페이지까지 읽고, 도중에 실패하면 gh가 실패한다
+    return gh(
+      [
+        'api',
+        '--paginate',
+        `repos/{owner}/{repo}/issues/${n}/comments?per_page=100`,
+        '--jq',
+        '.[] | [.id, .user.login, .body] | @json',
+      ],
+      this.cwd,
+    )
+      .split('\n')
+      .filter((l) => l.trim() !== '')
+      .map((l) => {
+        const [id, author, body] = JSON.parse(l) as [number, string | null, string | null];
+        return { id, author: author ?? '', body: body ?? '' };
+      });
   }
   addLabel(n: number, label: string): void {
     gh(['api', `repos/{owner}/{repo}/issues/${n}/labels`, '-f', `labels[]=${label}`], this.cwd);
