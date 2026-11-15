@@ -18,10 +18,13 @@ export type EntryStatus = (typeof ENTRY_STATUSES)[number];
 export const REPRO_RESULTS = ['', 'reproduced', 'not-reproduced', 'error'] as const;
 export type ReproResult = (typeof REPRO_RESULTS)[number];
 
-/** 이 수를 넘으면 P2·P3은 더 등록하지 않는다(댓글 크기 상한 65536자). P0·P1은 계속 받는다 */
+/** 이 수를 넘으면 P2·P3은 더 등록하지 않는다. P0·P1은 계속 받는다 */
 export const MAX_ENTRIES = 150;
+/** 댓글 본문이 이 길이를 넘게 되면 P2·P3은 더 등록하지 않는다(GitHub 댓글 상한 65536자) */
+export const MAX_BODY = 60_000;
 const MAX_CI_FAILURES = 30;
-const MAX_ROUNDS = 200;
+/** 읽을 때의 상한. 넘으면 원장으로 읽지 않는다(fail-closed). 쓸 때는 자르지 않는다 */
+const MAX_ROUNDS = 2000;
 
 export interface Entry {
   /** F<번호>. 원장 전체에서 차례로 붙인다 */
@@ -59,7 +62,7 @@ export interface Ledger {
   rounds: Round[];
   findings: Entry[];
   ciFailures: CiFailure[];
-  /** 원장이 가득 차 등록하지 않은 P2·P3 수 */
+  /** 원장이 가득 찼거나 댓글 상한에 걸려 등록하지 않은 P2·P3 수 */
   dropped: number;
 }
 
@@ -103,7 +106,7 @@ export interface ApplyOptions {
 export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
   const out: Ledger = {
     ...l,
-    rounds: [...l.rounds, { reviewer: o.reviewer, head: o.headSha }].slice(-MAX_ROUNDS),
+    rounds: [...l.rounds, { reviewer: o.reviewer, head: o.headSha }],
     findings: l.findings.map((e) => ({ ...e, rejectedBy: [...e.rejectedBy] })),
     ciFailures: [...l.ciFailures],
   };
@@ -130,11 +133,20 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
   let next = out.findings.reduce((n, e) => Math.max(n, Number(e.id.slice(1))), 0) + 1;
   const same = (e: Entry, f: Finding) =>
     e.reviewer === o.reviewer &&
-    e.file === f.file &&
+    e.file === oneLine(f.file, LIMITS.file) &&
     e.line === f.line &&
     e.title === oneLine(f.title, LIMITS.title);
   for (const f of o.verdict.findings) {
-    if (out.findings.some((e) => same(e, f))) continue;
+    const dup = out.findings.find((e) => same(e, f));
+    if (dup) {
+      // 닫힌 지적을 낸 검증자가 같은 지적을 다시 냈다: 회귀로 보고 다시 연다. deferred는 그대로 둔다
+      if (dup.status === 'fixed' || dup.status === 'rejected') {
+        dup.status = 'open';
+        dup.rejectedBy = dup.rejectedBy.filter((x) => x !== o.reviewer);
+        dup.note = `다시 지적됨(${round}라운드)`;
+      }
+      continue;
+    }
     const blocking = BLOCKING.includes(f.severity);
     if (!blocking && out.findings.length >= MAX_ENTRIES) {
       out.dropped++;
@@ -154,18 +166,28 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
       round,
       rejectedBy: [],
     });
+    // 댓글 상한을 넘기는 비차단 지적은 등록하지 않는다. 차단 지적은 넘겨도 등록한다(쓰기 실패는 기록 job이 error로 남긴다)
+    if (!blocking && renderLedger(out).length > MAX_BODY) {
+      out.findings.pop();
+      next--;
+      out.dropped++;
+    }
   }
   return out;
 }
 
-/** review-ledger 판정: P0·P1이 모두 fixed 또는 rejected인가(R16). deferred는 동결된 지적이라 막지 않는다 */
+/**
+ * review-ledger 판정(R16): open인 P0·P1이 없어야 한다.
+ * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다
+ */
 export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; description: string } {
   const open = l.findings.filter((e) => BLOCKING.includes(e.severity) && e.status === 'open');
   if (open.length === 0) {
-    const deferred = l.findings.filter((e) => e.status === 'deferred').length;
+    const deferred = l.findings.filter((e) => e.status === 'deferred');
+    const frozen = deferred.filter((e) => e.severity === 'P1').length;
     return {
       state: 'success',
-      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred})`,
+      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''})`,
     };
   }
   let ids = open.map((e) => e.id).join(', ');

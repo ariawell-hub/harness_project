@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  MAX_BODY,
   MAX_ENTRIES,
   applyVerdict,
   emptyLedger,
@@ -127,6 +128,49 @@ test('같은 지적(검증자·위치·제목)은 다시 등록하지 않는다'
   });
   assert.equal(again.findings.length, 1);
   assert.equal(again.rounds.length, 2);
+  // 파일 이름은 원장에 적는 꼴(제어 문자 제거)로 비교한다
+  const ctl = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ file: 'src/a.ts\u0007' })]),
+    headSha: H2,
+    changedSinceLastRound: ['src/a.ts'],
+  });
+  assert.equal(ctl.findings.length, 1);
+});
+
+test('fixed·rejected 지적을 같은 검증자가 다시 내면 다시 연다. deferred는 그대로 둔다', () => {
+  let l = round1([finding({ title: 'a' }), finding({ title: 'b' }), finding({ severity: 'P2' })]);
+  l = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict(
+      [],
+      [
+        { id: 'F1', status: 'fixed', note: '고침' },
+        { id: 'F2', status: 'rejected', note: '반박 동의' },
+      ],
+    ),
+    headSha: H2,
+    changedSinceLastRound: [],
+  });
+  l = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ title: 'a' }),
+      finding({ title: 'b' }),
+      finding({ severity: 'P2' }),
+    ]),
+    headSha: H3,
+    changedSinceLastRound: [],
+  });
+  assert.deepEqual(
+    l.findings.map((e) => [e.id, e.status]),
+    [
+      ['F1', 'open'],
+      ['F2', 'open'],
+      ['F3', 'deferred'],
+    ],
+  );
+  assert.match(byId(l, 'F1').note, /다시 지적/);
 });
 
 test('resolutions: 자기 지적만 fixed·rejected·open으로 바꾼다', () => {
@@ -255,6 +299,16 @@ test('ledgerStatus: P0·P1이 모두 fixed·rejected일 때만 success', () => {
   const ok = ledgerStatus(l);
   assert.equal(ok.state, 'success');
   assert.match(ok.description, /차단 지적 없음/);
+  // 동결된 P1은 막지 않는다(10.2절 (5)). 수를 description에 적는다
+  const frozen = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ file: 'src/old.ts', title: '뒤늦은 P1' })]),
+    headSha: H3,
+    changedSinceLastRound: [],
+  });
+  const f = ledgerStatus(frozen);
+  assert.equal(f.state, 'success');
+  assert.match(f.description, /동결 P1 1/);
   // 열린 지적이 많아도 description은 140자를 넘지 않는다
   const many = round1(Array.from({ length: 30 }, (_, i) => finding({ title: `t${i}` })));
   assert.ok(ledgerStatus(many).description.length <= 140);
@@ -328,4 +382,38 @@ test('원장이 가득 차면 P2·P3은 더 등록하지 않고 센다. P0·P1�
   assert.equal(more.findings.at(-1)?.title, '차단');
   assert.equal(more.dropped, l.dropped + 1);
   assert.ok(renderLedger(more).length < 65536);
+});
+
+test('댓글 크기 상한: 긴 제목·특수문자로 커지면 P2·P3 등록을 멈춘다', () => {
+  let l = emptyLedger(BASE);
+  const long = (i: number, j: number) => `${'한|<@[*'.repeat(30)}${i}-${j}`.slice(0, 200);
+  for (let i = 0; i < 6; i++)
+    l = applyVerdict(l, {
+      reviewer: i % 2 ? 'codex' : 'claude',
+      verdict: verdict(
+        Array.from({ length: 30 }, (_, j) =>
+          finding({ severity: 'P2', title: long(i, j), file: `${'d/'.repeat(100)}${i}-${j}.ts` }),
+        ),
+      ),
+      headSha: H1,
+      changedSinceLastRound: null,
+    });
+  assert.ok(l.dropped > 0, '크기 상한에 걸린 지적이 없다');
+  assert.ok(l.findings.length < MAX_ENTRIES);
+  const body = renderLedger(l);
+  assert.ok(body.length <= MAX_BODY, String(body.length));
+  assert.deepEqual(parseLedger(body), l);
+});
+
+test('라운드 기록은 자르지 않는다(라운드 번호와 동결 판정이 틀어진다)', () => {
+  let l = emptyLedger(BASE);
+  for (let i = 0; i < 210; i++)
+    l = applyVerdict(l, {
+      reviewer: 'claude',
+      verdict: verdict(),
+      headSha: H1,
+      changedSinceLastRound: [],
+    });
+  assert.equal(l.rounds.length, 210);
+  assert.deepEqual(parseLedger(renderLedger(l)), l);
 });
