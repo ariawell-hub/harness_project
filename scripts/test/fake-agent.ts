@@ -11,9 +11,21 @@
 // 충돌 해결 프롬프트("# 이번 작업: 충돌 해결")는 behavior의 "conflict" 순서를 쓴다.
 //   ok   : "## 충돌 파일"에 나열된 파일에서 충돌 표시 줄(<<<<<<<, =======, >>>>>>>)을 지운다(양쪽 내용 유지). git은 쓰지 않는다
 //   fail : 아무것도 하지 않는다
+// 지적 대응 프롬프트("# 이번 작업: 지적 대응")는 behavior의 "review" 순서를 쓴다. 기록의 step은 "review"다.
+//   ok   : 프롬프트의 지적 ID(`- ID: F<번호>` 줄)를 적은 파일을 고치고 `fix(F<번호>): …`로 커밋한다.
+//          "계획 검증 단계"면 계획 파일의 진행 로그에 한 줄을 더해 커밋한다(계획 폴더 파일만 바꾼다)
+//   fail : 아무것도 하지 않는다
+//   break: step의 AC가 확인하는 파일을 지워 커밋한다(판정 실패)
 // FAKE_LOG: 받은 프롬프트를 JSON 줄로 남긴다.
 // FAKE_RESULT_JSON=1: 끝에 Claude `-p --output-format json` 형식의 결과 객체(권한 거부 포함)를 출력한다.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -22,11 +34,9 @@ const planning = prompt.includes('# 이번 작업: 계획 작성');
 const resolving = prompt.includes('# 이번 작업: 충돌 해결');
 const planFile = /계획 파일: `([^`]+)`/.exec(prompt)?.[1] ?? '';
 const id = /(\d{8}-[a-z0-9-]+?)(?:\/plan\.md|\.md)$/.exec(planFile)?.[1] ?? '';
-const step = planning
-  ? 'plan'
-  : resolving
-    ? 'conflict'
-    : (/step 지시서 \([^)]*step(\d+)\.md/.exec(prompt)?.[1] ?? '0');
+const reviewing = prompt.includes('# 이번 작업: 지적 대응');
+const stepNo = /step 지시서 \([^)]*step(\d+)\.md/.exec(prompt)?.[1] ?? '0';
+const step = planning ? 'plan' : resolving ? 'conflict' : reviewing ? 'review' : stepNo;
 const slug = id.replace(/^\d{8}-/, '');
 
 if (process.env.FAKE_LOG)
@@ -57,6 +67,28 @@ if (action === 'timeout') {
       .split('\n')
       .filter((l) => !/^(<{7}|={7}|>{7})( |$)/.test(l));
     writeFileSync(f, kept.join('\n'));
+  }
+} else if (reviewing) {
+  const ids = [...prompt.matchAll(/^- ID: (F\d+)$/gm)].map((m) => m[1]);
+  const acFile = `out/${slug}-s${stepNo}.txt`;
+  if (action === 'break') {
+    rmSync(acFile, { force: true });
+    git('add', '-A');
+    git('commit', '-q', '-m', `fix(${ids[0] ?? 'F0'}): 깨뜨림`);
+  } else if (prompt.includes('계획 검증 단계')) {
+    const text = readFileSync(planFile, 'utf8');
+    writeFileSync(
+      planFile,
+      text.replace('## 진행 로그', `## 진행 로그\n\n- 지적 대응 ${ids.join(', ')} (${Date.now()})`),
+    );
+    git('add', '-A');
+    git('commit', '-q', '-m', `fix(${ids[0] ?? 'F0'}): 계획 수정`);
+  } else {
+    mkdirSync('out', { recursive: true });
+    if (!existsSync(acFile)) writeFileSync(acFile, `step ${stepNo}\n`);
+    appendFileSync(`out/${slug}-review.txt`, `${ids.join(', ')} ${Date.now()}\n`);
+    git('add', '-A');
+    git('commit', '-q', '-m', `fix(${ids[0] ?? 'F0'}): 고침`);
   }
 } else if (planning) {
   const steps = Number(behavior[slug]?.steps ?? 2);

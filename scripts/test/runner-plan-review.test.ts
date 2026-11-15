@@ -227,8 +227,8 @@ test('runner: 계획 승인은 해시에 묶인다. 승인 뒤 진행 로그만 
     // 새 head에서 검증자가 수정을 요청하면(원장의 옛 승인이 남아 있어도) step을 시작하지 않는다
     planChecks(t, pr.head(), { 'review/codex': 'failure', 'review-ledger': 'failure' });
     const blocked = pick(t.fx.root);
-    assert.equal(blocked.task.kind, 'idle');
-    assert.deepEqual(blocked.waiting, { ci: 0, human: 1 });
+    assert.equal(blocked.task.kind, 'review', 'step이 아니라 지적 대응이다');
+    assert.equal(blocked.task.kind === 'review' ? blocked.task.phase : '', 'plan');
     // 새 head의 필수 체크가 통과하면, 승인이 기록된 head가 달라도 같은 해시의 승인으로 진행한다
     t.gh.setCheck(pr.head(), { context: 'review/codex', creator: BOT });
     t.gh.setCheck(pr.head(), { context: 'review-ledger', creator: BOT });
