@@ -106,7 +106,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 ## 발견 사항
 
 - 판정 지적의 본문은 원장(#55) 전에는 기록 job 로그에서만 볼 수 있다(`record-review:` 줄). 이 출력은 main에 병합된 뒤의 PR부터 나온다. → 처리: #55
-- 로컬에서 CI와 같은 인자로 `claude -p`를 돌리면 CI 검증자의 지적을 미리 볼 수 있다(`review-plan`으로 입력 폴더를 만든 뒤 실행). 로컬 사전 점검용이고 병합 판단에는 쓰지 않는다. → 처리: [문서](docs/harness/workflow.md)
+- 로컬에서 CI와 같은 인자로 `claude -p`를 돌리면 CI 검증자의 지적을 미리 볼 수 있다(`review-plan`으로 입력 폴더를 만든 뒤 실행). 로컬 사전 점검용이고 병합 판단에는 쓰지 않는다. → 처리: [문서](../../../harness/workflow.md)
 - `judge-codex` environment의 `CODEX_AUTH_JSON`이 JSON으로 읽히지 않는다(값은 봇이 볼 수 없다). → 처리: #54 step4(제작자 재등록)
 - `workflow_run`으로 도는 실행은 `gh run list`의 `headBranch`가 PR 브랜치가 아니라 `main`이다. PR의 판정 실행을 찾을 때는 브랜치 이름이 아니라 PR head의 커밋 상태(`review/*`의 target URL)로 찾는다. → 처리: 해당 없음
 - 테스트에 실제 토큰 형식(`sk-ant-…`, `gho_…`, JWT 머리)의 가짜 값을 리터럴로 적으면 gitleaks가 검출해 `check`가 실패한다. 시크릿 스캔 테스트 값은 조각을 런타임에 이어 붙인다. → 처리: 해당 없음
