@@ -2,7 +2,7 @@
 id: 20261115-cross-review
 issue: 54 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -74,6 +74,19 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step3: 고친 뒤 로컬 사전 점검을 다시 돌려 P1 하나를 더 받았다: `samePrContent`가 PR 파일 이름을 `git diff -- <파일>`의 pathspec으로 넘겨, 이름이 `:!a.txt`인 파일 하나로 비교 대상이 비어 검사가 무력화된다. 테스트를 먼저 더해 실패를 확인하고, 파일 이름을 인자로 넘기지 않고 두 head 사이의 변경 목록과 비교하게 고쳤다. 함께 받은 P2도 반영했다: 이어받기용 PR 파일은 `--no-renames` 기준, patch-id는 diff를 바이트 그대로 넘김(UTF-8이 아닌 텍스트 테스트), 판정 기록이 없는 head를 건너뛰는 이유를 주석·설계서에 적음. 계획 수정(수용 기준 6 문구, step4 추가)은 구축 단계라 계획 재검증(G1, `planReview.required: false`)이 돌지 않는다. `loadConfig` 테스트의 위치(P3)는 그대로 뒀다(설정 테스트 파일이 따로 없다).
 - 2026-11-15 step3: 세 번째 로컬 사전 점검은 승인(P0·P1 없음, P2 4, P3 2)이었다. P2 중 "같은 head를 다시 돌릴 때 그 head의 실패 판정을 보지 않고 옛 승인을 이어받는다"는 테스트를 먼저 더해 고쳤다(`fetchCandidates`가 지금 head도 후보에 넣는다). 나머지(`review-plan` 연결부 테스트, `base.sha` 최신 여부 확인, `init` 안내의 필수 체크 목록)는 step4 작업 4로 넘겼다. 복원 실패 문구의 길이·줄 수 출력(P3)은 진단에 필요해 그대로 둔다.
 - 2026-11-15 step3: AC 실행 결과 — `node --test scripts/test/binding.test.ts scripts/test/verdict.test.ts scripts/test/protection.test.ts` 통과, `grep -q "export function carryOver" scripts/ci/binding.ts`·`grep -q "recorderBot" harness.config.json` 통과. 이어받기는 이 PR(위험도 높음)에서 일어나지 않는다. `review-plan`을 이 브랜치에 돌려 `patch=<40자>`, `carry_claude=`, `carry_codex=`(높음이라 다시 검증)를 확인했다. 실제 이어받기 확인과 필수 체크 등록은 step4.
+- 2026-11-15: PR #68(step3)이 제작자 승인 뒤 병합됐다. 제작자가 `CODEX_AUTH_JSON`을 다시 등록했다(봇 API의 갱신 시각 2026-11-15T03:40:16Z). 앞서 들어 있던 값은 인증 파일이 아니라 로그인 URL이었다(제작자 확인).
+- 2026-11-15 step4: `planCarry` 테스트를 먼저 써서 실패 확인(export 없음) → `review-plan`의 이어받기 연결부를 `scripts/ci/binding.ts`의 `planCarry`로 옮기고 가짜 API로 성공·위험도 높음·봇 설정 없음·조회 실패를 테스트했다. `init` 안내의 필수 체크 목록에 `review/*`를 더했다.
+- 2026-11-15 step4: 초안 PR #69에서 재등록된 인증으로 `judge-codex`가 돌았다(실행 43673752078). 인증 복원(필드 9개, API 키 없음), 판정 설정, 봉인, 저장(`store`가 `CODEX_AUTH_JSON` 재등록)이 처음 성공했다. 다음 실행(PR #71)이 그 저장값으로 같은 인증(sha8 일치)을 복원해 봉인 → 저장 → 복원 왕복을 확인했다. 실행 전후 인증 변화는 없었다(`changed=false`, 갱신 미관찰). 샌드박스 준비는 `bwrap: execvp …/codex: No such file or directory`로 실패했다(Codex 설치 위치가 권한 프로필 읽기 범위 밖). Issue #70 / PR #71로 고쳐 병합했다.
+- 2026-11-15 step4: 같은 PR에서 step3 변경이 실제로 돌았다. `review/claude = success — 승인 (P3 1) patch:<40자>`(작성자 `harness-recorder[bot]`), 기록 job 로그에 판정 요약과 지적 본문이 나왔다. 지적(P3: `fetchCandidates`가 `headSha`를 쓰지 않는다)을 반영해 인자를 뺐다.
+- 2026-11-15 step4: PR #71 병합 뒤 PR #69에서 `judge-codex`가 처음 끝까지 돌았다(실행 43681655728). 설치 위치 `/usr/local/lib/node_modules/@openai/codex`, 샌드박스 준비 `ok=initial`, 사전 측정 12항목 모두 기대대로(`pr_read`만 허용, 쓰기 반영·`/tmp` 쓰기·인증 파일·`RUNNER_TEMP`·홈 설정 두 곳·`base/`·환경 표식·조상 프로세스 환경·네트워크·sudo 거부), `codex exec` 종료 코드 0(이벤트 12개, 명령 4회, 입력 127,881·출력 1,690 토큰), 유출 검사 통과(허용 밖 항목 0, `pr/` 밖 시도 0, 비밀 0), 봉인·저장 성공, `record`가 `review/codex = failure — 수정 요청 (P1 2)`를 기록했다(작성자 `harness-recorder[bot]`). 지적은 "step4의 실제 확인·등록·문서가 아직 없다"였고 사실이었다(그때는 진행 중).
+- 2026-11-15 step4: 승인 이어받기를 확인용 PR #75(Issue #74, 위험도 보통, 보호 경로 밖)에서 확인했다.
+  - head 767915d: `review/claude` 승인, `review/codex` 수정 요청(P1: 검증 결과 기록 없음) → 기록을 더한 head 0220bd3에서 둘 다 `승인 (지적 없음) patch:c0070d71…`.
+  - main이 PR #76 병합으로 나아간 뒤 `origin/main`을 병합한 head 26876ba: 두 워크플로 모두 `plan`이 `이어받음 ← 0220bd33c5b0`을 내고 판정 job(`judge`, Codex는 `pubkey`·`store`도)은 건너뛰었다. `record`가 `이어받음 0220bd33c5b0 patch:c0070d71…`을 success로 기록했다(작성자 `harness-recorder[bot]`). PR API의 `base.sha`는 main 최신이었다(merge-base가 병합한 main 커밋이라 patch가 같았다).
+  - 공백만 바꾼 head ce86556(로컬에서 잰 patch-id는 전과 같음): `다시 검증 — PR 파일의 내용이 다르다`로 두 검증자가 다시 판정했다. 공백은 되돌렸다.
+- 2026-11-15 step4: 문서 갱신. 설계서 0.2절 필수 체크 목록, 10.3절·13.3절 실제 확인 결과(v0.7.28, main 병합 때 v0.7.25에서 다시 매김), 절차서 5절 필수 체크 문장, TD-1 비고. Codex 실행 중 인증 갱신은 관찰하지 못했다(모든 실행에서 `changed=false`). TD-1 비고에 확인 방법을 남겼다.
+- 2026-11-15 step4: 제작자가 `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록했다(제작자 대화 통보). 첫 통보 때는 보호 규칙에 반영되지 않아(`required-checks` 실패, 등록 5개) 저장을 다시 요청했고, 두 번째 통보 뒤 확인했다.
+- 2026-11-15 step4: AC 실행 결과. `node --test scripts/test/protection.test.ts scripts/test/binding.test.ts` 종료 코드 0(테스트 23개, 실패 0개). `node scripts/harness.ts required-checks` 종료 코드 0, 7개 모두 통과(`check` 출처 actions 15368, `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex` 출처 recorder 5764201). `origin/main`(#79~#82) 병합 뒤 `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step4: 제작자가 완료 처리 전의 head 625ddf0을 두 번 승인했다. 그 head는 main과 충돌했고 완료 처리 전이라 병합할 수 없어, 제작자에게 먼저 알린 뒤 main 병합·완료 처리 커밋을 올렸다(승인은 새 head에서 다시 받는다).
 
 ## 의사결정 로그
 
@@ -103,10 +116,15 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 이어받기 후보는 가장 최근에 판정된 앞선 head 하나다. 그 head의 마지막 판정이 success가 아니거나 patch가 다르면 더 옛 head의 승인으로 거슬러 가지 않는다. 이유: 같은 patch의 최신 판정이 실패인데 옛 승인을 되살리면 안 된다.
 - 기록 job은 검사를 통과한 판정의 요약과 지적을 로그에 한 줄씩 낸다(원장 #55 전의 임시 통로). 이유: step3 PR에서 `수정 요청 (P1 2)`만 보이고 무엇을 고칠지 알 수 없었다. 본문은 형식 검사와 시크릿 스캔을 통과한 뒤에만, 제어 문자를 공백으로 바꿔 낸다.
 - `restoreAuth`는 JSON 파싱에 실패하면 줄바꿈을 빼고 한 번 더 읽는다. 그래도 안 되면 값 없이 길이·줄 수·첫 글자 종류만 오류에 적는다. 이유: 터미널 폭 줄바꿈이 섞인 붙여넣기는 Claude 토큰에서도 겪은 문제이고(13.3절), 첫 실행의 "JSON이 아니다"만으로는 원인을 좁힐 수 없었다.
+- (제작자 결정, 2026-11-15 대화, "검사 약화 권한 변경이 없는 수정에 한해 위험도 보통으로 올려") 판정 워크플로(`judge-*`)의 후속 수정 PR은 검사 약화·권한 변경이 없으면 계획 `risk: normal`로 올린다(자동 병합). 이유: 이 워크플로들은 main에 병합돼야 검증되므로 추정이 틀릴 때마다 승인이 한 번씩 더 든다. 검사 약화·권한 완화·environment 밖 참조·새 write 권한은 `harness-guard`가 잡아 높음으로 올린다. #54 계획 자체의 step PR은 앞의 결정대로 높음이다.
 - (제작자 결정, 2026-11-15 대화) 이 계획(#54)은 `risk: high`를 유지해 PR마다 제작자 head 승인을 받는다. 구독 토큰·Codex 인증·인증 저장 App이 실제로 CI에 들어가는 작업이기 때문이다. #55·#56·#57의 계획은 `risk: normal`로 만든다. 그 PR들은 자동 병합되고, `harness-guard`가 검사 약화·권한 완화 신호를 잡았거나 경로 표가 높음인 PR만 승인을 요구한다. 이유: 구축 단계에서는 보호 경로도 자동 병합한다는 결정(설계서 10.4절)과 맞추되, 인증을 직접 다루는 구간만 사람이 본다. 버린 대안: 전부 높음(PR마다 승인, #53에서 겪은 부담), #54도 보통(검증자가 완성되기 전에 인증 워크플로가 사람 눈 없이 병합됨).
 
 ## 발견 사항
 
+- main 병합 충돌을 풀 때 `tech-debt-tracker.md`의 충돌 표식이 남은 채 커밋·push했다(한 파일만 정리하고 확인하지 않았다). `check`는 통과했다. 다음 커밋에서 main 판으로 다시 만들어 고쳤다. 충돌을 푼 뒤에는 `git grep -n '^<<<<<<< '`로 확인한다. → 처리: TD-30
+- `node scripts/harness.ts check 2>&1 | tail -1 && git push`로 실행해, 네트워크 끊김으로 `check`가 실패했는데 push가 이어졌다(다시 돌려 통과를 확인했다). → 처리: #72, TD-29
+- Codex 검증자는 계획의 검증 명령 실행 결과가 진행 로그에 없으면 P1을 낸다(PR #75). 소규모 계획도 실행 결과(종료 코드)를 진행 로그에 적는다. → 처리: #55
+- `review/*`가 필수가 되면 검증자 장애(`error`)나 사용량 한도가 병합을 막는다. 판정 실행을 다시 돌리는 절차와 반박 절차는 원장과 함께 정한다. → 처리: #55
 - PR이 정하는 파일 이름을 `git … -- <파일>`로 넘기면 pathspec으로 해석된다(`:!x`는 제외, `*`·`[`는 glob). `samePrContent`는 고쳤고, `harness-guard`의 파일별 diff에 같은 유형이 남아 있다. → 처리: TD-28
 - 판정 지적의 본문은 원장(#55) 전에는 기록 job 로그에서만 볼 수 있다(`record-review:` 줄). 이 출력은 main에 병합된 뒤의 PR부터 나온다. → 처리: #55
 - 로컬에서 CI와 같은 인자로 `claude -p`를 돌리면 CI 검증자의 지적을 미리 볼 수 있다(`review-plan`으로 입력 폴더를 만든 뒤 실행). 로컬 사전 점검용이고 병합 판단에는 쓰지 않는다. → 처리: [문서](../../../harness/workflow.md)
@@ -123,5 +141,5 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- 제작자: `judge-codex` environment의 `CODEX_AUTH_JSON`을 다시 등록한다(임시 `CODEX_HOME`의 `auth.json` 파일 내용 전체. 13.3절 CI 전용 로그인).
-- step4 verify-register.
+- 제작자: `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록한다. 등록 뒤 `required-checks` 통과를 확인하고 step4를 완료 처리한다.
+- 그 뒤 #55(원장·재현 job·G1).

@@ -3,7 +3,7 @@
 // 겹치지 않으면 LLM 없이 새 head로 승인을 옮긴다. patch-id는 승인 상태의 description 끝에 적어 두고,
 // 이어받을 때는 그 상태를 검증 App 봇이 썼는지 확인한다(봇 PAT도 같은 이름의 상태를 쓸 수 있다, ADR-0003).
 // patch-id는 PR ref가 아니라 체크아웃한 이벤트 head에서 잰다(push 직후 PR ref는 옛 head일 수 있다, Q20).
-import type { Risk } from '../gates/risk-gate.ts';
+import { changedFiles, type Risk } from '../gates/risk-gate.ts';
 import { spawnSync } from 'node:child_process';
 import { gitTry } from '../lib/git.ts';
 import { DESCRIPTION_MAX, SHA_RE } from './results.ts';
@@ -169,7 +169,6 @@ export async function fetchCandidates(o: {
   api: (path: string) => Promise<unknown>;
   repo: string;
   number: number;
-  headSha: string;
   recorderBot: string;
   contexts: readonly string[];
   limit?: number;
@@ -197,6 +196,78 @@ export async function fetchCandidates(o: {
     const judged = (ctx: string) =>
       statuses.some((s) => s.creator === o.recorderBot && s.context === ctx);
     if (o.contexts.every(judged)) break;
+  }
+  return out;
+}
+
+export interface CarryPlan {
+  /** 지금 head의 patch-id. 재지 못했으면 '' */
+  patch: string;
+  /** 이어받을 원래 head SHA. 이어받지 않으면 '' */
+  claude: string;
+  codex: string;
+  /** 로그에 낼 판정 이유 */
+  notes: string[];
+}
+
+/**
+ * 판정 워크플로의 plan job이 쓰는 이어받기 판정(review-plan). 판정하지 못하면 이어받지 않는다(다시 검증).
+ * 위험도 높음이거나 봇 설정이 없으면 조회하지 않는다.
+ */
+export async function planCarry(o: {
+  /** PR head 체크아웃 */
+  root: string;
+  /** merge-base */
+  base: string;
+  /** PR의 base 브랜치 끝(SHA 또는 ref) */
+  baseSha: string;
+  number: number;
+  /** owner/name */
+  repo: string;
+  risk: Risk;
+  /** 이 PR에 필요한 검증자 */
+  need: { claude: boolean; codex: boolean };
+  recorderBot: string;
+  api: (path: string) => Promise<unknown>;
+}): Promise<CarryPlan> {
+  const out: CarryPlan = { patch: '', claude: '', codex: '', notes: [] };
+  const keys = (['claude', 'codex'] as const).filter((k) => o.need[k]);
+  try {
+    out.patch = patchId(o.root, o.base);
+    const lookup =
+      Boolean(o.recorderBot) && out.patch !== '' && o.risk !== 'high' && keys.length > 0;
+    const candidates = lookup
+      ? await fetchCandidates({
+          api: o.api,
+          repo: o.repo,
+          number: o.number,
+          recorderBot: o.recorderBot,
+          contexts: keys.map((k) => `review/${k}`),
+        })
+      : [];
+    // rename의 원본 경로도 PR 파일이다(겹침 검사와 같은 기준: --no-renames)
+    const prFiles = changedFiles(o.root, o.base).map((f) => f.path);
+    for (const k of keys) {
+      const c = carryOver({
+        patch: out.patch,
+        risk: o.risk,
+        prFiles,
+        candidates,
+        changedOnBaseSince: (old) => changedOnBaseSince(o.root, o.baseSha, old),
+        samePrContent: (old) => samePrContent(o.root, old, prFiles),
+        recorderBot: o.recorderBot,
+        context: `review/${k}`,
+      });
+      if ('from' in c) out[k] = c.from;
+      out.notes.push(
+        `review/${k} ${'from' in c ? `이어받음 ← ${c.from.slice(0, 12)}` : `다시 검증 — ${c.no}`}`,
+      );
+    }
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).split('\n')[0].slice(0, 200);
+    out.claude = '';
+    out.codex = '';
+    out.notes.push(`이어받기를 판정하지 못했다(다시 검증) — ${msg}`);
   }
   return out;
 }

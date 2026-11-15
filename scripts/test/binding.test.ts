@@ -10,6 +10,7 @@ import {
   samePrContent,
   patchId,
   patchOf,
+  planCarry,
   withPatch,
   type Candidate,
 } from '../ci/binding.ts';
@@ -312,7 +313,7 @@ test('fetchCandidates: 최신이 먼저(지금 head 포함), 판정된 head를 �
     const m = /commits\/([0-9a-f]{40})\/statuses/.exec(p);
     return m ? (statuses[m[1]] ?? []) : null;
   };
-  const o = { api, repo: 'o/r', number: 7, headSha: sha('4'), recorderBot: BOT, contexts: [CTX] };
+  const o = { api, repo: 'o/r', number: 7, recorderBot: BOT, contexts: [CTX] };
   const got = await fetchCandidates(o);
   assert.deepEqual(
     got.map((c) => c.sha),
@@ -357,4 +358,66 @@ test('patchId: UTF-8이 아닌 텍스트의 바이트 차이도 구분한다', (
   writeFileSync(path.join(root, 'latin.txt'), Buffer.from([0x61, 0xe8, 0x0a]));
   commitAll(root, 'latin2');
   assert.notEqual(patchId(root, mergeBase(root)), one);
+});
+
+// ---------- review-plan의 이어받기 판정 (plan job) ----------
+
+function carryRepo() {
+  const { root, oldHead } = repo();
+  const patch = patchId(root, mergeBase(root));
+  mainCommit(root, 'b.txt', 'b1\nb2\n');
+  sh('git', ['merge', '-q', '--no-edit', 'main'], root);
+  const head = sh('git', ['rev-parse', 'HEAD'], root);
+  const calls: string[] = [];
+  const api = async (p: string) => {
+    calls.push(p);
+    if (p.includes('/pulls/7/commits')) return [{ sha: oldHead }, { sha: head }];
+    if (p.includes(`${oldHead}/statuses`))
+      return [CTX, 'review/codex'].map((context) => ({
+        context,
+        state: 'success',
+        description: withPatch('승인 (지적 없음)', patch),
+        creator: { login: BOT },
+      }));
+    return [];
+  };
+  const o = {
+    root,
+    base: mergeBase(root),
+    baseSha: sh('git', ['rev-parse', 'main'], root),
+    number: 7,
+    repo: 'o/r',
+    risk: 'normal' as const,
+    need: { claude: true, codex: true },
+    recorderBot: BOT,
+    api,
+  };
+  return { o, oldHead, patch, calls };
+}
+
+test('planCarry: main 병합 갱신 뒤 두 검증자의 승인을 이어받는다', async () => {
+  const { o, oldHead, patch } = carryRepo();
+  const r = await planCarry(o);
+  assert.deepEqual([r.patch, r.claude, r.codex], [patch, oldHead, oldHead]);
+  assert.equal(r.notes.length, 2);
+  // 필요한 검증자만 판정한다
+  const one = await planCarry({ ...o, need: { claude: false, codex: true } });
+  assert.deepEqual([one.claude, one.codex], ['', oldHead]);
+});
+
+test('planCarry: 위험도 높음·봇 설정 없음은 API를 부르지 않고, 조회 실패는 patch만 남긴다', async () => {
+  const { o, patch, calls } = carryRepo();
+  const high = await planCarry({ ...o, risk: 'high' });
+  assert.deepEqual([high.patch, high.claude, high.codex], [patch, '', '']);
+  const noBot = await planCarry({ ...o, recorderBot: '' });
+  assert.deepEqual([noBot.claude, noBot.codex], ['', '']);
+  assert.equal(calls.length, 0);
+  const failed = await planCarry({
+    ...o,
+    api: async () => {
+      throw new Error('HTTP 500\n상세');
+    },
+  });
+  assert.deepEqual([failed.patch, failed.claude, failed.codex], [patch, '', '']);
+  assert.match(failed.notes.join('\n'), /판정하지 못했다.*HTTP 500$/);
 });
