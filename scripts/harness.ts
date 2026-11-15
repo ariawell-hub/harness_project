@@ -8,6 +8,15 @@ import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
+import {
+  diffAuth,
+  restoreAuth,
+  sealAuth,
+  snapshotAuth,
+  writeCodexConfig,
+  type AuthSnapshot,
+} from './ci/codex-auth.ts';
+import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
@@ -61,6 +70,13 @@ CI(gates 워크플로, 10.4절):
                                            위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
   claude-scan --log <stream-json> --pr <pr 폴더> --out <verdict.json>
                                            Claude 실행 기록 유출 검사. 문제가 없을 때만 판정을 쓴다(비밀은 SCAN_SECRETS)
+  codex-auth restore --home <CODEX_HOME>   시크릿(CODEX_AUTH_JSON) → auth.json(0600). 값은 출력하지 않는다
+  codex-auth snapshot --auth <auth.json> --out <파일> | diff --snap <파일> --auth <auth.json>
+  codex-auth config --home <CODEX_HOME> --pr <pr 폴더> --deny <폴더:폴더:…>   판정용 config.toml(권한 프로필)
+  codex-auth seal --auth <auth.json> --sodium-dir <폴더>   공개키(PUBKEY)로 봉인해 $GITHUB_OUTPUT에 sealed=
+  codex-schema --out <파일>                 codex exec --output-schema용 스키마
+  codex-scan --events <jsonl> --last <파일> --stderr <파일> --pr <pr 폴더> --auth <auth.json> --out <verdict.json>
+                                           Codex 실행 기록 유출 검사(실행 전 시크릿은 SCAN_AUTH_JSON)
   required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
 
 설정:
@@ -116,6 +132,14 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   event: { type: 'string' },
   'body-out': { type: 'string' },
   log: { type: 'string' },
+  home: { type: 'string' },
+  auth: { type: 'string' },
+  snap: { type: 'string' },
+  deny: { type: 'string' },
+  'sodium-dir': { type: 'string' },
+  events: { type: 'string' },
+  last: { type: 'string' },
+  stderr: { type: 'string' },
   pr: { type: 'string' },
   'repo-slug': { type: 'string' },
   'target-url': { type: 'string' },
@@ -162,7 +186,12 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write(`알 수 없는 옵션: ${scan.unknown.join(', ')}\n\n${HELP}`);
     return 2;
   }
-  const { values } = parseArgs({ args, allowPositionals: true, strict: false, options: OPTIONS });
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: false,
+    options: OPTIONS,
+  });
   const str = (k: string) => (typeof values[k] === 'string' ? (values[k] as string) : undefined);
   const flag = (k: string) => values[k] === true;
   const cwd = process.cwd();
@@ -324,6 +353,99 @@ async function main(argv: string[]): Promise<number> {
       }
       writeFileSync(out, JSON.stringify(r.verdict) + '\n');
       log('claude-scan: 통과, 판정을 냈다');
+      return 0;
+    }
+    case 'codex-auth': {
+      const sub = positionals[0];
+      const need = (...keys: string[]) => {
+        const missing = keys.filter((k) => !str(k));
+        if (missing.length)
+          throw new Error(`codex-auth ${sub}: --${missing.join(', --')}가 필요하다`);
+        return keys.map((k) => str(k) as string);
+      };
+      try {
+        if (sub === 'restore') {
+          const [home] = need('home');
+          const r = restoreAuth(process.env.CODEX_AUTH_JSON ?? '', home);
+          log(
+            `codex-auth: restore sha8=${r.sha8} fields=${r.fields.join(',')} api_key=${r.apiKey}`,
+          );
+        } else if (sub === 'snapshot') {
+          const [auth, out] = need('auth', 'out');
+          writeFileSync(out, JSON.stringify(snapshotAuth(auth)));
+        } else if (sub === 'diff') {
+          const [snap, auth] = need('snap', 'auth');
+          const before = JSON.parse(readFileSync(snap, 'utf8')) as AuthSnapshot;
+          const d = diffAuth(before, auth);
+          log(
+            `codex-auth: after sha8=${d.sha8} changed=${d.changed} fields_changed=${d.fieldsChanged.join(',') || '-'}`,
+          );
+        } else if (sub === 'config') {
+          const [home, prDir, deny] = need('home', 'pr', 'deny');
+          const denyDirs = deny.split(':').filter(Boolean);
+          writeCodexConfig({ home, prDir, denyDirs });
+          log(`codex-auth: config pr=${prDir} deny=${denyDirs.join(',')}`);
+        } else if (sub === 'seal') {
+          const [auth, dir] = need('auth', 'sodium-dir');
+          const output = process.env.GITHUB_OUTPUT;
+          if (!output) throw new Error('codex-auth seal: 환경 변수 GITHUB_OUTPUT이 없다');
+          const sealed = await sealAuth(auth, process.env.PUBKEY ?? '', dir);
+          appendFileSync(output, `sealed=${sealed}\n`);
+          log('codex-auth: seal ok');
+        } else {
+          process.stderr.write('codex-auth: restore | snapshot | diff | config | seal\n');
+          return 2;
+        }
+      } catch (e) {
+        // 인증 도구의 오류 문구는 값을 담지 않는다(codex-auth.ts). 스택은 내지 않는다
+        process.stderr.write(`codex-auth: 실패 — ${e instanceof Error ? e.message : '오류'}\n`);
+        return 1;
+      }
+      return 0;
+    }
+    case 'codex-schema': {
+      const out = str('out');
+      if (!out) {
+        process.stderr.write('codex-schema: --out이 필요하다\n');
+        return 2;
+      }
+      const src = path.join(import.meta.dirname, 'cross-review', 'verdict.schema.json');
+      writeFileSync(
+        out,
+        JSON.stringify(codexOutputSchema(JSON.parse(readFileSync(src, 'utf8')))) + '\n',
+      );
+      return 0;
+    }
+    case 'codex-scan': {
+      const eventsFile = str('events');
+      const prDir = str('pr');
+      const out = str('out');
+      if (!eventsFile || !prDir || !out) {
+        process.stderr.write('codex-scan: --events, --pr, --out이 필요하다\n');
+        return 2;
+      }
+      const readOr = (f?: string) => (f && existsSync(f) ? readFileSync(f, 'utf8') : '');
+      const r = scanCodexRun({
+        events: readOr(eventsFile),
+        last: readOr(str('last')),
+        logs: [readOr(str('stderr'))],
+        prDir,
+        // 실행 전 시크릿과 실행 뒤 파일(갱신됐을 수 있다)의 토큰을 모두 찾는다
+        secrets: [
+          ...new Set([
+            ...authTokenValues(process.env.SCAN_AUTH_JSON ?? ''),
+            ...authTokenValues(readOr(str('auth'))),
+          ]),
+        ],
+      });
+      for (const l of r.report) log(`codex-scan: ${l}`);
+      if (!r.ok) {
+        log(`codex-scan: 실패 — ${r.reason}`);
+        if (r.errorText !== undefined) log(`codex-scan: 오류 문구: ${r.errorText}`);
+        return 1;
+      }
+      writeFileSync(out, JSON.stringify(r.verdict) + '\n');
+      log('codex-scan: 통과, 판정을 냈다');
       return 0;
     }
     case 'ci-pr': {

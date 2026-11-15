@@ -1,0 +1,316 @@
+# L3 교차 검증: Codex 판정과 인증 수명주기(10.1·10.4·13.3절, 계획 20261115-cross-review). `check`가 통과한 커밋에서만 돈다(R16).
+# workflow_run은 main의 정의로 돌고, 판정할 PR은 페이로드가 아니라 head SHA로 API를 다시 조회해 정한다.
+# plan:   비밀 없음. base/(github.sha)의 스크립트로 위험도와 필요한 검증자를 계산한다.
+# pubkey: codex-auth-store environment(인증 저장 App, 읽기). judge-codex environment의 GitHub 공개키를 조회한다. LLM·체크아웃 없음.
+# judge:  judge-codex environment(Codex 인증 파일만). 인증을 임시 CODEX_HOME에 복원하고, 권한 프로필 샌드박스를
+#         사전 측정한 뒤 pr/에서 Codex를 비대화로 돌린다. 같은 job의 유출 검사(LLM 없음)를 통과해야 판정이 나간다.
+#         실행 뒤 auth.json은 공개키로 봉인해 job 출력으로 넘긴다(평문은 러너 밖으로 나가지 않는다). 판정이 실패해도 봉인한다.
+# store:  codex-auth-store environment(인증 저장 App, 쓰기). 봉인값을 풀지 않고 그대로 다시 등록한다. LLM·체크아웃 없음.
+# record: recorder environment(검증 App 키만). PR 트리를 받지 않고 판정을 검사한 뒤 review/codex를 쓴다.
+# 동시 실행하면 토큰 갱신이 충돌하므로 워크플로 단위 concurrency로 실행 전체(판정 + 저장)를 하나씩 처리한다.
+# job 단위로 걸면 다음 실행의 판정이 앞 실행의 저장보다 먼저 시작해 옛 인증으로 돈다.
+# PR 유래 값은 run 스크립트에 직접 넣지 않고 env로만 넘긴다. Actions 캐시는 복원하지 않는다. 액션은 커밋 SHA로 고정한다.
+name: judge-codex
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: codex-auth
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  plan:
+    name: plan
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      skip: ${{ steps.pr.outputs.skip }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      risk: ${{ steps.plan.outputs.risk }}
+      codex: ${{ steps.plan.outputs.codex }}
+    steps:
+      - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: 판정할 PR 정하기 (head SHA로 API 재조회)
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node base/scripts/harness.ts ci-pr --event "$GITHUB_EVENT_PATH" --body-out "$RUNNER_TEMP/pr-body.md"
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        if: steps.pr.outputs.skip == 'false'
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (데이터로만 읽음)
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 위험도와 필요한 검증자 (base 스크립트만 실행)
+        id: plan
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          cd pr
+          BASE=$(git merge-base "$BASE_SHA" HEAD)
+          node ../base/scripts/harness.ts review-plan --repo . --config-root ../base \
+            --base "$BASE" --head-ref "$HEAD_REF"
+
+  pubkey:
+    name: pubkey
+    needs: plan
+    if: needs.plan.outputs.skip == 'false' && needs.plan.outputs.codex == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: codex-auth-store
+    permissions: {}
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+      key_id: ${{ steps.key.outputs.key_id }}
+    steps:
+      - name: 인증 저장 App 토큰 (Environments 읽기만)
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.STORE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.STORE_APP_KEY }}
+          permission-environments: read
+
+      - name: judge-codex environment 공개키 조회
+        id: key
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/environments/judge-codex/secrets/public-key" \
+            --jq '"key=\(.key)", "key_id=\(.key_id)"' >> "$GITHUB_OUTPUT"
+          grep '^key_id=' "$GITHUB_OUTPUT"
+
+  judge:
+    name: judge
+    needs: [plan, pubkey]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: judge-codex
+    permissions:
+      contents: read
+    outputs:
+      verdict: ${{ steps.scan.outputs.verdict }}
+      sealed: ${{ steps.seal.outputs.sealed }}
+      key_id: ${{ steps.seal.outputs.key_id }}
+    steps:
+      - name: main 정의 체크아웃 (프롬프트·스키마·스크립트, github.sha)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (plan job이 정한 head, 데이터로만 읽음)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 검증 입력 만들기 (pr/.harness-review/, job 사이에 pr/를 넘기지 않는다)
+        env:
+          HEAD_REF: ${{ needs.plan.outputs.head_ref }}
+          BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+        run: |
+          cd pr
+          BASE=$(git merge-base "$BASE_SHA" HEAD)
+          node ../base/scripts/harness.ts review-plan --repo . --config-root ../base \
+            --base "$BASE" --head-ref "$HEAD_REF"
+
+      - name: 도구 설치 (버전 고정, 설치 스크립트 없이 libsodium)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap > /dev/null
+          npm install -g --no-audit --no-fund @openai/codex@0.167.2
+          npm install --prefix "$RUNNER_TEMP/seal-tools" --no-audit --no-fund --ignore-scripts \
+            libsodium-wrappers@0.8.4 libsodium@0.8.4
+          echo "judge-codex: codex=$(codex --version) bwrap=$(bwrap --version)"
+          echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
+
+      - name: 인증 복원과 판정 설정 (LLM 없음)
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          H=base/scripts/harness.ts
+          node "$H" codex-auth restore --home "$CODEX_HOME"
+          node "$H" codex-auth snapshot --auth "$CODEX_HOME/auth.json" --out "$RUNNER_TEMP/auth-before.json"
+          # 거부 목록에 pr/의 조상은 넣지 않는다(Linux에서 pr/ 읽기까지 막힌다). 인증이 있는 곳과 base/·홈 설정만 거부한다
+          node "$H" codex-auth config --home "$CODEX_HOME" --pr "$GITHUB_WORKSPACE/pr" \
+            --deny "$RUNNER_TEMP:$GITHUB_WORKSPACE/base:$HOME/.codex:$HOME/.config"
+          node "$H" codex-schema --out "$RUNNER_TEMP/codex-schema.json"
+          cat base/scripts/cross-review/prompt.md base/scripts/cross-review/prompt-codex.md \
+            > "$RUNNER_TEMP/codex-prompt.txt"
+
+      - name: 샌드박스 준비 (LLM 없음)
+        working-directory: pr
+        run: |
+          echo "judge-codex: userns_restrict=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo none)"
+          if codex sandbox -- true 2> "$RUNNER_TEMP/sandbox-err.txt"; then
+            echo "judge-codex: sandbox ok=initial"
+          else
+            echo "judge-codex: sandbox initial_error=$(head -c 300 "$RUNNER_TEMP/sandbox-err.txt" | tr '\n' ' ')"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            codex sandbox -- true
+            echo "judge-codex: sandbox ok=after-sysctl"
+          fi
+
+      - name: 샌드박스 사전 측정 (LLM 없음. 기대와 다르면 판정하지 않는다)
+        working-directory: pr
+        env:
+          HARNESS_PROBE_MARKER: harness-probe-marker-value
+        run: bash ../base/scripts/ci/codex-probe.sh
+
+      - name: 판정 (LLM. 권한 프로필 샌드박스, PR 트리의 설정 무시)
+        working-directory: pr
+        run: |
+          set +e
+          timeout 30m codex exec --json --ephemeral --ignore-rules \
+            --output-schema "$RUNNER_TEMP/codex-schema.json" \
+            -o "$RUNNER_TEMP/codex-last.txt" -C "$PWD" - < "$RUNNER_TEMP/codex-prompt.txt" \
+            > "$RUNNER_TEMP/codex-events.jsonl" 2> "$RUNNER_TEMP/codex-stderr.log"
+          echo "judge-codex: 종료 코드 $? events=$(wc -l < "$RUNNER_TEMP/codex-events.jsonl")"
+
+      - name: 유출 검사 (LLM 없음. 통과해야 판정이 나간다)
+        id: scan
+        env:
+          SCAN_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          OUT="$RUNNER_TEMP/verdict.json"
+          node base/scripts/harness.ts codex-scan --events "$RUNNER_TEMP/codex-events.jsonl" \
+            --last "$RUNNER_TEMP/codex-last.txt" --stderr "$RUNNER_TEMP/codex-stderr.log" \
+            --pr "$GITHUB_WORKSPACE/pr" --auth "$CODEX_HOME/auth.json" --out "$OUT"
+          echo "verdict=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
+
+      # 판정·검사가 실패해도 실행 중 갱신된 토큰은 저장해야 한다(13.3절)
+      - name: 인증 봉인 (LLM 없음. 평문은 러너 밖으로 나가지 않는다)
+        id: seal
+        if: always() && needs.pubkey.outputs.key != ''
+        env:
+          PUBKEY: ${{ needs.pubkey.outputs.key }}
+          KEY_ID: ${{ needs.pubkey.outputs.key_id }}
+        run: |
+          H=base/scripts/harness.ts
+          node "$H" codex-auth diff --snap "$RUNNER_TEMP/auth-before.json" --auth "$CODEX_HOME/auth.json"
+          node "$H" codex-auth seal --auth "$CODEX_HOME/auth.json" --sodium-dir "$RUNNER_TEMP/seal-tools"
+          echo "key_id=$KEY_ID" >> "$GITHUB_OUTPUT"
+
+  store:
+    name: store
+    needs: [pubkey, judge]
+    if: always() && needs.judge.outputs.sealed != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: codex-auth-store
+    permissions: {}
+    steps:
+      - name: 인증 저장 App 토큰 (Environments 쓰기만)
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.STORE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.STORE_APP_KEY }}
+          permission-environments: write
+
+      - name: 봉인값을 풀지 않고 등록 (공개키 id가 같을 때만)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          SEALED: ${{ needs.judge.outputs.sealed }}
+          KEY_ID: ${{ needs.judge.outputs.key_id }}
+        run: |
+          current="$(gh api "repos/$REPO/environments/judge-codex/secrets/public-key" --jq .key_id)"
+          if [ "$current" != "$KEY_ID" ]; then
+            echo "judge-codex: 공개키 id가 달라 저장하지 않는다"
+            exit 1
+          fi
+          gh api -X PUT "repos/$REPO/environments/judge-codex/secrets/CODEX_AUTH_JSON" \
+            -f encrypted_value="$SEALED" -f key_id="$KEY_ID" --silent
+          gh api "repos/$REPO/environments/judge-codex/secrets/CODEX_AUTH_JSON" \
+            --jq '"judge-codex: 저장함 name=\(.name) updated_at=\(.updated_at)"'
+
+  record:
+    name: record
+    needs: [plan, judge]
+    if: ${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: recorder
+    permissions:
+      contents: read
+    steps:
+      - name: main 정의 체크아웃 (기록 스크립트만)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: 검증 App 토큰 (커밋 상태 쓰기만)
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RECORDER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RECORDER_APP_KEY }}
+          permission-statuses: write
+
+      - name: record-review (판정 검사 뒤 review/codex 기록)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERDICT_B64: ${{ needs.judge.outputs.verdict }}
+          # plan job이 계산하지 못했으면 필요한 것으로 보고 error를 남긴다(fail-closed)
+          NEEDED: ${{ needs.plan.outputs.codex }}
+          # plan job이 PR을 정하기 전에 죽었으면 check가 돈 head에 error를 남긴다
+          HEAD_SHA: ${{ needs.plan.outputs.head_sha || github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ "$NEEDED" = "false" ] || NEEDED=true
+          F="$RUNNER_TEMP/verdict.json"
+          printf '%s' "$VERDICT_B64" | base64 -d > "$F" 2>/dev/null || : > "$F"
+          node base/scripts/harness.ts record-review --context review/codex --needed "$NEEDED" \
+            --verdict "$F" --head-sha "$HEAD_SHA" --repo-slug "$REPO" --target-url "$RUN_URL"

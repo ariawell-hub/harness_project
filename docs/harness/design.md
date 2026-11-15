@@ -54,6 +54,7 @@ review_cycle: quarterly
   - v0.7.19 (2026-11-15): `deps-guard` 구현에 맞춰 R17(ADR 확인 방식, OSV, 조회 실패는 error)과 Q14(ISC 허용, 값은 설정 `deps`)를 고침(5.1절, 18절, Issue #53)
   - v0.7.20 (2026-11-15): 필수 체크 출처 전환 순서와 `required-checks` 확인 명령(0.2절), 기계 판정 네 개의 기록 위치와 리뷰 뒤 `risk-gate` 재판정 경로(10.3절). 옛 `plan-gate` job 제거(Issue #53, TD-2 해결)
   - v0.7.21 (2026-11-15): Claude 판정 워크플로(`judge-claude`). 판정은 `check` 워크플로 완료(`workflow_run`, 성공)로 시작하고, 첫 job(비밀 없음)이 위험도와 필요한 검증자를 다시 계산한다. 검증 입력은 base 스크립트가 `pr/.harness-review/`에 쓴다(10.1·10.4절, Issue #54)
+  - v0.7.22 (2026-11-15): Codex 판정 워크플로(`judge-codex`)와 인증 수명주기 구현 위치. 판정·저장 job도 `check` 완료(`workflow_run`)로 시작한다. 사전 측정이 기대와 다르면 판정 없이 실패, `pr/` 밖을 가리킨 셸 명령은 세어 보고만 한다(10.4절, 13.3절, Issue #54)
 
 ### 0.1 전제 조건
 
@@ -880,8 +881,8 @@ pnpm test src/auth/login-guard.spec.ts
 | `check` (빌드·테스트) | `pull_request` (PR 쪽 정의) | 실행한다 | 비밀 없음. 토큰은 `contents: read` |
 | 재현 job | `pull_request_target` (main 정의) | 실행한다(재현 테스트만) | 비밀 없음, 쓰기 권한 없음. 캐시에 쓰는 것은 막을 수 없다고 가정한다(아래 캐시 규칙) |
 | 판정 job: Claude (LLM) | `workflow_run`(`check` 완료, main 정의) | 실행하지 않는다. `base/`(main의 스크립트·프롬프트)만 실행하고 `pr/`는 데이터로 읽기만 | Claude 구독 토큰(`judge-claude` environment)만. 검증 App 키, Codex 인증, GitHub 쓰기 권한은 없음 |
-| 판정 job: Codex (LLM) | `pull_request_target` (main 정의) | 위와 같음 | Codex 인증 파일(`judge-codex` environment)만. 인증 저장용 자격증명, Claude 토큰, 검증 App 키, GitHub 쓰기 권한은 없음 |
-| Codex 인증 저장 job | `pull_request_target` (main 정의). Codex 판정 job 앞(공개키 조회)과 뒤(저장) | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 판정 job이 `judge-codex`의 공개키로 봉인해 넘기고, 이 job은 풀지 않고 그대로 등록한다(13.3절) |
+| 판정 job: Codex (LLM) | `workflow_run`(`check` 완료, main 정의) | 위와 같음 | Codex 인증 파일(`judge-codex` environment)만. 인증 저장용 자격증명, Claude 토큰, 검증 App 키, GitHub 쓰기 권한은 없음 |
+| Codex 인증 저장 job | `workflow_run`(`check` 완료, main 정의). Codex 판정 job 앞(공개키 조회)과 뒤(저장) | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 판정 job이 `judge-codex`의 공개키로 봉인해 넘기고, 이 job은 풀지 않고 그대로 등록한다(13.3절) |
 | 기록 job | `pull_request_target` (main 정의) | 실행하지 않는다 | 검증 App 키(`recorder` environment). LLM 없음 |
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록 |
 
@@ -906,13 +907,14 @@ pnpm test src/auth/login-guard.spec.ts
   - **심볼릭 링크**: PR은 `pr/` 안에 밖을 가리키는 링크를 넣을 수 있다. Q20에서 Claude Code는 파일 링크 읽기를 거부했고, Codex 샌드박스는 해석된 경로 기준으로 거부 영역 읽기를 막았다(macOS). 디렉터리 링크를 검색 도구가 따라가는 경우와 Linux에서 링크를 거쳐 읽는 경우는 모델이 시도하지 않아 확인하지 못했다. 그래서 base 스크립트가 LLM 실행 전에 `pr/`의 심볼릭 링크를 없앤다(예: `core.symlinks=false`로 체크아웃하면 링크가 대상 경로를 담은 일반 파일이 된다).
   - 도구 제한과 샌드박스로 위 범위를 지킬 수 없으면, base 스크립트가 입력을 모두 모아 프롬프트로 넘기고 도구를 끈 채 실행한다. 이것도 안 되면 그 도구를 CI 검증자로 쓰지 않고 제작자가 결정한다. Q20에서는 두 도구 모두 이 대안이 필요하지 않았다.
   - Claude와 Codex 판정은 서로 다른 job에서 자기 인증만 가지고 실행한다. 한쪽이 주입당해도 다른 쪽 인증은 노출되지 않는다.
-- **판정 시작과 입력**: 판정 워크플로(`judge-claude`)는 `check` 워크플로의 완료(`workflow_run`)로 시작하고, `check`가 성공한 같은 리포 PR에서만 돈다(R16, 실패할 커밋에 구독 한도를 쓰지 않는다). `workflow_run`도 main 정의로 돌고 main 전용 environment의 비밀을 받는다. 판정할 PR은 페이로드가 아니라 head SHA로 API를 다시 조회해 정한다.
+- **판정 시작과 입력**: 판정 워크플로(`judge-claude`, `judge-codex`)는 `check` 워크플로의 완료(`workflow_run`)로 시작하고, `check`가 성공한 같은 리포 PR에서만 돈다(R16, 실패할 커밋에 구독 한도를 쓰지 않는다). `workflow_run`도 main 정의로 돌고 main 전용 environment의 비밀을 받는다. 판정할 PR은 페이로드가 아니라 head SHA로 API를 다시 조회해 정한다.
   - 첫 job(`plan`, 비밀 없음)이 base 스크립트로 위험도와 필요한 검증자를 계산한다(`review-plan`). `gates`와 같은 계산(`harness-guard` 신호 포함)이고, 계산하지 못하면 높음으로 본다. 이 검증자가 필요 없으면 판정 job은 건너뛰고 기록 job이 "해당 없음(통과)"을 쓴다. `plan`이 죽었으면 필요한 것으로 보고 `error`를 쓴다.
   - 검증 입력(변경 파일 목록, merge-base 대비 diff, 계획·step 파일 경로와 위험도)은 base 스크립트가 `pr/.harness-review/`에 쓴다. 검증자는 셸이 없고 읽기 범위가 `pr/`뿐이기 때문이다. PR이 넣은 같은 이름의 폴더는 지우고 다시 만든다. diff는 크기 상한에서 줄 단위로 자르고 잘렸다고 적는다. job 사이에 `pr/`를 넘기지 않고, 판정 job이 `plan`이 정한 head SHA를 다시 받아 입력을 다시 만든다.
 - **판정 job 안의 유출 검사**: LLM 단계 뒤에 같은 job에서 LLM 없는 base 스크립트가 판정과 실행 기록(도구 호출 포함) 전체를 검사한다. 인증 값을 원문·조각·흔한 인코딩으로 찾고, `pr/` 밖을 가리킨 도구 호출(경로 문자열이 아니라 실제 경로 기준)·허용 밖 도구·훅·MCP 실행 흔적을 센다. 문제가 없을 때만 `verdict.json`을 낸다.
   - 실행 기록 원문과 값은 출력하지 않고 아티팩트로도 올리지 않는다. 실행 오류는 문구를 비밀을 가려 출력해 원인을 볼 수 있게 한다(Q20에서 오류 문구가 없어 인증 실패 원인을 못 찾은 적이 있다).
   - `claude -p --json-schema`는 판정을 `StructuredOutput` 도구 호출로 낸다. 이 도구는 허용 밖 도구로 세지 않는다.
   - `pr/` 밖을 가리킨 호출은 거부(`is_error`)가 확인된 것만 시도로 세고, 성공했거나 결과를 알 수 없으면 판정 없이 실패한다. 세션 시작 기록(init)의 도구 목록에 허용 밖 도구나 MCP 서버가 있어도 실패한다.
+  - Codex는 셸을 뺄 수 없어 `pr/` 밖을 가리킨 명령을 문자열로만 알 수 있다(검색 패턴의 `/`도 걸린다). 그래서 Codex의 밖 가리킴은 세어 보고만 하고, 읽기 범위는 샌드박스와 사전 측정이 막는다. 셸·메시지 밖의 항목 종류(MCP 호출, 웹 검색, 파일 변경)가 실행 기록에 있으면 실패한다.
   - 인증 실패·사용량 한도 같은 실행 오류는 판정 없이 실패로 끝난다(fail closed). 다른 검증자로 대신하지 않는다(10.1절 검증자 장애 규칙).
 - **기록 job의 검사**: `verdict.json`을 스키마(정해진 값, 길이 제한)로 검사하고, 시크릿 스캔을 통과해야만 기록한다. 스캔은 CI에 있는 토큰 값과의 정확 일치뿐 아니라 흔한 인코딩(base64·hex·URL 인코딩)과 고엔트로피 문자열도 찾는다. 다만 쪼개거나 바꿔 쓴 토큰까지 모두 잡을 수는 없으므로 이 검사는 보조 수단이다. 1차 방어는 판정 job 규칙대로 LLM이 인증 정보를 읽지 못하게 하는 것이다.
 - **재현 job의 한계**: PR 코드를 실행하므로 결과를 조작할 수 있다. 그래서 "재현됨"은 차단 근거로 쓰고, "재현 안 됨"으로 P1을 내릴 때는 검증자가 재현 테스트와 실행 로그를 다시 확인한다.
@@ -1096,6 +1098,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
     - **CI 전용 로그인**: CI용 `auth.json`은 제작자가 임시 `CODEX_HOME`에서 파일 저장 방식(`codex login -c cli_auth_credentials_store=file`)으로 새로 로그인해 만든다. 제작자 로컬 로그인과 토큰 계열이 나뉘어 CI 쪽 갱신이 실패해도 로컬 로그인이 풀리지 않는다. 공식 CI 문서도 `auth.json` 하나를 여러 머신·동시 작업이 공유하지 말라고 한다. 한 줄 JSON으로 시크릿에 넣은 뒤 로컬 사본은 지운다. `codex logout`은 토큰을 폐기할 수 있어 쓰지 않는다.
     - **복원**: 판정 job이 임시 `CODEX_HOME`(`RUNNER_TEMP` 아래, 권한 0600)에 쓰고 비대화(`codex exec --json --ephemeral`)로 실행한다. 이 폴더는 판정 샌드박스의 읽기 거부 목록에 있다(10.4절).
     - **봉인과 재저장**: 실행 뒤 판정 job이 `auth.json`을 `judge-codex` environment의 GitHub 공개키로 봉인해(libsodium sealed box, 시크릿 API 형식) job 출력으로 넘긴다. 저장 job은 풀지 않고 그 암호문을 그대로 등록한다. 공개키는 판정 job 앞의 조회 job(저장 자격증명, LLM 없음)이 가져오고, 저장 job은 공개키 id가 같을 때만 등록한다. 평문은 판정 러너 밖으로 나가지 않고, 풀 수 있는 것은 GitHub뿐이다. 저장용 자격증명은 판정 job이 참조하지 않는 `codex-auth-store` environment에 둔다. 같은 job에 두면 판정 job 안의 프로세스가 저장용 자격증명에도 닿을 수 있기 때문이다. 저장용 자격증명은 Environments 읽기·쓰기 권한만 가진 GitHub App(인증 저장 App, 0.2절)이다.
+    - **구현 위치**: 워크플로 `.github/workflows/judge-codex.yml`(`plan` → `pubkey` → `judge` → `store` → `record`). 복원·스냅숏·설정·봉인은 `scripts/ci/codex-auth.ts`(`harness.ts codex-auth …`), 사전 측정은 `scripts/ci/codex-probe.sh`, 유출 검사는 `scripts/ci/codex-scan.ts`. 봉인에 쓰는 libsodium은 리포 의존성이 아니라 판정 job이 버전을 고정해 설치 스크립트 없이 임시 폴더에 받는다. 출력은 필드 이름과 sha256 앞 8자뿐이다.
     - 봉인·저장은 판정이나 유출 검사가 실패해도 실행한다. 실행 중 갱신된 토큰을 잃으면 다음 실행이 옛 토큰을 써서 CI 로그인이 풀릴 수 있다.
     - **동시 실행 제한**: 동시에 실행하면 토큰 갱신이 충돌할 수 있으므로 Codex 작업은 워크플로 단위 concurrency group(`cancel-in-progress: false`, `queue: max`)으로 하나씩 실행한다. job 단위로 걸면 다음 실행의 판정이 앞 실행의 저장보다 먼저 시작해 옛 인증으로 돌고, 기본 `queue: single`은 기다리던 실행을 새 실행이 취소한다(GitHub 문서). Q20에서 동시에 연 PR 3개가 겹치지 않고 하나씩 돌았다.
     - **갱신**: Q20에서는 실행 중 갱신을 관찰하지 못했다. `last_refresh`를 9일 전으로 바꿔도 access token이 유효하면 Codex는 갱신하지 않았다. 갱신은 access token이 만료된 뒤에 일어나는 것으로 보고(문서 근거), 2단계에서 첫 갱신과 재저장을 확인한다(TD-1). 갱신이 실패하면 판정 없이 실패하고(fail closed), 제작자가 CI 전용 로그인을 다시 만든다.

@@ -474,3 +474,101 @@ test('judge-claude.yml: 허용 목록 도구·설정 무시 인자로 실행하�
     assert.doesNotMatch(b, /\$\{\{/, b);
   }
 });
+
+// ---------- judge-codex.yml 불변식 (10.4절 Codex 샌드박스, 13.3절 인증 저장) ----------
+
+const JUDGE_CODEX = readFileSync(
+  path.join(HARNESS_ROOT, '.github/workflows/judge-codex.yml'),
+  'utf8',
+);
+
+test('judge-codex.yml: check 완료로 시작, 워크플로 단위 직렬화, SHA 고정, 캐시 없음', () => {
+  assert.match(JUDGE_CODEX, /workflow_run:\n\s+workflows: \[check\]\n\s+types: \[completed\]/);
+  assert.doesNotMatch(JUDGE_CODEX, /pull_request_target:|pull_request:/);
+  // concurrency는 워크플로 단위(들여쓰기 없음)에만 둔다
+  assert.match(
+    JUDGE_CODEX,
+    /^concurrency:\n {2}group: codex-auth\n {2}cancel-in-progress: false\n {2}queue: max$/m,
+  );
+  assert.equal([...JUDGE_CODEX.matchAll(/concurrency:/g)].length, 1);
+  const uses = [...JUDGE_CODEX.matchAll(/^\s*(?:- )?uses:\s*(\S+)/gm)].map((m) => m[1]);
+  assert.ok(uses.length >= 10);
+  for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
+  assert.match(JUDGE_CODEX, /^permissions: \{\}$/m);
+  assert.doesNotMatch(JUDGE_CODEX, /cache/i);
+  assert.doesNotMatch(JUDGE_CODEX, /upload-artifact/);
+  const writes = [...JUDGE_CODEX.matchAll(/^\s*(\S+): write\s*$/gm)].map((m) => m[1]);
+  assert.deepEqual(writes.sort(), ['permission-environments', 'permission-statuses']);
+  for (const b of runBlocks(JUDGE_CODEX)) assert.doesNotMatch(b, /\$\{\{/, b);
+});
+
+test('judge-codex.yml: environment는 job마다 하나, 비밀은 자기 job에만', () => {
+  const j = jobs(JUDGE_CODEX);
+  assert.deepEqual([...j.keys()], ['plan', 'pubkey', 'judge', 'store', 'record']);
+  const envOf = (n: string) => /^ {4}environment: (\S+)$/m.exec(j.get(n)!)?.[1] ?? null;
+  assert.deepEqual(['plan', 'pubkey', 'judge', 'store', 'record'].map(envOf), [
+    null,
+    'codex-auth-store',
+    'judge-codex',
+    'codex-auth-store',
+    'recorder',
+  ]);
+  const secretsOf = (n: string) => [
+    ...new Set([...j.get(n)!.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1])),
+  ];
+  assert.deepEqual(secretsOf('plan'), []);
+  assert.deepEqual(secretsOf('pubkey'), ['STORE_APP_KEY']);
+  assert.deepEqual(secretsOf('judge'), ['CODEX_AUTH_JSON']);
+  assert.deepEqual(secretsOf('store'), ['STORE_APP_KEY']);
+  assert.deepEqual(secretsOf('record'), ['RECORDER_APP_KEY']);
+  // 판정 job은 GitHub 쓰기·App 토큰이 없다
+  assert.doesNotMatch(j.get('judge')!, /create-github-app-token|GH_TOKEN|: write/);
+  // 공개키 조회는 읽기, 저장만 쓰기
+  assert.match(j.get('pubkey')!, /permission-environments: read/);
+  assert.match(j.get('store')!, /permission-environments: write/);
+  // 조회·저장·기록 job은 LLM도 PR 트리도 없다. 조회·저장은 체크아웃 자체가 없다
+  for (const n of ['pubkey', 'store']) {
+    assert.doesNotMatch(j.get(n)!, /actions\/checkout|codex exec|npm install|path: pr\b/, n);
+  }
+  assert.doesNotMatch(j.get('record')!, /path: pr\b|codex exec/);
+});
+
+test('judge-codex.yml: 설정 → 사전 측정 → 판정 → 유출 검사 → 봉인 순서, 봉인·저장은 실패해도 실행', () => {
+  const judge = jobs(JUDGE_CODEX).get('judge')!;
+  const order = [
+    'codex-auth restore',
+    'codex-auth snapshot',
+    'codex-auth config',
+    'codex-probe.sh',
+    'codex exec',
+    'codex-scan',
+    'codex-auth seal',
+  ].map((k) => judge.indexOf(k));
+  assert.ok(
+    order.every((i) => i >= 0),
+    order.join(','),
+  );
+  assert.deepEqual(
+    [...order].sort((a, b) => a - b),
+    order,
+  );
+  for (const flag of ['--json', '--ephemeral', '--ignore-rules', '--output-schema'])
+    assert.ok(judge.includes(flag), flag);
+  assert.doesNotMatch(judge, /read-only|danger|--sandbox|codex logout|bypass/);
+  assert.match(judge, /@openai\/codex@\d+\.\d+\.\d+\b/);
+  assert.match(judge, /libsodium-wrappers@\d+\.\d+\.\d+ /);
+  assert.match(judge, /--ignore-scripts/);
+  assert.match(judge, /core\.symlinks false/);
+  assert.match(judge, /base\/scripts\/cross-review\/prompt\.md/);
+  // 봉인 단계
+  const seal = judge.slice(judge.lastIndexOf('- name', judge.indexOf('codex-auth seal')));
+  assert.match(seal, /if: always\(\) && needs\.pubkey\.outputs\.key != ''/);
+  const store = jobs(JUDGE_CODEX).get('store')!;
+  assert.match(store, /if: always\(\) && needs\.judge\.outputs\.sealed != ''/);
+  // 저장 job은 공개키 id를 다시 확인한 뒤 암호문을 그대로 등록한다
+  assert.ok(store.indexOf('public-key') < store.indexOf('-X PUT'));
+  assert.match(store, /encrypted_value="\$SEALED"/);
+  // pr/ 아래의 스크립트를 실행하지 않는다
+  for (const b of runBlocks(JUDGE_CODEX))
+    assert.doesNotMatch(b, /node (\.\/)?pr\/|(bash|sh) (\.\/)?pr\//, b);
+});
