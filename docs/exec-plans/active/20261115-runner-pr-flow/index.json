@@ -4,8 +4,9 @@
     {
       "step": 0,
       "name": "pr-state",
-      "status": "pending",
-      "summary": "`lib/github.ts`에 `commitChecks(sha)`(커밋 상태 전체 기록 + check run, 출처 포함, 최신순)·`getPR`·`PullRequest.headSha`/`autoMerge`, 가짜 GitHub에 `setCheck`. `runner/pr-state.ts`의 `requiredStates`·`classifyPr`·`describeVerdict`(순수 함수), `lib/git.ts`의 `isBehind`, `commands/pr-state.ts`의 `prState`·`stepCompletedOf`·`behindOf`(명령 `pr-state`). `pickNext`·runner 루프는 그대로다"
+      "status": "completed",
+      "summary": "`lib/github.ts`에 `commitChecks(sha)`(커밋 상태 전체 기록 + check run, 출처 포함, 최신순)·`getPR`·`PullRequest.headSha`/`autoMerge`, 가짜 GitHub에 `setCheck`. `runner/pr-state.ts`의 `requiredStates`·`classifyPr`·`describeVerdict`(순수 함수), `lib/git.ts`의 `isBehind`, `commands/pr-state.ts`의 `prState`·`stepCompletedOf`·`behindOf`(명령 `pr-state`). `pickNext`·runner 루프는 그대로다",
+      "completed_at": "2026-11-15T21:17:29+09:00"
     },
     {
       "step": 1,
