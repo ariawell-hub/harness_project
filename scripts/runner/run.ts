@@ -57,6 +57,7 @@ import { resolveAgentCommand, runSession, type AgentTool, type SessionResult } f
 import {
   BOT_ISSUE_ACCEPT,
   allowedAccounts,
+  clearPrWait,
   issueTrust,
   pickNext,
   readConflictState,
@@ -1049,7 +1050,8 @@ function doArmMerge(ctx: Ctx, l: LocalPlan, pr: PullRequest): 'ok' | 'env' {
 
 /**
  * 매 바퀴 내 열린 PR의 기록을 맞춘다. 상태 파일은 runner만 쓴다(`start`·`next` 명령은 읽기만).
- * - CI 대기가 시작된 head와 시각(`pr-wait.json`). head가 바뀌면 새로 센다
+ * - CI 대기가 시작된 head와 시각(`pr-wait.json`). head가 바뀌면 새로 센다. 대기가 아닌 상태가 되면
+ *   알리지 않은 기록은 지운다(같은 head가 다시 대기할 때 옛 시각으로 세지 않는다)
  * - 통과한 필수 체크의 실패 키(`pr:<context>`)는 0으로 되돌린다(9.2절)
  */
 function trackPrs(ctx: Ctx, locals: LocalPlan[]): void {
@@ -1057,8 +1059,10 @@ function trackPrs(ctx: Ctx, locals: LocalPlan[]): void {
     if (!l.prState || l.pr?.state !== 'open' || !sameWorker(ctx, l)) continue;
     try {
       const waiting = l.prState.kind === 'wait-ci' || l.prState.kind === 'infra-error';
-      if (waiting && l.pr.headSha && readPrWait(l.worktree)?.head !== l.pr.headSha)
+      const w = readPrWait(l.worktree);
+      if (waiting && l.pr.headSha && w?.head !== l.pr.headSha)
         writePrWait(l.worktree, { head: l.pr.headSha, since: nowIso(), reported: false });
+      else if (!waiting && w && !w.reported) clearPrWait(l.worktree);
       const info = repoInfo(l.worktree);
       const fails = keyFailures(readAttempts(info), l.id);
       for (const r of l.required ?? []) {

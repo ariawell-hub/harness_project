@@ -87,6 +87,8 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15 step1: 테스트 먼저. `node --test scripts/test/runner-pr.test.ts` 종료 코드 1(`next.ts`에 `readPrWait` export 없음). 구현 뒤 9개 통과. AC 테스트(`next`·`runner-pr`·`runner`·`start`·`pr-state`) 종료 코드 0(101개 통과).
 - 2026-11-15 step1: 작업 목록에 없던 것 세 가지를 더했다(의사결정 로그). 알림으로 붙인 `needs-human` 떼기(`settleNotices`), 알림에 대한 제작자 답 처리(`doAnswered`가 완료된 step을 되돌리지 않는다), 통과한 체크의 `pr:<context>` 키 초기화(`trackPrs`). `pickNext`는 읽은 worktree 목록(`locals`)을 함께 돌려주고 runner가 그것으로 대기 기록을 쓴다.
 - 2026-11-15T22:07:35+09:00 step1 재작업: PR #93 원장 F2(Codex P1) 수정
+- 2026-11-15 step1: PR #93 1차 판정. `review/claude` 승인(P2 1, 원장 F1 미룸), `review/codex` 수정 요청(P1 1, 원장 F2, 재현 job "재현됨"): step이 끝나지 않은 PR에서 `deps-guard`·`harness-guard` 실패를 보지 않고 `ready`로 분류한다. `pr-state`·`next` 명령이 실제 PR에서 `분류: review`, "사람 대기 1건 (열린 차단 지적: PR #93 …)"을 냈다(수용 기준 11: 수정 요청 상태의 실제 응답).
+- 2026-11-15 step1: F2 반영. 테스트 먼저: `node --test scripts/test/pr-state.test.ts scripts/test/runner-pr.test.ts` 종료 코드 1(새 테스트 3개 실패: 미완료 step의 `deps-guard`·`harness-guard`, 로컬에서만 되돌린 step, 대기 기록 지우기). 고친 뒤 AC 테스트 종료 코드 0(104개 통과). F2를 보다가 같은 뿌리의 결함을 찾았다: step 완료 여부를 worktree에서 읽어, 수정 세션이 실패해 step을 되돌린 커밋이 로컬에만 있으면 그 PR의 `plan-gate`·기계 판정 실패를 다시 고치지 않았다. PR head의 계획에서 읽게 했다(`stepCompletedAt`). Claude의 미룬 지적 F1(같은 head의 대기 시각이 비대기 구간에도 남는다)도 함께 고쳤다.
 
 ## 의사결정 로그
 
@@ -107,6 +109,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 결정: "GitHub 반영 지연" 판단은 PR head를 worktree의 `HEAD`가 아니라 push한 커밋(원격 추적 브랜치 `<remote>/<브랜치>`)과 비교한다. / 이유: step1 작업 1은 `HEAD`와 비교한다고 적었지만, 수정 세션이 판정에 실패하면 push하지 않은 로컬 커밋이 남는다. 그때 `HEAD`와 비교하면 PR의 `check` 실패를 영영 CI 대기로 보고 다시 고치지 않는다. 의도(push한 커밋이 PR에 아직 안 보이는 경우만 기다린다)는 원격 추적 브랜치 비교로 맞는다. 뒤처짐도 PR head 기준으로 본다. / 버린 대안: 글자 그대로 `HEAD`와 비교.
 - 결정: 승인 요청·오래된 대기 알림으로 붙인 `needs-human`은 runner가 뗀다(PR이 병합됐거나 `ready`가 되면, 할 일이 없는 바퀴에서). 제작자가 그 Issue에 답하면 라벨만 떼고 계획·step 상태는 그대로 둔다. / 이유: 떼지 않으면 남은 step이 있는 Issue에 라벨이 계속 남아 `start`가 매번 답변 대기로 보고한다. 기존 답변 처리는 step을 `in_progress`로 되돌리는데, 완료된 step의 열린 PR에서 그러면 `plan-gate`가 실패한다. / 버린 대안: 라벨 없이 멘션만(절차서 5절이 승인 요청에 `needs-human`을 쓴다).
 - 결정: 오래된 대기를 알린 PR은 CI 대기가 아니라 사람 대기로 센다. / 이유: 알린 뒤에도 CI 대기로 세면 다른 할 일이 없을 때 runner가 끝없이 기다린다. 사람 대기로 세면 runner가 멈추고, 다시 시작하면 상태를 다시 읽는다.
+- 결정: step이 끝나지 않은 PR에서 보지 않는 실패는 `plan-gate`와 `risk-gate`뿐이다. `deps-guard`·`harness-guard` 실패는 `fix`다. step 완료 여부는 PR head의 계획에서 읽는다. / 이유: `plan-gate`는 "step이 completed가 아니다"로 실패하는 것이 예상되지만, 다른 기계 판정 실패는 step 완료와 무관하게 고쳐야 병합된다(PR #93 원장 F2). step0 지시서의 규칙 5는 "그 밖은 ready"라고 적었는데 그 문장이 이 경우를 빠뜨렸다. step0은 이미 병합된 step이라 지시서는 고치지 않고(고치면 계획을 다시 검증받아야 한다) 구현과 설계서 10.3절을 맞췄다. / 버린 대안: 지시서 문장대로 두기.
 
 ## 발견 사항
 
@@ -115,6 +118,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - `gh pr view`의 `autoMergeRequest`와 `headRefOid`로 자동 병합 여부와 PR head를 읽을 수 있다. 병합된 PR의 `mergeStateStatus`는 `UNKNOWN`이다. → 처리: 해당 없음
 - 기존 답변 처리(`doAnswered`)는 답을 받으면 step을 `in_progress`로 되돌린다. 완료된 step의 열린 PR에 달린 알림(승인 요청, 오래된 대기)에 제작자가 답하면 step이 되돌려져 `plan-gate`가 실패할 수 있었다. 알림에 대한 답은 상태를 바꾸지 않게 했다. → 처리: [설계서 4.5절 "내 PR 다루기"](../../../harness/design.md)
 - 다른 세션(`start`)이 병합된 worktree를 먼저 지우면 runner가 알림 라벨을 떼지 못한다(표시가 worktree 상태 폴더에 있다). 마지막 step이면 Issue가 닫혀 문제가 없고, 남은 step이 있으면 라벨이 남는다. → 처리: TD-34
+- PR #93에서 Codex 검증자가 낸 F2(P1)와 그 뿌리: PR 분류가 worktree의 step 상태를 봤다. runner는 수정 세션을 띄우기 전에 step을 로컬에서 되돌리므로, 세션이 실패하면 worktree와 PR head의 step 상태가 달라진다. PR에 대한 판단은 PR head의 내용으로 해야 한다. → 처리: [설계서 10.3절 PR 분류](../../../harness/design.md)
 
 ## 열린 질문
 

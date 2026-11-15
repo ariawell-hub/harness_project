@@ -296,7 +296,7 @@ review_cycle: quarterly
   - 뒤처진 PR은 필수 체크가 모두 success일 때(위험도 높음은 `risk-gate`를 뺀 나머지)만 갱신한다. 승인 이어받기(10.3절)는 앞선 head의 판정이 success일 때만 되므로, 수정 요청 상태나 판정 중에 갱신하면 변경이 없어도 검증자 판정이 한 번 더 돈다. 충돌(`mergeStateStatus`가 DIRTY)은 `pull_request` 워크플로가 돌지 않아 아무것도 진행되지 않으므로 바로 갱신한다.
   - 필수 체크가 모두 통과했는데 자동 병합이 꺼져 있으면 다시 켠다.
   - push한 커밋이 PR head에 아직 반영되지 않았으면(원격 추적 브랜치와 PR head가 다르다, Q20) 옛 head의 결과로 판단하지 않고 기다린다.
-  - 같은 head에서 CI 대기나 판정 없음(`error`)이 `limits.ciStallHours`(기본 24시간, 9.1절 "검증자 장애 24시간")를 넘으면 Issue에 `needs-human`과 기다리는 체크·실행 링크를 한 번 알린다. 기다리기 시작한 head와 시각은 worktree 하네스 상태(`pr-wait.json`)에 두고 runner만 쓴다. runner는 판정 워크플로를 다시 실행하지 않는다.
+  - 같은 head에서 CI 대기나 판정 없음(`error`)이 `limits.ciStallHours`(기본 24시간, 9.1절 "검증자 장애 24시간")를 넘으면 Issue에 `needs-human`과 기다리는 체크·실행 링크를 한 번 알린다. 기다리기 시작한 head와 시각은 worktree 하네스 상태(`pr-wait.json`)에 두고 runner만 쓴다. 대기가 아닌 상태(수정 요청, 승인 대기 등)가 되면 알리지 않은 기록은 지워, 같은 head가 다시 대기할 때 새로 센다. runner는 판정 워크플로를 다시 실행하지 않는다.
   - 승인 요청·대기 알림으로 붙인 `needs-human`은 그 PR이 병합됐거나 조치할 것이 없어지면 runner가 뗀다(할 일이 없는 바퀴에서, 병합된 worktree를 지우기 전에). 제작자가 그 Issue에 답하면 라벨만 떼고 완료된 step의 상태는 바꾸지 않는다.
 - 세션이 시간 제한(Q19)을 넘기면 runner가 세션을 끝내고 실패 1회로 기록한다. runner 자신은 죽지 않는다.
 - 계획 작성 세션이 "열린 질문"에 `### 질문:`(9.1절 형식)을 남기면 runner는 그 계획을 `blocked`로 커밋·push하고 Issue에 `needs-human` 라벨과 제작자 멘션으로 질문 전문을 올린다. 같은 질문은 다시 올리지 않는다. 제작자 답을 받으면 계획을 `draft`로 되돌리고 답을 넣어 계획 작성 세션을 다시 띄운다(Issue #33). step 세션이 남긴 새 질문도 runner가 AC 판정 전에 보고 같은 방법으로 올린다. 그 step은 실패로 세지 않고, 답을 받으면 계획을 `active`, step을 `in_progress`로 되돌려 답을 넣은 step 세션을 다시 띄운다(Issue #43).
@@ -904,7 +904,7 @@ pnpm test src/auth/login-guard.spec.ts
 - merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
 - **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다.
   - **구현**(`scripts/runner/pr-state.ts`, `scripts/lib/github.ts`의 `commitChecks`): 커밋의 커밋 상태 전체 기록과 check run을 출처와 함께 읽고, 설정 `ci.requiredChecks`의 context마다 기대 출처가 쓴 가장 최근 결과를 고른다. `recorder`는 작성자가 `ci.recorderBot`인 커밋 상태, `actions`는 GitHub Actions App의 check run이다. 다른 계정·App이 쓴 같은 이름의 결과는 없는 것(`missing`)으로 보고, 나중에 쓰였어도 기대 출처의 결과를 가리지 않는다. context별 최신 하나만 주는 API(체크 요약, combined status)는 쓰지 않는다.
-  - PR 분류(`classifyPr`): 충돌 → `check` 실패(바로 수정) → 진행 중·아직 없음(CI 대기) → 기계 판정 실패(수정) → 검증자 수정 요청·열린 차단 지적(지적 대응) → 판정 없음(`error`, 대기) → 뒤처짐(갱신) → 제작자 승인 대기 → 조치 없음 순으로 처음 맞는 것이다. 뒤처짐은 `mergeStateStatus`가 아니라 로컬 git(`origin/main`이 PR head의 조상인가)으로 본다. step이 끝나지 않은 PR(계획 검증 중)은 `plan-gate`·`risk-gate` 실패와 뒤처짐을 보지 않는다.
+  - PR 분류(`classifyPr`): 충돌 → `check` 실패(바로 수정) → 진행 중·아직 없음(CI 대기) → 기계 판정 실패(수정) → 검증자 수정 요청·열린 차단 지적(지적 대응) → 판정 없음(`error`, 대기) → 뒤처짐(갱신) → 제작자 승인 대기 → 조치 없음 순으로 처음 맞는 것이다. 뒤처짐은 `mergeStateStatus`가 아니라 로컬 git(`origin/main`이 PR head의 조상인가)으로 본다. step이 끝나지 않은 PR(계획 검증 중)은 `plan-gate`·`risk-gate` 실패와 뒤처짐을 보지 않는다. `deps-guard`·`harness-guard` 실패는 step 완료와 무관하게 고친다. step 완료 여부는 worktree가 아니라 PR head의 계획에서 읽는다(수정하다 실패해 step을 되돌린 커밋이 로컬에만 있어도 PR head는 완료된 step의 PR이다).
   - `node scripts/harness.ts pr-state [--pr <번호>]`가 필수 체크별 출처·상태·설명과 분류를 보여 준다(읽기만). runner의 다음 할 일 고르기도 이 분류를 쓴다(4.5절 "내 PR 다루기").
 
 **절차**

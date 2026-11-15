@@ -73,6 +73,7 @@ export type PrVerdict =
   | { kind: 'ready' };
 
 const RISK_CONTEXT = 'risk-gate';
+const PLAN_CONTEXT = 'plan-gate';
 const isReview = (context: string) => context.startsWith('review/') || context === LEDGER_CONTEXT;
 
 export function classifyPr(i: {
@@ -95,14 +96,21 @@ export function classifyPr(i: {
   const failed = i.required.filter((r) => r.state === 'failure');
   const reviewFailed = failed.some((r) => isReview(r.context));
   const errors = i.required.filter((r) => r.state === 'error');
+  // step이 끝나지 않은 PR에서 plan-gate 실패는 예상된 것이다("step이 completed가 아니다").
+  // deps-guard·harness-guard 실패는 step 완료와 무관하게 고쳐야 한다(PR #93 F2)
+  const gateFailed = failed.filter(
+    (r) =>
+      !isReview(r.context) &&
+      r.context !== RISK_CONTEXT &&
+      (i.stepCompleted || r.context !== PLAN_CONTEXT),
+  );
+  if (gateFailed.length) return { kind: 'fix', failing: gateFailed };
   if (!i.stepCompleted) {
-    // step이 끝나지 않은 PR: plan-gate(step 미완료)·risk-gate 실패와 뒤처짐은 지금 볼 일이 아니다
+    // step이 끝나지 않은 PR: risk-gate 실패와 뒤처짐은 지금 볼 일이 아니다
     if (reviewFailed) return { kind: 'review' };
     if (errors.length) return { kind: 'infra-error', failing: errors };
     return { kind: 'ready' };
   }
-  const gateFailed = failed.filter((r) => !isReview(r.context) && r.context !== RISK_CONTEXT);
-  if (gateFailed.length) return { kind: 'fix', failing: gateFailed };
   if (reviewFailed) return { kind: 'review' };
   if (errors.length) return { kind: 'infra-error', failing: errors };
   if (i.behind) return { kind: 'behind' };

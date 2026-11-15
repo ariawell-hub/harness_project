@@ -8,8 +8,9 @@
 //      그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절).
 //      만든 뒤 허용 계정이 아닌 계정이 제목·본문을 고쳤으면 그 뒤의 제작자 승인이 있어야 한다(TD-19)
 //   6. 없으면 idle (CI·사람 대기 수 포함)
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { stepCompletedAt } from '../commands/pr-state.ts';
 import { listRemoteClaims } from '../commands/task.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import type {
@@ -100,6 +101,10 @@ export function writePrWait(worktree: string, w: PrWait): void {
   writeFileSync(prWaitFile(worktree), JSON.stringify(w, null, 2) + '\n');
 }
 
+export function clearPrWait(worktree: string): void {
+  rmSync(prWaitFile(worktree), { force: true });
+}
+
 /**
  * main 병합 충돌 상태(TD-27). worktree 하네스 상태 폴더의 `conflict.json`(git이 추적하지 않는다).
  * 충돌 중단은 계획 파일을 바꾸지 않으므로(열린 PR의 plan-gate 유지) 대기 여부를 여기에 둔다.
@@ -186,14 +191,16 @@ export interface NextEnv {
 
 /**
  * 열린 내 PR의 필수 체크를 읽어 분류한다. push한 커밋이 PR head에 아직 반영되지 않았으면(GitHub 반영 지연, Q20)
- * 옛 head의 결과로 판단하지 않고 기다린다. 조회가 실패해도 기다린다(실패한 체크가 있다고 단정하지 않는다)
+ * 옛 head의 결과로 판단하지 않고 기다린다. 조회가 실패해도 기다린다(실패한 체크가 있다고 단정하지 않는다).
+ * step 완료 여부는 PR head의 계획에서 읽는다(`localCompleted`는 head에서 읽지 못할 때만 쓴다):
+ * 수정하다 실패해 step을 되돌린 커밋이 로컬에만 있어도 PR head는 완료된 step의 PR이다
  */
 function inspectPr(
   env: NextEnv,
   worktree: string,
   branch: string,
   pr: PullRequest,
-  stepCompleted: boolean,
+  localCompleted: boolean,
 ): { prState: PrVerdict; required: RequiredState[] } {
   const { remote, defaultBranch } = env.cfg.github;
   try {
@@ -202,6 +209,7 @@ function inspectPr(
       return { prState: { kind: 'wait-ci', waiting: ['PR head 반영'] }, required: [] };
     const required = requiredStates(env.gh.commitChecks(pr.headSha), env.cfg.ci);
     const behind = isBehind(worktree, remote, defaultBranch, pr.headSha);
+    const stepCompleted = stepCompletedAt(worktree, pr.headSha, branch) ?? localCompleted;
     return { prState: classifyPr({ pr, required, behind, stepCompleted }), required };
   } catch (e) {
     return {

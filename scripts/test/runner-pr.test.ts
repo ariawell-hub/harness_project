@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { reopenStep } from '../commands/task.ts';
 import { readAttempts } from '../lib/attempts.ts';
 import { readApprovalMarker } from '../lib/approval.ts';
 import { loadConfig } from '../lib/config.ts';
@@ -149,6 +150,47 @@ test('runner: check(Actions) 실패는 수정 세션을 띄우고 실패 키 pr:
     assert.match(fix[0].prompt, /## CI 실패[\s\S]*check/);
     assert.ok(readAttempts(repoInfo(pr.worktree)).some((a) => a.key === 'pr:check' && !a.ok));
     assert.notEqual(pr.head(), before, '고친 뒤 새 head를 push한다');
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: step 완료 여부는 PR head에서 읽는다. 수정하다 실패해 로컬 step만 되돌려진 PR의 plan-gate 실패를 계속 고친다', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    setAll(t, pr.head(), { 'plan-gate': 'failure' });
+    assert.equal(pick(t.fx.root).task.kind, 'fix-pr');
+    // 수정 세션이 판정에 실패한 뒤의 상태: step을 되돌린 커밋이 로컬에만 있다(push하지 않았다)
+    reopenStep(pr.worktree, 'CI 체크 실패: plan-gate');
+    const p = pick(t.fx.root);
+    assert.equal(
+      p.task.kind,
+      'fix-pr',
+      'PR head의 step은 completed다: plan-gate 실패를 숨기지 않는다',
+    );
+    assert.deepEqual(p.task.kind === 'fix-pr' ? p.task.failing.map((f) => f.context) : [], [
+      'plan-gate',
+    ]);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 대기가 아닌 상태가 되면 그 head의 대기 기록을 지워, 다시 대기할 때 새로 센다', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    writePrWait(pr.worktree, {
+      head: pr.head(),
+      since: new Date(Date.now() - 25 * 3_600_000).toISOString(),
+      reported: false,
+    });
+    // 판정이 끝나 수정 요청 상태가 됐다(대기가 아니다)
+    setAll(t, pr.head(), { 'review/claude': 'failure', 'review-ledger': 'failure' });
+    await run(t.fx.root);
+    assert.equal(readPrWait(pr.worktree), null, '옛 대기 시각을 남기지 않는다');
+    assert.equal(t.raw().issues[0].comments.filter((c) => c.body.includes('CI 대기가')).length, 0);
   } finally {
     t.fx.cleanup();
   }
