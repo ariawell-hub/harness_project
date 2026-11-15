@@ -37,7 +37,7 @@ export function authTokenValues(text: string): string[] {
  * (구조화 출력이 받지 않을 수 있다). 제약은 프롬프트로 알리고 validateVerdict가 검사한다.
  */
 export function codexOutputSchema(schema: unknown): unknown {
-  const DROP = ['maxLength', 'minLength', 'maxItems', 'minItems', 'minimum', 'maximum'];
+  const DROP = ['maxLength', 'minLength', 'maxItems', 'minItems', 'minimum', 'maximum', 'pattern'];
   if (Array.isArray(schema)) return schema.map(codexOutputSchema);
   if (!schema || typeof schema !== 'object') return schema;
   return Object.fromEntries(

@@ -8,7 +8,7 @@
 
 ## 작업
 
-1. 판정 스키마에 `resolutions`(선택, 최대 60개)를 더한다: `{ id: "F<번호>", status: "fixed" | "rejected" | "open", note: string(300자 이내) }`. `scripts/cross-review/verdict.schema.json`과 `validateVerdict`(`scripts/ci/verdict.ts`)를 함께 고치고, 없으면 빈 배열로 읽는다. Codex용 스키마 변환(`codexOutputSchema`)이 새 필드에서도 통하는지 테스트한다.
+1. 판정 스키마에 `resolutions`(최대 60개)를 더한다. 스키마에서는 필수다(Codex 구조화 출력은 모든 속성이 `required`여야 한다). 형식: `{ id: "F<번호>", status: "fixed" | "rejected" | "open", note: string(300자 이내) }`. `scripts/cross-review/verdict.schema.json`과 `validateVerdict`(`scripts/ci/verdict.ts`)를 함께 고치고, 없으면 빈 배열로 읽는다. Codex용 스키마 변환(`codexOutputSchema`)이 새 필드에서도 통하는지 테스트한다.
 2. `scripts/ci/ledger.ts`(새 파일, 순수 함수. 네트워크·git 호출 없음):
    - `interface Ledger { version: 1; promptBase: string; rounds: Round[]; findings: Entry[]; ciFailures: CiFailure[] }`. `Entry`는 id, severity, reviewer(`claude` | `codex`), file, line, title, repro(`'' | 'reproduced' | 'not-reproduced' | 'error'`), status(`open` | `fixed` | `rejected` | `deferred`), note, round, rejectedBy(검증자 목록)를 담는다.
    - `emptyLedger(promptBase)`, `parseLedger(body): Ledger | null`(숨은 JSON만 읽고, 형식이 다르면 null), `renderLedger(l): string`(표 + 숨은 JSON. 표 셀의 `|`·줄바꿈·`<`·`@`를 무해하게 바꾸고, JSON 안의 `-->`를 막는다).

@@ -8,6 +8,8 @@ import { reviewersFor } from '../ci/review-plan.ts';
 import type { StatusPayload } from '../ci/results.ts';
 import {
   LIMITS,
+  RESOLUTION_ID_RE,
+  RESOLUTION_STATUSES,
   SEVERITIES,
   highEntropy,
   secretNeedles,
@@ -72,12 +74,52 @@ test('validateVerdict: 모르는 키·값·길이·건수를 거부한다', () =
     assert.equal(validateVerdict(raw).ok, false, JSON.stringify(raw)?.slice(0, 80));
 });
 
+test('validateVerdict: resolutions는 없으면 빈 배열, 있으면 ID·상태·길이를 검사한다', () => {
+  const none = validateVerdict(verdict());
+  assert.ok(none.ok);
+  assert.deepEqual(none.value.resolutions, []);
+  const some = validateVerdict(
+    verdict({ resolutions: [{ id: 'F12', status: 'fixed', note: 'a1b2c3d에서 고침' }] }),
+  );
+  assert.ok(some.ok);
+  assert.deepEqual(some.value.resolutions, [
+    { id: 'F12', status: 'fixed', note: 'a1b2c3d에서 고침' },
+  ]);
+  const r = (over: Record<string, unknown>) => ({ id: 'F1', status: 'open', note: '', ...over });
+  const bad: unknown[] = [
+    verdict({ resolutions: 'none' }),
+    verdict({ resolutions: [r({ id: 'f1' })] }),
+    verdict({ resolutions: [r({ id: 'F0' })] }),
+    verdict({ resolutions: [r({ id: 'F1 ' })] }),
+    verdict({ resolutions: [r({ status: 'deferred' })] }),
+    verdict({ resolutions: [r({ note: 'a'.repeat(LIMITS.note + 1) })] }),
+    verdict({ resolutions: [r({ extra: 1 })] }),
+    verdict({ resolutions: Array.from({ length: LIMITS.resolutions + 1 }, () => r({})) }),
+  ];
+  for (const raw of bad)
+    assert.equal(validateVerdict(raw).ok, false, JSON.stringify(raw)?.slice(0, 120));
+});
+
 test('스키마 파일과 코드 규칙이 같다', () => {
   const s = JSON.parse(
     readFileSync(path.join(HARNESS_ROOT, 'scripts/cross-review/verdict.schema.json'), 'utf8'),
   );
   assert.equal(s.additionalProperties, false);
-  assert.deepEqual([...s.required].sort(), ['findings', 'risk', 'summary', 'verdict']);
+  // Codex 구조화 출력은 모든 속성이 required여야 한다. 검사기는 resolutions가 없어도 받는다
+  assert.deepEqual([...s.required].sort(), [
+    'findings',
+    'resolutions',
+    'risk',
+    'summary',
+    'verdict',
+  ]);
+  const r = s.properties.resolutions;
+  assert.equal(r.maxItems, LIMITS.resolutions);
+  assert.equal(r.items.additionalProperties, false);
+  assert.deepEqual([...r.items.required].sort(), ['id', 'note', 'status']);
+  assert.deepEqual(r.items.properties.status.enum, [...RESOLUTION_STATUSES]);
+  assert.equal(r.items.properties.note.maxLength, LIMITS.note);
+  assert.equal(r.items.properties.id.pattern, RESOLUTION_ID_RE.source);
   assert.deepEqual(s.properties.verdict.enum, ['approve', 'request_changes']);
   assert.deepEqual(s.properties.risk.enum, ['low', 'normal', 'high']);
   assert.equal(s.properties.summary.maxLength, LIMITS.summary);

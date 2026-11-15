@@ -58,7 +58,8 @@ test('깨끗한 실행: 판정을 낸다', () => {
     result(),
   ]);
   assert.ok(r.ok, reason(r));
-  assert.deepEqual(r.ok && r.verdict, okVerdict);
+  // 검사기가 없는 resolutions를 빈 배열로 채운다
+  assert.deepEqual(r.ok && r.verdict, { ...okVerdict, resolutions: [] });
 });
 
 test('pr/ 안의 절대 경로는 안쪽이다', () => {

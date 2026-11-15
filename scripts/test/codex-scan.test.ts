@@ -35,7 +35,8 @@ const reason = (r: ReturnType<typeof scan>) => (r.ok ? '' : r.reason);
 test('깨끗한 실행: 판정을 낸다', () => {
   const r = scan([started, cmd("/bin/bash -lc 'cat src/a.js'"), msg('{}'), done]);
   assert.ok(r.ok, reason(r));
-  assert.deepEqual(r.ok && r.verdict, okVerdict);
+  // 검사기가 없는 resolutions를 빈 배열로 채운다
+  assert.deepEqual(r.ok && r.verdict, { ...okVerdict, resolutions: [] });
   assert.ok(r.report.some((l) => /outside_attempts=0/.test(l)));
 });
 
@@ -126,7 +127,11 @@ test('codexOutputSchema: 공통 스키마에서 길이·개수 제약만 뺀다'
   );
   const s = codexOutputSchema(base) as typeof base;
   const text = JSON.stringify(s);
-  assert.doesNotMatch(text, /maxLength|maxItems|minimum/);
+  assert.doesNotMatch(text, /maxLength|maxItems|minimum|pattern/);
+  assert.deepEqual(
+    s.properties.resolutions.items.required,
+    base.properties.resolutions.items.required,
+  );
   assert.deepEqual(s.required, base.required);
   assert.equal(s.additionalProperties, false);
   assert.deepEqual(s.properties.findings.items.required, base.properties.findings.items.required);

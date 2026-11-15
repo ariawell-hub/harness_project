@@ -11,7 +11,20 @@ export const LIMITS = {
   title: 200,
   evidence: 1500,
   suggestion: 1000,
+  resolutions: 60,
+  note: 300,
 } as const;
+
+/** 원장 지적 ID(10.2절 (4)) */
+export const RESOLUTION_ID_RE = /^F[1-9][0-9]{0,3}$/;
+export const RESOLUTION_STATUSES = ['fixed', 'rejected', 'open'] as const;
+
+/** 검증자가 원장의 지적 하나에 내는 판정(2라운드부터) */
+export interface Resolution {
+  id: string;
+  status: (typeof RESOLUTION_STATUSES)[number];
+  note: string;
+}
 
 export interface Finding {
   severity: Severity;
@@ -27,19 +40,22 @@ export interface Verdict {
   risk: 'low' | 'normal' | 'high';
   summary: string;
   findings: Finding[];
+  resolutions: Resolution[];
 }
 
 type Validated = { ok: true; value: Verdict } | { ok: false; reason: string };
 
-const onlyKeys = (o: object, keys: readonly string[]) =>
-  Object.keys(o).every((k) => keys.includes(k)) && keys.every((k) => k in o);
+const onlyKeys = (o: object, keys: readonly string[], optional: readonly string[] = []) =>
+  Object.keys(o).every((k) => keys.includes(k) || optional.includes(k)) &&
+  keys.every((k) => k in o);
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
 
 export function validateVerdict(raw: unknown): Validated {
   const no = (reason: string): Validated => ({ ok: false, reason });
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return no('판정이 객체가 아니다');
   const v = raw as Record<string, unknown>;
-  if (!onlyKeys(v, ['verdict', 'risk', 'summary', 'findings'])) return no('판정의 키가 다르다');
+  if (!onlyKeys(v, ['verdict', 'risk', 'summary', 'findings'], ['resolutions']))
+    return no('판정의 키가 다르다');
   if (v.verdict !== 'approve' && v.verdict !== 'request_changes') return no('verdict 값이 다르다');
   if (v.risk !== 'low' && v.risk !== 'normal' && v.risk !== 'high') return no('risk 값이 다르다');
   if (!str(v.summary, LIMITS.summary)) return no('summary가 문자열이 아니거나 너무 길다');
@@ -67,9 +83,26 @@ export function validateVerdict(raw: unknown): Validated {
       suggestion: f.suggestion as string,
     });
   }
+  const resolutions: Resolution[] = [];
+  const rawRes = v.resolutions ?? [];
+  if (!Array.isArray(rawRes) || rawRes.length > LIMITS.resolutions)
+    return no('resolutions가 배열이 아니거나 너무 많다');
+  for (const [i, x] of (rawRes as unknown[]).entries()) {
+    if (!x || typeof x !== 'object' || Array.isArray(x))
+      return no(`resolutions[${i}]가 객체가 아니다`);
+    const r = x as Record<string, unknown>;
+    if (!onlyKeys(r, ['id', 'status', 'note'])) return no(`resolutions[${i}]의 키가 다르다`);
+    if (typeof r.id !== 'string' || !RESOLUTION_ID_RE.test(r.id))
+      return no(`resolutions[${i}].id가 F<번호> 꼴이 아니다`);
+    if (!(RESOLUTION_STATUSES as readonly unknown[]).includes(r.status))
+      return no(`resolutions[${i}].status 값이 다르다`);
+    if (!str(r.note, LIMITS.note))
+      return no(`resolutions[${i}].note가 문자열이 아니거나 너무 길다`);
+    resolutions.push({ id: r.id, status: r.status as Resolution['status'], note: r.note });
+  }
   return {
     ok: true,
-    value: { verdict: v.verdict, risk: v.risk, summary: v.summary, findings },
+    value: { verdict: v.verdict, risk: v.risk, summary: v.summary, findings, resolutions },
   };
 }
 

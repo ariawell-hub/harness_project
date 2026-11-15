@@ -421,3 +421,12 @@ test('planCarry: 위험도 높음·봇 설정 없음은 API를 부르지 않고,
   assert.deepEqual([failed.patch, failed.claude, failed.codex], [patch, '', '']);
   assert.match(failed.notes.join('\n'), /판정하지 못했다.*HTTP 500$/);
 });
+
+test('planCarry: patch-id를 재지 못하면 patch가 비고 이어받지 않는다', async () => {
+  const { o, calls } = carryRepo();
+  const notRepo = tmp('norepo');
+  const r = await planCarry({ ...o, root: notRepo });
+  assert.deepEqual([r.patch, r.claude, r.codex], ['', '', '']);
+  assert.equal(calls.length, 0);
+  assert.match(r.notes.join('\n'), /판정하지 못했다/);
+});
