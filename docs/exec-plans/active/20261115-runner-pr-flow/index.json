@@ -18,9 +18,8 @@
     {
       "step": 2,
       "name": "plan-review",
-      "status": "completed",
-      "summary": "`lib/github.ts` `prComments(n)`. `runner/ledger-read.ts` `readPrLedger(gh, cfg, pr)`·`planApproved(ledger, hash)`. `next.ts`: `planReviewHash`·`inPlanReview`·`PLAN_APPROVAL_WAIT`, `LocalPlan.planReview`·`prStepCompleted`, 작업 `plan-push`, 대기 판단 `waitOrStall`·`act`(pickFrom 안). 계획 검증 중인 PR의 `review` 분류는 아직 2번에서 사람 대기로 센다(`reviewPrs`). `run.ts`: `doPlanPush`·`notePlanCheckFailure`, `doStep` 끝의 초안 해제. 가짜 에이전트 계획 동작 `stray`. 테스트 도우미는 `scripts/test/runner-plan-review.test.ts`의 `setup`·`planPr`·`planChecks`·`ledgerBody`",
-      "completed_at": "2026-11-15T22:23:07+09:00"
+      "status": "in_progress",
+      "summary": "`lib/github.ts` `prComments(n)`. `runner/ledger-read.ts` `readPrLedger(gh, cfg, pr)`·`planApproved(ledger, hash)`. `next.ts`: `planReviewHash`·`inPlanReview`·`PLAN_APPROVAL_WAIT`, `LocalPlan.planReview`·`prStepCompleted`, 작업 `plan-push`, 대기 판단 `waitOrStall`·`act`(pickFrom 안). 계획 검증 중인 PR의 `review` 분류는 아직 2번에서 사람 대기로 센다(`reviewPrs`). `run.ts`: `doPlanPush`·`notePlanCheckFailure`, `doStep` 끝의 초안 해제. 가짜 에이전트 계획 동작 `stray`. 테스트 도우미는 `scripts/test/runner-plan-review.test.ts`의 `setup`·`planPr`·`planChecks`·`ledgerBody`"
     },
     {
       "step": 3,

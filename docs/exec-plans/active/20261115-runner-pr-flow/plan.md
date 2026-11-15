@@ -92,6 +92,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15 step1: PR #93 2차 판정에서 두 검증자 승인(지적 없음), 원장 F2 `fixed`. 병합(`0518dc1`). `pr-state`가 수정 push 뒤 `wait-ci` → `ready`, `mergeStateStatus=CLEAN`을 냈다.
 - 2026-11-15 step2: 테스트 먼저. `node --test scripts/test/runner-plan-review.test.ts` 종료 코드 1(`plan-push` 작업, `planReviewHash` 없음). 구현 뒤 9개 통과. AC 테스트(`runner-plan-review`·`runner-pr`·`runner`·`next`) 종료 코드 0(77개 통과).
 - 2026-11-15 step2: 실제 PR의 원장 읽기 확인(수용 기준 11). `readPrLedger`를 실제 `gh`로 불러 PR #92는 댓글 1개, `F1:deferred`, `planReview 4215e28f88b8 claude+codex`, `planApproved` true, PR #93은 `F1:deferred, F2:fixed`, 계획 승인 없음(계획이 main과 같은 해시라 계획 검증을 받지 않은 PR)을 읽었다. 보지 못한 것: 댓글이 100개를 넘는 PR(페이지 넘김), runner가 실제로 연 초안 PR.
+- 2026-11-15T22:33:44+09:00 step2 재작업: PR #94 1차 판정 반영(F3 반박, 미룬 지적 수정)
 
 ## 의사결정 로그
 
