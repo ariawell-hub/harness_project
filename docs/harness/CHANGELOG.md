@@ -46,6 +46,8 @@ review_cycle: on-change
 - 설계서 v0.7.23 · 승인 결속(Issue #54 step3): `scripts/ci/binding.ts`. 승인 상태에 `patch:<id 40자>`를 적고, main 병합 갱신 뒤 patch가 같고 위험도 낮음·보통이며 main 변경과 PR 파일이 겹치지 않고 PR 파일이 바이트 단위로 같으면 판정 job 없이 `이어받음 <sha>`를 기록한다. 근거는 검증 App 봇(`ci.recorderBot`, 새 설정)이 쓴 가장 최근 판정뿐이다. 두 판정 워크플로의 `plan` job에 `statuses: read`, `review-plan --pr-number --base-sha`, `record-review --patch --carried-from`. 기록 job이 검사를 통과한 판정의 지적을 로그에 낸다. `codex-auth restore`가 줄바꿈이 섞인 붙여넣기를 읽고, 실패하면 값 없이 모양만 알린다. `ci.requiredChecks`에 `review/claude`·`review/codex`를 더했다(등록은 step4에서 요청. 그때까지 `required-checks`는 미등록으로 보고한다).
 - 교차 검증 확인·등록(Issue #54 step4): `review-plan`의 이어받기 판정을 `planCarry`(`scripts/ci/binding.ts`)로 옮겨 테스트. `init` 안내의 필수 체크 목록에 `review/claude`·`review/codex`. 설계서 v0.7.25: 필수 체크 목록에 `review/*`(0.2절), 실제 확인 결과(10.3절, 13.3절). 절차서 5절 필수 체크 문장, TD-1 비고.
 - 설계서 v0.7.24 · `judge-codex` 설치 위치(Issue #70): Codex를 `/usr/local`에 설치한다. `setup-node`의 전역 위치는 판정 권한 프로필의 읽기 범위 밖이라 샌드박스가 Codex 실행 파일을 찾지 못했다(`bwrap: execvp … No such file or directory`). 권한 프로필과 거부 목록은 바꾸지 않았다.
+- `docs/SECURITY.md`(Issue #73): Codex CI 인증 등록 절차(임시 `CODEX_HOME` 로그인, `auth.json` 파일 내용을 파일에서 직접 복사)와 흔한 실수·로그 증상. 첫 등록 때 로그인 주소가 들어가 판정이 실패했다.
+- 절차서 4절(Issue #72): push 전 `check` 결과는 종료 코드로 확인한다. `check | tail && git push` 꼴은 실패를 가린다(나쁜 예·좋은 예).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
