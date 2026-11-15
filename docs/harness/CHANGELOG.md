@@ -40,6 +40,7 @@ review_cycle: on-change
 - 설계서 v0.7.19 · `deps-guard`(Issue #53 step3): `scripts/gates/deps-guard.ts`, `scripts/lib/lockfile.ts`. lockfile(`deps.lockfiles`)에 새로 생긴 `name@version`마다 레지스트리 실존, 게시 후 `deps.minReleaseAgeDays`(14)일, 라이선스 허용 목록(`deps.licenses`: MIT·Apache-2.0·BSD-2-Clause·BSD-3-Clause·0BSD·ISC, SPDX `OR`는 하나·`AND`는 모두), OSV 취약점을 확인한다. 새 직접 의존성은 같은 PR의 ADR이 이름을 언급해야 한다. lockfile이 안 바뀌면 네트워크 없이 통과, 조회 실패는 `error`. 새 설정 `deps`(변경은 `harness-guard` 신호). `runGates`는 async.
 - 설계서 v0.7.20 · 필수 체크 출처 전환(Issue #53 step4, TD-2 해결): 옛 `.github/workflows/plan-gate.yml` 삭제(같은 검사를 `gates`의 판정 job이 돌리고 검증 App이 기록한다). 새 명령 `harness.ts required-checks`와 설정 `ci.requiredChecks`·`ci.recorderAppId`: main에 등록된 필수 체크와 출처(`check` = GitHub Actions, 나머지 = 검증 App)를 봇 토큰으로 읽어 비교한다. `GitHubPort.branchInfo`.
 - 교차 검증 판정 기반(Issue #54 step0): 검증 프롬프트 `scripts/cross-review/prompt.md`와 판정 스키마 `verdict.schema.json`(verdict·risk·summary·findings). `scripts/ci/verdict.ts`(형식 검사, 비밀 원문·base64·hex·URL 인코딩·16자 조각 스캔, 고엔트로피 문자열, 승인이고 P0·P1이 없을 때만 통과), `review-plan.ts`(낮음은 다른 도구 1명, 보통·높음은 둘 다), `record.ts`의 `recordReview`와 `harness.ts record-review`(`review/claude`·`review/codex`, 필요 없는 검증자는 "해당 없음" 통과, 판정이 없거나 깨지거나 비밀이 보이면 error). 워크플로는 아직 없다.
+- `AGENTS.md` 작업 루프(Issue #64, 제작자 지시): 제작자 승인을 요청한 PR에는 커밋을 더 올리지 않는다. 꼭 올려야 하면 push 전에 먼저 알린다. PR #62·#63에서 승인 뒤 push로 승인이 철회되어 다시 승인해야 했다.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
