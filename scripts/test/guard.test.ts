@@ -483,3 +483,63 @@ test('guard 프로세스: 입력이 깨지면 안전을 위해 차단한다(fail
   assert.equal(r.code, 2);
   assert.match(r.stderr, /fail-closed/);
 });
+
+// ---------- 검사 출력 가림·실패 뒤 진행 (Issue #78 step1, TD-29) ----------
+
+const CHECK = 'node scripts/harness.ts check';
+const SEQ_BLOCK: string[] = [
+  `${CHECK} 2>&1 | tail -1 && git push origin feat/x`,
+  `${CHECK} | tail -3`,
+  `${CHECK} |& tee check.log`,
+  `node scripts/harness.ts test | grep -c ok`,
+  `cd /work/wt && ${CHECK} 2>&1 | tail -1`,
+  `${CHECK}; node scripts/harness.ts complete-step`,
+  `${CHECK}\ngh pr create --draft --title x --body y`,
+  `${CHECK} || true; git push origin feat/x`,
+  `${CHECK} && echo ok; git push origin feat/x`,
+  `${CHECK} & git push origin feat/x`,
+  `${CHECK}; gh pr ready 12`,
+  `${CHECK}; node scripts/harness.ts pr-ready`,
+  `(cd /work/wt && ${CHECK}); git -C /work/wt push origin feat/x`,
+  `HARNESS_WORKER=mac node /work/wt/scripts/harness.ts check ; git push origin feat/x`,
+  // set -e가 있어도 파이프는 실패를 가린다
+  `set -e\n${CHECK} | tail -1\ngit push origin feat/x`,
+];
+const SEQ_ALLOW: string[] = [
+  `${CHECK} && node scripts/harness.ts complete-step && git push origin feat/x`,
+  `${CHECK} > check.log 2>&1 && git push origin feat/x`,
+  `cd /work/wt && ${CHECK} > /tmp/c.log 2>&1 && echo OK; tail -3 /tmp/c.log`,
+  `set -o pipefail; ${CHECK} | tail -5`,
+  `set -eo pipefail\n${CHECK} | tail -5\ngit push origin feat/x`,
+  `set -o pipefail; ${CHECK} 2>&1 | tail -5 && git push origin feat/x`,
+  `set -e\n${CHECK}\ngit push origin feat/x`,
+  `(cd /work/wt && ${CHECK}) && git -C /work/wt push origin feat/x`,
+  'git push origin feat/x',
+  'ls; git push origin feat/x',
+  'git log --oneline | head -3',
+  'node scripts/harness.ts doc-lint | tail -3',
+  `${CHECK}; tail -3 check.log`,
+  'node scripts/harness.ts complete-step; git push origin feat/x',
+  `echo "${CHECK} | tail -1"`,
+];
+
+test('검사 출력을 파이프로 가리거나 실패를 보지 않고 완료 처리·push로 이어지면 R4로 막는다', () => {
+  for (const cmd of SEQ_BLOCK) {
+    const p = bash(cmd);
+    assert.ok(p, `차단되어야 한다: ${cmd}`);
+    assert.match(p.rule, /^R4/, `${cmd} → ${p.rule}`);
+    assert.match(p.how, /check\.log|pipefail|&&/, cmd);
+  }
+});
+
+test('검사 결과를 종료 코드로 잇는 명령과 검사 명령이 없는 명령은 허용한다', () => {
+  for (const cmd of SEQ_ALLOW) assert.equal(bash(cmd), null, `허용되어야 한다: ${cmd}`);
+});
+
+test('검사 순서 규칙은 POSIX 방언에만 적용한다', () => {
+  const cmd = `${CHECK}; git push origin feat/x`;
+  assert.equal(
+    evaluate({ kind: 'bash', command: cmd, cwd: '/w', dialects: ['powershell'] }, ctx()),
+    null,
+  );
+});

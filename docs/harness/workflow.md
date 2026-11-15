@@ -84,7 +84,7 @@ node scripts/harness.ts complete-step     # 계획 전용 커밋
 node scripts/harness.ts plan-gate         # PR 모드 확인
 ```
 
-- **`check` 결과는 종료 코드로 확인한다.** 출력을 줄이려고 파이프를 붙이면 `&&`가 실패를 보지 못한다. 파이프의 종료 코드는 마지막 명령의 것이기 때문이다. 실패한 채 push·`complete-step`이 이어진 사례가 있다(Issue #72, TD-29).
+- **`check` 결과는 종료 코드로 확인한다.** 출력을 줄이려고 파이프를 붙이면 `&&`가 실패를 보지 못한다. 파이프의 종료 코드는 마지막 명령의 것이기 때문이다. 실패한 채 push·`complete-step`이 이어진 사례가 있다(Issue #72, TD-29). L1 훅이 이 꼴을 R4로 막는다: 검사 명령 바로 뒤의 파이프(앞에 `set -o pipefail`이 있으면 허용), 검사 명령과 그 뒤 `complete-step`·`git push`·`gh pr create` 사이의 `;`·줄바꿈·`||`(앞에 `set -e`가 있으면 허용).
 
   ```bash
   # 나쁜 예: check가 실패해도 push된다
