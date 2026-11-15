@@ -36,6 +36,9 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 | large  | 여러 모듈, 아키텍처 변경 | 위와 같고 step이 여러 개                                             |
 
 - 위험도(`risk`)는 규모와 별개다: low(문서·소규모), normal(일반 코드·lockfile), high(보안·인증·마이그레이션·데이터 스크립트).
+  - high는 이 기준에 해당하는 작업에만 붙인다. 계획의 `risk`가 high면 그 계획의 모든 PR에 제작자 승인이 필요하므로, 기준에 해당하는 일과 아닌 일은 계획(Issue)을 나눈다.
+  - 검사 약화·권한 변경이 없는 후속 수정(오타, 설치 경로, 문서)은 normal로 올린다(제작자 결정, 2026-11-15). 약화·완화가 섞이면 `harness-guard`가 높음으로 올린다.
+  - 애매하면 high다. 승인을 줄이려고 기준에 해당하는 작업을 낮춰 적지 않는다.
 - 진행 로그를 갱신할 때 `node scripts/harness.ts claim-heartbeat --issue <N>`로 선점이 살아 있음을 알린다(24시간 무응답이면 만료).
 - **여러 머신(Mac·Windows)에서 일하면 작업자 이름을 머신마다 고유하게 정한다**: 대화 세션은 환경 변수 `HARNESS_WORKER`(예: `mac-session`), runner는 `--worker`(예: `win-runner-1`). 계획의 `owner`가 이 이름이라, 같은 이름이면 서로의 계획을 자기 것으로 본다.
 - Windows는 네이티브로 작업한다(WSL 아님). Git for Windows(Git Bash)가 필요하고, 하네스는 셸 명령을 Git Bash로 실행한다([ADR-0005](../decisions/ADR-0005-windows-native.md)).
@@ -105,6 +108,16 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`다. 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약은 출처를 보지 않으니, 병합 가능 여부는 `mergeStateStatus`로 본다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
+- **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 초안을 해제하며 승인을 요청한다.
+  - `complete-step` 커밋까지 push했다.
+  - 의사결정 로그·발견 사항 등 이 PR에 넣을 기록을 다 넣었다. 승인 요청 뒤에 생긴 기록은 다음 PR에 넣는다.
+  - `origin/main`을 병합해 최신이고 `check`가 통과했다.
+  - 이 PR에 반영해야 하는 제작자 작업(App ID 같은 설정값)을 먼저 받아 반영했다.
+- **제작자 작업 요청**: 제작자만 할 수 있는 일(시크릿·environment 등록, 필수 체크 등록, App 설정)은 한 번에 모아 요청한다. 항목마다 아래를 적는다.
+  - 순서: 무엇을 먼저 해야 하는지, 승인·병합보다 앞인지 뒤인지.
+  - 넣을 값의 형식: 예) "`auth.json` 파일 내용 전체. `{`로 시작한다. 로그인 URL이 아니다."
+  - 확인 방법: 등록 뒤 봇이 무엇으로 확인하는지(이름 조회, `required-checks` 등). 봇은 시크릿 값을 볼 수 없다.
+  - 절차 문서 링크([SECURITY.md](../SECURITY.md) 등).
 - **보호 경로를 바꾼 PR**(`harness-guard`): `docs/harness/CHANGELOG.md`에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
 - **교차 검증**(`review/claude`, `review/codex`): `check`가 통과하면 판정 워크플로(`judge-claude`, `judge-codex`)가 main의 정의로 돈다. 위험도 낮음은 작성 도구와 다른 검증자 1명, 보통·높음은 둘 다 판정하고, 돌지 않은 쪽은 "해당 없음(통과)"으로 기록된다. 승인이고 P0·P1 지적이 없어야 success다.
   - 지적 본문은 판정 실행의 `record` job 로그(`record-review:` 줄)에서 본다. 실행은 PR head 커밋 상태의 링크로 찾는다(`workflow_run` 실행은 브랜치가 `main`으로 표시된다). P0·P1을 고쳐 push하면 `check` 통과 뒤 다시 판정한다.
@@ -194,6 +207,8 @@ git -C <worktree> push origin <브랜치>
 - runner의 계획 작성 세션이나 step 세션이 "열린 질문"에 남긴 `### 질문:`은 runner가 Issue에 `needs-human` + 제작자 멘션으로 올리고, 답을 받을 때까지 그 계획을 멈춘다. 답을 받으면 답을 넣어 계획을 다시 작성하거나(계획 작성 세션) 그 step을 다시 띄운다(step 세션). step 세션의 질문은 실패로 세지 않는다. 그래서 추천안으로 진행할 판단은 `### 질문:`으로 적지 않고 의사결정 로그에 남긴다.
 - 답은 **제작자 계정의 댓글**이나 대화 중인 제작자의 답만 인정한다.
 - 기다리는 동안 막히지 않은 일은 계속한다.
+- **대기 상태 보고**: 멈추거나 기다릴 때는 세 가지를 알린다. 무엇을 기다리는지(예: PR #N의 `risk-gate` 승인), 누가 풀어야 하는지(봇·제작자·CI), 그동안 무엇을 하는지. 제작자 차례가 아닌 대기(CI 진행 중, main과 충돌)는 봇이 이어서 처리하고 멈추지 않는다.
+- 추천안이 있는 질문은 하지 않는다. 물을 때는 위 "반드시 묻는다"의 어느 항목인지 적는다.
 
 ## 8. 반박 형식 (2단계 교차 검증부터)
 

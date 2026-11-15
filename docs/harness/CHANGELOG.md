@@ -47,6 +47,7 @@ review_cycle: on-change
 - 설계서 v0.7.24 · `judge-codex` 설치 위치(Issue #70): Codex를 `/usr/local`에 설치한다. `setup-node`의 전역 위치는 판정 권한 프로필의 읽기 범위 밖이라 샌드박스가 Codex 실행 파일을 찾지 못했다(`bwrap: execvp … No such file or directory`). 권한 프로필과 거부 목록은 바꾸지 않았다.
 - `docs/SECURITY.md`(Issue #73): Codex CI 인증 등록 절차(임시 `CODEX_HOME` 로그인, `auth.json` 파일 내용을 파일에서 직접 복사)와 흔한 실수·로그 증상. 첫 등록 때 로그인 주소가 들어가 판정이 실패했다.
 - 절차서 4절(Issue #72): push 전 `check` 결과는 종료 코드로 확인한다. `check | tail && git push` 꼴은 실패를 가린다(나쁜 예·좋은 예).
+- 반복 문제 방지 규칙(Issue #78 step0): 승인 요청 전 조건(초안으로 올리고 끝난 뒤 한 번만 요청), 제작자 작업을 모아 요청하는 형식, 위험도 high를 붙이는 범위(기준은 그대로), 대기 상태 보고, 명령 작성 규칙(절차서 1·5·7절, AGENTS.md). 문서만 바꾸고 검사·권한은 그대로다.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
