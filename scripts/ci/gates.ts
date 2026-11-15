@@ -3,6 +3,7 @@
 // 설정(cfg)은 반드시 main 쪽에서 읽는다. PR이 판정 기준을 함께 바꿀 수 있기 때문이다.
 import type { HarnessConfig } from '../lib/config.ts';
 import { formatProblem } from '../lib/util.ts';
+import { harnessGuard } from '../gates/harness-guard.ts';
 import { planGate } from '../gates/plan-gate.ts';
 import { riskGate, type Review, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
 import { GATE_CONTEXTS, type GateResult, type GateResults } from './results.ts';
@@ -19,6 +20,8 @@ export interface RunGatesOptions {
   headSha: string;
   /** PR 리뷰(제작자 승인 확인용). 조회하지 못했으면 null */
   reviews?: Review[] | null;
+  /** PR 본문(보호 경로 체크리스트 확인용). 읽지 못했으면 null */
+  prBody?: string | null;
 }
 
 function firstLine(e: unknown): string {
@@ -62,6 +65,22 @@ export function runGates(o: RunGatesOptions): GateResults {
   let risk: Risk | undefined;
   const byContext: Record<(typeof GATE_CONTEXTS)[number], () => GateResult> = {
     'plan-gate': () => guarded('plan-gate', () => planGateResult(o)),
+    'harness-guard': () => {
+      const g = guarded('harness-guard', () => {
+        const r = harnessGuard({
+          root: o.root,
+          base: o.base,
+          cfg: o.cfg,
+          prBody: o.prBody ?? null,
+        });
+        signals.push(...r.signals);
+        return r.result;
+      });
+      // 검사가 죽어 신호를 알 수 없으면 위험도를 높음으로 본다(fail-closed)
+      if (g.state === 'error' && !signals.length)
+        signals.push({ risk: 'high', reason: 'harness-guard가 판정하지 못했다' });
+      return g;
+    },
     'risk-gate': () =>
       guarded('risk-gate', () => {
         const r = riskGate({ ...o, signals, reviews: o.reviews ?? null });

@@ -80,6 +80,7 @@ jobs:
           OUT="$RUNNER_TEMP/gates.json"
           node ../base/scripts/harness.ts gates --repo . --config-root ../base \
             --base "$BASE" --head-ref "$HEAD_REF" --reviews "$REVIEWS" \
+            --pr-body "$RUNNER_TEMP/pr-body.md" \
             --out "$OUT" --summary "$GITHUB_STEP_SUMMARY"
           echo "results=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
 

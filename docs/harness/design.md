@@ -50,6 +50,7 @@ review_cycle: quarterly
   - v0.7.15 (2026-11-12): step 세션이 "열린 질문"에 `### 질문:`을 남기면 runner가 판정 전에 계획을 멈추고 Issue에 `needs-human` + 제작자 멘션으로 올린다. 답을 받으면 답을 넣어 그 step을 다시 띄운다(4.5절, 9.1절, Issue #43, TD-24 해결)
   - v0.7.16 (2026-11-14): Q20 시험 결과 반영, 조건부 통과(18절 Q20, 19절, 결과 `lab/q20/results/`). E3 유지. 없는 environment 참조는 새 environment가 생겨 돎·`pull_request_target`의 main은 실행 생성 시점의 main 끝·네트워크는 job 단위로 막을 수 없음(10.4절), PR 트리의 도구 설정 무시·Codex 권한 프로필 거부 목록과 `pr/` 조상 금지·`pr/`의 심볼릭 링크 제거·판정 job 안 유출 검사(10.4절), 체크 요약 API는 출처를 보지 않음·merge queue 불가 확정·push 직후 PR head 반영 지연(10.3절), PR 워크플로의 `statuses: write`·App 화면 이름(0.2절), Codex CI 전용 로그인·공개키 봉인 재저장·워크플로 단위 동시 실행 제한·갱신 미관찰과 fail closed, Claude 토큰 한 줄 입력(13.3절), 인증 저장 자격증명을 GitHub App으로(14.2절, Issue #12)
   - v0.7.17 (2026-11-14): 로드맵 2단계 착수(Issue #53~#57). 기계 판정(`plan-gate` 등)은 `gates` 워크플로의 판정 job 하나가 모아 내고 기록 job이 검증 App으로 커밋 상태를 쓴다(10.4절). `pull_request_target` 체크는 도입 PR에서 돌지 않으므로 다음 PR에서 확인한 뒤 등록한다(10.4절 부트스트랩, Issue #53)
+  - v0.7.18 (2026-11-15): `harness-guard`가 탐지한 검사 약화·권한 완화·environment 밖 참조는 표시 + 위험도 높음(제작자 head 승인)으로 처리한다. `CHANGELOG`·체크리스트 누락과 캐시 사용은 실패(10.4절, Issue #53, TD-10 해결)
 
 ### 0.1 전제 조건
 
@@ -915,7 +916,7 @@ pnpm test src/auth/login-guard.spec.ts
   - 하네스 로직: `scripts/`, `.github/`, `.claude/`, `.codex/`, 린트·테스트 설정, `CODEOWNERS`, `.gitignore`, `.gitattributes`, `docs/harness/`
   - 로컬에서 실행되는 파일(제작자·외주 개발자 머신에서도 실행됨): `.mcp.json`, git hook 폴더, `.devcontainer/`, `.vscode/`, `Makefile`·`justfile` 등 표준 명령 정의, `package.json`의 `scripts` 항목, 패키지 매니저 설정
   - 규범 문서(문서가 곧 프롬프트, 14.6절): `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `docs/core-beliefs.md`, `docs/SECURITY.md`, 계획 템플릿, 검증 체크리스트·프롬프트
-- **샌드박스·권한 완화 탐지**: `harness-guard`가 LLM 판단 없이 규칙으로 탐지한다. 대상은 Codex `sandbox_mode = "danger-full-access"`·`approval_policy` 완화, Claude Code `defaultMode: "bypassPermissions"`·`--dangerously-skip-permissions`·`enableAllProjectMcpServers`, 무인 권한 프로필(4.5절)보다 넓히는 `permissions.allow` 추가, 훅 삭제·비활성화, `.gitignore`의 `.env` 항목 삭제다. 탐지되면 PR에 표시한다.
+- **샌드박스·권한 완화 탐지**: `harness-guard`가 LLM 판단 없이 규칙으로 탐지한다. 대상은 Codex `sandbox_mode = "danger-full-access"`·`approval_policy` 완화, Claude Code `defaultMode: "bypassPermissions"`·`--dangerously-skip-permissions`·`enableAllProjectMcpServers`, 무인 권한 프로필(4.5절)보다 넓히는 `permissions.allow` 추가, 훅 삭제·비활성화, `.gitignore`의 `.env` 항목 삭제다. 탐지되면 PR에 표시한다. 표시된 PR은 `risk-gate`가 위험도를 "높음"으로 올려 제작자의 head 승인이 있어야 병합된다(제작자 결정 2026-11-14, Issue #53). 검사 약화 흔적(워크플로·job 삭제, `harness.config.json`의 표준 명령·보호 경로·위험도 표·`stage` 등 판정 관련 키 변경, 워크플로의 새 `write` 권한)과 정해 둔 environment 밖 참조도 같은 방식으로 처리한다. `CHANGELOG`·PR 본문 체크리스트 누락과 워크플로 캐시 사용은 작성자가 고칠 수 있으므로 `harness-guard` 실패다.
 - **구축 단계(현재)**: 하네스를 만드는 동안 매번 승인하지 않도록 **보호 경로도 자동 병합한다**(사용자 결정). 대신 아래로 보완한다.
   - `harness-guard`를 main의 정의로 실행한다. 체크리스트, `CHANGELOG`, 필수 체크 이름·단계 삭제 같은 검사 약화 흔적, 위 완화 설정을 확인한다.
   - 하네스 자체 테스트(12.4절)를 통과해야 한다. 이 요구는 자체 테스트가 생기는 로드맵 2단계부터 켠다.
