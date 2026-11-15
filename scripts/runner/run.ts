@@ -40,7 +40,7 @@ import {
   type OpenQuestion,
   type PlanRef,
 } from '../lib/plan.ts';
-import type { Entry } from '../ci/ledger.ts';
+import { cell, type Entry, type Ledger } from '../ci/ledger.ts';
 import { log, nowIso, warn } from '../lib/util.ts';
 import { runCheck } from '../commands/check.ts';
 import {
@@ -75,6 +75,7 @@ import {
   type Pick,
 } from './next.ts';
 import { readPrLedger } from './ledger-read.ts';
+import { requiredStates } from './pr-state.ts';
 import {
   conflictPrompt,
   planningPrompt,
@@ -84,18 +85,27 @@ import {
 } from './prompt.ts';
 import {
   commitSubject,
+  deadlockRebuttals,
+  deadlocked,
   failedResponses,
+  findingHead,
   findingLine,
   lastRoundFindings,
+  loggedFor,
   markCounted,
+  markEscalated,
   maxFindingId,
   openBlocking,
+  parseReviewLog,
   readReviewState,
+  rebuttalComment,
   reviewerJudgedResponse,
   reviewerKey,
   reviewerOfContext,
+  sessionRebuttal,
   settledResponses,
   writeReviewState,
+  type LoggedFinding,
 } from './review.ts';
 
 export interface RunnerOptions {
@@ -1149,7 +1159,7 @@ const REPRO_TEXT: Record<string, string> = {
   error: '실행 못 함',
 };
 
-const toPromptFinding = (e: Entry): ReviewFinding => ({
+const toPromptFinding = (e: Entry, logged: LoggedFinding | null): ReviewFinding => ({
   id: e.id,
   severity: e.severity,
   reviewer: e.reviewer,
@@ -1157,7 +1167,50 @@ const toPromptFinding = (e: Entry): ReviewFinding => ({
   line: e.line,
   title: e.title,
   repro: REPRO_TEXT[e.repro] ?? '—',
+  logged: logged && { evidence: logged.evidence, suggestion: logged.suggestion },
 });
+
+/**
+ * 지적의 근거·제안을 판정 실행 로그에서 읽는 함수를 만든다(10.1절: 원장에는 위치와 제목만 있다).
+ * 그 지적이 등록된 판정의 head에서 `review/<검증자>` 상태(작성자가 검증 App 봇인 것만, `requiredStates`와 같은 규칙)의
+ * 링크를 얻어 그 실행의 로그를 읽고, 위치와 제목이 같은 지적을 찾는다. 어느 단계든 실패하면 null이다(근거 없이 진행한다).
+ * 같은 커밋의 체크와 같은 실행의 로그는 한 번만 읽는다(이 함수를 만든 doReview 한 번 동안)
+ */
+function evidenceReader(ctx: Ctx, ledger: Ledger): (e: Entry) => LoggedFinding | null {
+  const urls = new Map<string, string | null>();
+  const logs = new Map<string, LoggedFinding[]>();
+  return (e) => {
+    const head = findingHead(ledger, e);
+    if (!head) return null;
+    const at = `${e.reviewer}\n${head}`;
+    if (!urls.has(at)) {
+      let url: string | null = null;
+      try {
+        const [status] = requiredStates(ctx.gh.commitChecks(head), {
+          requiredChecks: [{ context: `review/${e.reviewer}`, source: 'recorder' }],
+          recorderBot: ctx.cfg.ci.recorderBot,
+        });
+        url = status?.targetUrl || null;
+      } catch (err) {
+        warn(`판정 실행 링크를 읽지 못했다(${e.id}): ${(err as Error).message}`);
+      }
+      urls.set(at, url);
+    }
+    const url = urls.get(at);
+    if (!url) return null;
+    if (!logs.has(url)) {
+      let found: LoggedFinding[] = [];
+      try {
+        const text = ctx.gh.runLog(url);
+        if (text !== null) found = parseReviewLog(text);
+      } catch (err) {
+        warn(`판정 실행 로그를 읽지 못했다(${e.id}): ${(err as Error).message}`);
+      }
+      logs.set(url, found);
+    }
+    return loggedFor(logs.get(url) ?? [], e);
+  };
+}
 
 /** 계획 검증 단계의 판정: 계획 구조(plan-gate 계획 모드)와 계획 전용 변경. 통과하면 null, 아니면 이유 */
 function judgePlanOnly(ctx: Ctx, l: LocalPlan): string | null {
@@ -1184,6 +1237,11 @@ function judgePlanOnly(ctx: Ctx, l: LocalPlan): string | null {
  * - 열린 차단 지적마다 세션 하나(10.2절 (6)). 세션 뒤 runner가 직접 판정한다(code: AC와 check, plan: 계획 구조와 계획 전용 변경)
  * - 한 라운드의 대응은 모아서 한 번만 push한다(push마다 check와 두 검증자 판정이 돈다)
  * - 차단 지적 없이 수정을 요청한 검증자가 있으면 그 검증자가 마지막 판정에서 낸 지적을 한 세션에 넘긴다
+ * - 반박(절차서 8절): 세션이 아무것도 바꾸지 않고 형식·근거가 맞는 반박 문단을 냈으면 그 지적은 반박으로 대응한 것이다.
+ *   라운드의 반박은 push 전에 PR 댓글 하나로 단다(본문은 검사를 통과한 세 줄 문단뿐이고 코드 블록 안에 둔다). 수정 커밋이 없는 라운드는
+ *   진행 로그에 한 줄을 더한 계획 전용 커밋을 올린다(다음 판정은 새 커밋에서 돈다). 반박은 원장 상태를 바꾸지 않는다
+ * - 교착(9.1절): 같은 지적에 반박을 2회 냈고 둘째 반박을 그 검증자가 판정한 뒤에도 열려 있으면 계획을 멈추고 사람에게 넘긴다
+ * - 지적의 근거·제안은 판정 실행 로그에서 읽어 프롬프트의 데이터 블록에 넣는다. 읽지 못하면 위치·제목만으로 진행한다
  */
 async function doReview(
   ctx: Ctx,
@@ -1273,6 +1331,34 @@ async function doReview(
     l = { ...l, ref: findPlan(l.worktree, l.id) ?? l.ref, stepStatus: 'in_progress' };
   };
 
+  // ---- 교착(9.1절): 같은 지적에 반박 2회, 둘째 반박을 그 검증자가 판정한 뒤에도 열려 있다 ----
+  const stuck = deadlocked(state, ledger);
+  if (stuck.length) {
+    // 반박의 근거·요지는 세션 출력이다. 댓글에서 멘션·마크다운으로 해석되지 않게 원장 표와 같은 방법으로 바꾼다
+    const detail = stuck
+      .map((id) => {
+        const rebuttals = deadlockRebuttals(state, id)
+          .map(
+            (r, n) =>
+              `\n    - 반박 ${n + 1}: 근거 ${cell(r.evidence ?? '') || '—'} · 요지 ${cell(r.summary ?? '') || '—'}`,
+          )
+          .join('');
+        return `\n  - ${findingLine(byId.get(id)!)}${rebuttals}`;
+      })
+      .join('');
+    reopen(`교착: ${stuck.join(', ')}`);
+    await blockPlan(
+      ctx,
+      l,
+      `교착(9.1절): ${stuck.join(', ')}에 반박을 2회 냈지만 지적을 낸 검증자가 받아들이지 않았다`,
+      'A) 지적대로 고치게 한다 / B) 범위를 줄인다(무엇을 뺄지 답에 적는다) / C) 포기(abandoned) — 추천 없음: 작성자와 검증자의 판단이 갈렸다(9.1절 "반드시 묻는다"의 교착). 두 반박과 판정 실행의 record job 로그를 보고 정한다. 이 Issue에 제작자 계정으로 답을 달면 runner가 답을 넣어 그 지적의 세션을 다시 띄운다.',
+      `교착 지적 ${stuck.length}건${detail}`,
+    );
+    // 올린 반박은 다음 교착 판단에서 세지 않는다(제작자 답을 받은 뒤 같은 보고를 반복하지 않는다)
+    writeReviewState(l.worktree, markEscalated(state, stuck));
+    return 'blocked';
+  }
+
   const v = judge(readAttempts(info), l.id, l.step, limitsOf(ctx.cfg));
   if (v.action === 'stop') {
     reopen('지적 대응 실패 한도');
@@ -1293,6 +1379,21 @@ async function doReview(
     return wait('대응할 지적이 없다(원장과 커밋 상태가 아직 맞지 않는다)');
   }
 
+  // 반박할 수 있는 대상: 원장의 열린 차단 지적 하나에 대한 세션. 반박 형식 검사에 저장소 이름이 든다
+  const rebuttable = (t: Target) => t.findings.length === 1 && t.key === t.findings[0].id;
+  let repo = '';
+  if (targets.some((t) => rebuttable(t) && !state.pending.includes(t.key))) {
+    try {
+      repo = ctx.gh.repoSlug();
+    } catch (e) {
+      return wait(`저장소 이름을 읽지 못했다: ${(e as Error).message}`);
+    }
+  }
+  // push하지 않은 커밋이 worktree에 있는가(앞선 바퀴에서 판정에 실패한 수정이 남아 있을 수 있다).
+  // 반박은 파일을 바꾸지 않지만, 그런 커밋이 있으면 라운드를 올리기 전에 판정을 한 번 거친다
+  let unjudged = revParse('HEAD', l.worktree) !== pr.headSha;
+  const readEvidence = evidenceReader(ctx, ledger);
+
   reopen(`지적 대응: ${targets.map((t) => t.key).join(', ')}`);
   const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
   const answer = existsSync(answerFile)
@@ -1312,10 +1413,11 @@ async function doReview(
       step: l.step,
       branch: l.branch,
       phase,
-      findings: t.findings.map(toPromptFinding),
+      findings: t.findings.map((e) => toPromptFinding(e, readEvidence(e))),
       attempts,
       attemptNo: fails + 1,
       switchApproach: fails >= ctx.cfg.failure.switchAt,
+      canRebut: rebuttable(t),
       extra: answer,
     });
     event(ctx, 'session-start', {
@@ -1378,30 +1480,108 @@ async function doReview(
       event(ctx, 'review-fail', { plan: l.id, pr: pr.number, finding: t.key, detail });
       return 'fail';
     };
-    if (isClean(l.worktree) && revParse('HEAD', l.worktree) === before)
-      return fail(`세션이 아무것도 바꾸지 않았다(${t.key}에 대응하지 못했다)`);
+    // 세션이 파일을 바꿨으면 수정이다(출력의 반박 문단은 보지 않는다). 아무것도 바꾸지 않았으면 반박을 찾는다
+    const changed = !(isClean(l.worktree) && revParse('HEAD', l.worktree) === before);
+    const rebuttal =
+      !changed && rebuttable(t)
+        ? sessionRebuttal({
+            output: s.text,
+            id: t.findings[0].id,
+            ledger,
+            repo,
+            worktree: l.worktree,
+            remote: ctx.cfg.github.remote,
+          })
+        : null;
+    if (!changed && !rebuttal)
+      // 세션 출력은 실패 기록에 넣지 않는다: detail은 다음 세션 프롬프트의 "직전 실패"에 들어간다
+      return fail(
+        `세션이 아무것도 바꾸지 않았다(${t.key}에 대응하지 못했다)${
+          rebuttable(t)
+            ? '. 반박이라면 마지막 출력에 절차서 8절 형식의 세 줄 문단이 있어야 하고, 근거는 이미 push된 커밋의 40자 SHA나 리포 안 파일 경로여야 한다'
+            : ''
+        }`,
+      );
     const subject = `fix(${t.findings[0].id}): ${commitSubject(t.findings[0].title)}`;
     const commitRest = () => {
       if (isClean(l.worktree)) return;
       git(['add', '-A'], l.worktree);
       git(['commit', '--quiet', '-m', subject], l.worktree);
     };
+    const what = changed ? '수정 뒤' : '반박을 냈지만 push하지 않은 앞선 변경이 남아 있다:';
     if (phase === 'plan') {
       // 계획 전용 변경인지는 커밋된 변경으로 본다
       commitRest();
       const problem = judgePlanOnly(ctx, l);
-      if (problem) return fail(`수정 뒤 계획 판정 실패:\n${problem}`);
-    } else {
+      if (problem) return fail(`${what} 계획 판정 실패:\n${problem}`);
+    } else if (changed || unjudged) {
       const judged = await judgeStep(ctx, l, ref);
       if (!judged.ok)
         return fail(
-          '수정 뒤 판정(AC·check)이 실패했다. 실패한 검사는 같은 기록의 ac·check 항목에 있다',
+          `${what} 판정(AC·check)이 실패했다. 실패한 검사는 같은 기록의 ac·check 항목에 있다`,
         );
       acCount = judged.acs;
+      unjudged = false;
       commitRest();
     }
-    state = { ...state, pending: [...state.pending, t.key] };
+    state = {
+      ...state,
+      pending: [...state.pending, t.key],
+      rebuttals: rebuttal
+        ? {
+            ...state.rebuttals,
+            [t.key]: { evidence: rebuttal.evidence, summary: rebuttal.summary, posted: false },
+          }
+        : state.rebuttals,
+    };
     writeReviewState(l.worktree, state);
+  }
+
+  // ---- 라운드의 반박을 PR 댓글 하나로 단다(push 전에. 판정 워크플로는 새 커밋의 check 통과 뒤에 댓글을 읽는다) ----
+  // 본문은 검사를 통과한 세 줄 문단뿐이고(세션의 자유 글은 검증자에게 가지 않는다, 10.2절 (4)),
+  // 코드 블록 안에 둬서 요지의 멘션·마크다운이 댓글에서 해석되지 않는다
+  const stillOpen = new Set(blocking.map((e) => e.id));
+  const rebutted = state.pending.filter((k) => state.rebuttals[k]);
+  // 그사이 닫힌 지적의 반박은 달지 않는다(판정 워크플로도 열린 지적의 반박만 받는다)
+  const unposted = rebutted.filter((k) => !state.rebuttals[k].posted && stillOpen.has(k));
+  if (unposted.length) {
+    try {
+      ctx.gh.comment(
+        pr.number,
+        rebuttalComment(
+          unposted.map((id) => ({
+            id,
+            evidence: state.rebuttals[id].evidence,
+            summary: state.rebuttals[id].summary,
+          })),
+        ),
+      );
+    } catch (e) {
+      event(ctx, 'notify-fail', { plan: l.id, pr: pr.number, detail: (e as Error).message });
+      return 'env';
+    }
+    const rebuttals = { ...state.rebuttals };
+    for (const k of unposted) rebuttals[k] = { ...rebuttals[k], posted: true };
+    state = { ...state, rebuttals };
+    writeReviewState(l.worktree, state);
+    event(ctx, 'rebuttal-posted', { plan: l.id, pr: pr.number, reason: unposted.join(', ') });
+  }
+  // 수정 커밋이 없는 라운드: 진행 로그에 한 줄을 더한 계획 전용 커밋을 만든다(다음 판정은 새 커밋이 올라와야 돈다)
+  if (rebutted.length && rebutted.length === state.pending.length) {
+    const planRef = findPlan(l.worktree, l.id) ?? l.ref;
+    appendProgress(l.worktree, planRef, `${rebutted.join(', ')} 반박`);
+    git(['add', '-A', '--', 'docs/exec-plans'], l.worktree);
+    git(
+      [
+        'commit',
+        '--quiet',
+        '-m',
+        `plan(${l.id}): ${rebutted.join(', ')} 반박`,
+        '--',
+        'docs/exec-plans',
+      ],
+      l.worktree,
+    );
   }
 
   // ---- 한 라운드의 대응을 한 번에 올린다 ----
@@ -1421,8 +1601,15 @@ async function doReview(
   }
   const head = revParse('HEAD', l.worktree) ?? '';
   const responses = { ...state.responses };
-  for (const key of state.pending)
-    responses[key] = [...(responses[key] ?? []), { head, kind: 'fix', counted: false }];
+  for (const key of state.pending) {
+    const r = rebutted.includes(key) ? state.rebuttals[key] : null;
+    responses[key] = [
+      ...(responses[key] ?? []),
+      r
+        ? { head, kind: 'rebuttal', counted: false, evidence: r.evidence, summary: r.summary }
+        : { head, kind: 'fix', counted: false },
+    ];
+  }
   writeReviewState(l.worktree, {
     responses,
     round: {
@@ -1432,13 +1619,14 @@ async function doReview(
       maxId: maxFindingId(ledger),
     },
     pending: [],
+    rebuttals: {},
   });
   if (existsSync(answerFile)) unlinkSync(answerFile);
   event(ctx, 'review-pushed', {
     plan: l.id,
     pr: pr.number,
     head,
-    reason: `대응: ${state.pending.join(', ')}`,
+    reason: `대응: ${state.pending.map((k) => (rebutted.includes(k) ? `${k}(반박)` : k)).join(', ')}`,
   });
   return 'ok';
 }

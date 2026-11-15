@@ -72,6 +72,12 @@ export interface FakeState {
   requiredChecks?: { context: string; app_id: number | null }[];
   /** 커밋 SHA → 그 커밋의 커밋 상태·check run 기록(setCheck가 쓴다) */
   checks?: Record<string, CommitCheck[]>;
+  /** repoSlug가 돌려줄 저장소 이름(선택). 없으면 `fake/repo` */
+  repo?: string;
+  /** 실행 URL → runLog가 돌려줄 로그(선택). 없는 URL은 null이다 */
+  runLogs?: Record<string, string>;
+  /** 실행 URL → runLog가 불린 횟수(테스트가 "한 번만 읽는다"를 확인한다) */
+  runLogReads?: Record<string, number>;
   /**
    * 병합에 필요한 체크와 출처(선택). 있으면 `ciCommand` 대신 "PR head에 그 출처의 가장 최근 결과가 모두 success인가"로
    * 병합을 정하고(브랜치 보호의 출처 지정 흉내), 초안 PR은 병합하지 않는다
@@ -137,6 +143,16 @@ export class FakeGitHub implements GitHubPort {
   }
   branchInfo(): unknown {
     return { protection: { required_status_checks: { checks: this.load().requiredChecks ?? [] } } };
+  }
+  repoSlug(): string {
+    return this.load().repo ?? 'fake/repo';
+  }
+  runLog(runUrl: string): string | null {
+    const s = this.load();
+    s.runLogReads ??= {};
+    s.runLogReads[runUrl] = (s.runLogReads[runUrl] ?? 0) + 1;
+    this.save(s);
+    return s.runLogs?.[runUrl] ?? null;
   }
   private load(): FakeState {
     return JSON.parse(readFileSync(this.file, 'utf8')) as FakeState;

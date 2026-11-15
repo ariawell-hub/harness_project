@@ -40,7 +40,13 @@ import {
   writeRebuttalInput,
   type Rebuttal,
 } from './ci/rebuttal.ts';
-import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
+import {
+  githubStatusPoster,
+  oneLine,
+  recordReview,
+  recordStatuses,
+  reviewLogLines,
+} from './ci/record.ts';
 import { parseReproResults, reproResultsData, runRepro } from './ci/repro.ts';
 import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
@@ -395,15 +401,7 @@ async function main(argv: string[]): Promise<number> {
         // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장에는 위치와 제목만 남으므로 근거·제안은 이 로그에서 본다(10.1절)
         onVerdict: (v) => {
           seen = v;
-          // 본문은 PR 내용에 영향받는 LLM 출력이다. 한 줄로 만들고 접두어를 붙여 워크플로 명령 줄이 생기지 않게 한다
-          log(
-            `record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${oneLine(v.summary)}`,
-          );
-          for (const f of v.findings) {
-            log(`  [${f.severity}] ${oneLine(f.file)}:${f.line} ${oneLine(f.title)}`);
-            log(`    근거: ${oneLine(f.evidence)}`);
-            log(`    제안: ${oneLine(f.suggestion)}`);
-          }
+          for (const line of reviewLogLines(v)) log(line);
         },
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);

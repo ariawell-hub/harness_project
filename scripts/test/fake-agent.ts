@@ -16,6 +16,10 @@
 //          "계획 검증 단계"면 계획 파일의 진행 로그에 한 줄을 더해 커밋한다(계획 폴더 파일만 바꾼다)
 //   fail : 아무것도 하지 않는다
 //   break: step의 AC가 확인하는 파일을 지워 커밋한다(판정 실패)
+//   rebut    : 파일을 바꾸지 않고 절차서 8절 형식의 반박 문단을 마지막 출력에 적는다. 근거는 리포 안 파일 경로다
+//              (step의 AC가 확인하는 파일. 계획 검증 단계이거나 그 파일이 없으면 계획 파일)
+//   rebut-bad: 파일을 바꾸지 않고 형식이 틀린 반박(근거 줄 없음)을 적는다
+//   fix-rebut: ok처럼 고쳐 커밋하고 반박 문단도 적는다(파일을 바꿨으면 반박은 무시된다)
 // FAKE_LOG: 받은 프롬프트를 JSON 줄로 남긴다.
 // FAKE_RESULT_JSON=1: 끝에 Claude `-p --output-format json` 형식의 결과 객체(권한 거부 포함)를 출력한다.
 import {
@@ -49,6 +53,8 @@ const action = seq.shift() ?? 'ok';
 if (bfile) writeFileSync(bfile, JSON.stringify(behavior));
 
 const git = (...args: string[]) => execFileSync('git', args, { stdio: 'ignore' });
+/** 세션의 마지막 출력. FAKE_RESULT_JSON이면 결과 객체의 result에 넣는다 */
+let said = '';
 
 if (action === 'limit') {
   process.stderr.write('Claude AI usage limit reached|1700000000\n');
@@ -57,7 +63,7 @@ if (action === 'limit') {
 if (action === 'timeout') {
   setTimeout(() => process.exit(0), 600_000);
 } else if (action === 'fail') {
-  process.stdout.write('완료했습니다! 모든 작업을 마쳤습니다.\n');
+  said = '완료했습니다! 모든 작업을 마쳤습니다.\n';
 } else if (resolving) {
   const list = prompt.split('## 충돌 파일')[1]?.split('\n## ')[0] ?? '';
   for (const m of list.matchAll(/^- `([^`]+)`/gm)) {
@@ -71,11 +77,18 @@ if (action === 'timeout') {
 } else if (reviewing) {
   const ids = [...prompt.matchAll(/^- ID: (F\d+)$/gm)].map((m) => m[1]);
   const acFile = `out/${slug}-s${stepNo}.txt`;
-  if (action === 'break') {
+  const planOnly = prompt.includes('계획 검증 단계');
+  const target = ids[0] ?? 'F0';
+  if (action === 'rebut' || action === 'fix-rebut')
+    said = `지적을 확인했다. 틀린 지적이라 반박한다.\n\n- 지적: ${target}\n- 근거: ${planOnly || !existsSync(acFile) ? planFile : acFile}\n- 요지: ${target}는 이 step의 범위 밖이다\n\n끝.\n`;
+  if (action === 'rebut-bad') said = `- 지적: ${target}\n- 요지: 근거 줄이 없다\n`;
+  if (action === 'rebut' || action === 'rebut-bad') {
+    // 파일을 바꾸지 않는다
+  } else if (action === 'break') {
     rmSync(acFile, { force: true });
     git('add', '-A');
     git('commit', '-q', '-m', `fix(${ids[0] ?? 'F0'}): 깨뜨림`);
-  } else if (prompt.includes('계획 검증 단계')) {
+  } else if (planOnly) {
     const text = readFileSync(planFile, 'utf8');
     writeFileSync(
       planFile,
@@ -133,7 +146,7 @@ if (action === 'timeout') {
     '## 열린 질문\n\n### 질문: 스텝 질문\n\n- A) 이쪽 — 영향: 작다\n- B) 저쪽 — 영향: 크다\n- 추천: A. 이유: 단순하다\n',
   );
   writeFileSync(planFile, text);
-  process.stdout.write('판단이 필요해 열린 질문에 적고 멈춘다.\n');
+  said = '판단이 필요해 열린 질문에 적고 멈춘다.\n';
 } else {
   mkdirSync('out', { recursive: true });
   writeFileSync(`out/${slug}-s${step}.txt`, `step ${step}\n`);
@@ -148,6 +161,7 @@ if (action === 'timeout') {
   git('commit', '-q', '-m', `feat: ${slug} step ${step}`);
 }
 
+if (!process.env.FAKE_RESULT_JSON) process.stdout.write(said);
 if (process.env.FAKE_RESULT_JSON && action !== 'timeout') {
   process.stdout.write(
     JSON.stringify({
@@ -157,7 +171,7 @@ if (process.env.FAKE_RESULT_JSON && action !== 'timeout') {
       num_turns: 7,
       terminal_reason: 'completed',
       session_id: `fake-${slug}-${step}`,
-      result: '끝났습니다',
+      result: said || '끝났습니다',
       permission_denials: [
         { tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'sed -n 1,20p a.ts' } },
         { tool_name: 'Bash', tool_use_id: 't2', tool_input: { command: 'find . -name x' } },
