@@ -113,6 +113,9 @@
     "docs/SECURITY.md",
     "docs/exec-plans/TEMPLATE*.md"
   ],
+  "ci": {
+    "environments": ["judge-claude", "judge-codex", "codex-auth-store", "recorder", "revert"]
+  },
   "agents": {
     "claude": {
       "cmd": "claude",

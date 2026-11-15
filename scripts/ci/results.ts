@@ -1,8 +1,8 @@
 // 기계 판정 결과 파일 형식과 커밋 상태 변환(10.3·10.4절). 판정 job이 쓰고 기록 job이 검사한다.
 // 기록 job은 이 형식을 통과한 값만 커밋 상태로 쓴다. 결과가 없거나 깨지면 아는 context 모두 error(fail-closed).
 
-/** 기록 job이 쓰는 기계 판정 context. 검사를 더하는 step이 여기에 더한다 */
-export const GATE_CONTEXTS = ['plan-gate', 'risk-gate'] as const;
+/** 기록 job이 쓰는 기계 판정 context(판정 순서). harness-guard의 신호를 risk-gate가 받으므로 앞에 둔다 */
+export const GATE_CONTEXTS = ['plan-gate', 'harness-guard', 'risk-gate'] as const;
 
 export type GateState = 'success' | 'failure' | 'error';
 const STATES: readonly string[] = ['success', 'failure', 'error'];

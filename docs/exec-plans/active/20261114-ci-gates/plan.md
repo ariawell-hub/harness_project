@@ -65,6 +65,9 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 2026-11-14 step0: 제작자 답 2건(약화·완화 → 위험도 높음, ISC 허용)을 의사결정 로그에 기록. 테스트 `scripts/test/ci.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/ci/gates.ts`). `scripts/ci/{results,gates,record}.ts`, `harness.ts gates`·`record-status`, `.github/workflows/gates.yml` 구현 뒤 13개 통과. 테스트를 고친 2건은 fixture 문제였다(마지막 step 완료인데 계획이 active에 있음 → step 2개로, 예외 유발을 없는 base 대신 `planReview` 없는 설정으로). AC 명령 통과. 발견 사항(부트스트랩)은 설계서 10.4절에 바로 반영(v0.7.17). 실제 동작은 step1 PR에서 확인한다.
 - 2026-11-14: step0 PR #58 병합.
 - 2026-11-15 step1: `scripts/test/risk-gate.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/ci/pr.ts`). `scripts/gates/risk-gate.ts`, `scripts/ci/pr.ts`, `gates`의 `--reviews`, `ci-pr` 명령, `review-trigger.yml`, `gates.yml`의 `workflow_run` 구현. context가 늘어 step0 테스트 fixture 2곳을 `GATE_CONTEXTS` 기준으로 바꿨다. 리포에 `recorder` environment가 아직 없어(봇 API로 확인) 이 PR의 `gates / record` job은 실패로 보일 것이다. 실제 기록 확인은 제작자 준비 뒤로 미룬다.
+- 2026-11-15: step1 PR #59 병합. 그 PR에서 step0의 `gates`가 처음 돌았다: `evaluate` 성공, `record`는 검증 App이 없어 실패(`client-id` 빈 값). `recorder` environment는 GitHub이 브랜치 제한 없이 자동 생성했다(예상한 대로, Q20).
+- 2026-11-15: 제작자가 `recorder` 브랜치 제한(`main`만)·검증 App·변수·시크릿을 준비했다(봇 API로 제한과 변수 이름 확인). 실패했던 실행 43653153698의 `record`를 다시 돌려 PR #59 head에 `plan-gate` = success가 `harness-recorder[bot]` 이름으로 기록됨을 확인했다(수용 기준 7의 첫 근거).
+- 2026-11-15 step2: `scripts/test/harness-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/gates/harness-guard.ts`) → 구현 뒤 34개 통과. `ci.environments` 설정, `gates`의 `--pr-body`, PR 템플릿 항목. 이 PR은 `harness.config.json`에 `ci` 키를 더하므로 자기 규칙으로도 신호가 된다(계획 risk가 이미 high).
 
 ## 의사결정 로그
 
@@ -79,6 +82,9 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 경로 표에 맞지 않는 파일의 위험도는 낮음이다. 이유: 표는 "최소 위험도"이고 기본선은 계획 `risk`다. fail-closed가 필요한 것은 판정할 수 없는 형식(바이너리)이다. 버린 대안: 안 맞으면 보통(문서 밖 사소한 파일도 A+B가 됨).
 - 제작자 승인은 제작자 계정의 마지막 판정 리뷰(`APPROVED`·`CHANGES_REQUESTED`·`DISMISSED`)만 본다. `COMMENTED`는 승인을 지우지 않는다. 이유: 승인 뒤 댓글 하나로 승인이 사라지면 안 되고, 변경 요청·철회는 승인을 무효로 해야 한다.
 - 판정 job이 PR을 정하기 전에 죽으면 기록 job은 이벤트의 head SHA에 `error`를 쓴다(`workflow_run`이면 head를 몰라 기록 job이 실패로 끝난다). 이유: 원인을 PR 화면에 보이게 한다.
+- `harness-guard`가 예외로 죽으면 `risk-gate`에 높음 신호를 넣는다. 이유: 신호를 알 수 없는데 낮은 위험도로 통과시키면 안 된다(fail-closed).
+- 위험 플래그(`--dangerously-…` 등) 탐지는 보호 경로의 `.md`가 아닌 파일에 새로 들어간 줄만 본다. 이유: 설계서·절차서는 이 문자열을 설명하려고 적는다. `harness-guard.ts`와 테스트는 문자열을 나눠 적어 자기 탐지를 피한다.
+- 캐시 검사는 바뀐 파일이 아니라 head의 모든 워크플로를 본다. 이유: 비밀 job과 main에서 도는 워크플로를 가려내는 것보다 전면 금지가 단순하고, 지금 어떤 워크플로도 캐시를 쓰지 않는다.
 - (제작자 결정, 2026-11-14 대화) 보호 경로의 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조를 탐지하면 `harness-guard`는 표시만 하고 `risk-gate`가 위험도를 "높음"으로 올린다. 제작자 head 승인이 있어야 병합된다. 캐시 사용·`CHANGELOG`·체크리스트 누락은 작성자가 고칠 수 있으므로 `harness-guard` 실패다. 이유: 10.1절 "위험도는 올릴 수만 있다"와 같은 방향이고, 정당한 변경을 막지 않으면서 사람 확인을 강제한다. 버린 대안: 탐지 즉시 실패(정당한 완화도 제작자가 보호 설정을 풀어야 함), 표시만(②가 생기기 전엔 아무도 막지 않음).
 - (제작자 결정, 2026-11-14 대화) `deps-guard` 라이선스 허용 목록: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC. SPDX 식은 `OR` 중 하나, `AND`는 모두 허용이어야 통과. 이유: ISC는 MIT 수준의 허용 라이선스이고 npm에서 흔하다. 버린 대안: Q14 그대로(ISC 전이 의존성마다 막힘). 설계서 18절 Q14에 반영한다(step3).
 
@@ -107,4 +113,4 @@ step0이 병합되기 전에 제작자가 준비한다. 봇은 관리자 권한�
 
 ## 다음 할 일
 
-- step2 harness-guard. 제작자가 검증 App·`recorder` environment를 준비하면 열린 PR에서 기록 상태의 작성자를 확인해 진행 로그에 남긴다.
+- step3 deps-guard. step2 PR에서 `risk-gate` 상태(step1 정의)가 검증 App 이름으로 기록되는지 확인한다.

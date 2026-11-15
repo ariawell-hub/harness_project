@@ -46,7 +46,7 @@ CI(gates 워크플로, 10.4절):
   ci-pr --event <이벤트 JSON> --body-out <파일>
                                            판정할 PR을 정해 $GITHUB_OUTPUT에 쓴다(이벤트 이름·리포·토큰은 환경 변수)
   gates --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> --out <파일> [--summary <파일>]
-        [--reviews <리뷰 API JSON>]        기계 판정 결과 파일(판정 job, 비밀 없음)
+        [--reviews <리뷰 API JSON>] [--pr-body <본문 파일>]   기계 판정 결과 파일(판정 job, 비밀 없음)
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
@@ -96,6 +96,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   summary: { type: 'string' },
   results: { type: 'string' },
   reviews: { type: 'string' },
+  'pr-body': { type: 'string' },
   event: { type: 'string' },
   'body-out': { type: 'string' },
   'repo-slug': { type: 'string' },
@@ -267,7 +268,9 @@ async function main(argv: string[]): Promise<number> {
       const headSha = git(['rev-parse', 'HEAD'], root);
       const rf = str('reviews');
       const reviews = rf && existsSync(rf) ? parseReviews(readFileSync(rf, 'utf8')) : null;
-      const r = runGates({ root, cfg, base, branch, headSha, reviews });
+      const bf = str('pr-body');
+      const prBody = bf && existsSync(bf) ? readFileSync(bf, 'utf8') : null;
+      const r = runGates({ root, cfg, base, branch, headSha, reviews, prBody });
       writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
       const md = summaryMarkdown(r);
       const summary = str('summary');

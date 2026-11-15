@@ -94,6 +94,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 - 제목: `<type>(<계획 id>): step<N> <이름>`. 본문 첫 줄은 마지막 step만 `Closes #<issue>`, 나머지는 `Refs #<issue>`.
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
+- **보호 경로를 바꾼 PR**(`harness-guard`): `docs/harness/CHANGELOG.md`에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
 - 무관한 검사 실패는 별도 PR로 먼저 고친다. flaky 테스트는 같은 커밋에서 한 번만 재실행하고, 통과하면 TD로 등록한 뒤 격리한다.
 
 ```ts

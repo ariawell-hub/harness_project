@@ -70,8 +70,19 @@ export interface HarnessConfig {
   planReview: { required: boolean };
   riskPaths: { glob: string; risk: 'low' | 'normal' | 'high' }[];
   protectedPaths: string[];
+  /** CI 판정 기준. environments: 워크플로가 참조해도 되는 역할별 environment(10.4절) */
+  ci: { environments: string[] };
   agents: Record<string, AgentDef>;
 }
+
+/** 역할별 environment(10.4절). 이 밖의 이름을 참조하는 워크플로는 harness-guard가 표시한다 */
+export const DEFAULT_ENVIRONMENTS = [
+  'judge-claude',
+  'judge-codex',
+  'codex-auth-store',
+  'recorder',
+  'revert',
+];
 
 export const CONFIG_FILE = 'harness.config.json';
 
@@ -132,6 +143,8 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   cfg.riskPaths ??= [];
   cfg.protectedPaths ??= [];
   cfg.planReview ??= { required: false };
+  cfg.ci ??= { environments: [...DEFAULT_ENVIRONMENTS] };
+  cfg.ci.environments ??= [...DEFAULT_ENVIRONMENTS];
   return cfg;
 }
 
