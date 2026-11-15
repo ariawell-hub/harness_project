@@ -22,7 +22,8 @@
     {
       "step": 3,
       "name": "deps-guard",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T09:08:50+09:00"
     },
     {
       "step": 4,
