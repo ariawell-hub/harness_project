@@ -39,8 +39,9 @@
     {
       "step": 5,
       "name": "divergence",
-      "status": "in_progress",
-      "summary": "`runner/divergence.ts`: `divergence(before, after)`·`RoundBefore`(순수 함수. 신호 글에는 지적 ID만). `runner/review.ts`: `ReviewRound`(`open`이 ID·파일·줄, `evaluated`), `ReviewState.reverted`, `REVIEW_ROUND_KEY`, `commitsBetween`·`codeCommits`(계획 전용 커밋 제외)·`revertCommits`(`git revert --no-edit`, 충돌하면 `--abort`). `run.ts`: `revertRound(ctx, l, pr, phase, signals)`(수정 커밋 되돌림 → 진행 로그 → `publishStep(…, { keepAnswer })` → `reverted` 기록, 이벤트 `review-reverted`·`review-diverged`), `doReview`(대응 head의 판정 뒤 한 번 평가, 판정 실패 때 세션 변경 되돌림, `review-round` 3회부터 `roundSwitch`), `doFixPR`(대응 head의 `check` 실패는 되돌리기). `prompt.ts` `roundSwitch`. 가짜 에이전트 `break-dirty`. 테스트 도우미는 `runner-review.test.ts`의 `roundFails`·`codeDiff`"
+      "status": "completed",
+      "summary": "`runner/divergence.ts`: `divergence(before, after)`·`RoundBefore`(순수 함수. 신호 글에는 지적 ID만). `runner/review.ts`: `ReviewRound`(`open`이 ID·파일·줄, `evaluated`), `ReviewState.reverted`, `REVIEW_ROUND_KEY`, `commitsBetween`·`codeCommits`(계획 전용 커밋 제외)·`revertCommits`(`git revert --no-edit`, 충돌하면 `--abort`). `run.ts`: `revertRound(ctx, l, pr, phase, signals)`(수정 커밋 되돌림 → 진행 로그 → `publishStep(…, { keepAnswer })` → `reverted` 기록, 이벤트 `review-reverted`·`review-diverged`), `doReview`(대응 head의 판정 뒤 한 번 평가, 판정 실패 때 세션 변경 되돌림, `review-round` 3회부터 `roundSwitch`), `doFixPR`(대응 head의 `check` 실패는 되돌리기). `prompt.ts` `roundSwitch`. 가짜 에이전트 `break-dirty`. 테스트 도우미는 `runner-review.test.ts`의 `roundFails`·`codeDiff`",
+      "completed_at": "2026-11-16T00:45:56+09:00"
     },
     {
       "step": 6,
