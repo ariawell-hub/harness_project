@@ -17,7 +17,7 @@ review_cycle: quarterly
   - `background/openai.md` (OpenAI, "하네스 엔지니어링: 에이전트 우선 세계에서 Codex 활용하기"). 본문에서는 `(원문: 절 제목)`으로 출처를 표기한다.
   - `background/CODEX_의견.md`, `background/CLAUDE_의견.md` (v0.3 검토와 v0.4.2 이후 2차 검토), `background/CODEX_의견v0.5.md` (v0.5 검토). 반영 내역은 부록 B.
   - `jha0313/harness_framework` (GitHub). `phases/`의 task 인덱스 + step 파일 구조와 step 실행기 `scripts/execute.py`. step 형식(8.2절)과 runner(4.5절)의 바탕이다. 그 리포의 "phase"는 이 문서의 "실행 계획", "step"은 이 문서의 "step"에 해당한다.
-- **현재 범위**: 로드맵 1단계(최소 구성)가 구현되어 있다(`docs/harness/CHANGELOG.md` 0.1.0). 2단계 이후 항목은 `docs/exec-plans/tech-debt-tracker.md`에 TD로 등록되어 있다.
+- **현재 범위**: 로드맵 1단계(최소 구성)가 구현되어 있다(`docs/harness/CHANGELOG.md` 0.1.0). 2단계는 진행 중이다(기계 판정과 기록 job은 Issue #53에서 구현, 나머지는 Issue #54~#57). 남은 항목은 `docs/exec-plans/tech-debt-tracker.md`에 TD로 등록되어 있다.
 - **지원 범위**: 코어는 **GitHub(브랜치 보호·Issues·Actions) + Claude Code + Codex** 조합을 전제로 한다. 언어·엔진은 중립이지만, 다른 코드 호스팅(GitLab 등), 다른 CI, 다른 에이전트 도구는 지금 범위 밖이다.
 - **실행 OS**: 에이전트가 실행되는 머신은 **macOS와 Windows 네이티브**(WSL 아님)이며, 둘을 함께 쓴다. Windows에는 Git for Windows(Git Bash)가 필수다. CI 러너는 Linux다(ADR-0005).
 - **단계 구분**: 하네스 자체를 만드는 동안을 **구축 단계**, 하네스를 실제 제품 프로젝트에 적용한 뒤를 **운영 단계**라 한다. 일부 정책이 단계별로 다르다(10.4절). 운영 전환은 파일럿 전에 10.4절의 운영 전환 체크리스트를 충족한 뒤 한다(Q7).
@@ -52,6 +52,7 @@ review_cycle: quarterly
   - v0.7.17 (2026-11-14): 로드맵 2단계 착수(Issue #53~#57). 기계 판정(`plan-gate` 등)은 `gates` 워크플로의 판정 job 하나가 모아 내고 기록 job이 검증 App으로 커밋 상태를 쓴다(10.4절). `pull_request_target` 체크는 도입 PR에서 돌지 않으므로 다음 PR에서 확인한 뒤 등록한다(10.4절 부트스트랩, Issue #53)
   - v0.7.18 (2026-11-15): `harness-guard`가 탐지한 검사 약화·권한 완화·environment 밖 참조는 표시 + 위험도 높음(제작자 head 승인)으로 처리한다. `CHANGELOG`·체크리스트 누락과 캐시 사용은 실패(10.4절, Issue #53, TD-10 해결)
   - v0.7.19 (2026-11-15): `deps-guard` 구현에 맞춰 R17(ADR 확인 방식, OSV, 조회 실패는 error)과 Q14(ISC 허용, 값은 설정 `deps`)를 고침(5.1절, 18절, Issue #53)
+  - v0.7.20 (2026-11-15): 필수 체크 출처 전환 순서와 `required-checks` 확인 명령(0.2절), 기계 판정 네 개의 기록 위치와 리뷰 뒤 `risk-gate` 재판정 경로(10.3절). 옛 `plan-gate` job 제거(Issue #53, TD-2 해결)
 
 ### 0.1 전제 조건
 
@@ -74,6 +75,7 @@ review_cycle: quarterly
   - 필수 상태 체크(10.3절). `check`를 뺀 모든 필수 체크(`review/*`, `plan-gate`, `risk-gate` 등 기록 job이 쓰는 체크)는 검증 App이 보낸 상태만 인정하도록 출처를 지정한다. PR에 같은 이름의 job을 가진 워크플로를 넣어 체크를 흉내 내는 것을 막기 위해서다
     - Q20에서 확인: 같은 이름의 job(check run), PR 워크플로가 `permissions: statuses: write`로 쓴 status(리포 기본 권한이 읽기 전용이어도 받는다), 봇 PAT로 쓴 status가 모두 이 지정으로 병합이 막혔다. 막힘은 병합 판정에만 나타난다(10.3절 "체크 요약 API")
     - 등록은 검증 App이 그 체크를 한 번 보고한 뒤에 한다. admin이 아닌 봇도 `GET repos/<리포>/branches/main`의 `protection.required_status_checks.checks[].app_id`로 등록된 출처를 확인할 수 있다
+    - 기대하는 등록(`harness.config.json`의 `ci.requiredChecks`, 검증 App ID는 `ci.recorderAppId`)과 실제 등록은 `node scripts/harness.ts required-checks`로 비교한다. 읽기만 하고 바꾸지 않는다. 이미 다른 출처로 등록된 체크(1단계의 `plan-gate`)는 검증 App이 같은 이름을 보고한 뒤 제작자가 출처를 바꾸고, 그다음에 옛 job을 지운다. 순서가 바뀌면 그 체크를 아무도 채우지 못해 모든 PR이 막힌다(Issue #53)
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
   - "Dismiss stale approvals"(새 커밋이 push되면 기존 승인 무효화)
@@ -827,6 +829,9 @@ pnpm test src/auth/login-guard.spec.ts
 | `harness-guard` | 보호 경로 변경 시 체크리스트·`CHANGELOG`·하네스 자체 테스트(로드맵 2단계부터), 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
 | `revert-check` | revert PR 전용. diff가 대상 커밋을 정확히 되돌리는지 확인하고, 통과하면 `review/*`를 대신한다 | 아래 "병합 후 main CI가 실패하면" |
+
+- `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`·`review-ledger`·`revert-check`는 Issue #54·#55·#57에서 같은 방식으로 더한다.
+- `risk-gate`의 제작자 승인은 리뷰가 달리거나 철회될 때 다시 판정한다: `review-trigger` 워크플로(`pull_request_review`, PR 쪽 정의라 비밀·권한 없음)가 끝나면 `gates`가 `workflow_run`(main 정의)으로 돌고, 페이로드 대신 head SHA로 API를 조회해 열린 같은 리포 PR의 현재 head에만 판정한다.
 
 **승인 결속 기준**
 

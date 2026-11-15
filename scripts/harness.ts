@@ -8,6 +8,7 @@ import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
+import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
 import { githubStatusPoster, recordStatuses } from './ci/record.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
@@ -49,6 +50,8 @@ CI(gates 워크플로, 10.4절):
         [--reviews <리뷰 API JSON>] [--pr-body <본문 파일>]   기계 판정 결과 파일(판정 job, 비밀 없음)
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
+
+  required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
@@ -222,6 +225,21 @@ async function main(argv: string[]): Promise<number> {
           : `plan-gate: 통과 (${branch}, ${r.plan?.file})`,
       );
       return r.problems.length ? 1 : 0;
+    }
+    case 'required-checks': {
+      const info = repoInfo(cwd);
+      const cfg = loadConfig(info.mainRoot);
+      const actual = toRequiredChecks(
+        getGitHub(info.mainRoot).branchInfo(cfg.github.defaultBranch),
+      );
+      const r = compareRequiredChecks(actual, cfg.ci);
+      for (const l of r.lines) log(l);
+      log(
+        r.ok
+          ? 'required-checks: 통과'
+          : 'required-checks: 실패 — 등록은 제작자가 리포 설정에서 한다(0.2절). 봇은 바꾸지 않는다(R20)',
+      );
+      return r.ok ? 0 : 1;
     }
     case 'ci-pr': {
       const eventFile = str('event');

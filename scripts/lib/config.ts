@@ -71,7 +71,13 @@ export interface HarnessConfig {
   riskPaths: { glob: string; risk: 'low' | 'normal' | 'high' }[];
   protectedPaths: string[];
   /** CI 판정 기준. environments: 워크플로가 참조해도 되는 역할별 environment(10.4절) */
-  ci: { environments: string[] };
+  ci: {
+    environments: string[];
+    /** main에 등록되어 있어야 하는 필수 체크와 출처(0.2절). actions = GitHub Actions, recorder = 검증 App */
+    requiredChecks: { context: string; source: 'actions' | 'recorder' }[];
+    /** 검증 App ID(제작자가 알려 준 값). 없으면 출처를 확인할 수 없다 */
+    recorderAppId: number | null;
+  };
   /** 의존성 통제 기준(R17, Q14). deps-guard가 쓴다 */
   deps: {
     lockfiles: string[];
@@ -160,8 +166,18 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   cfg.riskPaths ??= [];
   cfg.protectedPaths ??= [];
   cfg.planReview ??= { required: false };
-  cfg.ci ??= { environments: [...DEFAULT_ENVIRONMENTS] };
-  cfg.ci.environments ??= [...DEFAULT_ENVIRONMENTS];
+  const ci: Partial<HarnessConfig['ci']> = cfg.ci ?? {};
+  cfg.ci = {
+    environments: ci.environments ?? [...DEFAULT_ENVIRONMENTS],
+    requiredChecks: ci.requiredChecks ?? [],
+    recorderAppId: ci.recorderAppId ?? null,
+  };
+  for (const c of cfg.ci.requiredChecks) {
+    if (typeof c?.context !== 'string' || (c.source !== 'actions' && c.source !== 'recorder'))
+      throw new ConfigError(
+        `${CONFIG_FILE} 검증 실패:\n- ci.requiredChecks 항목은 { context, source: actions | recorder }`,
+      );
+  }
   cfg.deps = { ...DEFAULT_DEPS, ...(cfg.deps ?? {}) };
   return cfg;
 }
