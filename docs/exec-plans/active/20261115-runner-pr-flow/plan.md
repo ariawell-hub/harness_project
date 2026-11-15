@@ -101,6 +101,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15T23:03:40+09:00 step3 재작업: PR #95 1차 판정 반영(F3 반박, 미룬 지적 F1·F2 수정)
 - 2026-11-15 step3: PR #95 1차 판정. `review/claude` 승인(P2 2, 원장 F1·F2 미룸: 지적 제목이 프롬프트의 데이터 블록을 닫을 수 있다, 실패 기록 detail의 지적 제목이 "직전 실패"로 블록 밖에 들어간다), `review/codex` 수정 요청(P1 1, 원장 F3): 수정 세션 뒤 AC·`check`가 실패해도 변경을 되돌리지 않는다(수용 기준 7).
 - 2026-11-15 step3: F3은 반박한다(의사결정 로그). Claude의 F1·F2는 고쳤다: 지적 블록에 넣는 값은 한 줄로 만들고 구분자를 지운다(`blockText`), 실패 기록 detail에는 지적 ID와 검증자만 적는다, 중단 보고에 넣는 지적 한 줄은 원장 표와 같은 `cell`로 멘션·마크다운 문자를 바꾼다. 테스트와 구현을 함께 썼고, 그 뒤 옛 구현(`git stash`로 `prompt.ts`·`review.ts`·`run.ts`·`ledger.ts`만 되돌림)으로 새 테스트를 돌려 실패를 확인했다: `node --test scripts/test/runner-review.test.ts` 종료 코드 1(`prompt.ts`에 `blockText` export가 없어 파일 전체가 실패. 테스트별 실패는 따로 보지 못했다). 새 구현에서 AC 테스트와 `ledger.test.ts` 종료 코드 0(107개 통과).
+- 2026-11-15T23:13:04+09:00 step3 재작업: PR #95 원장 F4(Codex P1) 수정
 
 ## 의사결정 로그
 
