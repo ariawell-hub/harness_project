@@ -64,6 +64,8 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step0: 첫 `check`가 secret-scan에서 실패했다(테스트의 가짜 토큰 리터럴이 실제 토큰 형식으로 검출). 실패한 채 `complete-step`까지 이어 실행한 것은 명령을 `;`로 이은 실수였다. push 전이라 로컬 커밋을 계획 커밋 위에서 다시 만들고(`reset --soft`), 테스트 값은 런타임에 조각을 이어 붙이게 바꿨다. `check` 통과를 확인한 뒤 완료 처리했다.
 - 2026-11-15: #53의 마지막 PR #62가 제작자 재승인 뒤 병합됐다.
 - 2026-11-15 step1: `scripts/test/claude-scan.test.ts`와 `ci.test.ts`의 입력 폴더·워크플로 테스트를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`: `claude-scan.ts`, `review-input.ts`) → `scanClaudeRun`, `writeReviewInput`, `planReview`, 명령 `review-plan`·`claude-scan`, `judge-claude.yml` 구현 뒤 `claude-scan`·`ci`·`verdict` 테스트 42개 통과. `review-plan`을 이 브랜치에 직접 돌려 출력(`risk=high`, `claude=true`, `codex=true`)과 입력 폴더를 확인했다. 워크플로는 `workflow_run`이라 이 PR에서는 돌지 않는다. 실제 판정은 step2 PR에서 확인한다.
+- 2026-11-15 step2: `scripts/test/codex-auth.test.ts`·`codex-scan.test.ts`와 `ci.test.ts`의 `judge-codex.yml` 불변식을 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`: `codex-auth.ts`, `codex-scan.ts`, `ENOENT`: `judge-codex.yml`) → 구현 뒤 통과. 새 명령(`codex-auth restore|snapshot|diff|config|seal`, `codex-schema`, `codex-scan`)을 가짜 값으로 직접 돌려 출력에 값이 없는 것(필드 이름·해시 앞 8자)을 확인했다. 봉인은 libsodium 0.8.4를 임시 폴더에 받아 임의 키쌍으로 봉인→풀기 왕복이 원문과 같음을 확인했다(리포 밖 임시 스크립트). `codex-probe.sh`는 로컬에서 문법 검사(`bash -n`)만 했다. Linux 샌드박스 동작은 CI에서만 확인할 수 있다.
+- 2026-11-15 step2: `judge-claude`(step1) 첫 실제 실행을 이 step의 PR #67에서 확인했다(실행 43666809569, head 초안 커밋). `check` 성공 → `plan`(위험도 high, claude=true) → `judge`(Claude Code 2.1.314, 모델 claude-sonnet-5-5, 약 40초, 세션 도구 4개·허용 밖 0·MCP 0, Read 9·Grep 2·StructuredOutput 1, `pr/` 밖 시도 0, 비밀 0, 유출 검사 통과) → `record`가 `review/claude = success — 승인 (P2 3)`을 기록했다. 상태 작성자는 `harness-recorder[bot]`이다. main push의 `check` 완료에서는 `plan`이 건너뛰어 아무것도 기록하지 않았다. 판정의 지적 본문(P2 3건)은 아직 어디에도 게시되지 않는다(원장은 #55).
 
 ## 의사결정 로그
 
@@ -81,10 +83,17 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 판정 워크플로의 concurrency는 head 리포 + 브랜치 단위로 묶고 진행 중인 실행을 취소한다. 이유: 새 커밋의 `check`가 통과하면 옛 head의 판정은 쓸모가 없고 구독 한도만 쓴다. 리포 이름을 넣어 포크의 같은 이름 브랜치가 실행을 취소하지 못하게 한다. 취소된 실행은 아무것도 기록하지 않는다.
 - 유출 검사에서 `pr/` 밖 대상의 도구 결과를 알 수 없으면(결과 이벤트 없음) 성공한 것으로 보고 실패시킨다. Q20의 표식 파일 검사(시험용 훅·MCP 미끼)는 옮기지 않고, 대신 init 이벤트의 도구 목록·MCP 서버 목록에 허용 밖 항목이 있으면 실패시킨다. init이 없어도 실패다(fail-closed).
 - Claude 판정의 모델은 지정하지 않는다(Q20과 같은 조건, 구독 기본 모델). 판정 품질 때문에 고정이 필요해지면 설정 값으로 올린다.
+- Codex 유출 검사는 `pr/` 밖을 가리킨 명령을 실패 조건으로 쓰지 않고 세어 보고만 한다(Q20과 같다). 이유: 명령 문자열만으로는 검색 패턴의 `/`나 `$`도 밖으로 보여 오탐이 잦고, 오탐이면 판정 전체가 `error`가 된다. 읽기 범위는 권한 프로필 샌드박스와 사전 측정(기대와 다르면 판정 없이 실패)이 막는다. 비밀 값·허용 밖 항목 종류·`turn.failed`는 실패 조건이다.
+- `codex exec --output-schema`에는 공통 스키마에서 길이·개수 제약 키워드(`maxLength`, `maxItems`, `minimum`)를 뺀 사본을 준다(`codex-schema`). 이유: 구조화 출력이 이 키워드를 받지 않으면 실행 자체가 실패한다(Q20의 Codex 스키마에도 없었다). 제약은 프롬프트 꼬리말로 알리고 `validateVerdict`가 검사한다.
+- 판정 설정은 인증 폴더(`CODEX_HOME`)가 거부 목록에 덮이지 않으면 만들지 않는다. 이유: 거부 목록 인자를 잘못 줘 인증 파일이 읽히는 설정이 조용히 만들어지는 것을 막는다(사전 측정이 다시 잡지만 앞에서 거절한다).
+- 사전 측정에 홈 설정 폴더(`~/.codex`, `~/.config`) 읽기 항목을 더하고, 측정 전에 샌드박스 밖에서 빈 표식 파일을 둔다. 이유: Q20의 측정은 없는 파일을 읽어 "거부"와 "없음"을 구분하지 못했다.
+- `judge-codex`는 취소하지 않고 줄을 세우므로(`queue: max`) 옛 head의 판정도 끝까지 돈다. 이유: 취소하면 봉인·저장이 빠져 갱신된 인증을 잃을 수 있다(13.3절). 구독 한도가 문제가 되면 판정 job 앞에서 head가 최신인지 확인해 LLM 단계만 건너뛰는 방식을 검토한다.
+- 비밀 스캔의 16자 조각은 JWT 머리처럼 여러 토큰에 공통인 부분도 포함한다. PR 파일에 같은 머리의 JWT가 있고 검증자가 그 파일을 읽으면 판정이 `error`가 된다. 이유: 조각을 빼면 스캔이 약해진다. 실제로 걸리면 그때 공통 머리만 제외하는 규칙을 검토한다.
 - (제작자 결정, 2026-11-15 대화) 이 계획(#54)은 `risk: high`를 유지해 PR마다 제작자 head 승인을 받는다. 구독 토큰·Codex 인증·인증 저장 App이 실제로 CI에 들어가는 작업이기 때문이다. #55·#56·#57의 계획은 `risk: normal`로 만든다. 그 PR들은 자동 병합되고, `harness-guard`가 검사 약화·권한 완화 신호를 잡았거나 경로 표가 높음인 PR만 승인을 요구한다. 이유: 구축 단계에서는 보호 경로도 자동 병합한다는 결정(설계서 10.4절)과 맞추되, 인증을 직접 다루는 구간만 사람이 본다. 버린 대안: 전부 높음(PR마다 승인, #53에서 겪은 부담), #54도 보통(검증자가 완성되기 전에 인증 워크플로가 사람 눈 없이 병합됨).
 
 ## 발견 사항
 
+- `workflow_run`으로 도는 실행은 `gh run list`의 `headBranch`가 PR 브랜치가 아니라 `main`이다. PR의 판정 실행을 찾을 때는 브랜치 이름이 아니라 PR head의 커밋 상태(`review/*`의 target URL)로 찾는다. → 처리: 해당 없음
 - 테스트에 실제 토큰 형식(`sk-ant-…`, `gho_…`, JWT 머리)의 가짜 값을 리터럴로 적으면 gitleaks가 검출해 `check`가 실패한다. 시크릿 스캔 테스트 값은 조각을 런타임에 이어 붙인다. → 처리: 해당 없음
 
 ## 열린 질문
@@ -96,4 +105,4 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step2 judge-codex. 그 PR에서 `judge-claude` 실제 동작(판정, `review/claude` 작성자 = 검증 App)을 확인해 진행 로그에 남긴다.
+- step3 approval-binding. 그 PR에서 `judge-codex` 첫 실제 실행(사전 측정, 판정, 봉인·저장, `review/codex` 작성자 = 검증 App)을 확인해 진행 로그에 남긴다. 실패하면 step3 안에서 고친다.
