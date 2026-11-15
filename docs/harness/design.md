@@ -57,6 +57,7 @@ review_cycle: quarterly
   - v0.7.22 (2026-11-15): Codex 판정 워크플로(`judge-codex`)와 인증 수명주기 구현 위치. 판정·저장 job도 `check` 완료(`workflow_run`)로 시작한다. 사전 측정이 기대와 다르면 판정 없이 실패, `pr/` 밖을 가리킨 셸 명령은 세어 보고만 한다(10.4절, 13.3절, Issue #54)
   - v0.7.23 (2026-11-15): 승인 결속 구현. 승인 상태 description에 patch-id 전체를 적고, 이어받기는 검증 App 봇이 쓴 가장 최근 판정만 근거로 삼는다. 조건에 "PR 파일이 바이트 단위로 같다"를 더했다(patch-id는 공백을 무시한다). 기록 job이 판정 지적을 로그에 낸다(10.3절, 10.1절, Issue #54)
   - v0.7.24 (2026-11-15): Codex 판정 job의 도구 설치 위치는 권한 프로필의 읽기 범위 안이어야 한다(10.4절, Issue #70)
+  - v0.7.25 (2026-11-15): 교차 검증 실제 확인 결과와 필수 체크 목록. `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록한다(0.2절). Codex 판정·사전 측정·봉인 재저장·승인 이어받기를 실제 PR에서 확인했다(10.3절, 13.3절, Issue #54)
 
 ### 0.1 전제 조건
 
@@ -79,6 +80,7 @@ review_cycle: quarterly
   - 필수 상태 체크(10.3절). `check`를 뺀 모든 필수 체크(`review/*`, `plan-gate`, `risk-gate` 등 기록 job이 쓰는 체크)는 검증 App이 보낸 상태만 인정하도록 출처를 지정한다. PR에 같은 이름의 job을 가진 워크플로를 넣어 체크를 흉내 내는 것을 막기 위해서다
     - Q20에서 확인: 같은 이름의 job(check run), PR 워크플로가 `permissions: statuses: write`로 쓴 status(리포 기본 권한이 읽기 전용이어도 받는다), 봇 PAT로 쓴 status가 모두 이 지정으로 병합이 막혔다. 막힘은 병합 판정에만 나타난다(10.3절 "체크 요약 API")
     - 등록은 검증 App이 그 체크를 한 번 보고한 뒤에 한다. admin이 아닌 봇도 `GET repos/<리포>/branches/main`의 `protection.required_status_checks.checks[].app_id`로 등록된 출처를 확인할 수 있다
+    - 등록하는 필수 체크는 `check`(GitHub Actions)와 검증 App 출처의 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`다. `review/*`는 두 판정 워크플로가 실제 PR에서 판정을 내는 것을 확인한 뒤 등록한다. 검증자가 고장 난 채 필수가 되면 모든 PR의 병합이 막힌다(Issue #54)
     - 기대하는 등록(`harness.config.json`의 `ci.requiredChecks`, 검증 App ID는 `ci.recorderAppId`)과 실제 등록은 `node scripts/harness.ts required-checks`로 비교한다. 읽기만 하고 바꾸지 않는다. 이미 다른 출처로 등록된 체크(1단계의 `plan-gate`)는 검증 App이 같은 이름을 보고한 뒤 제작자가 출처를 바꾸고, 그다음에 옛 job을 지운다. 순서가 바뀌면 그 체크를 아무도 채우지 못해 모든 PR이 막힌다(Issue #53)
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
@@ -855,6 +857,7 @@ pnpm test src/auth/login-guard.spec.ts
   - 후보는 이 PR의 앞선 head 중 가장 최근에 판정된 것 하나다(판정 기록이 없는 head는 건너뛴다. 중간 커밋이거나 판정이 아직 줄 서 있는 head다). 그 head의 마지막 판정이 success가 아니거나 patch가 다르면 더 옛 승인으로 거슬러 가지 않는다.
   - `git patch-id`는 공백을 무시한다. 승인 뒤 들여쓰기나 따옴표 안 공백만 바꾼 커밋을 걸러 내려고, PR이 바꾼 파일이 옛 head와 새 head에서 바이트 단위로 같은지도 본다(옛 head와 새 head 사이에 바뀐 파일 목록에 PR 파일이 없어야 한다. PR 파일 이름은 git 인자로 넘기지 않는다. pathspec으로 해석되기 때문이다). main 병합 갱신은 PR 파일을 건드리지 않아 항상 성립한다.
   - 옛 head가 새 head의 조상이 아니거나 조회에 실패하면 이어받지 않고 다시 검증한다.
+- 실제 PR에서 확인했다(2026-11-15, PR #75). 두 검증자 승인 뒤 `origin/main`을 병합해 갱신하자 판정 job 없이 두 체크에 `이어받음 <sha> patch:<id>`가 기록됐고, 공백만 바꾼 커밋은 patch-id가 같아도 "PR 파일의 내용이 다르다"로 다시 검증됐다.
 - patch-id가 같다는 것은 패치가 같다는 뜻이지, 새 base와 합쳐진 코드의 의미까지 같다는 증거는 아니다. 그래서 승인을 이어받을 때도 `check`는 항상 새 head에서 다시 돈다. 최신 브랜치가 필수이므로 squash 결과의 트리는 head와 같고, 이 `check`가 최종 병합 대상에 대한 검증이 된다.
 - merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
 - **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다. 지금 runner는 요약을 실패를 찾는 데만 쓰고 병합은 GitHub 자동 병합에 맡기므로 영향이 없다.
@@ -1108,6 +1111,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
     - **복원**: 판정 job이 임시 `CODEX_HOME`(`RUNNER_TEMP` 아래, 권한 0600)에 쓰고 비대화(`codex exec --json --ephemeral`)로 실행한다. 이 폴더는 판정 샌드박스의 읽기 거부 목록에 있다(10.4절).
     - **봉인과 재저장**: 실행 뒤 판정 job이 `auth.json`을 `judge-codex` environment의 GitHub 공개키로 봉인해(libsodium sealed box, 시크릿 API 형식) job 출력으로 넘긴다. 저장 job은 풀지 않고 그 암호문을 그대로 등록한다. 공개키는 판정 job 앞의 조회 job(저장 자격증명, LLM 없음)이 가져오고, 저장 job은 공개키 id가 같을 때만 등록한다. 평문은 판정 러너 밖으로 나가지 않고, 풀 수 있는 것은 GitHub뿐이다. 저장용 자격증명은 판정 job이 참조하지 않는 `codex-auth-store` environment에 둔다. 같은 job에 두면 판정 job 안의 프로세스가 저장용 자격증명에도 닿을 수 있기 때문이다. 저장용 자격증명은 Environments 읽기·쓰기 권한만 가진 GitHub App(인증 저장 App, 0.2절)이다.
     - **구현 위치**: 워크플로 `.github/workflows/judge-codex.yml`(`plan` → `pubkey` → `judge` → `store` → `record`). 복원·스냅숏·설정·봉인은 `scripts/ci/codex-auth.ts`(`harness.ts codex-auth …`), 사전 측정은 `scripts/ci/codex-probe.sh`, 유출 검사는 `scripts/ci/codex-scan.ts`. 봉인에 쓰는 libsodium은 리포 의존성이 아니라 판정 job이 버전을 고정해 설치 스크립트 없이 임시 폴더에 받는다. 출력은 필드 이름과 sha256 앞 8자뿐이다.
+    - 실제 실행에서 확인했다(2026-11-15): 복원 → 사전 측정(12항목 모두 기대대로) → 판정 → 유출 검사 → 봉인 → 저장 → 다음 실행의 복원(같은 인증). 실행 중 인증 갱신은 아직 일어나지 않았다(실행 전후 `changed=false`).
     - 봉인·저장은 판정이나 유출 검사가 실패해도 실행한다. 실행 중 갱신된 토큰을 잃으면 다음 실행이 옛 토큰을 써서 CI 로그인이 풀릴 수 있다.
     - **동시 실행 제한**: 동시에 실행하면 토큰 갱신이 충돌할 수 있으므로 Codex 작업은 워크플로 단위 concurrency group(`cancel-in-progress: false`, `queue: max`)으로 하나씩 실행한다. job 단위로 걸면 다음 실행의 판정이 앞 실행의 저장보다 먼저 시작해 옛 인증으로 돌고, 기본 `queue: single`은 기다리던 실행을 새 실행이 취소한다(GitHub 문서). Q20에서 동시에 연 PR 3개가 겹치지 않고 하나씩 돌았다.
     - **갱신**: Q20에서는 실행 중 갱신을 관찰하지 못했다. `last_refresh`를 9일 전으로 바꿔도 access token이 유효하면 Codex는 갱신하지 않았다. 갱신은 access token이 만료된 뒤에 일어나는 것으로 보고(문서 근거), 2단계에서 첫 갱신과 재저장을 확인한다(TD-1). 갱신이 실패하면 판정 없이 실패하고(fail closed), 제작자가 CI 전용 로그인을 다시 만든다.

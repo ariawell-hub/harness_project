@@ -78,6 +78,12 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step4: `planCarry` 테스트를 먼저 써서 실패 확인(export 없음) → `review-plan`의 이어받기 연결부를 `scripts/ci/binding.ts`의 `planCarry`로 옮기고 가짜 API로 성공·위험도 높음·봇 설정 없음·조회 실패를 테스트했다. `init` 안내의 필수 체크 목록에 `review/*`를 더했다.
 - 2026-11-15 step4: 초안 PR #69에서 재등록된 인증으로 `judge-codex`가 돌았다(실행 43673752078). 인증 복원(필드 9개, API 키 없음), 판정 설정, 봉인, 저장(`store`가 `CODEX_AUTH_JSON` 재등록)이 처음 성공했다. 다음 실행(PR #71)이 그 저장값으로 같은 인증(sha8 일치)을 복원해 봉인 → 저장 → 복원 왕복을 확인했다. 실행 전후 인증 변화는 없었다(`changed=false`, 갱신 미관찰). 샌드박스 준비는 `bwrap: execvp …/codex: No such file or directory`로 실패했다(Codex 설치 위치가 권한 프로필 읽기 범위 밖). Issue #70 / PR #71로 고쳐 병합했다.
 - 2026-11-15 step4: 같은 PR에서 step3 변경이 실제로 돌았다. `review/claude = success — 승인 (P3 1) patch:<40자>`(작성자 `harness-recorder[bot]`), 기록 job 로그에 판정 요약과 지적 본문이 나왔다. 지적(P3: `fetchCandidates`가 `headSha`를 쓰지 않는다)을 반영해 인자를 뺐다.
+- 2026-11-15 step4: PR #71 병합 뒤 PR #69에서 `judge-codex`가 처음 끝까지 돌았다(실행 43681655728). 설치 위치 `/usr/local/lib/node_modules/@openai/codex`, 샌드박스 준비 `ok=initial`, 사전 측정 12항목 모두 기대대로(`pr_read`만 허용, 쓰기 반영·`/tmp` 쓰기·인증 파일·`RUNNER_TEMP`·홈 설정 두 곳·`base/`·환경 표식·조상 프로세스 환경·네트워크·sudo 거부), `codex exec` 종료 코드 0(이벤트 12개, 명령 4회, 입력 127,881·출력 1,690 토큰), 유출 검사 통과(허용 밖 항목 0, `pr/` 밖 시도 0, 비밀 0), 봉인·저장 성공, `record`가 `review/codex = failure — 수정 요청 (P1 2)`를 기록했다(작성자 `harness-recorder[bot]`). 지적은 "step4의 실제 확인·등록·문서가 아직 없다"였고 사실이었다(그때는 진행 중).
+- 2026-11-15 step4: 승인 이어받기를 확인용 PR #75(Issue #74, 위험도 보통, 보호 경로 밖)에서 확인했다.
+  - head 767915d: `review/claude` 승인, `review/codex` 수정 요청(P1: 검증 결과 기록 없음) → 기록을 더한 head 0220bd3에서 둘 다 `승인 (지적 없음) patch:c0070d71…`.
+  - main이 PR #76 병합으로 나아간 뒤 `origin/main`을 병합한 head 26876ba: 두 워크플로 모두 `plan`이 `이어받음 ← 0220bd33c5b0`을 내고 판정 job(`judge`, Codex는 `pubkey`·`store`도)은 건너뛰었다. `record`가 `이어받음 0220bd33c5b0 patch:c0070d71…`을 success로 기록했다(작성자 `harness-recorder[bot]`). PR API의 `base.sha`는 main 최신이었다(merge-base가 병합한 main 커밋이라 patch가 같았다).
+  - 공백만 바꾼 head ce86556(로컬에서 잰 patch-id는 전과 같음): `다시 검증 — PR 파일의 내용이 다르다`로 두 검증자가 다시 판정했다. 공백은 되돌렸다.
+- 2026-11-15 step4: 문서 갱신. 설계서 0.2절 필수 체크 목록, 10.3절·13.3절 실제 확인 결과(v0.7.25), 절차서 5절 필수 체크 문장, TD-1 비고. Codex 실행 중 인증 갱신은 관찰하지 못했다(모든 실행에서 `changed=false`). TD-1 비고에 확인 방법을 남겼다.
 
 ## 의사결정 로그
 
@@ -112,6 +118,9 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 발견 사항
 
+- `node scripts/harness.ts check 2>&1 | tail -1 && git push`로 실행해, 네트워크 끊김으로 `check`가 실패했는데 push가 이어졌다(다시 돌려 통과를 확인했다). → 처리: #72, TD-29
+- Codex 검증자는 계획의 검증 명령 실행 결과가 진행 로그에 없으면 P1을 낸다(PR #75). 소규모 계획도 실행 결과(종료 코드)를 진행 로그에 적는다. → 처리: #55
+- `review/*`가 필수가 되면 검증자 장애(`error`)나 사용량 한도가 병합을 막는다. 판정 실행을 다시 돌리는 절차와 반박 절차는 원장과 함께 정한다. → 처리: #55
 - PR이 정하는 파일 이름을 `git … -- <파일>`로 넘기면 pathspec으로 해석된다(`:!x`는 제외, `*`·`[`는 glob). `samePrContent`는 고쳤고, `harness-guard`의 파일별 diff에 같은 유형이 남아 있다. → 처리: TD-28
 - 판정 지적의 본문은 원장(#55) 전에는 기록 job 로그에서만 볼 수 있다(`record-review:` 줄). 이 출력은 main에 병합된 뒤의 PR부터 나온다. → 처리: #55
 - 로컬에서 CI와 같은 인자로 `claude -p`를 돌리면 CI 검증자의 지적을 미리 볼 수 있다(`review-plan`으로 입력 폴더를 만든 뒤 실행). 로컬 사전 점검용이고 병합 판단에는 쓰지 않는다. → 처리: [문서](../../../harness/workflow.md)
@@ -128,5 +137,5 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- 제작자: `judge-codex` environment의 `CODEX_AUTH_JSON`을 다시 등록한다(임시 `CODEX_HOME`의 `auth.json` 파일 내용 전체. 13.3절 CI 전용 로그인).
-- step4 verify-register.
+- 제작자: `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록한다. 등록 뒤 `required-checks` 통과를 확인하고 step4를 완료 처리한다.
+- 그 뒤 #55(원장·재현 job·G1).
