@@ -231,9 +231,9 @@ review_cycle: quarterly
   - **runner의 계획 검증**(`scripts/runner/next.ts`의 `planReviewHash`, `scripts/runner/run.ts`의 `doPlanPush`, `scripts/runner/ledger-read.ts`)
     - 대상: `planReview.required`가 켜져 있고, step 폴더 형식 계획이고, 계획 해시가 base(main)의 것과 다른 경우다. 소규모 계획과 둘째 step부터(계획이 main에 같은 해시로 있다)는 대상이 아니다. 필수 체크(`ci.requiredChecks`)나 검증 App 봇(`ci.recorderBot`) 설정이 없는 리포도 대상이 아니다(승인을 기록할 CI가 없어 runner가 기다리기만 하게 된다).
     - 계획 작성 세션이 끝나면 runner가 PR 전체 변경이 계획 폴더 안뿐인지(`planMode`) 확인하고, 일반 push한 뒤 초안 PR을 연다. 제목은 그 step의 PR 제목이고 자동 병합은 켜지 않는다. 계획 폴더 밖 변경이 커밋돼 있으면 push하지 않고 `plan:scope` 실패로 센 뒤 계획을 `draft`로 되돌린다. 다음 계획 작성 세션이 직전 실패를 보고 그 파일을 되돌린다(runner는 `reset`하지 않는다, R14).
-    - 계획 검증 중인 PR(PR head의 step이 끝나지 않았다)은 CI가 끝난 뒤에 원장을 읽는다. 원장으로 인정하는 댓글은 작성자가 `ci.recorderBot`인 것뿐이고(10.2절 (4). runner가 만든 PR의 작성자는 runner 자신이다), `planReview.hash`가 지금 계획의 해시와 같고 두 검증자가 모두 `approvals`에 있어야 승인이다(`plan-gate`와 같은 기준). 승인을 확인하면 step 세션을 띄운다. 승인이 없거나 원장을 읽지 못하면 CI 대기로 세고, 같은 head에서 `limits.ciStallHours`를 넘으면 알린다(4.5절).
+    - 계획 검증 중인 PR(PR head의 step이 끝나지 않았다)은 CI가 끝난 뒤에 원장을 읽는다. 원장으로 인정하는 댓글은 작성자가 `ci.recorderBot`인 것뿐이고(10.2절 (4). runner가 만든 PR의 작성자는 runner 자신이다), `planReview.hash`가 지금 계획의 해시와 같고 두 검증자가 모두 `approvals`에 있어야 승인이다(`plan-gate`와 같은 기준). 승인이 기록된 head가 지금 head와 같은지는 보지 않는다: 승인은 해시에 묶이고(10.3절 결속 기준), 지금 head의 `review/*`·`review-ledger`가 통과한 뒤에만 원장을 읽으므로 지금 head에서 나온 수정 요청은 그 앞에서 걸린다. 승인을 확인하면 step 세션을 띄운다. 승인이 없거나 원장을 읽지 못하면 CI 대기로 세고, 같은 head에서 `limits.ciStallHours`를 넘으면 알린다(4.5절).
     - 계획만 담은 커밋의 `check`가 실패하면 수정 세션이 아니라 계획 작성 세션을 다시 띄운다(실패 내용을 직전 실패로 넣는다). 계획 검증에서 나온 차단 지적의 대응은 Issue #56 step3이고, 그전에는 사람 대기로 센다.
-    - step이 끝나 push할 때 runner는 그 PR의 초안을 해제하고 자동 병합을 켠다. runner는 계획 승인을 스스로 판정하거나 원장을 쓰지 않는다(R12).
+    - step이 끝나 push할 때 runner는 그 PR의 초안을 해제하고 자동 병합을 켠다. 계획 검증 대상이 아닌 계획의 초안 PR(사람이 초안으로 돌려 둔 것)은 해제하지 않는다. runner는 계획 승인을 스스로 판정하거나 원장을 쓰지 않는다(R12).
 - **G2**: 로컬에서 push·PR 직전에 `check` 전체를 실행한다(R7). CI가 같은 검사를 다시 실행한다.
 - **G3**: 10.3절의 필수 상태 체크가 모두 통과해야 GitHub이 병합한다.
 

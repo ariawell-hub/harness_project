@@ -11,12 +11,12 @@ import { readAttempts } from '../lib/attempts.ts';
 import { loadConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { listWorktrees, repoInfo } from '../lib/git.ts';
-import { getGitHub, type CommitCheck } from '../lib/github.ts';
+import { getGitHub, parseCommentRows, type CommitCheck } from '../lib/github.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
 import { planApproved, readPrLedger } from '../runner/ledger-read.ts';
 import { pickNext, planReviewHash } from '../runner/next.ts';
 import { runRunner } from '../runner/run.ts';
-import { HARNESS_ROOT, makeFixture, sh } from './helpers.ts';
+import { HARNESS_ROOT, commitAll, makeFixture, sh } from './helpers.ts';
 
 const BOT = 'harness-recorder[bot]';
 const ACTIONS = 15368;
@@ -203,6 +203,94 @@ test('runner: 해시가 다르거나, 검증자가 하나뿐이거나, 검증 Ap
   } finally {
     t.fx.cleanup();
   }
+});
+
+test('runner: 계획 승인은 해시에 묶인다. 승인 뒤 진행 로그만 바뀐 새 head에서도 승인이고(plan-gate와 같은 기준), 새 head에서 수정 요청이 나오면 진행하지 않는다', async () => {
+  const t = setup();
+  try {
+    const pr = await planPr(t);
+    const approvedHead = pr.head();
+    const hash = pr.hash();
+    t.gh.commentAs(pr.number, BOT, ledgerBody(hash, approvedHead, ['claude', 'codex']));
+    // 승인 뒤 계획의 진행 로그만 바꾼 커밋(해시에 들어가지 않는다)을 올린다
+    const planFile = path.join(pr.worktree, `docs/exec-plans/active/${pr.id}/plan.md`);
+    writeFileSync(
+      planFile,
+      readFileSync(planFile, 'utf8').replace('## 진행 로그', '## 진행 로그\n\n- 기록 한 줄'),
+    );
+    commitAll(pr.worktree, 'plan: 진행 로그');
+    sh('git', ['push', '-q', 'origin', pr.branch], pr.worktree);
+    assert.notEqual(pr.head(), approvedHead);
+    assert.equal(pr.hash(), hash, '진행 로그는 계획 해시에 들어가지 않는다');
+    // 새 head의 판정이 끝나기 전에는 기다린다
+    assert.equal(pick(t.fx.root).task.kind, 'idle');
+    // 새 head에서 검증자가 수정을 요청하면(원장의 옛 승인이 남아 있어도) step을 시작하지 않는다
+    planChecks(t, pr.head(), { 'review/codex': 'failure', 'review-ledger': 'failure' });
+    const blocked = pick(t.fx.root);
+    assert.equal(blocked.task.kind, 'idle');
+    assert.deepEqual(blocked.waiting, { ci: 0, human: 1 });
+    // 새 head의 필수 체크가 통과하면, 승인이 기록된 head가 달라도 같은 해시의 승인으로 진행한다
+    t.gh.setCheck(pr.head(), { context: 'review/codex', creator: BOT });
+    t.gh.setCheck(pr.head(), { context: 'review-ledger', creator: BOT });
+    const p = pick(t.fx.root);
+    assert.equal(p.task.kind, 'step');
+    // 계획 핵심 섹션이 바뀌면(해시가 달라지면) 옛 승인은 승인이 아니다
+    const step0 = path.join(pr.worktree, `docs/exec-plans/active/${pr.id}/step0.md`);
+    writeFileSync(
+      step0,
+      readFileSync(step0, 'utf8').replace('## 금지사항', '## 금지사항\n- 더한 줄'),
+    );
+    commitAll(pr.worktree, 'plan: 금지사항');
+    sh('git', ['push', '-q', 'origin', pr.branch], pr.worktree);
+    planChecks(t, pr.head());
+    assert.notEqual(pr.hash(), hash);
+    assert.equal(pick(t.fx.root).task.kind, 'idle');
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 계획 검증 대상이 아닌 계획의 PR을 사람이 초안으로 돌려 두면, 수정 세션 뒤에도 초안을 해제하지 않는다', async () => {
+  const t = setup({ planReview: { required: false } }, 1);
+  try {
+    addFakeIssue(t.state, 'Demo feature', '데모 기능을 만든다');
+    assert.equal(await run(t.fx.root), 'idle');
+    const branch = t.raw().prs[0].head;
+    const before = headOf(t, branch);
+    // 사람이 PR을 초안으로 돌려 둔다(병합을 잠시 막는다)
+    const s = t.raw();
+    s.prs[0].isDraft = true;
+    s.prs[0].autoMerge = false;
+    writeFileSync(t.state, JSON.stringify(s));
+    t.gh.setCheck(before, {
+      context: 'check',
+      kind: 'check-run',
+      appId: ACTIONS,
+      state: 'failure',
+    });
+    assert.equal(pick(t.fx.root).task.kind, 'fix-pr');
+    await run(t.fx.root);
+    assert.notEqual(headOf(t, branch), before, '수정은 push한다');
+    assert.equal(t.raw().prs[0].isDraft, true, '사람이 건 초안은 runner가 풀지 않는다');
+    assert.equal(t.raw().prs[0].autoMerge, false);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('parseCommentRows: 여러 페이지가 이어진 출력을 줄 단위로 읽고, 형식이 다른 줄이 있으면 예외다', () => {
+  const page1 = Array.from({ length: 100 }, (_, i) =>
+    JSON.stringify([i + 1, 'a', `본문 ${i}\n둘째 줄`]),
+  );
+  const page2 = [JSON.stringify([101, null, null]), JSON.stringify([102, BOT, '원장'])];
+  const rows = parseCommentRows([...page1, ...page2].join('\n') + '\n');
+  assert.equal(rows.length, 102);
+  assert.deepEqual(rows[0], { id: 1, author: 'a', body: '본문 0\n둘째 줄' });
+  assert.deepEqual(rows[100], { id: 101, author: '', body: '' }, '삭제된 계정·빈 본문');
+  assert.deepEqual(rows[101], { id: 102, author: BOT, body: '원장' });
+  assert.deepEqual(parseCommentRows(''), []);
+  assert.throws(() => parseCommentRows('[1,"a","b"]\n{"message":"Server Error"}\n'), /형식 오류/);
+  assert.throws(() => parseCommentRows('[1,"a","b"]\n<html>'));
 });
 
 test('runner: 계획 작성 세션이 계획 폴더 밖 파일을 커밋하면 push하지 않고 plan:scope 실패로 세며, 되돌린 뒤에 초안 PR을 연다', async () => {

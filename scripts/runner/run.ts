@@ -744,8 +744,12 @@ async function doStep(
     return 'env';
   }
   let pr = ctx.gh.findPRByBranch(l.branch);
-  // 계획 검증 때 연 초안 PR이 있으면 그 PR에 구현을 올린 것이다: 초안을 해제한다(4.1절)
-  if (pr?.state === 'open' && pr.isDraft) ctx.gh.setDraft(pr.number, false);
+  // 계획 검증 때 runner가 연 초안 PR이면 그 PR에 구현을 올린 것이다: 초안을 해제한다(4.1절).
+  // 계획 검증 대상이 아닌 계획의 초안 PR(사람이 연 것)은 건드리지 않는다
+  if (pr?.state === 'open' && pr.isDraft && planReviewHash(ctx.cfg, l.worktree, l.branch)) {
+    ctx.gh.setDraft(pr.number, false);
+    pr = { ...pr, isDraft: false };
+  }
   if (!pr || pr.state !== 'open') {
     const idx = ref.kind === 'multi' ? readIndex(l.worktree, findPlan(l.worktree, l.id)!) : null;
     const entry = idx?.steps[l.step ?? 0];
@@ -765,7 +769,9 @@ async function doStep(
       body,
     });
   }
-  ctx.gh.enableAutoMerge(pr.number);
+  // 초안 PR에는 자동 병합을 켤 수 없다. 사람이 초안을 해제하면 다음 바퀴가 켠다(arm-merge)
+  if (pr.isDraft) event(ctx, 'draft-kept', { plan: l.id, pr: pr.number });
+  else ctx.gh.enableAutoMerge(pr.number);
   if (existsSync(answerFile)) unlinkSync(answerFile);
   event(ctx, 'pr-ready', { plan: l.id, step: l.step, pr: pr.number, last: completed.last });
   return 'ok';
