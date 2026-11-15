@@ -138,6 +138,8 @@ export interface GitHubPort {
     draft?: boolean;
   }): PullRequest;
   enableAutoMerge(n: number): void;
+  /** `GET repos/{repo}/branches/{branch}` 원본(필수 체크 등록 확인용, 봇 토큰으로 읽을 수 있다) */
+  branchInfo(branch: string): unknown;
 }
 
 export class GitHubError extends Error {}
@@ -266,6 +268,11 @@ export class GhCli implements GitHubPort {
   private login: string | null = null;
   constructor(cwd: string) {
     this.cwd = cwd;
+  }
+  branchInfo(branch: string): unknown {
+    return JSON.parse(
+      gh(['api', `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}`], this.cwd),
+    );
   }
   me(): string {
     this.login ??= gh(['api', 'user', '--jq', '.login'], this.cwd).trim();

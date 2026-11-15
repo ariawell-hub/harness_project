@@ -114,7 +114,15 @@
     "docs/exec-plans/TEMPLATE*.md"
   ],
   "ci": {
-    "environments": ["judge-claude", "judge-codex", "codex-auth-store", "recorder", "revert"]
+    "environments": ["judge-claude", "judge-codex", "codex-auth-store", "recorder", "revert"],
+    "requiredChecks": [
+      { "context": "check", "source": "actions" },
+      { "context": "plan-gate", "source": "recorder" },
+      { "context": "risk-gate", "source": "recorder" },
+      { "context": "deps-guard", "source": "recorder" },
+      { "context": "harness-guard", "source": "recorder" }
+    ],
+    "recorderAppId": 5764201
   },
   "deps": {
     "lockfiles": ["pnpm-lock.yaml"],
