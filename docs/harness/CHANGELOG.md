@@ -54,6 +54,7 @@ review_cycle: on-change
 - 교차 검증 확인·등록(Issue #54 step4): `review-plan`의 이어받기 판정을 `planCarry`(`scripts/ci/binding.ts`)로 옮겨 테스트. `init` 안내의 필수 체크 목록에 `review/claude`·`review/codex`. 설계서 v0.7.28: 필수 체크 목록에 `review/*`(0.2절), 실제 확인 결과(10.3절, 13.3절). 절차서 5절 필수 체크 문장, TD-1 비고.
 - 지적 원장 핵심 로직(Issue #55 step0): `scripts/ci/ledger.ts`(원장 자료 구조, 댓글 직렬화·해석, 판정 반영: ID·라운드·동결·상태 전이, `review-ledger` 판정)와 형식 문서 `scripts/cross-review/ledger.md`. 판정 스키마에 `resolutions`(원장 지적에 대한 검증자 판정)를 더했다. 검사기는 없으면 빈 배열로 읽는다. 워크플로와 기록 job의 동작은 바뀌지 않는다(연결은 step1). 검사를 약화하지 않는다.
 - 설계서 v0.7.29 · 지적 원장 연결(Issue #55 step1): `scripts/ci/ledger-store.ts`(원장 댓글 읽기·쓰기, `recordLedger`, `recordCiFailure`), `scripts/ci/review-round.ts`(라운드 입력, 프롬프트 버전 고정). `record-review`가 원장을 고치고 `review-ledger`를 기록한다. `review-plan`에 `--reviewer`·`--ledger`, 새 명령 `review-prompt`·`ledger-ci-failure`. 두 판정 워크플로: 기록 job의 원장 직렬화(job 단위 concurrency)와 원장 토큰(`permission-pull-requests: write`, 실패해도 `review/*`는 기록), plan job이 원장을 읽어 판정 job에 넘김(판정 job에는 여전히 GitHub 토큰이 없다), `judge-claude`에 `ci-failure` job. 프롬프트에 라운드 규칙. 검증 App에 Pull requests 쓰기 권한이 필요하다(제작자 작업). `review-ledger`는 아직 필수 체크가 아니다. 검사를 약화하지 않는다.
+- 설계서 v0.7.30 · 반박 전달(Issue #55 step2): `scripts/ci/rebuttal.ts`(PR 작성자 댓글에서 세 줄 형식만 해석, 근거·요지 검사, 검증자 입력 `rebuttals.md`). `review-plan`에 `--rebuttals`, plan job이 반박을 job 출력으로 넘긴다(판정 job에는 여전히 GitHub 토큰이 없다). 프롬프트에 반박 다루는 규칙. 절차서 8절에 쓰는 곳과 버려지는 경우. 검사를 약화하지 않는다.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

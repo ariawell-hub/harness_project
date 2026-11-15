@@ -641,6 +641,10 @@ test('judge-*.yml: 기록 job이 PR마다 차례로 원장을 고치고, 원장 
     const judge = j.get('judge')!;
     assert.match(judge, new RegExp(`--ledger "\\$LEDGER" --reviewer ${who}`));
     assert.match(judge, /LEDGER: \$\{\{ needs\.plan\.outputs\.ledger \}\}/);
+    // 반박도 plan job이 형식을 검사해 넘긴다
+    assert.match(plan, /rebuttals: \$\{\{ steps\.plan\.outputs\.rebuttals \}\}/);
+    assert.match(judge, /REBUTTALS: \$\{\{ needs\.plan\.outputs\.rebuttals \}\}/);
+    assert.match(judge, /--rebuttals "\$REBUTTALS"/);
     assert.doesNotMatch(judge, /pull-requests|LEDGER_TOKEN/);
     // 프롬프트 버전을 읽으려면 base의 전체 이력이 필요하다
     assert.match(judge, /path: base\n(?:\s+#[^\n]*\n)*\s+fetch-depth: 0/);

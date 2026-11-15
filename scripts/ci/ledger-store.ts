@@ -40,31 +40,56 @@ interface Where {
   recorderBot: string;
 }
 
-function checkWhere(o: Where): void {
+export function checkWhere(o: Where): void {
   if (!o.recorderBot) throw new Error('ci.recorderBot 설정이 없어 원장 댓글을 가릴 수 없다');
   if (!REPO_RE.test(o.repo)) throw new Error('repo 형식 오류(owner/name)');
   if (!Number.isInteger(o.number) || o.number <= 0) throw new Error('PR 번호를 모른다');
 }
 
-/** 검증 App 봇이 쓴 원장 댓글 중 가장 오래된 것을 읽는다. 없으면 둘 다 null */
-export async function loadLedger(o: Where & { get: LedgerApi['get'] }): Promise<StoredLedger> {
-  checkWhere(o);
+export interface IssueComment {
+  id?: unknown;
+  user?: { login?: unknown } | null;
+  body?: unknown;
+}
+
+/** PR의 댓글을 시간순으로 모두 읽는다. 끝을 확인하지 못하면 예외 */
+export async function listComments(o: {
+  get: LedgerApi['get'];
+  repo: string;
+  number: number;
+}): Promise<IssueComment[]> {
+  const out: IssueComment[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const raw = await o.get(
       `repos/${o.repo}/issues/${o.number}/comments?per_page=${PER_PAGE}&page=${page}`,
     );
     if (!Array.isArray(raw)) throw new Error('댓글 목록이 배열이 아니다');
-    for (const c of raw as { id?: unknown; user?: { login?: unknown }; body?: unknown }[]) {
-      if (c?.user?.login !== o.recorderBot) continue;
-      if (typeof c.body !== 'string' || !c.body.includes(LEDGER_MARKER)) continue;
-      if (typeof c.id !== 'number') throw new Error('원장 댓글에 id가 없다');
-      const ledger = parseLedger(c.body);
-      if (!ledger) throw new Error(`원장 댓글(${c.id})이 깨졌다`);
-      return { commentId: c.id, ledger };
-    }
-    if (raw.length < PER_PAGE) return { commentId: null, ledger: null };
+    out.push(...(raw as IssueComment[]));
+    if (raw.length < PER_PAGE) return out;
   }
   throw new Error(`댓글이 ${MAX_PAGES * PER_PAGE}개를 넘어 원장 유무를 알 수 없다`);
+}
+
+/** 댓글 목록에서 검증 App 봇이 쓴 원장 댓글 중 가장 오래된 것을 고른다. 없으면 둘 다 null, 깨졌으면 예외 */
+export function ledgerFromComments(
+  comments: readonly IssueComment[],
+  recorderBot: string,
+): StoredLedger {
+  for (const c of comments) {
+    if (c?.user?.login !== recorderBot) continue;
+    if (typeof c.body !== 'string' || !c.body.includes(LEDGER_MARKER)) continue;
+    if (typeof c.id !== 'number') throw new Error('원장 댓글에 id가 없다');
+    const ledger = parseLedger(c.body);
+    if (!ledger) throw new Error(`원장 댓글(${c.id})이 깨졌다`);
+    return { commentId: c.id, ledger };
+  }
+  return { commentId: null, ledger: null };
+}
+
+/** 검증 App 봇이 쓴 원장 댓글 중 가장 오래된 것을 읽는다. 없으면 둘 다 null */
+export async function loadLedger(o: Where & { get: LedgerApi['get'] }): Promise<StoredLedger> {
+  checkWhere(o);
+  return ledgerFromComments(await listComments(o), o.recorderBot);
 }
 
 /** 원장 댓글을 만들거나 고친다. 본문이 댓글 상한을 넘으면 쓰지 않고 예외 */

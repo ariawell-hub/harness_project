@@ -16,7 +16,8 @@
     {
       "step": 2,
       "name": "rebuttal",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T17:54:48+09:00"
     },
     {
       "step": 3,
