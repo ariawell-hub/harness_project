@@ -294,9 +294,51 @@ jobs:
           gh api "repos/$REPO/environments/judge-codex/secrets/CODEX_AUTH_JSON" \
             --jq '"judge-codex: 저장함 name=\(.name) updated_at=\(.updated_at)"'
 
+  repro:
+    name: repro
+    needs: [plan, judge]
+    if: needs.judge.outputs.verdict != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # PR 코드를 실행한다: 비밀·environment·쓰기 권한이 없다(10.4절). 결과는 조작될 수 있는 값으로 다룬다
+    permissions:
+      contents: read
+    outputs:
+      results: ${{ steps.run.outputs.results }}
+    steps:
+      - name: main 정의 체크아웃 (재현 스크립트와 설정만)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          sparse-checkout: |
+            scripts
+            harness.config.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: PR head 체크아웃 (재현 테스트를 붙여 실행할 트리)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.head_sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: 재현 테스트 실행 (base의 설정과 스크립트로, 테스트마다 시간 제한)
+        id: run
+        env:
+          VERDICT_B64: ${{ needs.judge.outputs.verdict }}
+        run: |
+          F="$RUNNER_TEMP/verdict.json"
+          printf '%s' "$VERDICT_B64" | base64 -d > "$F"
+          node base/scripts/harness.ts repro --verdict "$F" --repo pr --config-root base
+
   record:
     name: record
-    needs: [plan, judge]
+    needs: [plan, judge, repro]
     if: ${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -360,6 +402,8 @@ jobs:
           PR_NUMBER: ${{ needs.plan.outputs.number }}
           PROMPT_BASE: ${{ github.sha }}
           ROUND_CHANGED: ${{ needs.plan.outputs.round_changed }}
+          # 재현 job 결과(PR 코드가 만든 값. 순번과 값만 받는다)
+          REPRO: ${{ needs.repro.outputs.results }}
         run: |
           [ "$NEEDED" = "false" ] || NEEDED=true
           F="$RUNNER_TEMP/verdict.json"
@@ -368,4 +412,4 @@ jobs:
             --verdict "$F" --head-sha "$HEAD_SHA" --repo-slug "$REPO" --target-url "$RUN_URL" \
             --patch "$PATCH" --carried-from "$CARRIED" \
             --config-root base --pr-number "$PR_NUMBER" --prompt-base "$PROMPT_BASE" \
-            --round-changed "$ROUND_CHANGED"
+            --round-changed "$ROUND_CHANGED" --repro-results "$REPRO"

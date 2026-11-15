@@ -83,6 +83,35 @@ const usesCache = (text: string) =>
     .split('\n')
     .some((l) => /uses:\s*actions\/cache/.test(l) || /^\s*cache(-dependency-path)?:/.test(l));
 
+/**
+ * PR 코드를 실행하는 재현 job(10.4절)이 지켜야 할 것: environment·비밀·쓰기 권한이 없다.
+ * 재현 job = id가 `repro`이거나 `harness.ts repro`를 실행하는 job. 어긴 내용을 돌려준다
+ */
+export function reproJobViolations(text: string): string[] {
+  const i = text.search(/^jobs:\s*$/m);
+  if (i < 0) return [];
+  const blocks = new Map<string, string[]>();
+  let cur: string | null = null;
+  for (const line of text.slice(i).split('\n').slice(1)) {
+    const m = /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(line);
+    if (m) {
+      cur = m[1];
+      blocks.set(cur, []);
+    } else if (/^\S/.test(line)) break;
+    else if (cur) blocks.get(cur)!.push(line);
+  }
+  const out: string[] = [];
+  for (const [id, lines] of blocks) {
+    const body = lines.join('\n');
+    if (id !== 'repro' && !/harness\.ts repro\b/.test(body)) continue;
+    if (environments(body).length) out.push(`${id}: environment를 참조한다`);
+    if (/\bsecrets\./.test(body)) out.push(`${id}: 비밀을 참조한다`);
+    if (writeLines(body).length) out.push(`${id}: 쓰기 권한이 있다`);
+    if (!/^ {4}permissions:/m.test(body)) out.push(`${id}: job 권한을 적지 않았다`);
+  }
+  return out;
+}
+
 function parse(text: string | null): Record<string, unknown> | null {
   if (text === null) return {};
   try {
@@ -163,7 +192,12 @@ export function harnessGuard(o: {
   const wfDir = path.join(o.root, WORKFLOWS);
   for (const name of existsSync(wfDir) ? readdirSync(wfDir).sort() : []) {
     if (!/\.ya?ml$/.test(name)) continue;
-    if (usesCache(readFileSync(path.join(wfDir, name), 'utf8')))
+    const text = readFileSync(path.join(wfDir, name), 'utf8');
+    for (const v of reproJobViolations(text))
+      failures.push(
+        `${WORKFLOWS}${name}: 재현 job ${v}\n  고치는 법: PR 코드를 실행하는 job에는 environment·비밀·쓰기 권한을 두지 마라\n  근거: docs/harness/design.md 10.4절 재현 job`,
+      );
+    if (usesCache(text))
       failures.push(
         `${WORKFLOWS}${name}: Actions 캐시를 쓴다\n  고치는 법: actions/cache와 setup-* 액션의 cache 옵션을 빼라\n  근거: docs/harness/design.md 10.4절 캐시 규칙`,
       );

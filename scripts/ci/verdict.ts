@@ -13,6 +13,10 @@ export const LIMITS = {
   suggestion: 1000,
   resolutions: 60,
   note: 300,
+  reproPath: 200,
+  reproContent: 4000,
+  /** 판정 하나에 붙일 수 있는 재현 테스트 수(job 출력 크기) */
+  repros: 3,
 } as const;
 
 /** 원장 지적 ID(10.2절 (4)) */
@@ -33,6 +37,15 @@ export interface Finding {
   title: string;
   evidence: string;
   suggestion: string;
+  /** 재현 테스트(10.2절 (3)). 없으면 path와 content가 빈 문자열 */
+  repro: Repro;
+}
+
+export interface Repro {
+  /** 재현 job이 PR 체크아웃에 쓸 새 테스트 파일 경로 */
+  path: string;
+  /** 테스트 소스. 지적한 결함이 있으면 단언이 실패해야 한다 */
+  content: string;
 }
 
 export interface Verdict {
@@ -66,8 +79,17 @@ export function validateVerdict(raw: unknown): Validated {
     if (!x || typeof x !== 'object' || Array.isArray(x))
       return no(`findings[${i}]가 객체가 아니다`);
     const f = x as Record<string, unknown>;
-    if (!onlyKeys(f, ['severity', 'file', 'line', 'title', 'evidence', 'suggestion']))
+    if (!onlyKeys(f, ['severity', 'file', 'line', 'title', 'evidence', 'suggestion'], ['repro']))
       return no(`findings[${i}]의 키가 다르다`);
+    let repro: Repro = { path: '', content: '' };
+    if (f.repro !== undefined) {
+      const r = f.repro as Record<string, unknown>;
+      if (!r || typeof r !== 'object' || Array.isArray(r) || !onlyKeys(r, ['path', 'content']))
+        return no(`findings[${i}].repro의 형식이 다르다`);
+      if (!str(r.path, LIMITS.reproPath) || !str(r.content, LIMITS.reproContent))
+        return no(`findings[${i}].repro가 문자열이 아니거나 너무 길다`);
+      repro = { path: r.path, content: r.content };
+    }
     if (!(SEVERITIES as readonly unknown[]).includes(f.severity))
       return no(`findings[${i}].severity 값이 다르다`);
     if (!Number.isInteger(f.line) || (f.line as number) < 0)
@@ -81,8 +103,11 @@ export function validateVerdict(raw: unknown): Validated {
       title: f.title as string,
       evidence: f.evidence as string,
       suggestion: f.suggestion as string,
+      repro,
     });
   }
+  if (findings.filter((f) => f.repro.content !== '').length > LIMITS.repros)
+    return no(`재현 테스트가 ${LIMITS.repros}개를 넘는다`);
   const resolutions: Resolution[] = [];
   const rawRes = v.resolutions ?? [];
   if (!Array.isArray(rawRes) || rawRes.length > LIMITS.resolutions)

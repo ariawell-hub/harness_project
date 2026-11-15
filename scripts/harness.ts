@@ -38,8 +38,9 @@ import {
   type Rebuttal,
 } from './ci/rebuttal.ts';
 import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
+import { parseReproResults, reproResultsData, runRepro } from './ci/repro.ts';
 import { pinnedPrompt, writeRoundInput } from './ci/review-round.ts';
-import type { Verdict } from './ci/verdict.ts';
+import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
@@ -87,6 +88,7 @@ CI(gates 워크플로, 10.4절):
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
                 --head-sha <sha> --repo-slug <owner/name> --target-url <url> [--patch <id>] [--carried-from <sha>]
                 [--pr-number <N> --config-root <base> --prompt-base <sha> --round-changed <base64 JSON>]
+                [--repro-results <base64 JSON>]
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
                                            PR 번호를 주면 지적 원장 댓글을 고치고 review-ledger도 기록한다(토큰은 LEDGER_TOKEN)
   review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N>] [--base-sha <sha>]
@@ -95,6 +97,8 @@ CI(gates 워크플로, 10.4절):
                                            PR 번호와 base SHA를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
                                            검증자와 PR 번호(원장을 API로 읽고 ledger 출력) 또는 --ledger(받은 원장)를 주면
                                            원장·라운드 입력을 쓰고 round, prompt_base, round_changed를 낸다(10.2절)
+  repro --verdict <verdict.json> --repo <pr> --config-root <base>
+                                           판정의 재현 테스트를 PR 체크아웃에 붙여 실행하고 results를 $GITHUB_OUTPUT에 쓴다(재현 job)
   review-prompt --base-dir <base> --files <a.md,b.md> --out <파일> [--prompt-base <sha>]
                                            검증 프롬프트를 이어 붙인다. 프롬프트 버전이 있으면 그 커밋의 파일을 쓴다(10.2절 (2))
   ledger-ci-failure --config-root <base> --pr-number <N> --head-sha <sha> --repo-slug <owner/name> --run-url <url> --prompt-base <sha>
@@ -176,6 +180,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'run-url': { type: 'string' },
   ledger: { type: 'string' },
   rebuttals: { type: 'string' },
+  'repro-results': { type: 'string' },
   home: { type: 'string' },
   auth: { type: 'string' },
   snap: { type: 'string' },
@@ -387,6 +392,13 @@ async function main(argv: string[]): Promise<number> {
         } catch {
           // 목록이 없거나 깨졌으면 모르는 것으로 본다(2라운드부터 새 P1은 동결된다)
         }
+        // 재현 job 결과(10.2절 (3)). PR 코드가 만든 값이라 순번과 값만 받는다. 형식이 다르면 없는 것으로 본다
+        const v = seen as Verdict | null;
+        const outcomes = v ? parseReproResults(str('repro-results') ?? '', v.findings.length) : [];
+        if (outcomes === null) log('record-review: 재현 결과 형식이 달라 쓰지 않는다');
+        const reproMap = new Map((outcomes ?? []).map((x) => [x.index, x.result] as const));
+        for (const x of outcomes ?? [])
+          log(`record-review: 재현 findings[${x.index}] = ${x.result}`);
         const l = await recordLedger({
           reviewer: (p.context.split('/')[1] ?? '') as Reviewer,
           verdict: seen,
@@ -396,6 +408,7 @@ async function main(argv: string[]): Promise<number> {
           recorderBot: cfg.ci.recorderBot ?? '',
           promptBase: str('prompt-base') ?? '',
           changedSinceLastRound: changed,
+          repro: reproMap,
           api: ledgerToken ? githubLedgerApi(ledgerToken, process.env.GITHUB_API_URL) : null,
           post: githubStatusPoster({
             token,
@@ -525,6 +538,34 @@ async function main(argv: string[]): Promise<number> {
         `review-plan: 위험도 ${r.risk}, 작성 도구 ${r.author || '알 수 없음'} → claude=${r.claude} codex=${r.codex}`,
       );
       for (const why of r.reasons) log(`  - ${why}`);
+      return 0;
+    }
+    case 'repro': {
+      const file = str('verdict');
+      const root = str('repo');
+      const output = process.env.GITHUB_OUTPUT;
+      if (!file || !root || !output) {
+        process.stderr.write('repro: --verdict, --repo와 환경 변수 GITHUB_OUTPUT이 필요하다\n');
+        return 2;
+      }
+      // 설정은 base의 것만 쓴다. PR 트리의 설정으로 명령을 바꿀 수 없다
+      const cfg = loadConfig(path.resolve(str('config-root') ?? '.'));
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(readFileSync(file, 'utf8'));
+      } catch {
+        // 판정이 없으면 실행할 것이 없다
+      }
+      const v = validateVerdict(parsed);
+      if (!v.ok) {
+        log('repro: 판정을 읽지 못해 실행하지 않는다');
+        appendFileSync(output, 'results=\n');
+        return 0;
+      }
+      const results = runRepro({ root: path.resolve(root), verdict: v.value, cfg: cfg.ci.repro });
+      for (const r of results) log(`repro: findings[${r.index}] = ${r.result}`);
+      if (!results.length) log('repro: 실행한 재현 테스트가 없다');
+      appendFileSync(output, `results=${reproResultsData(results)}\n`);
       return 0;
     }
     case 'review-prompt': {

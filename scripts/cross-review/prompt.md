@@ -51,6 +51,16 @@ base 스크립트가 모아 둔 입력이 `.harness-review/`에 있다.
 
 P0·P1은 병합을 막는다. 그래서 `evidence`에 위치(파일·라인)와 실패 시나리오(어떤 입력·상태에서 어떤 잘못된 결과가 나오는지)를 반드시 적어라. 근거를 댈 수 없는 추측은 P2 이하로 내려라. 범위는 이번 diff와 그 직접 영향이다. 바뀌지 않은 기존 코드의 문제는 P2로 적되, 기존 코드의 P0는 그대로 P0로 적어라.
 
+## 재현 테스트
+
+P1 지적이 테스트로 재현할 수 있는 버그라면 `repro`에 재현 테스트를 붙여라. 재현 job이 그 파일을 PR head에 붙여 실행하고 결과를 원장에 적는다. 너는 아무것도 실행하지 않는다.
+
+- `path`: 이 리포의 테스트 폴더 바로 아래의 새 파일. 이름은 `harness-repro-<소문자·숫자·->.test.<확장자>` 꼴이다(이 리포: `scripts/test/harness-repro-<이름>.test.ts`). 이미 있는 파일 이름은 쓰지 마라.
+- `content`: 그 파일 전체. 이 리포의 다른 테스트와 같은 방식(`node:test`, `node:assert/strict`)으로 쓰고, **지적한 결함이 있으면 단언이 실패하고 고쳐지면 통과**하게 써라. 단언 실패가 아닌 실패(문법 오류, 없는 모듈)는 재현으로 세지 않는다.
+- 테스트는 그 파일 하나로 끝나야 한다. 네트워크, 환경 변수, 리포 밖 파일에 기대지 마라. 비밀처럼 보이는 값을 넣지 마라.
+- 판정 하나에 재현 테스트는 3개까지다. 재현 테스트가 없으면 `path`와 `content`를 빈 문자열로 둬라. 보안·정적 분석 지적처럼 테스트로 재현하기 어려운 것은 붙이지 않아도 된다.
+- 원장의 "재현 안 됨"·"실행 못 함"은 PR 코드가 실행된 결과라 조작될 수 있다. 네 지적이 "재현 안 됨"이면 지금 코드와 네 테스트를 다시 확인해 `resolutions`로 답하라.
+
 ## 출력
 
 정해진 JSON 스키마 하나로만 낸다.
@@ -58,5 +68,5 @@ P0·P1은 병합을 막는다. 그래서 `evidence`에 위치(파일·라인)와
 - `verdict`: P0·P1 지적이 하나도 없으면 `approve`, 있으면 `request_changes`
 - `risk`: 네가 보는 위험도(low | normal | high). 보안·권한·인증, 마이그레이션·데이터 스크립트, 검사 약화가 보이면 high
 - `summary`: 판정 이유 요약
-- `findings`: 지적마다 `severity`, `file`, `line`(모르면 0), `title`, `evidence`, `suggestion`
+- `findings`: 지적마다 `severity`, `file`, `line`(모르면 0), `title`, `evidence`, `suggestion`, `repro`(`path`, `content`. 없으면 둘 다 빈 문자열)
 - `resolutions`: 원장 지적마다 `id`(`F<번호>`), `status`(`fixed` | `rejected` | `open`), `note`. 입력에 원장(`.harness-review/ledger.md`)이 없으면 빈 배열

@@ -86,7 +86,7 @@ export function writeRoundInput(o: {
       : []),
     ...(note ? [`- ${note}`] : []),
     '',
-    'ID | 등급 | 검증자 | 상태 | 위치 | 내용 | 처리',
+    'ID | 등급 | 검증자 | 상태 | 위치 | 내용 | 재현 | 처리',
     ...o.ledger.findings.map((e) =>
       [
         e.id,
@@ -95,6 +95,7 @@ export function writeRoundInput(o: {
         e.status,
         `${oneLine(e.file)}:${e.line}`,
         oneLine(e.title),
+        e.repro || '-',
         oneLine(e.note) || '-',
       ].join(' | '),
     ),

@@ -104,6 +104,7 @@ const finding = (over: Record<string, unknown> = {}) => ({
   title: '만료 토큰을 허용함',
   evidence: '근거',
   suggestion: '제안',
+  repro: { path: '', content: '' },
   ...over,
 });
 function verdictFile(v: Record<string, unknown>): string {
@@ -358,4 +359,69 @@ test('review-plan: plan job은 원장을 읽어 출력으로 넘기고, 판정 j
     GITHUB_OUTPUT: out2,
   });
   assert.equal(bad.code, 1, bad.out);
+});
+
+test('repro → record-review: 재현 job 결과가 원장의 재현 칸에 들어간다. 형식이 다른 결과는 쓰지 않는다', async () => {
+  reset();
+  // PR 트리: add가 빼기를 한다. 검증자가 낸 재현 테스트는 그 결함에서 단언이 실패한다
+  const root = tmp();
+  write(root, 'src/a.mjs', 'export const add = (a, b) => a - b;\n');
+  write(root, 'scripts/test/keep.txt', '');
+  const content = [
+    "import assert from 'node:assert/strict';",
+    "import { test } from 'node:test';",
+    "import { add } from '../../src/a.mjs';",
+    "test('add', () => assert.equal(add(1, 2), 3));",
+    '',
+  ].join('\n');
+  const v = verdictFile({
+    verdict: 'request_changes',
+    findings: [
+      finding({ repro: { path: 'scripts/test/harness-repro-add.test.mjs', content } }),
+      finding({ title: '재현 테스트 없음' }),
+    ],
+  });
+  const out = path.join(tmp(), 'out');
+  writeFileSync(out, '');
+  const rr = await run(['repro', '--verdict', v, '--repo', root, '--config-root', HARNESS_ROOT], {
+    GITHUB_OUTPUT: out,
+  });
+  assert.equal(rr.code, 0, rr.out);
+  assert.match(rr.out, /findings\[0\] = reproduced/);
+  const results = /^results=(.*)$/m.exec(readFileSync(out, 'utf8'))?.[1] ?? '';
+  assert.deepEqual(JSON.parse(Buffer.from(results, 'base64').toString()), [
+    { index: 0, result: 'reproduced' },
+  ]);
+  const r = await run(recordArgs(v, [...ledgerArgs, '--repro-results', results]), tokens);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(
+    parseLedger(state.comments[0].body)?.findings.map((e) => [e.id, e.repro]),
+    [
+      ['F1', 'reproduced'],
+      ['F2', ''],
+    ],
+  );
+  // 순번이 범위를 벗어난 결과는 통째로 버린다(기록은 그대로 한다)
+  reset();
+  const forged = Buffer.from(JSON.stringify([{ index: 9, result: 'not-reproduced' }])).toString(
+    'base64',
+  );
+  const r2 = await run(recordArgs(v, [...ledgerArgs, '--repro-results', forged]), tokens);
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /재현 결과 형식이 달라/);
+  assert.deepEqual(
+    parseLedger(state.comments[0].body)?.findings.map((e) => e.repro),
+    ['', ''],
+  );
+  // 판정이 없으면 재현 job은 아무것도 실행하지 않는다
+  const empty = path.join(tmp(), 'empty.json');
+  writeFileSync(empty, '');
+  const none = await run(
+    ['repro', '--verdict', empty, '--repo', root, '--config-root', HARNESS_ROOT],
+    {
+      GITHUB_OUTPUT: out,
+    },
+  );
+  assert.equal(none.code, 0, none.out);
+  assert.match(none.out, /판정을 읽지 못해/);
 });

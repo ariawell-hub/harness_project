@@ -125,7 +125,13 @@
       { "context": "review/codex", "source": "recorder" }
     ],
     "recorderAppId": 5764201,
-    "recorderBot": "harness-recorder[bot]"
+    "recorderBot": "harness-recorder[bot]",
+    "repro": {
+      "dir": "scripts/test",
+      "command": ["node", "--test"],
+      "failPattern": "AssertionError|ERR_ASSERTION",
+      "timeoutSec": 120
+    }
   },
   "deps": {
     "lockfiles": ["pnpm-lock.yaml"],
