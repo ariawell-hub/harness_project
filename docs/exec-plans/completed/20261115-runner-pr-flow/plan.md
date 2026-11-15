@@ -2,7 +2,7 @@
 id: 20261115-runner-pr-flow
 issue: 56 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -120,6 +120,13 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-16 step5: 전체 `check` 종료 코드 0(fmt·lint·test·doc-lint·우회 탐지·시크릿 스캔). doc-lint의 R8 경고는 `related_code`가 문서보다 나중에 바뀌었다는 것이다(ADR 4건, `docs/harness/workflow.md` 1건).
 - 2026-11-16T00:43:56+09:00 step5 재작업: 절차서 6절에 발산 대응을 적고 진행 로그의 doc-lint 설명을 바로잡는다
 - 2026-11-16 step5: 위 줄을 바로잡았다. 처음에는 "이 step에서 바꾼 파일은 그 목록에 없다"고 적어 push했는데 틀렸다: `workflow.md`의 `related_code`에 이 step에서 바꾼 `scripts/runner/`가 있다. 절차서 6절에 수렴하지 않은 리뷰 라운드의 대응(되돌리기, `review-round`)을 적었다. ADR 4건은 이 step에서 그 파일들을 바꾸지 않았다.
+- 2026-11-16 step5: PR #97 1차 판정에서 두 검증자 승인(지적 없음, 원장 없음). 병합(`5b59f0a`).
+- 2026-11-16 step6: 테스트 먼저. `node --test scripts/test/runner-workers.test.ts` 종료 코드 1(`scripts/runner/workers.ts` 없음). 구현 뒤 `runner-workers`·`runner` 22개 중 1개 실패(`limits.workers: null`을 기본값 1로 받아 넘겼다. 테스트가 맞아 구현을 고쳤다) → 통과.
+- 2026-11-16 step6: 작업자 2개 테스트는 실제로 `node scripts/harness.ts run`을 띄워 자식 프로세스 둘이 Issue 둘을 나눠 끝내는 것을 본다. 흔들림을 보려고 8번 반복해 8번 통과했다. 가짜 GitHub 상태 파일은 두 프로세스가 함께 쓰므로 잠금과 원자적 저장을 넣었다(의사결정 로그).
+- 2026-11-16 step6: 원격 fetch 실패 테스트는 먼저 실패를 봤다(`node --test --test-name-pattern="원격 fetch가 실패해도" scripts/test/runner-workers.test.ts` 종료 코드 1: `runRunner`가 `원격(origin) fetch 실패` 예외로 끝났다). 환경 대기로 고친 뒤 통과.
+- 2026-11-16 step6: 충돌 테스트(`runner.test.ts`)와 정지 알림·WIP 테스트는 구현 전에 실패를 보지 않았다. 구현 뒤 네 곳을 일부러 깨뜨려 확인했다: 충돌을 예전처럼 바로 사람에게 넘기기, 정지 알림의 중복 방지 빼기, 작업자 이름이 겹치게 하기, WIP 상한 무시. 깨뜨린 구현에서 `node --test scripts/test/runner-workers.test.ts scripts/test/runner.test.ts` 종료 코드 1이고 네 곳 모두 해당 테스트가 실패했다(9개 실패). 원본으로 되돌린 뒤 통과.
+- 2026-11-16 step6: AC 명령(테스트 7개 파일 116개, `grep` 3개) 종료 코드 0.
+- 2026-11-16 step6: 전체 `check` 종료 코드 0. doc-lint R8 경고 3건 가운데 이 step에서 바꾼 파일은 ADR-0003의 `harness.config.json`이다(`limits.workers`만 바꿨다. 봇 토큰 결정과 무관해 ADR은 고치지 않는다).
 
 ## 의사결정 로그
 
@@ -164,6 +171,12 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 결정: `review-round` 키는 수렴한 라운드가 있어도 0으로 돌리지 않는다. / 이유: 10.2절 (7)이 "누적 3회·5회"로 센다. 발산과 수렴이 번갈아 나오는 PR도 방법 전환과 중단에 닿아야 한다. 제작자 답변 뒤에는 다른 키와 함께 새로 센다(기존 `RESET_KEY`).
 - 결정: 발산 신호의 글에는 지적 ID만 넣는다("같은 위치"도 `F5(F2의 자리)`로 적는다). / 이유: 신호는 실패 기록의 detail과 진행 로그에 들어가고, detail은 다음 세션 프롬프트의 "직전 실패"(데이터 블록 밖)로 간다(PR #95 원장 F2와 같은 이유).
 - 결정: 로컬 회귀에서 되돌리는 것은 세션 시작 전 HEAD 이후의 모든 커밋이다(세션이 계획 파일을 고친 커밋 포함). 발산 되돌리기는 계획 전용 커밋만 건너뛴다. / 이유: 로컬 회귀는 지시서가 "세션 시작 전 HEAD 이후의 커밋"으로 정했고, 그 구간에는 runner의 상태 커밋이 없다. 발산 되돌리기 구간에는 runner의 재작업·완료 커밋이 있어 되돌리면 step 상태가 어긋난다. 수정 커밋이 계획 파일도 함께 고쳤으면 그 부분도 되돌려지고, 충돌하면 멈춰 보고한다.
+- 결정: 원격 fetch 실패를 예외가 아니라 환경 대기로 다룬다(실패로 세지 않고 다음 바퀴에 다시 한다. 기다린 시간이 `limits.usageLimitMaxWaitMin`을 넘으면 `usage-limit`로 멈추고 알린다). / 이유: step6 지시서에는 없지만, 지금까지는 fetch가 실패하면 예외가 루프 밖으로 나가 runner가 알림 없이 죽었다. 작업자가 둘이면 같은 리포에서 `git fetch`가 겹쳐 ref 잠금으로 실패할 수 있다. 죽은 작업자는 정지 알림(수용 기준 10)도 남기지 못한다. / 버린 대안: 그대로 두기(작업자 2개의 전제가 흔들린다), fetch를 작업자 사이에 잠그기(머신이 여럿이면 소용없다).
+- 결정: 가짜 GitHub(`scripts/lib/github-fake.ts`)의 상태를 고치는 메서드를 파일 잠금 안에서 돌리고 저장은 임시 파일에 쓴 뒤 이름을 바꾼다. / 이유: 작업자 프로세스 둘이 같은 상태 파일을 읽고-고치고-쓴다. 잠금이 없으면 한쪽이 만든 PR이나 댓글이 사라지고, 병합 흉내가 겹치면 원격 push가 거부된다. 테스트 기반이고 실제 GitHub 구현은 그대로다.
+- 결정: main 병합 충돌은 `pr:update` 실패로 세지 않고 `pr:conflict`로만 센다. / 이유: 지시서가 "실패는 지금처럼 `pr:conflict` 키로 센다"고 정했다. 충돌마다 두 키가 함께 늘면 해결 세션 3번 만에 한도에 닿는다.
+- 결정: 정지 알림은 `runRunner`의 `finally`에서 부르고, 표식의 작업자 이름은 영문·숫자·`_.-` 밖의 글자를 `_`로 바꾼다. / 이유: 세 정지 이유 모두 루프를 `break`로 빠져나와 `finally`를 지난다. `--worker`로 받은 이름이 HTML 주석을 닫지 못하게 한다(`--prefix`는 처음부터 형식을 검사한다).
+- 결정: `limits.workers`는 키가 없을 때만 1로 채우고, `null`을 포함해 1 이상의 정수가 아닌 값은 `ConfigError`다. / 이유: 지시서의 "1 이상의 정수가 아니면 `ConfigError`". 옛 설정 파일(키 없음)은 지금처럼 작업자 하나로 돈다.
+- 결정: `CLAUDE.md`는 고치지 않았다. / 이유: 무인 실행 줄에 `run` 명령이 없어 구현과 다른 곳이 없다. `AGENTS.md`의 `run --worker runner-1`만 `run`으로 바꿨다.
 
 ## 발견 사항
 
@@ -187,6 +200,10 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - CI `check`가 실패한 head에서는 판정 워크플로가 돌지 않아 PR이 `fix`로 분류된다. 대응 head의 회귀는 지적 대응 경로로는 보이지 않는다. → 처리: [계획 의사결정 로그](plan.md)
 - 판정에 실패한 수정을 그 자리에서 되돌리게 되면서, step4에서 넣은 "push하지 않은 커밋이 있으면 반박 전에 판정한다"가 실패하는 경우를 테스트로 만들 수 없게 됐다(되돌리기가 충돌했을 때만 남는다). 판정을 거치는 것 자체는 테스트가 확인한다. → 처리: 해당 없음
 - 발산 되돌리기는 구간의 수정 커밋을 모두 되돌린다. 로컬 회귀로 생긴 "깨진 커밋 + 그 되돌림 커밋"이 구간에 있으면 그것도 차례로 되돌려져(되돌림의 되돌림) 커밋 수가 늘지만 결과 트리는 대응 전과 같다. → 처리: 해당 없음
+- 원격 fetch가 실패하면 예외가 루프 밖으로 나가 runner가 알림 없이 죽었다(1단계부터의 동작). → 처리: [설계서 4.5절 "runner가 멈추는 조건"](../../../harness/design.md)
+- 가짜 GitHub의 상태 파일은 프로세스 하나만 쓴다는 전제였다. 작업자 프로세스 둘이 쓰면 읽고-고치고-쓰기가 겹친다. → 처리: [계획 의사결정 로그](plan.md)
+- runner가 만든 PR이 보호 경로를 바꾸면 PR 본문의 체크 줄이 없어 `harness-guard`가 실패하고 사람에게 넘어간다(비범위로 둔 것). → 처리: TD-37
+- 이 계획의 PR(#92~#97)은 대화 세션이 올렸다. runner가 실제 GitHub에서 무인으로 도는 것은 한 번도 보지 못했다. → 처리: TD-38
 
 ## 열린 질문
 
@@ -197,9 +214,21 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - step마다 AC 명령(해당 테스트 파일과 기존 runner·next 테스트)과 `node scripts/harness.ts check`.
 - runner 흐름은 가짜 GitHub(`HARNESS_FAKE_GH`)과 가짜 에이전트로 끝까지 돌린다: 출처별 체크, 계획 승인 대기, 지적 대응 라운드, 발산 되돌리기, 작업자 2개, 정지 알림.
 - 실제 GitHub 응답은 이 계획의 PR에서 `node scripts/harness.ts pr-state`로 확인해 진행 로그에 남긴다(수용 기준 11).
-- 결과: (step마다 진행 로그에 적는다)
+- 결과(수용 기준별. 실제 PR 확인과 가짜 GitHub 확인을 나눠 적는다. 전체 목록은 TD-38):
+  1. 출처 기준 판정: 충족. `pr-state.test.ts`(step0). 실제 PR #92에서 검증 App 봇의 커밋 상태와 Actions check run으로 골랐다.
+  2. 대기와 조치 구분: 충족. `runner-pr.test.ts`(step1). 실제 PR #93·#96에서 `wait-ci` → `review` → `ready` 분류를 봤다. 승인 요청·오래된 대기 알림은 가짜 GitHub으로만 봤다.
+  3. PR 갱신과 승인 이어받기: 충족. `runner-pr.test.ts`(step1: 필수 체크가 모두 success일 때만 갱신, 뒤처짐은 로컬 git). 가짜 GitHub으로만 봤다.
+  4. 계획 검증(G1) 흐름: 충족. `runner-plan-review.test.ts`(step2). 실제 PR #92의 원장에서 계획 승인을 읽었다. runner가 연 초안 PR은 가짜 GitHub으로만 봤다.
+  5. 지적 대응: 충족. `runner-review.test.ts`(step3·4). 실제 PR에서 반박 전달과 `rejected` 답(#94·#95·#96), 근거·제안 읽기(#93·#95·#96의 지적 7건)를 봤다. runner의 대응 세션과 push는 가짜 GitHub으로만 봤다.
+  6. 지적별 실패 횟수와 교착: 충족. `runner-review.test.ts`(step3: 3회·5회, step4: 교착과 제작자 답). 가짜 GitHub으로만 봤다.
+  7. 발산 감지: 충족. `divergence.test.ts`·`runner-review.test.ts`(step5: 신호 (a)·(b)·(c), `git revert`와 일반 push, `review-round` 3회·5회, 로컬 판정 실패 되돌리기). 가짜 GitHub으로만 봤다.
+  8. 충돌 자동 해결: 충족. `runner.test.ts`(step6: 답 없이 해결 세션, 5회 실패하면 `needs-human`, 답을 받으면 다시). 가짜 GitHub으로만 봤다.
+  9. 작업자와 WIP: 충족. `runner-workers.test.ts`(step6: 자식 프로세스 둘이 Issue 둘을 나눠 끝냄, `--prefix`, WIP 상한). `harness.config.json`의 `limits.workers`는 2다. 실제 원격에서의 동시 실행은 보지 못했다.
+  10. 정지 알림: 충족. `runner-workers.test.ts`(step6: 연속 오류·사용량 한도, 중복 방지, 라벨 없음). 가짜 GitHub으로만 봤다.
+  11. 실제 PR 확인: 충족. `pr-state` 출력은 step0·step1 진행 로그에 있다. 확인하지 못한 경로는 TD-38에 남겼다.
+  12. 문서: 충족. 설계서 v0.7.35~v0.7.41(4.5·9.1·9.2·10.1·10.2·10.3·19절), 절차서 5·6·8절, `architecture.md`, `CHANGELOG`, ADR-0006, TD-9 해결.
 
 ## 다음 할 일
 
-- step0부터 차례로 진행한다. 계획만 담은 커밋으로 초안 PR을 열어 계획 검증을 받은 뒤 step0 구현을 올린다.
+- step0~step6을 모두 끝냈다. 이 계획의 마지막 PR이 병합되면 Issue #56이 닫힌다.
 - 이 계획이 끝나면 #57(revert·자체 테스트·운영 전환). 실제 GitHub에서의 runner 무인 시범은 #57이나 파일럿에서 한다.

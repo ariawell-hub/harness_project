@@ -1,6 +1,15 @@
 // 테스트·스모크 테스트용 가짜 GitHub. 상태를 JSON 파일에 저장해 여러 프로세스가 공유한다.
 // 자동 병합을 켜면(mergeMode=immediate) 로컬 bare 원격에서 squash merge를 흉내 낸다.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  rmdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runSync } from './exec.ts';
@@ -134,12 +143,74 @@ function git(args: string[], cwd: string): string {
   return r.stdout;
 }
 
+/** 상태를 읽고-고치고-쓰는 메서드. 작업자 프로세스 여러 개가 같은 상태 파일을 쓰므로 잠금 안에서 돈다 */
+const MUTATORS = [
+  'commentAs',
+  'editIssueAs',
+  'editCommentAs',
+  'addLabel',
+  'removeLabel',
+  'reopenIssue',
+  'setCheck',
+  'createPR',
+  'setDraft',
+  'enableAutoMerge',
+  'tryMerge',
+  'runLog',
+] as const;
+
+/** 이 프로세스가 상태 파일 잠금을 잡고 있는 깊이(잠금 안에서 다른 메서드를 부른다: enableAutoMerge → tryMerge) */
+let lockDepth = 0;
+
+const sleepSync = (ms: number) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
 export class FakeGitHub implements GitHubPort {
   readonly kind = 'fake' as const;
   private file: string;
   constructor(file: string) {
     this.file = file;
     if (!existsSync(file)) throw new Error(`HARNESS_FAKE_GH 상태 파일이 없다: ${file}`);
+    const self = this as unknown as Record<string, (...a: unknown[]) => unknown>;
+    for (const name of MUTATORS) {
+      const original = self[name].bind(this);
+      self[name] = (...a: unknown[]) => this.locked(() => original(...a));
+    }
+  }
+  /**
+   * 상태 파일 잠금(`<파일>.lock` 폴더를 만드는 쪽이 갖는다) 안에서 실행한다. 작업자 프로세스 둘이 동시에
+   * 읽고-고치고-쓰면 한쪽의 변경(만든 PR, 단 댓글)이 사라지고, 병합 흉내가 겹치면 원격 push가 거부된다
+   */
+  private locked<T>(fn: () => T): T {
+    if (lockDepth > 0) {
+      lockDepth++;
+      try {
+        return fn();
+      } finally {
+        lockDepth--;
+      }
+    }
+    const dir = `${this.file}.lock`;
+    const deadline = Date.now() + 900_000;
+    for (;;) {
+      try {
+        mkdirSync(dir);
+        break;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+        if (Date.now() > deadline)
+          throw new Error(`[fake-gh] 상태 파일 잠금을 얻지 못했다: ${dir}`);
+        sleepSync(20);
+      }
+    }
+    lockDepth = 1;
+    try {
+      return fn();
+    } finally {
+      lockDepth = 0;
+      rmdirSync(dir);
+    }
   }
   branchInfo(): unknown {
     return { protection: { required_status_checks: { checks: this.load().requiredChecks ?? [] } } };
@@ -158,7 +229,10 @@ export class FakeGitHub implements GitHubPort {
     return JSON.parse(readFileSync(this.file, 'utf8')) as FakeState;
   }
   private save(s: FakeState): void {
-    writeFileSync(this.file, JSON.stringify(s, null, 2));
+    // 다른 프로세스가 쓰다 만 파일을 읽지 않게 임시 파일에 쓴 뒤 이름을 바꾼다
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(s, null, 2));
+    renameSync(tmp, this.file);
   }
   private issue(s: FakeState, n: number): FakeIssue {
     const i = s.issues.find((x) => x.number === n);

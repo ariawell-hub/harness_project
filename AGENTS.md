@@ -29,7 +29,7 @@ Claude Code 대화 세션은 SessionStart 훅이 이 명령을 실행해 결과�
    - **제작자 승인을 요청한 PR에는 커밋을 더 올리지 않는다.** 승인은 head 커밋에 묶여 있어 새 커밋이 올라가면 철회되고 다시 승인해야 한다. 꼭 올려야 하면 push 전에 제작자에게 먼저 알린다. 미룰 수 있는 변경(기록, 문서 보완)은 다음 PR에 넣는다.
 7. 남은 step은 병합 뒤 `new-task --plan <id> --step <N>`으로 새 브랜치에서 이어 간다.
 
-무인 실행은 runner가 위 루프를 step마다 새 세션으로 돌린다: `node scripts/harness.ts run --worker runner-1`
+무인 실행은 runner가 위 루프를 step마다 새 세션으로 돌린다: `node scripts/harness.ts run`(설정 `limits.workers`만큼 작업자 프로세스를 띄운다. 하나만 돌리려면 `--worker <이름>`)
 
 - step 하나 = 세션 하나 = PR 하나.
 - 판단이 필요하면 혼자 추측하지 말고 묻는다. 단, "반드시 묻는 것"이 아니면 추천안으로 진행하고 의사결정 로그에 남긴다. 질문은 작업 시작 때 모은다. 기준과 형식은 [workflow.md](docs/harness/workflow.md) 7절 "에스컬레이션".

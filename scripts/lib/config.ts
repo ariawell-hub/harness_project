@@ -176,6 +176,10 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   }
   cfg.github.collaborators ??= [];
   cfg.limits.ciStallHours ??= 24;
+  // 작업자 수(4.5절 운영, Q19): `run`을 --worker 없이 실행하면 이만큼 작업자 프로세스를 띄운다. 없으면 1
+  if (cfg.limits.workers === undefined) cfg.limits.workers = 1;
+  if (!(Number.isInteger(cfg.limits.workers) && cfg.limits.workers >= 1))
+    throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- limits.workers는 1 이상의 정수(작업자 수)`);
   if (!(typeof cfg.limits.ciStallHours === 'number' && cfg.limits.ciStallHours > 0))
     throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- limits.ciStallHours는 양수(시간)`);
   cfg.github.botIssues ??= 'exclude'; // 제작자가 고르기 전에는 fail-closed(14.6절)

@@ -930,10 +930,9 @@ async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env' | 'fail'> 
     return 'env';
   }
   if (r.status === 'conflict') {
-    record(false, `main 병합 충돌: ${r.files.join(', ')}`);
-    // 제작자 답 없이 자동으로 풀지는 않는다(TD-9). 답을 받으면 해결 세션으로 푼다(TD-27)
-    await reportConflict(ctx, l, r.files);
-    return 'ok';
+    // 제작자 답을 기다리지 않고 바로 충돌 해결 세션으로 푼다(TD-9). 실패는 `pr:conflict` 키로 세고,
+    // 한도에 닿으면 doResolveConflict가 needs-human으로 넘긴다. 충돌 해결로 PR 변경이 바뀌면 두 검증자가 다시 판정한다(10.3절)
+    return doResolveConflict(ctx, l, r.files);
   }
   record(false, `PR 갱신 실패(${r.stage}): ${r.reason}`);
   event(ctx, 'update-fail', { plan: l.id, pr: l.pr?.number, stage: r.stage, reason: r.reason });
@@ -945,7 +944,7 @@ async function doUpdate(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env' | 'fail'> 
 // ---------- main 병합 충돌 (ADR-0006, TD-27) ----------
 
 /**
- * 충돌로 PR 갱신을 멈추고 Issue에 needs-human과 중단 보고를 남긴다. 계획 파일은 바꾸지 않는다
+ * 충돌 해결이 한도에 닿아 PR 갱신을 멈추고 Issue에 needs-human과 중단 보고를 남긴다. 계획 파일은 바꾸지 않는다
  * (완료된 step의 PR에 blocked를 push하면 plan-gate가 실패한다, PR #29). 대기는 conflict.json에 둔다
  */
 async function reportConflict(
@@ -1024,11 +1023,16 @@ async function judgeResolution(
 }
 
 /**
- * 제작자 답을 받은 충돌을 푼다(TD-27). origin/main을 병합해 충돌을 남기고 해결 세션을 띄운 뒤 runner가 판정한다.
+ * main 병합 충돌을 푼다(TD-9, TD-27). 충돌을 만나면 제작자 답 없이 바로 오고(`files`는 방금 충돌한 파일), 한도에 닿아
+ * 멈춘 뒤 제작자가 답했으면 답을 넣어 다시 온다. origin/main을 병합해 충돌을 남기고 해결 세션을 띄운 뒤 runner가 판정한다.
  * 통과하면 병합 커밋을 만들고 일반 push, 실패하면 `git merge --abort`로 병합 전으로 되돌린다(force push·reset 없음).
  * 충돌이 그사이 사라졌으면 세션 없이 일반 갱신으로 끝낸다. 9.2절 한도에 닿으면 다시 사람에게 넘긴다
  */
-async function doResolveConflict(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env' | 'fail'> {
+async function doResolveConflict(
+  ctx: Ctx,
+  l: LocalPlan,
+  files?: string[],
+): Promise<'ok' | 'env' | 'fail'> {
   const { remote, defaultBranch } = ctx.cfg.github;
   const base = `${remote}/${defaultBranch}`;
   const info = repoInfo(l.worktree);
@@ -1036,7 +1040,12 @@ async function doResolveConflict(ctx: Ctx, l: LocalPlan): Promise<'ok' | 'env' |
   const prev = readConflictState(l.worktree);
   const v = judge(all, l.id, l.step, limitsOf(ctx.cfg));
   if (v.action === 'stop') {
-    await reportConflict(ctx, l, prev.files, `충돌 해결을 반복해 실패했다(${v.reason})`);
+    await reportConflict(
+      ctx,
+      l,
+      files?.length ? files : prev.files,
+      `충돌 해결을 반복해 실패했다(${v.reason})`,
+    );
     return 'fail';
   }
   const record = (ok: boolean, detail?: string, env = false) =>
@@ -1975,6 +1984,83 @@ export function cleanupMerged(
   return removed;
 }
 
+// ---------- 정지 알림 (4.5절 멈추는 조건) ----------
+
+/** 알리는 정지 이유. 할 일이 없거나(idle·human) 한 바퀴만 돈 것(once·max-iterations), 시작하지 못한 것은 알리지 않는다 */
+const STOP_NOTICE: Partial<Record<StopReason, string>> = {
+  'time-limit': '실행 시간 상한(limits.runnerMaxHours)에 닿았다',
+  'usage-limit':
+    '사용량 한도나 환경 장애로 기다린 시간이 상한(limits.usageLimitMaxWaitMin)을 넘었다',
+  error: '오류가 연속으로 나서 멈췄다(runner 로그 runner.jsonl의 error 이벤트에 내용이 있다)',
+};
+
+/** 정지 알림 댓글 끝의 표식. 같은 작업자·같은 이유의 알림이 마지막 댓글이면 다시 달지 않는다 */
+export function stopMarker(worker: string, reason: string): string {
+  return `<!-- harness-runner-stop:${worker.replace(/[^A-Za-z0-9_.-]/g, '_')}:${reason} -->`;
+}
+
+/**
+ * runner가 실행 시간 상한, 사용량 한도, 연속 오류로 멈출 때: 이 작업자가 맡은 끝나지 않은 계획의 Issue마다
+ * 제작자 멘션 댓글(작업자, 이유, 남은 일, 다시 시작하는 명령)을 남긴다.
+ * `needs-human`은 붙이지 않고 계획도 멈추지 않는다: 정지는 runner를 다시 시작하면 풀린다. 라벨과 `blocked`는
+ * 제작자 답을 기다린다는 뜻이라 다시 시작한 runner가 그 계획을 건너뛴다.
+ * 알림 실패는 경고만 남긴다(종료를 막지 않는다)
+ */
+function notifyStop(ctx: Ctx, stop: StopReason): void {
+  const why = STOP_NOTICE[stop];
+  if (!why) return;
+  try {
+    const { worker, tool } = ctx.o;
+    const left = readLocalPlans({
+      main: ctx.main.mainRoot,
+      cfg: ctx.cfg,
+      gh: ctx.gh,
+      worker,
+    }).filter(
+      (l) =>
+        sameWorker(ctx, l) &&
+        l.issue > 0 &&
+        l.fm.status !== 'completed' &&
+        l.fm.status !== 'abandoned' &&
+        l.pr?.state !== 'merged',
+    );
+    const marker = stopMarker(worker, stop);
+    const me = ctx.gh.me();
+    const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
+    for (const issue of [...new Set(left.map((l) => l.issue))]) {
+      try {
+        const last = ctx.gh.comments(issue).at(-1);
+        if (last && last.author === me && last.body.includes(marker)) continue;
+        const plans = left
+          .filter((l) => l.issue === issue)
+          .map(
+            (l) =>
+              `  - 계획 \`${l.id}\`${l.step === null ? '' : ` step ${l.step}`} · ${
+                l.pr && l.pr.state === 'open' ? `PR #${l.pr.number}` : 'PR 없음'
+              } · 브랜치 \`${l.branch}\``,
+          );
+        ctx.gh.comment(
+          issue,
+          `${mention}runner 작업자 \`${worker}\`가 멈췄다.
+
+- 이유: ${why}
+- 남은 일:
+${plans.join('\n')}
+- 다시 시작: \`node scripts/harness.ts run --worker ${worker} --tool ${tool}\`
+- 이 알림은 답을 기다리지 않는다(\`needs-human\` 없음). runner를 다시 시작하면 남은 일을 이어 간다.
+
+${marker}`,
+        );
+        event(ctx, 'stop-notified', { issue, reason: stop });
+      } catch (e) {
+        warn(`정지 알림 실패(#${issue}): ${(e as Error).message}`);
+      }
+    }
+  } catch (e) {
+    warn(`정지 알림 실패: ${(e as Error).message}`);
+  }
+}
+
 // ---------- 메인 루프 ----------
 
 export async function runRunner(o: RunnerOptions): Promise<StopReason> {
@@ -2019,7 +2105,24 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
         break;
       }
       iterations++;
-      fetchRemote(main.mainRoot, cfg);
+      try {
+        fetchRemote(main.mainRoot, cfg);
+      } catch (e) {
+        // 원격을 읽지 못했다(네트워크, 같은 리포에서 다른 작업자의 fetch와 겹친 ref 잠금). 예외로 죽으면 알림 없이
+        // 작업자가 사라진다. 환경 장애로 보고 기다렸다가 다시 한다. 기다린 시간이 상한을 넘으면 멈추고 알린다
+        event(ctx, 'fetch-fail', { detail: (e as Error).message });
+        ctx.envWaitMs += pollMs;
+        if (ctx.envWaitMs > cfg.limits.usageLimitMaxWaitMin * 60_000) {
+          stop = 'usage-limit';
+          break;
+        }
+        if (o.once) {
+          stop = 'once';
+          break;
+        }
+        if (!o.noWait) await sleep(pollMs);
+        continue;
+      }
       syncMain(ctx);
       const pick = pickNext({ main: main.mainRoot, cfg, gh, worker: o.worker });
       event(ctx, 'pick', { kind: pick.task.kind, reason: pick.reason });
@@ -2141,6 +2244,7 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
       }
     }
   } finally {
+    notifyStop(ctx, stop);
     event(ctx, 'exit', { reason: stop });
     try {
       rmSync(lock);
