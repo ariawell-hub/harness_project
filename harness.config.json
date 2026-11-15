@@ -122,7 +122,7 @@
       { "context": "deps-guard", "source": "recorder" },
       { "context": "harness-guard", "source": "recorder" }
     ],
-    "recorderAppId": null
+    "recorderAppId": 5764201
   },
   "deps": {
     "lockfiles": ["pnpm-lock.yaml"],

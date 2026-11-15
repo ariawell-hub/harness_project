@@ -228,10 +228,9 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'required-checks': {
       const info = repoInfo(cwd);
-      const cfg = loadConfig(info.mainRoot);
-      const actual = toRequiredChecks(
-        getGitHub(info.mainRoot).branchInfo(cfg.github.defaultBranch),
-      );
+      // 다른 명령처럼 현재 작업 트리의 설정을 쓴다(읽기 전용 확인 도구)
+      const cfg = loadConfig(info.root);
+      const actual = toRequiredChecks(getGitHub(info.root).branchInfo(cfg.github.defaultBranch));
       const r = compareRequiredChecks(actual, cfg.ci);
       for (const l of r.lines) log(l);
       log(
