@@ -98,6 +98,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15 step2: PR #94 2차 판정에서 두 검증자 승인(지적 없음). Codex가 반박을 받아들여 원장 F3 `rejected`("설계서의 해시 결속 기준 및 plan-gate 동작과 일치해 반박을 수용"). 판정 워크플로 plan job 로그에 `review-plan: 반박 1건(F3)`. 병합(`5f64130`). 실제 PR에서 반박 전달을 처음 확인했다(TD-1 비고의 "보지 못한 것"에서 뺐다). 재현 테스트 실행도 PR #93의 F2에서 "재현됨"으로 확인됐다.
 - 2026-11-15 step3: 테스트 먼저. `node --test scripts/test/runner-review.test.ts` 종료 코드 1(`review.ts`의 함수와 `review` 작업 없음). 구현 뒤 8개 통과. 앞 step의 테스트 4곳(수정 요청을 사람 대기로 기대하던 것)을 지적 대응 작업으로 고쳤다. AC 테스트(`runner-review`·`runner-plan-review`·`runner-pr`·`runner`·`next`) 종료 코드 0(88개 통과).
 - 2026-11-15 step3: `doStep`의 판정과 올리기를 `judgeStep`·`publishStep`으로 나눠 지적 대응이 같은 코드를 쓴다(동작은 같다. 기존 runner 테스트가 그대로 통과). 중단 순서는 PR #92 원장 F1의 결정대로 했다: 완료된 step을 먼저 되돌린 뒤 `blockPlan`, 5회 중단 테스트가 계획 `blocked`·step `blocked`·계획 폴더 `active/`를 함께 단언한다.
+- 2026-11-15T23:03:40+09:00 step3 재작업: PR #95 1차 판정 반영(F3 반박, 미룬 지적 F1·F2 수정)
 
 ## 의사결정 로그
 
