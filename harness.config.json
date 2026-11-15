@@ -68,7 +68,7 @@
     "dbClients": []
   },
   "planReview": {
-    "required": false
+    "required": true
   },
   "riskPaths": [
     {
@@ -122,7 +122,8 @@
       { "context": "deps-guard", "source": "recorder" },
       { "context": "harness-guard", "source": "recorder" },
       { "context": "review/claude", "source": "recorder" },
-      { "context": "review/codex", "source": "recorder" }
+      { "context": "review/codex", "source": "recorder" },
+      { "context": "review-ledger", "source": "recorder" }
     ],
     "recorderAppId": 5764201,
     "recorderBot": "harness-recorder[bot]",

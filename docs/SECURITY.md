@@ -70,7 +70,18 @@ GitHub → Settings → Environments → `judge-codex` → `CODEX_AUTH_JSON`에 
 | 적용됨                           | `record-review: review-ledger = success` 또는 `failure`                                        |
 | 권한을 저장하지 않았거나 수락 전 | "검증 App 토큰 (지적 원장 댓글 읽기·쓰기)" 단계 실패, `review-ledger = error — 원장 토큰 없음` |
 
-권한이 없어도 `review/claude`·`review/codex`는 그대로 기록된다. `review-ledger`만 `error`로 남는다.
+권한이 없어도 `review/claude`·`review/codex`는 그대로 기록된다. `review-ledger`만 `error`로 남는다. `review-ledger`는 필수 체크라 `error`인 동안 PR이 병합되지 않는다.
+
+## 필수 체크 등록 (제작자)
+
+main의 필수 상태 체크는 제작자가 리포 설정에서 등록한다(설계서 0.2절). 에이전트는 보호 설정을 바꾸지 않고 읽어서 비교만 한다(R20). 검증 App이 그 체크를 실제 PR에서 한 번 이상 기록한 뒤에 등록한다. 아무도 채우지 못하는 필수 체크는 모든 PR을 막는다.
+
+1. GitHub → 리포 → Settings → Branches → `main` 보호 규칙 → Edit.
+2. "Require status checks to pass before merging" 아래 검색 칸에 체크 이름(예: `review-ledger`)을 넣고 고른다. 목록에는 최근에 보고된 체크만 나온다.
+3. 고른 체크 옆의 출처를 "any source"에서 `harness-recorder`로 바꾼다(`check`만 GitHub Actions). 출처를 지정하지 않으면 PR 워크플로가 같은 이름으로 흉내 낼 수 있다.
+4. Save changes.
+
+확인: 봇이 `node scripts/harness.ts required-checks`를 실행한다. 등록된 체크와 출처가 `harness.config.json`의 `ci.requiredChecks`와 같으면 `required-checks: 통과`다. 출처가 다르면 `출처가 다르다(등록 아무 출처, …)`로 알려 준다.
 
 ## 유출 대응
 

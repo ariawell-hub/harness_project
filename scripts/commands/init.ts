@@ -13,6 +13,26 @@ interface ProfileFile {
   templates?: { from: string; to: string; replacePlaceholder?: boolean }[];
 }
 
+type RequiredCheck = { context: string; source: 'actions' | 'recorder' };
+
+/** 제작자가 등록할 필수 체크 목록(0.2절). 설정(ci.requiredChecks)에서 만들어 목록이 설정과 어긋나지 않게 한다 */
+export function requiredCheckGuide(checks: readonly RequiredCheck[]): string {
+  const of = (s: RequiredCheck['source']) =>
+    checks.filter((c) => c.source === s).map((c) => c.context);
+  const actions = of('actions');
+  const recorder = of('recorder');
+  if (!actions.length && !recorder.length)
+    return `${CONFIG_FILE}의 ci.requiredChecks에 등록할 체크를 먼저 적는다`;
+  return [
+    actions.length ? `${actions.join('·')}(GitHub Actions)` : '',
+    recorder.length
+      ? `${recorder.join('·')}(출처 = 검증 App. review/*와 review-ledger는 판정 워크플로가 실제 PR에서 판정을 낸 뒤 등록)`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
 export function init(
   root: string,
   profile: string,
@@ -54,12 +74,13 @@ export function init(
     log(`- 템플릿 복사: ${t.to}`);
   }
 
+  const checks = (cfg.ci as { requiredChecks?: RequiredCheck[] } | undefined)?.requiredChecks ?? [];
   log(`
 남은 수동 작업 (제작자가 직접, docs/harness/design.md 0절·16절):
   1. 전제 조건 E1~E5: 봇 계정 + 리포 한정 토큰(90일 이하), GitHub Pro, 이 Mac에서 제작자 gh 로그아웃(E5)
   2. 원격 리포 생성 후 main push, 0.2절 브랜치 보호(PR 필수, force push 금지, 최신 브랜치 필수, stale 승인 무효화)
   3. Actions: 기본 권한 읽기 전용, "Actions가 PR 승인" 끔, 리포 수준 시크릿 없음
-  4. 검증 App과 recorder environment(main만)를 만들고, App이 한 번 보고한 뒤 필수 상태 체크를 등록: check(GitHub Actions), plan-gate·risk-gate·deps-guard·harness-guard·review/claude·review/codex(출처 = 검증 App. review/*는 판정 워크플로가 실제 PR에서 판정을 낸 뒤 등록). 확인: node scripts/harness.ts required-checks
+  4. 검증 App과 recorder environment(main만)를 만들고, App이 한 번 보고한 뒤 필수 상태 체크를 등록: ${requiredCheckGuide(checks)}. 확인: node scripts/harness.ts required-checks
   5. ${CONFIG_FILE}의 github.owner(제작자 계정)와 github.bot(봇 계정) 확인
   6. 라벨 만들기: needs-human, priority:high|medium|low, size:small|medium|large, risk:low|high, bug
   7. runner 실행 환경: GH_TOKEN=<봇 토큰> node scripts/harness.ts run --worker runner-1`);

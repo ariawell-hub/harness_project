@@ -382,7 +382,7 @@ async function main(argv: string[]): Promise<number> {
         }),
         patch: str('patch') || undefined,
         carriedFrom: str('carried-from') || undefined,
-        // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장(#55) 전에는 기록 job 로그가 지적을 보는 곳이다
+        // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장에는 위치와 제목만 남으므로 근거·제안은 이 로그에서 본다(10.1절)
         onVerdict: (v) => {
           seen = v;
           // 본문은 PR 내용에 영향받는 LLM 출력이다. 한 줄로 만들고 접두어를 붙여 워크플로 명령 줄이 생기지 않게 한다
