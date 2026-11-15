@@ -1,0 +1,42 @@
+{
+  "plan": "20261115-runner-pr-flow",
+  "steps": [
+    {
+      "step": 0,
+      "name": "pr-state",
+      "status": "completed",
+      "summary": "`lib/github.ts`에 `commitChecks(sha)`(커밋 상태 전체 기록 + check run, 출처 포함, 최신순)·`getPR`·`PullRequest.headSha`/`autoMerge`, 가짜 GitHub에 `setCheck`. `runner/pr-state.ts`의 `requiredStates`·`classifyPr`·`describeVerdict`(순수 함수), `lib/git.ts`의 `isBehind`, `commands/pr-state.ts`의 `prState`·`stepCompletedOf`·`behindOf`(명령 `pr-state`). `pickNext`·runner 루프는 그대로다",
+      "completed_at": "2026-11-15T21:17:29+09:00"
+    },
+    {
+      "step": 1,
+      "name": "pick-by-state",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "plan-review",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "review-fix",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "rebuttal-evidence",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "divergence",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "workers-notify",
+      "status": "pending"
+    }
+  ]
+}

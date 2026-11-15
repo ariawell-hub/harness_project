@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.34 · 상태: 초안 · 최종 갱신: 2026-11-15
+> 버전 v0.7.35 · 상태: 초안 · 최종 갱신: 2026-11-15
 
 ---
 
@@ -67,6 +67,7 @@ review_cycle: quarterly
   - v0.7.32 (2026-11-15): 계획 검증(G1) 구현. 계획 핵심 섹션 해시, 계획만 바꾼 PR(`mode=plan`)의 판정에 계획 검증 프롬프트, 그 판정의 승인을 원장의 `planReview`에 기록, `plan-gate`가 merge-base 해시 또는 원장의 승인으로 확인한다. `planReview.required`는 아직 끈 채로 결과를 참고로만 남긴다(4.1절, 10.3절, Issue #55)
   - v0.7.33 (2026-11-15): 계획 검증(G1)을 켠다(`planReview.required: true`). `review-ledger`를 검증 App 출처의 필수 체크로 등록한다. 지적 원장·재현 job·계획 검증을 실제 PR에서 확인한 결과를 적었다. 계획 검증이 실행 중인 step에 일을 더하라고 지적하면 새 step을 더한다(0.2절, 4.1절, 8.2절, Issue #55)
   - v0.7.34 (2026-11-15): 계획 해시와 자기 step 불변 규칙에 step의 금지사항을 더한다. 승인 뒤 금지사항을 지우는 것은 AC를 약하게 고치는 것과 같은 우회다. 묶는 섹션 목록은 한 곳(`STEP_BOUND_SECTIONS`)에 둔다(8.2절, 8.3절, 10.3절, Issue #55)
+  - v0.7.35 (2026-11-15): PR의 필수 체크를 출처 기준으로 판정한다. 설정의 context마다 기대 출처(검증 App 봇의 커밋 상태, GitHub Actions의 check run)가 쓴 가장 최근 결과만 보고, PR 상태를 분류하는 함수와 `pr-state` 명령을 둔다. runner 연결은 다음 변경이다(10.3절, Issue #56 step0)
 
 ### 0.1 전제 조건
 
@@ -890,7 +891,10 @@ pnpm test src/auth/login-guard.spec.ts
 - 실제 PR에서 확인했다(2026-11-15, PR #75). 두 검증자 승인 뒤 `origin/main`을 병합해 갱신하자 판정 job 없이 두 체크에 `이어받음 <sha> patch:<id>`가 기록됐고, 공백만 바꾼 커밋은 patch-id가 같아도 "PR 파일의 내용이 다르다"로 다시 검증됐다.
 - patch-id가 같다는 것은 패치가 같다는 뜻이지, 새 base와 합쳐진 코드의 의미까지 같다는 증거는 아니다. 그래서 승인을 이어받을 때도 `check`는 항상 새 head에서 다시 돈다. 최신 브랜치가 필수이므로 squash 결과의 트리는 head와 같고, 이 `check`가 최종 병합 대상에 대한 검증이 된다.
 - merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
-- **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다. 지금 runner는 요약을 실패를 찾는 데만 쓰고 병합은 GitHub 자동 병합에 맡기므로 영향이 없다.
+- **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다.
+  - **구현**(`scripts/runner/pr-state.ts`, `scripts/lib/github.ts`의 `commitChecks`): 커밋의 커밋 상태 전체 기록과 check run을 출처와 함께 읽고, 설정 `ci.requiredChecks`의 context마다 기대 출처가 쓴 가장 최근 결과를 고른다. `recorder`는 작성자가 `ci.recorderBot`인 커밋 상태, `actions`는 GitHub Actions App의 check run이다. 다른 계정·App이 쓴 같은 이름의 결과는 없는 것(`missing`)으로 보고, 나중에 쓰였어도 기대 출처의 결과를 가리지 않는다. context별 최신 하나만 주는 API(체크 요약, combined status)는 쓰지 않는다.
+  - PR 분류(`classifyPr`): 충돌 → `check` 실패(바로 수정) → 진행 중·아직 없음(CI 대기) → 기계 판정 실패(수정) → 검증자 수정 요청·열린 차단 지적(지적 대응) → 판정 없음(`error`, 대기) → 뒤처짐(갱신) → 제작자 승인 대기 → 조치 없음 순으로 처음 맞는 것이다. 뒤처짐은 `mergeStateStatus`가 아니라 로컬 git(`origin/main`이 PR head의 조상인가)으로 본다. step이 끝나지 않은 PR(계획 검증 중)은 `plan-gate`·`risk-gate` 실패와 뒤처짐을 보지 않는다.
+  - `node scripts/harness.ts pr-state [--pr <번호>]`가 필수 체크별 출처·상태·설명과 분류를 보여 준다(읽기만). runner의 다음 할 일 고르기는 아직 체크 요약으로 실패를 찾는다. 분류로 바꾸는 것은 Issue #56 step1이다.
 
 **절차**
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).

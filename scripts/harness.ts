@@ -51,6 +51,7 @@ import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
 import { describeExcluded, describeTask, start } from './commands/start.ts';
 import { prReady } from './commands/pr-ready.ts';
+import { prState } from './commands/pr-state.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
 import { docLint, printDocLint } from './gates/doc-lint.ts';
@@ -73,6 +74,7 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   new-task --plan <계획 id> --step <N>     다음 step의 브랜치·worktree
   complete-step                            계획 전용 커밋(현재 worktree의 step 완료 처리)
   pr-ready [--undo]                        승인 요청 전 조건 확인 뒤 PR 초안 해제(--undo: 초안으로 되돌림)
+  pr-state [--pr <번호>]                   PR의 필수 체크를 출처와 함께 보이고 분류한다(읽기만. 번호가 없으면 현재 브랜치의 PR)
   claim-heartbeat --issue <N>              선점 생존 확인
   run [--worker runner-1] [--tool claude|codex] [--once] [--max-iterations N]   runner
 
@@ -335,6 +337,14 @@ async function main(argv: string[]): Promise<number> {
           : `plan-gate: 통과 (${branch}, ${r.plan?.file})`,
       );
       return r.problems.length ? 1 : 0;
+    }
+    case 'pr-state': {
+      const n = str('pr');
+      if (n !== undefined && !/^[1-9]\d*$/.test(n)) {
+        process.stderr.write('pr-state: --pr에는 PR 번호를 준다\n');
+        return 2;
+      }
+      return prState(cwd, n === undefined ? null : Number(n));
     }
     case 'required-checks': {
       const info = repoInfo(cwd);
