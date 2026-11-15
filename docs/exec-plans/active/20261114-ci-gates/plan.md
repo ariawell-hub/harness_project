@@ -69,7 +69,7 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 2026-11-15: 제작자가 `recorder` 브랜치 제한(`main`만)·검증 App·변수·시크릿을 준비했다(봇 API로 제한과 변수 이름 확인). 실패했던 실행 43653153698의 `record`를 다시 돌려 PR #59 head에 `plan-gate` = success가 `harness-recorder[bot]` 이름으로 기록됨을 확인했다(수용 기준 7의 첫 근거).
 - 2026-11-15 step2: `scripts/test/harness-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/gates/harness-guard.ts`) → 구현 뒤 34개 통과. `ci.environments` 설정, `gates`의 `--pr-body`, PR 템플릿 항목. 이 PR은 `harness.config.json`에 `ci` 키를 더하므로 자기 규칙으로도 신호가 된다(계획 risk가 이미 high).
 - 2026-11-15: step2 PR #60 병합. 그 PR head(570450a)에 검증 App(`harness-recorder[bot]`)이 `plan-gate` = success, `risk-gate` = failure("위험도 높음: 제작자 head 승인 필요 — 계획 risk: high")를 기록했다. `risk-gate`가 필수 체크가 아니라 병합은 됐다.
-- 2026-11-15 step3: `scripts/test/deps-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → `scripts/lib/lockfile.ts`, `scripts/gates/deps-guard.ts`, 설정 `deps`, `runGates` async 전환 뒤 42개 통과. `gates.yml`은 바꾸지 않았다.
+- 2026-11-15 step3: `scripts/test/deps-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → `scripts/lib/lockfile.ts`, `scripts/gates/deps-guard.ts`, 설정 `deps`, `runGates` async 전환 뒤 42개 통과. `gates.yml`은 바꾸지 않았다. 실제 레지스트리·OSV 구현(`httpRegistry`)은 로컬에서 한 번 호출해 응답 형식을 확인했다(`@types/node@22.20.5` 게시 시각·MIT, 없는 패키지 → null, `lodash@4.17.20` → GHSA 목록).
 
 ## 의사결정 로그
 
