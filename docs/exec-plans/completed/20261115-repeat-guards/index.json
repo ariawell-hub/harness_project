@@ -22,7 +22,8 @@
     {
       "step": 3,
       "name": "session-hooks",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T15:32:38+09:00"
     }
   ]
 }
