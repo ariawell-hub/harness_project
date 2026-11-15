@@ -46,8 +46,9 @@
     {
       "step": 6,
       "name": "workers-notify",
-      "status": "pending",
-      "summary": "`runner/workers.ts`: `workerNames(prefix, count)`·`runWorkers`(작업자마다 `run --worker <접두어>-<번호>` 자식 프로세스). `harness.ts`의 `run`: `--worker`·`HARNESS_WORKER`가 없으면 `limits.workers`만큼 띄운다(`--prefix`). `lib/config.ts`: `limits.workers` 검증. `harness.config.json` `limits.workers: 2`. `run.ts`: `notifyStop`·`stopMarker`(표식 `harness-runner-stop`), `doUpdate` → 충돌이면 `doResolveConflict(ctx, l, files)`, fetch 실패는 `fetch-fail` 이벤트와 환경 대기. `lib/github-fake.ts`: 상태 파일 잠금(`locked`)과 원자적 저장. TD-9 해결, TD-37·TD-38 등록. 테스트는 `runner-workers.test.ts`(실제 자식 프로세스), `runner.test.ts`의 충돌 테스트"
+      "status": "completed",
+      "summary": "`runner/workers.ts`: `workerNames(prefix, count)`·`runWorkers`(작업자마다 `run --worker <접두어>-<번호>` 자식 프로세스). `harness.ts`의 `run`: `--worker`·`HARNESS_WORKER`가 없으면 `limits.workers`만큼 띄운다(`--prefix`). `lib/config.ts`: `limits.workers` 검증. `harness.config.json` `limits.workers: 2`. `run.ts`: `notifyStop`·`stopMarker`(표식 `harness-runner-stop`), `doUpdate` → 충돌이면 `doResolveConflict(ctx, l, files)`, fetch 실패는 `fetch-fail` 이벤트와 환경 대기. `lib/github-fake.ts`: 상태 파일 잠금(`locked`)과 원자적 저장. TD-9 해결, TD-37·TD-38 등록. 테스트는 `runner-workers.test.ts`(실제 자식 프로세스), `runner.test.ts`의 충돌 테스트",
+      "completed_at": "2026-11-16T01:13:56+09:00"
     }
   ]
 }

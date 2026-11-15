@@ -2,7 +2,7 @@
 id: 20261115-runner-pr-flow
 issue: 56 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -126,6 +126,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-16 step6: 원격 fetch 실패 테스트는 먼저 실패를 봤다(`node --test --test-name-pattern="원격 fetch가 실패해도" scripts/test/runner-workers.test.ts` 종료 코드 1: `runRunner`가 `원격(origin) fetch 실패` 예외로 끝났다). 환경 대기로 고친 뒤 통과.
 - 2026-11-16 step6: 충돌 테스트(`runner.test.ts`)와 정지 알림·WIP 테스트는 구현 전에 실패를 보지 않았다. 구현 뒤 네 곳을 일부러 깨뜨려 확인했다: 충돌을 예전처럼 바로 사람에게 넘기기, 정지 알림의 중복 방지 빼기, 작업자 이름이 겹치게 하기, WIP 상한 무시. 깨뜨린 구현에서 `node --test scripts/test/runner-workers.test.ts scripts/test/runner.test.ts` 종료 코드 1이고 네 곳 모두 해당 테스트가 실패했다(9개 실패). 원본으로 되돌린 뒤 통과.
 - 2026-11-16 step6: AC 명령(테스트 7개 파일 116개, `grep` 3개) 종료 코드 0.
+- 2026-11-16 step6: 전체 `check` 종료 코드 0. doc-lint R8 경고 3건 가운데 이 step에서 바꾼 파일은 ADR-0003의 `harness.config.json`이다(`limits.workers`만 바꿨다. 봇 토큰 결정과 무관해 ADR은 고치지 않는다).
 
 ## 의사결정 로그
 
