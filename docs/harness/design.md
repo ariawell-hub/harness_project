@@ -56,6 +56,7 @@ review_cycle: quarterly
   - v0.7.21 (2026-11-15): Claude 판정 워크플로(`judge-claude`). 판정은 `check` 워크플로 완료(`workflow_run`, 성공)로 시작하고, 첫 job(비밀 없음)이 위험도와 필요한 검증자를 다시 계산한다. 검증 입력은 base 스크립트가 `pr/.harness-review/`에 쓴다(10.1·10.4절, Issue #54)
   - v0.7.22 (2026-11-15): Codex 판정 워크플로(`judge-codex`)와 인증 수명주기 구현 위치. 판정·저장 job도 `check` 완료(`workflow_run`)로 시작한다. 사전 측정이 기대와 다르면 판정 없이 실패, `pr/` 밖을 가리킨 셸 명령은 세어 보고만 한다(10.4절, 13.3절, Issue #54)
   - v0.7.23 (2026-11-15): 승인 결속 구현. 승인 상태 description에 patch-id 전체를 적고, 이어받기는 검증 App 봇이 쓴 가장 최근 판정만 근거로 삼는다. 조건에 "PR 파일이 바이트 단위로 같다"를 더했다(patch-id는 공백을 무시한다). 기록 job이 판정 지적을 로그에 낸다(10.3절, 10.1절, Issue #54)
+  - v0.7.24 (2026-11-15): Codex 판정 job의 도구 설치 위치는 권한 프로필의 읽기 범위 안이어야 한다(10.4절, Issue #70)
 
 ### 0.1 전제 조건
 
@@ -909,6 +910,7 @@ pnpm test src/auth/login-guard.spec.ts
   - **PR 트리의 도구 설정을 적용하지 않는다.** 판정은 `pr/`에서 실행되므로 PR이 넣은 도구 설정(훅은 셸 명령이다)·MCP 설정·지침 파일·스킬이 읽힐 수 있다. Claude Code는 `--restricted`(user·project·local 설정과 `CLAUDE.md`를 읽지 않음)와 `--strict-mcp-config`로, Codex는 프로젝트 신뢰 안 함(`.codex/` 무시)·`project_doc_max_bytes = 0`(`AGENTS.md` 무시)·훅·스킬·플러그인 기능 끄기로 막는다. Q20에서 PR이 넣은 훅·MCP·지침·스킬은 하나도 적용되지 않았다.
   - **Codex 샌드박스**: 내장 `read-only`는 인증 파일을 포함한 파일 시스템 전체를 읽으므로 쓰지 않는다. 권한 프로필(`default_permissions`)에 읽기 거부 목록(인증 파일이 있는 폴더, `base/`, 홈의 도구 설정)을 준다. "read" 항목만 적어서는 나머지가 막히지 않는다(Q20).
     - 거부 목록에 `pr/`의 조상이나 `pr/` 자신(예: `/home/runner`)을 넣지 않는다. Linux에서는 `pr/` 읽기까지 막히고, 쓰기는 덮인 임시 폴더로 들어가 성공한다(macOS에서는 드러나지 않았다). 설정을 만드는 base 스크립트가 이런 목록을 거절한다.
+    - Codex는 샌드박스 안에서 자기 실행 파일을 다시 실행한다. 그래서 Codex를 권한 프로필의 읽기 범위 안(시스템 경로 `/usr/local`)에 설치한다. `setup-node`의 전역 위치(`/opt/hostedtoolcache/…`)에 두면 샌드박스가 실행 파일을 찾지 못해 시작하지 못한다(Issue #70).
     - 셸 환경은 최소(`shell_environment_policy`의 `inherit = "core"`)로 준다.
     - LLM 실행 전에 같은 프로필로 `pr/` 읽기, 인증 파일·`base/` 읽기, 쓰기, 네트워크, sudo, 조상 프로세스 환경 읽기를 값 없이 종료 코드로만 측정한다. 하나라도 기대와 다르면 판정 없이 실패한다.
   - **심볼릭 링크**: PR은 `pr/` 안에 밖을 가리키는 링크를 넣을 수 있다. Q20에서 Claude Code는 파일 링크 읽기를 거부했고, Codex 샌드박스는 해석된 경로 기준으로 거부 영역 읽기를 막았다(macOS). 디렉터리 링크를 검색 도구가 따라가는 경우와 Linux에서 링크를 거쳐 읽는 경우는 모델이 시도하지 않아 확인하지 못했다. 그래서 base 스크립트가 LLM 실행 전에 `pr/`의 심볼릭 링크를 없앤다(예: `core.symlinks=false`로 체크아웃하면 링크가 대상 경로를 담은 일반 파일이 된다).
