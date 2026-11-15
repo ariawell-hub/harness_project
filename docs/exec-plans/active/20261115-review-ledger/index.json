@@ -35,6 +35,11 @@
       "step": 5,
       "name": "verify-register",
       "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "bind-prohibitions",
+      "status": "pending"
     }
   ]
 }
