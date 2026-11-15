@@ -159,6 +159,25 @@ test('runRepro: 테스트 프로세스에 러너의 환경 변수를 넘기지 �
     assert.deepEqual(runRepro({ root, verdict: v, cfg: CFG }), [
       { index: 0, result: 'reproduced' },
     ]);
+    // HOME과 임시 폴더는 러너의 것이 아니라 이 실행용 빈 폴더다(통과 = 조건을 모두 만족)
+    const home = verdict([
+      finding({
+        repro: T(
+          'home',
+          [
+            "  const fs = await import('node:fs');",
+            `  assert.notEqual(process.env.HOME, ${JSON.stringify(process.env.HOME ?? '')});`,
+            '  assert.match(process.env.HOME, /harness-repro-/);',
+            '  assert.equal(process.env.TMPDIR, process.env.HOME);',
+            '  assert.deepEqual(fs.readdirSync(process.env.HOME), []);',
+            '  assert.deepEqual(Object.keys(process.env).filter((k) => /^(GITHUB|RUNNER|ACTIONS)_/.test(k)), []);',
+          ].join('\n'),
+        ),
+      }),
+    ]);
+    assert.deepEqual(runRepro({ root, verdict: home, cfg: CFG }), [
+      { index: 0, result: 'not-reproduced' },
+    ]);
   } finally {
     delete process.env.HARNESS_REPRO_PROBE;
   }

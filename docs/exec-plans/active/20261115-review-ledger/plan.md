@@ -89,6 +89,8 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step3: 테스트 먼저. `node --test scripts/test/repro.test.ts scripts/test/ledger.test.ts scripts/test/verdict.test.ts` 종료 코드 1(28개 중 5개 실패: `scripts/ci/repro.ts` 없음, `repro` 필드와 원장 규칙 없음). 구현 뒤 34개 통과.
 - 2026-11-15 step3: `ci.repro` 설정을 더해 `harness-guard`가 `harness.config.json`의 `ci` 변경을 신호로 잡을 것이다(위험도 높음, 제작자 head 승인). PR 코드를 실행하는 job을 더하는 변경이라 초안으로 올리고 끝난 뒤 승인을 요청한다.
 - 2026-11-15 step3: AC 실행 결과. `node --test scripts/test/repro.test.ts scripts/test/ledger.test.ts scripts/test/verdict.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep` 2개 통과, `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step3: PR #86 1차 판정(head cd8ff70). `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 1: 재현 테스트에 러너의 `HOME`을 넘긴다). 원장에 F1(P1, codex, `open`)이 등록되고 `review-ledger = failure — 열린 차단 지적 1건: F1`이 기록됐다(차단 지적이 원장으로 병합을 막는 첫 실제 사례). `risk-gate`는 예상대로 위험도 높음(`harness.config.json`의 `ci` 변경).
+- 2026-11-15 step3: F1 수정(지적이 타당해 반박하지 않았다). `HOME`이 러너의 것과 다르고 빈 폴더인지 보는 사례를 더했고, 옛 구현에서 종료 코드 1(7개 중 1개 실패), 새 구현에서 7개 통과를 확인했다. 재현 테스트의 `HOME`·임시 폴더를 실행용 빈 폴더로 바꿨다. `node scripts/harness.ts check` 종료 코드 0.
 
 ## 의사결정 로그
 

@@ -1,7 +1,8 @@
 // 재현 job(10.2절 (3), 10.4절): 검증자가 낸 재현 테스트를 PR 체크아웃에 붙여 하나씩 실행한다.
 // 이 job은 PR 코드를 실행한다. 비밀·environment·쓰기 권한·캐시 없이 돌고, 결과는 조작될 수 있다고 본다:
 // "재현됨"은 차단 근거로만 쓰고, "재현 안 됨"으로는 아무것도 닫지 않는다(검증자가 다음 라운드에 확인한다).
-import { existsSync, lstatSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runSync } from '../lib/exec.ts';
 import type { ReproResult } from './ledger.ts';
@@ -31,12 +32,22 @@ export function reproPathOk(p: string, dir: string): boolean {
   return p.startsWith(prefix) && NAME_RE.test(p.slice(prefix.length));
 }
 
-/** 테스트 프로세스에 넘길 환경. 러너의 변수(GITHUB_*, 토큰 경로 등)는 넘기지 않는다 */
-function childEnv(): NodeJS.ProcessEnv {
-  const keep = ['PATH', 'HOME', 'LANG', 'TMPDIR', 'SystemRoot', 'TEMP', 'TMP'];
-  return Object.fromEntries(
-    keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]),
-  );
+/**
+ * 테스트 프로세스에 넘길 환경. 러너의 변수(GITHUB_*, 토큰 경로 등)는 넘기지 않는다.
+ * HOME과 임시 폴더는 러너의 것이 아니라 이 실행을 위해 만든 빈 폴더다(홈의 설정·자격증명 파일을 가리키지 않게)
+ */
+function childEnv(scratch: string): NodeJS.ProcessEnv {
+  const keep = ['PATH', 'LANG', 'SystemRoot'];
+  return {
+    ...Object.fromEntries(
+      keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]),
+    ),
+    HOME: scratch,
+    USERPROFILE: scratch,
+    TMPDIR: scratch,
+    TEMP: scratch,
+    TMP: scratch,
+  };
 }
 
 /**
@@ -54,6 +65,7 @@ export function runRepro(o: {
   const out: ReproOutcome[] = [];
   const fail = new RegExp(cfg.failPattern);
   const root = realpathSync(o.root);
+  const scratch = mkdtempSync(path.join(tmpdir(), 'harness-repro-'));
   for (const [index, f] of o.verdict.findings.entries()) {
     if (f.repro.content === '') continue;
     const done = (result: ReproOutcome['result']) => void out.push({ index, result });
@@ -76,7 +88,7 @@ export function runRepro(o: {
       writeFileSync(file, f.repro.content, { flag: 'wx' });
       const r = runSync(cfg.command[0], [...cfg.command.slice(1), f.repro.path], {
         cwd: root,
-        env: childEnv(),
+        env: childEnv(scratch),
         timeoutMs: cfg.timeoutSec * 1000,
       });
       if (r.code === 0) done('not-reproduced');
