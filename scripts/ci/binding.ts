@@ -160,7 +160,9 @@ interface RawStatus {
 }
 
 /**
- * 이 PR의 앞선 head 후보와 그 커밋 상태(읽기 전용 조회). 최신이 먼저다.
+ * 이 PR의 head 후보(지금 head 포함)와 그 커밋 상태(읽기 전용 조회). 최신이 먼저다.
+ * 지금 head도 넣는다. 같은 head를 다시 돌릴 때 그 head의 실패 판정을 건너뛰고 옛 승인을 되살리지 않기 위해서다.
+ * 지금 head의 마지막 판정이 승인이면 그 승인을 그대로 잇는다(다시 판정하지 않는다).
  * 검증 App이 쓴 `contexts` 상태가 모두 있는 head를 찾으면 멈춘다(그 앞은 쓰지 않는다).
  */
 export async function fetchCandidates(o: {
@@ -182,7 +184,6 @@ export async function fetchCandidates(o: {
   }
   const out: Candidate[] = [];
   for (const sha of shas.reverse()) {
-    if (sha === o.headSha) continue;
     if (out.length >= (o.limit ?? 20)) break;
     const list = await o.api(`repos/${o.repo}/commits/${sha}/statuses?per_page=100`);
     if (!Array.isArray(list)) throw new Error('커밋 상태 응답이 배열이 아니다');

@@ -173,6 +173,17 @@ test('carryOver: 검증 App 봇이 쓴 상태만, 그 context의 마지막 상�
       }),
     ),
   );
+  // 지금 head가 이미 실패 판정을 받았으면(같은 head 재실행) 옛 승인을 쓰지 않는다
+  assert.ok(
+    no(
+      carry({
+        candidates: [
+          { sha: '9'.repeat(40), statuses: [ok({ state: 'failure' })] },
+          { sha: '1'.repeat(40), statuses: [ok()] },
+        ],
+      }),
+    ),
+  );
   // 판정 기록이 없는 head(중간 커밋)는 건너뛴다
   assert.deepEqual(
     carry({
@@ -284,7 +295,7 @@ test('patchId: 바이너리 파일의 내용이 바뀌면 달라진다', () => {
   assert.notEqual(patchId(root, mergeBase(root)), one);
 });
 
-test('fetchCandidates: 최신이 먼저, 지금 head 제외, 판정된 head를 찾으면 멈춘다', async () => {
+test('fetchCandidates: 최신이 먼저(지금 head 포함), 판정된 head를 찾으면 멈춘다', async () => {
   const sha = (c: string) => c.repeat(40);
   const calls: string[] = [];
   const statuses: Record<string, unknown[]> = {
@@ -305,15 +316,16 @@ test('fetchCandidates: 최신이 먼저, 지금 head 제외, 판정된 head를 �
   const got = await fetchCandidates(o);
   assert.deepEqual(
     got.map((c) => c.sha),
-    [sha('3'), sha('2')],
+    [sha('4'), sha('3'), sha('2')],
   );
-  assert.deepEqual(got[1].statuses[0], {
+  assert.deepEqual(got[2].statuses[0], {
     context: CTX,
     state: 'success',
     description: 'd',
     creator: BOT,
   });
-  assert.ok(!calls.some((c) => c.includes(sha('1')) || c.includes(`${sha('4')}/statuses`)));
+  // 지금 head도 본다: 같은 head를 다시 돌릴 때 그 head의 실패 판정을 건너뛰고 옛 승인을 되살리지 않게
+  assert.ok(!calls.some((c) => c.includes(sha('1'))));
   // limit
   assert.equal((await fetchCandidates({ ...o, limit: 1 })).length, 1);
   // 응답 형식이 다르면 예외(이어받지 않는다)

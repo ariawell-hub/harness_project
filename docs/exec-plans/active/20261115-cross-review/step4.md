@@ -12,7 +12,8 @@
 1. `judge-codex` 실제 실행 확인. 전제: 제작자가 `judge-codex` environment의 `CODEX_AUTH_JSON`을 다시 등록했다(step3에서 "JSON이 아니다"로 실패). 이 step의 PR에서 인증 복원 → 사전 측정 → 판정 → 유출 검사 → 봉인 → 저장 → `review/codex` 기록(작성자 = 검증 App)을 로그로 확인한다. 기대와 다른 단계는 이 step에서 고친다(고친 것은 다음 PR에서 돈다).
 2. 승인 이어받기 실제 확인. 위험도 보통인 확인용 PR(문서 한 줄)에서 두 검증자 승인을 받은 뒤 `origin/main`을 병합해 갱신하고, 판정 job 없이 `이어받음 <sha> patch:<id>`가 기록되는지 본다. 공백만 바꾼 커밋은 다시 검증되는지도 본다.
 3. 제작자에게 요청(진행 로그에 기록): `review/claude`·`review/codex`를 검증 App 출처의 필수 체크로 등록. 1·2가 확인된 뒤에만 요청한다. 등록 뒤 `required-checks` 통과를 확인한다(설정 `ci.requiredChecks`에는 step3이 이미 더했다).
-4. 문서: 설계서 0.2절 필수 체크 목록, 절차서 5절 필수 체크 문장, TD-1 비고(② 완료, Codex 갱신 관찰 여부), 진행 로그.
+4. step3 사전 점검이 남긴 P2 처리: `review-plan`의 이어받기 연결부를 API를 주입받는 함수로 빼서 테스트(조회 실패, 위험도 높음, 성공 경로의 출력), 확인용 PR에서 PR API의 `base.sha`가 main 최신을 가리키는지 확인(낡으면 base 브랜치 끝을 따로 조회), `init` 안내의 필수 체크 목록에 `review/*` 추가.
+5. 문서: 설계서 0.2절 필수 체크 목록, 절차서 5절 필수 체크 문장, TD-1 비고(② 완료, Codex 갱신 관찰 여부), 진행 로그.
 
 ## Acceptance Criteria
 
