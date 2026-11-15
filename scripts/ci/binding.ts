@@ -4,14 +4,17 @@
 // 이어받을 때는 그 상태를 검증 App 봇이 썼는지 확인한다(봇 PAT도 같은 이름의 상태를 쓸 수 있다, ADR-0003).
 // patch-id는 PR ref가 아니라 체크아웃한 이벤트 head에서 잰다(push 직후 PR ref는 옛 head일 수 있다, Q20).
 import type { Risk } from '../gates/risk-gate.ts';
-import { runSync } from '../lib/exec.ts';
-import { git, gitTry } from '../lib/git.ts';
+import { spawnSync } from 'node:child_process';
+import { gitTry } from '../lib/git.ts';
 import { DESCRIPTION_MAX, SHA_RE } from './results.ts';
 
 /** merge-base 대비 diff의 patch-id. 변경이 없으면 '' */
 export function patchId(root: string, base: string): string {
-  const diff = git(
-    // --binary --full-index: 바이너리 파일의 내용과 전체 blob id가 patch에 들어가게 한다
+  // 문자열로 바꾸지 않고 바이트 그대로 넘긴다(UTF-8이 아닌 텍스트의 차이가 사라지지 않게).
+  // --binary --full-index: 바이너리 파일의 내용과 전체 blob id가 patch에 들어가게 한다
+  const opts = { cwd: root, maxBuffer: 256 * 1024 * 1024, windowsHide: true } as const;
+  const diff = spawnSync(
+    'git',
     [
       'diff',
       '--no-ext-diff',
@@ -21,12 +24,19 @@ export function patchId(root: string, base: string): string {
       '--full-index',
       `${base}...HEAD`,
     ],
-    root,
+    opts,
   );
-  if (!diff.trim()) return '';
-  const r = runSync('git', ['patch-id', '--stable'], { cwd: root, input: diff + '\n' });
-  if (r.code !== 0) throw new Error(`git patch-id 실패: ${r.stderr.trim().slice(0, 200)}`);
-  const id = r.stdout.trim().split(/\s+/)[0] ?? '';
+  if (diff.status !== 0)
+    throw new Error(
+      `git diff 실패: ${String(diff.stderr ?? diff.error?.message ?? '').slice(0, 200)}`,
+    );
+  if (!diff.stdout.length) return '';
+  const r = spawnSync('git', ['patch-id', '--stable'], { ...opts, input: diff.stdout });
+  if (r.status !== 0)
+    throw new Error(
+      `git patch-id 실패: ${String(r.stderr ?? r.error?.message ?? '').slice(0, 200)}`,
+    );
+  const id = r.stdout.toString('utf8').trim().split(/\s+/)[0] ?? '';
   return /^[0-9a-f]{40}$/.test(id) ? id : '';
 }
 
@@ -73,7 +83,11 @@ export function changedOnBaseSince(
  */
 export function samePrContent(root: string, oldHead: string, prFiles: string[]): boolean {
   if (!SHA_RE.test(oldHead) || !prFiles.length) return false;
-  return gitTry(['diff', '--quiet', '--no-ext-diff', oldHead, 'HEAD', '--', ...prFiles], root).ok;
+  // PR 파일 이름을 git 인자로 넘기지 않는다. `--` 뒤 인자는 pathspec이라 `:!a.txt` 같은 이름이 비교 대상을 비울 수 있다
+  const d = gitTry(['diff', '--name-only', '-z', '--no-renames', oldHead, 'HEAD'], root);
+  if (!d.ok) return false;
+  const mine = new Set(prFiles);
+  return !d.stdout.split('\0').some((f) => f && mine.has(f));
 }
 
 export interface CommitStatus {
@@ -111,7 +125,9 @@ export function carryOver(o: CarryOptions): { from: string } | { no: string } {
   if (o.risk === 'high') return { no: '위험도 높음은 patch가 같아도 다시 검증한다' };
   if (!validPatch(o.patch)) return { no: '지금 head의 patch가 없다' };
   for (const c of o.candidates) {
-    // 작성자를 확인한 상태만 본다. 그 head에 판정 기록이 없으면(중간 커밋) 더 앞의 head를 본다
+    // 작성자를 확인한 상태만 본다. 그 head에 판정 기록이 없으면 더 앞의 head를 본다.
+    // 중간 커밋일 수도, 판정이 아직 줄 서 있는 head일 수도 있다. 어느 쪽이든 아래 조건(patch 같음,
+    // PR 파일이 그 head와 바이트 단위로 같음)을 만족해야 하므로 검증된 내용만 이어받는다
     const mine = c.statuses.filter((s) => s.creator === o.recorderBot && s.context === o.context);
     if (!mine.length) continue;
     // 가장 최근에 판정된 head의 마지막 상태만 근거로 쓴다

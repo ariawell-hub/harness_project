@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
-import { changedFiles, defaultBase, git, repoInfo } from './lib/git.ts';
+import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
 import {
@@ -26,7 +26,7 @@ import {
 import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
-import { parseReviews } from './gates/risk-gate.ts';
+import { changedFiles as prChangedFiles, parseReviews } from './gates/risk-gate.ts';
 import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
@@ -373,7 +373,8 @@ async function main(argv: string[]): Promise<number> {
                   contexts: need.map((k) => `review/${k}`),
                 })
               : [];
-          const prFiles = changedFiles(root, base, 'HEAD');
+          // rename의 원본 경로도 PR 파일이다(겹침 검사와 같은 기준: --no-renames)
+          const prFiles = prChangedFiles(root, base).map((f) => f.path);
           for (const k of need) {
             const c = carryOver({
               patch,

@@ -1,5 +1,6 @@
 // 승인 결속(scripts/ci/binding.ts, 10.3절): patch-id와 승인 이어받기.
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
@@ -321,4 +322,27 @@ test('fetchCandidates: 최신이 먼저, 지금 head 제외, 판정된 head를 �
 
 test('oneLine: 줄바꿈·제어 문자를 공백으로(기록 job 로그에 워크플로 명령 줄이 생기지 않게)', () => {
   assert.equal(oneLine('a\n::add-mask::x\r\n\u001b[31mb\tc'), 'a ::add-mask::x [31mb c');
+});
+
+test('samePrContent: 파일 이름을 pathspec으로 해석하지 않는다(`:!a.txt` 같은 이름으로 우회 불가)', () => {
+  const { root } = repo();
+  write(root, ':!a.txt', 'x\n');
+  write(root, ':!*', 'x\n');
+  write(root, '[id].txt', 'x\n');
+  const approved = commitAll(root, 'odd names');
+  const files = ['a.txt', ':!a.txt', ':!*', '[id].txt'];
+  assert.equal(samePrContent(root, approved, files), true);
+  write(root, 'a.txt', 'a1\na2      changed\na3\n');
+  commitAll(root, 'whitespace only');
+  assert.equal(samePrContent(root, approved, files), false);
+});
+
+test('patchId: UTF-8이 아닌 텍스트의 바이트 차이도 구분한다', () => {
+  const { root } = repo();
+  writeFileSync(path.join(root, 'latin.txt'), Buffer.from([0x61, 0xe9, 0x0a]));
+  commitAll(root, 'latin1');
+  const one = patchId(root, mergeBase(root));
+  writeFileSync(path.join(root, 'latin.txt'), Buffer.from([0x61, 0xe8, 0x0a]));
+  commitAll(root, 'latin2');
+  assert.notEqual(patchId(root, mergeBase(root)), one);
 });

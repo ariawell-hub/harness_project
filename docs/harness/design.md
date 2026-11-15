@@ -851,8 +851,8 @@ pnpm test src/auth/login-guard.spec.ts
 - **구현**(`scripts/ci/binding.ts`): 판정 워크플로의 `plan` job이 base 스크립트로 patch-id(`git diff --binary --full-index <merge-base>...HEAD | git patch-id --stable`)를 재고 이어받기를 판정한다. 기록 job은 승인 상태의 description 끝에 ` patch:<id 40자>`를 적는다(예: `승인 (P2 1) patch:…`). 이어받으면 판정 job은 돌지 않고 기록 job이 `이어받음 <원래 head 앞 12자> patch:<id>`를 success로 쓴다.
   - id는 줄여 적지 않는다. PR 작성자는 승인받을 diff와 바꿔 넣을 diff를 모두 정할 수 있어, 앞부분만 같은 쌍을 만들 수 있다.
   - 근거로 쓰는 상태는 작성자가 검증 App 봇(`ci.recorderBot`)인 것뿐이다. 봇 PAT도 같은 이름의 상태를 쓸 수 있기 때문이다(ADR-0003). 설정이 없으면 이어받지 않는다.
-  - 후보는 이 PR의 앞선 head 중 가장 최근에 판정된 것 하나다. 그 head의 마지막 판정이 success가 아니거나 patch가 다르면 더 옛 승인으로 거슬러 가지 않는다.
-  - `git patch-id`는 공백을 무시한다. 승인 뒤 들여쓰기나 따옴표 안 공백만 바꾼 커밋을 걸러 내려고, PR이 바꾼 파일이 옛 head와 새 head에서 바이트 단위로 같은지도 본다(`git diff --quiet <옛 head> HEAD -- <PR 파일>`). main 병합 갱신은 PR 파일을 건드리지 않아 항상 성립한다.
+  - 후보는 이 PR의 앞선 head 중 가장 최근에 판정된 것 하나다(판정 기록이 없는 head는 건너뛴다. 중간 커밋이거나 판정이 아직 줄 서 있는 head다). 그 head의 마지막 판정이 success가 아니거나 patch가 다르면 더 옛 승인으로 거슬러 가지 않는다.
+  - `git patch-id`는 공백을 무시한다. 승인 뒤 들여쓰기나 따옴표 안 공백만 바꾼 커밋을 걸러 내려고, PR이 바꾼 파일이 옛 head와 새 head에서 바이트 단위로 같은지도 본다(옛 head와 새 head 사이에 바뀐 파일 목록에 PR 파일이 없어야 한다. PR 파일 이름은 git 인자로 넘기지 않는다. pathspec으로 해석되기 때문이다). main 병합 갱신은 PR 파일을 건드리지 않아 항상 성립한다.
   - 옛 head가 새 head의 조상이 아니거나 조회에 실패하면 이어받지 않고 다시 검증한다.
 - patch-id가 같다는 것은 패치가 같다는 뜻이지, 새 base와 합쳐진 코드의 의미까지 같다는 증거는 아니다. 그래서 승인을 이어받을 때도 `check`는 항상 새 head에서 다시 돈다. 최신 브랜치가 필수이므로 squash 결과의 트리는 head와 같고, 이 `check`가 최종 병합 대상에 대한 검증이 된다.
 - merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.

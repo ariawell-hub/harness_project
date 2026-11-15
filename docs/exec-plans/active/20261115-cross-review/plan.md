@@ -70,7 +70,8 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step3: `scripts/test/binding.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`: `binding.ts`) → `patchId`·`withPatch`·`patchOf`·`changedOnBaseSince`·`carryOver`·`fetchCandidates`, `recordReview`의 patch·이어받기, `review-plan`의 이어받기 판정, 두 판정 워크플로 연결을 구현했다.
 - 2026-11-15 step3: 초안 PR #68에서 `judge-codex`가 처음 실제로 돌았다(실행 43670203495). `plan`·`pubkey`(공개키 조회, 인증 저장 App 읽기)는 성공, `judge`는 도구 설치(Codex 0.167.2, bubblewrap 0.11.1)까지 된 뒤 인증 복원에서 `CODEX_AUTH_JSON: JSON이 아니다`로 실패했다. 봉인은 스냅숏이 없어 실패했고, `store`는 건너뛰어 기존 시크릿은 그대로다. `record`가 `review/codex = error — 판정 없음`을 기록했다(작성자 `harness-recorder[bot]`, fail-closed 동작 확인). 봇 API로 본 시크릿은 이름과 갱신 시각뿐이다(2026-11-15T01:07:02Z 등록, 로그에는 `***`로 가려져 비어 있지는 않다). 사전 측정·판정·봉인·저장은 아직 실제로 돌지 못했다. → step4.
 - 2026-11-15 step3: 같은 PR에서 `review/claude = failure — 수정 요청 (P1 2, P2 2)`가 기록됐으나 지적 본문을 볼 곳이 없었다(판정은 job 출력으로만 넘어간다). CI와 같은 인자(`--restricted --tools Read,Grep,Glob …`, `scripts/cross-review/prompt.md`)로 로컬 사전 점검을 돌려 지적을 재현했다: P1 ① 공백만 바꾼 후속 커밋이 patch-id가 같아 승인을 이어받는다 ② step3 문서 갱신 누락 ③ 진행 로그 누락. P2: 바이너리 내용이 patch-id에 약하게 묶임, 기록 job 로그의 줄바꿈(워크플로 명령 주입 여지), `fetchCandidates` 무테스트, `ci.recorderBot` 형식 검사 없음. P3: 길이 상수 중복.
-- 2026-11-15 step3: 지적마다 테스트를 먼저 더해 실패를 확인하고 고쳤다. ① `samePrContent`(PR 파일이 옛 head와 바이트 단위로 같아야 이어받는다, 공백만 바꾼 커밋 테스트) ② `git diff --binary --full-index`(바이너리 변경 테스트) ③ `oneLine`(로그 한 줄화) ④ `fetchCandidates` 테스트(가짜 API) ⑤ `loadConfig`의 `ci.recorderBot` 형식 검사 ⑥ `DESCRIPTION_MAX` 공유. 문서와 이 로그를 채웠다. 전체 테스트 253개, `check` 통과.
+- 2026-11-15 step3: 지적마다 테스트를 먼저 더해 실패를 확인하고 고쳤다. ① `samePrContent`(PR 파일이 옛 head와 바이트 단위로 같아야 이어받는다, 공백만 바꾼 커밋 테스트) ② `git diff --binary --full-index`(바이너리 변경 테스트) ③ `oneLine`(로그 한 줄화) ④ `fetchCandidates` 테스트(가짜 API) ⑤ `loadConfig`의 `ci.recorderBot` 형식 검사 ⑥ `DESCRIPTION_MAX` 공유. 문서와 이 로그를 채웠다. `check` 통과.
+- 2026-11-15 step3: 고친 뒤 로컬 사전 점검을 다시 돌려 P1 하나를 더 받았다: `samePrContent`가 PR 파일 이름을 `git diff -- <파일>`의 pathspec으로 넘겨, 이름이 `:!a.txt`인 파일 하나로 비교 대상이 비어 검사가 무력화된다. 테스트를 먼저 더해 실패를 확인하고, 파일 이름을 인자로 넘기지 않고 두 head 사이의 변경 목록과 비교하게 고쳤다. 함께 받은 P2도 반영했다: 이어받기용 PR 파일은 `--no-renames` 기준, patch-id는 diff를 바이트 그대로 넘김(UTF-8이 아닌 텍스트 테스트), 판정 기록이 없는 head를 건너뛰는 이유를 주석·설계서에 적음. 계획 수정(수용 기준 6 문구, step4 추가)은 구축 단계라 계획 재검증(G1, `planReview.required: false`)이 돌지 않는다. `loadConfig` 테스트의 위치(P3)는 그대로 뒀다(설정 테스트 파일이 따로 없다).
 - 2026-11-15 step3: AC 실행 결과 — `node --test scripts/test/binding.test.ts scripts/test/verdict.test.ts scripts/test/protection.test.ts` 통과, `grep -q "export function carryOver" scripts/ci/binding.ts`·`grep -q "recorderBot" harness.config.json` 통과. 이어받기는 이 PR(위험도 높음)에서 일어나지 않는다. `review-plan`을 이 브랜치에 돌려 `patch=<40자>`, `carry_claude=`, `carry_codex=`(높음이라 다시 검증)를 확인했다. 실제 이어받기 확인과 필수 체크 등록은 step4.
 
 ## 의사결정 로그
@@ -105,6 +106,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 발견 사항
 
+- PR이 정하는 파일 이름을 `git … -- <파일>`로 넘기면 pathspec으로 해석된다(`:!x`는 제외, `*`·`[`는 glob). `samePrContent`는 고쳤고, `harness-guard`의 파일별 diff에 같은 유형이 남아 있다. → 처리: TD-28
 - 판정 지적의 본문은 원장(#55) 전에는 기록 job 로그에서만 볼 수 있다(`record-review:` 줄). 이 출력은 main에 병합된 뒤의 PR부터 나온다. → 처리: #55
 - 로컬에서 CI와 같은 인자로 `claude -p`를 돌리면 CI 검증자의 지적을 미리 볼 수 있다(`review-plan`으로 입력 폴더를 만든 뒤 실행). 로컬 사전 점검용이고 병합 판단에는 쓰지 않는다. → 처리: [문서](../../../harness/workflow.md)
 - `judge-codex` environment의 `CODEX_AUTH_JSON`이 JSON으로 읽히지 않는다(값은 봇이 볼 수 없다). → 처리: #54 step4(제작자 재등록)
