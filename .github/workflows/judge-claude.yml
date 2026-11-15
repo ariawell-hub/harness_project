@@ -32,6 +32,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # 승인 이어받기: 앞선 head의 커밋 상태를 읽는다(10.3절)
+      statuses: read
     outputs:
       skip: ${{ steps.pr.outputs.skip }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
@@ -39,6 +41,8 @@ jobs:
       base_sha: ${{ steps.pr.outputs.base_sha }}
       risk: ${{ steps.plan.outputs.risk }}
       claude: ${{ steps.plan.outputs.claude }}
+      patch: ${{ steps.plan.outputs.patch }}
+      carry: ${{ steps.plan.outputs.carry_claude }}
     steps:
       - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,18 +77,20 @@ jobs:
         id: plan
         if: steps.pr.outputs.skip == 'false'
         env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           cd pr
           BASE=$(git merge-base "$BASE_SHA" HEAD)
           node ../base/scripts/harness.ts review-plan --repo . --config-root ../base \
-            --base "$BASE" --head-ref "$HEAD_REF"
+            --base "$BASE" --head-ref "$HEAD_REF" --pr-number "$PR_NUMBER" --base-sha "$BASE_SHA"
 
   judge:
     name: judge
     needs: plan
-    if: needs.plan.outputs.skip == 'false' && needs.plan.outputs.claude == 'true'
+    if: needs.plan.outputs.skip == 'false' && needs.plan.outputs.claude == 'true' && needs.plan.outputs.carry == ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: judge-claude
@@ -194,6 +200,9 @@ jobs:
           NEEDED: ${{ needs.plan.outputs.claude }}
           # plan job이 PR을 정하기 전에 죽었으면 check가 돈 head에 error를 남긴다
           HEAD_SHA: ${{ needs.plan.outputs.head_sha || github.event.workflow_run.head_sha }}
+          # 승인 결속(10.3절): 승인에 적을 patch와, 이어받을 원래 head(있으면 판정 없이 success)
+          PATCH: ${{ needs.plan.outputs.patch }}
+          CARRIED: ${{ needs.plan.outputs.carry }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -201,4 +210,5 @@ jobs:
           F="$RUNNER_TEMP/verdict.json"
           printf '%s' "$VERDICT_B64" | base64 -d > "$F" 2>/dev/null || : > "$F"
           node base/scripts/harness.ts record-review --context review/claude --needed "$NEEDED" \
-            --verdict "$F" --head-sha "$HEAD_SHA" --repo-slug "$REPO" --target-url "$RUN_URL"
+            --verdict "$F" --head-sha "$HEAD_SHA" --repo-slug "$REPO" --target-url "$RUN_URL" \
+            --patch "$PATCH" --carried-from "$CARRIED"
