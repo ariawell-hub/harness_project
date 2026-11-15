@@ -25,8 +25,9 @@
     {
       "step": 3,
       "name": "review-fix",
-      "status": "in_progress",
-      "summary": "`runner/review.ts`: `ReviewState`(`responses`·`round`·`pending`, `review.json`)·`readReviewState`·`writeReviewState`·`openBlocking`·`failedResponses`·`settledResponses`·`markCounted`·`maxFindingId`·`reviewerKey`·`reviewerOfContext`·`lastRoundFindings`·`reviewerJudgedResponse`·`findingLine`·`commitSubject`. `run.ts`: `doReview(ctx, l, pr, phase)`(세션 뒤 변경 없음·판정 실패는 `fail(detail)`로 `F<번호>` 실패, 통과는 `pending`, 끝에 한 번 push하고 `review-pushed` 이벤트), `judgeStep`·`publishStep`·`judgePlanOnly`, `blockPlan(…, opinion)`. `prompt.ts`: `reviewPrompt`·`ReviewFinding`(지적 블록은 `<<<지적 … 지적>>>`, `- ID: F<번호>` 줄). `next.ts`: 작업 `review`(phase plan|code). 가짜 에이전트 `review` 순서(`ok`·`fail`·`break`). 테스트 도우미는 `scripts/test/runner-review.test.ts`의 `judged`·`postLedger`·`reviewChecks`"
+      "status": "completed",
+      "summary": "`runner/review.ts`: `ReviewState`(`responses`·`round`·`pending`, `review.json`)·`readReviewState`·`writeReviewState`·`openBlocking`·`failedResponses`·`settledResponses`·`markCounted`·`maxFindingId`·`reviewerKey`·`reviewerOfContext`·`lastRoundFindings`·`reviewerJudgedResponse`·`findingLine`·`commitSubject`. `run.ts`: `doReview(ctx, l, pr, phase)`(세션 뒤 변경 없음·판정 실패는 `fail(detail)`로 `F<번호>` 실패, 통과는 `pending`, 끝에 한 번 push하고 `review-pushed` 이벤트), `judgeStep`·`publishStep`·`judgePlanOnly`, `blockPlan(…, opinion)`. `prompt.ts`: `reviewPrompt`·`ReviewFinding`(지적 블록은 `<<<지적 … 지적>>>`, `- ID: F<번호>` 줄). `next.ts`: 작업 `review`(phase plan|code). 가짜 에이전트 `review` 순서(`ok`·`fail`·`break`). 테스트 도우미는 `scripts/test/runner-review.test.ts`의 `judged`·`postLedger`·`reviewChecks`",
+      "completed_at": "2026-11-15T23:06:23+09:00"
     },
     {
       "step": 4,
