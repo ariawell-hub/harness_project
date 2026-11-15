@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   MAX_BODY,
   MAX_ENTRIES,
+  applyPlanReview,
   applyVerdict,
   emptyLedger,
   ledgerStatus,
@@ -475,4 +476,82 @@ test('재현 결과를 원장에 적는다. 재현된 P1은 동결하지 않고,
     repro: new Map([[0, 'reproduced']]),
   });
   assert.deepEqual([byId(again, 'F3').repro, byId(again, 'F3').status], ['reproduced', 'open']);
+});
+
+// ---------- 계획 승인(G1, step4) ----------
+
+const PH1 = 'a1'.repeat(32);
+const PH2 = 'b2'.repeat(32);
+
+test('applyPlanReview: 승인을 해시에 묶어 남기고, 해시가 바뀌면 이전 승인을 지운다', () => {
+  const l0 = emptyLedger(BASE);
+  const l1 = applyPlanReview(l0, { reviewer: 'codex', hash: PH1, headSha: H1, approved: true });
+  assert.deepEqual(l1.planReview, { hash: PH1, head: H1, approvals: ['codex'] });
+  // 입력은 바꾸지 않는다
+  assert.equal(l0.planReview, undefined);
+  // 다른 검증자가 같은 해시를 뒤 head에서 승인: 승인이 쌓이고 head는 마지막 승인의 것이다
+  const l2 = applyPlanReview(l1, { reviewer: 'claude', hash: PH1, headSha: H2, approved: true });
+  assert.deepEqual(l2.planReview, { hash: PH1, head: H2, approvals: ['claude', 'codex'] });
+  // 같은 검증자가 다시 승인해도 한 번만 남는다
+  const again = applyPlanReview(l2, { reviewer: 'claude', hash: PH1, headSha: H3, approved: true });
+  assert.deepEqual(again.planReview?.approvals, ['claude', 'codex']);
+  // 해시가 바뀌면 이전 승인은 모두 사라진다
+  const l3 = applyPlanReview(l2, { reviewer: 'claude', hash: PH2, headSha: H3, approved: true });
+  assert.deepEqual(l3.planReview, { hash: PH2, head: H3, approvals: ['claude'] });
+});
+
+test('applyPlanReview: 수정 요청은 그 검증자의 승인만 지우고, 판정이 없으면(error) 그대로 둔다', () => {
+  let l = applyPlanReview(emptyLedger(BASE), {
+    reviewer: 'claude',
+    hash: PH1,
+    headSha: H1,
+    approved: true,
+  });
+  l = applyPlanReview(l, { reviewer: 'codex', hash: PH1, headSha: H1, approved: true });
+  const rejected = applyPlanReview(l, {
+    reviewer: 'codex',
+    hash: PH1,
+    headSha: H2,
+    approved: false,
+  });
+  assert.deepEqual(rejected.planReview, { hash: PH1, head: H1, approvals: ['claude'] });
+  const unknown = applyPlanReview(l, { reviewer: 'codex', hash: PH1, headSha: H2, approved: null });
+  assert.deepEqual(unknown.planReview, l.planReview);
+  // 해시가 바뀌었으면 판정이 없어도 옛 승인은 남기지 않는다
+  const moved = applyPlanReview(l, { reviewer: 'codex', hash: PH2, headSha: H2, approved: null });
+  assert.deepEqual(moved.planReview, { hash: PH2, head: H2, approvals: [] });
+});
+
+test('planReview: 원장 댓글에 왕복하고 표에 보인다. 없는 옛 원장도 읽고, 형식이 다르면 null', () => {
+  const plain = round1([finding()]);
+  // 이 필드가 생기기 전의 원장: 자료에 planReview가 없다
+  assert.doesNotMatch(
+    Buffer.from(renderLedger(plain).match(/data:([A-Za-z0-9+/=]+)/)![1], 'base64').toString(),
+    /planReview/,
+  );
+  assert.deepEqual(parseLedger(renderLedger(plain)), plain);
+
+  const l = applyPlanReview(plain, { reviewer: 'codex', hash: PH1, headSha: H2, approved: true });
+  const body = renderLedger(l);
+  assert.deepEqual(parseLedger(body), l);
+  assert.match(body, new RegExp(`계획 검증\\(G1\\).*${PH1.slice(0, 12)}.*codex`));
+  // 계획 승인은 review-ledger 판정을 바꾸지 않는다
+  assert.deepEqual(ledgerStatus(l), ledgerStatus(plain));
+
+  const data = (o: unknown) =>
+    `<!-- harness-ledger-data:${Buffer.from(JSON.stringify(o)).toString('base64')} -->`;
+  const pr = l.planReview!;
+  for (const bad of [
+    { ...pr, hash: PH1.slice(0, 40) },
+    { ...pr, hash: PH1.toUpperCase() },
+    { ...pr, head: 'abc' },
+    { ...pr, approvals: ['gpt'] },
+    { ...pr, approvals: ['codex', 'codex'] },
+    { ...pr, approvals: 'codex' },
+    { ...pr, extra: 1 },
+    { hash: PH1, head: H1 },
+    null,
+    'x',
+  ])
+    assert.equal(parseLedger(data({ ...l, planReview: bad })), null, JSON.stringify(bad));
 });

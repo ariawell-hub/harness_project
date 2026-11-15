@@ -1,5 +1,6 @@
 # L3 기계 판정(10.3·10.4절, 계획 20261114-ci-gates). main의 정의(pull_request_target)로 돈다.
 # evaluate: base/(실행 중인 main 끝 = github.sha)의 스크립트만 실행하고 pr/는 데이터로 읽는다. 비밀·environment 없음.
+#           plan-gate의 G1은 지적 원장(검증 App 봇의 PR 댓글)의 계획 승인을 읽기 권한(pull-requests: read)으로 읽는다.
 # record: 판정 결과를 base 스크립트로 검사한 뒤 검증 App 토큰(recorder environment)으로 PR head에 커밋 상태를 쓴다.
 #         PR 트리를 받지 않고 LLM·PR 코드를 실행하지 않는다. 결과가 없거나 깨지면 모든 기계 판정을 error로 쓴다.
 # PR 유래 값(브랜치 이름, job 출력)은 run 스크립트에 직접 넣지 않고 env로만 넘긴다.
@@ -80,7 +81,7 @@ jobs:
           OUT="$RUNNER_TEMP/gates.json"
           node ../base/scripts/harness.ts gates --repo . --config-root ../base \
             --base "$BASE" --head-ref "$HEAD_REF" --reviews "$REVIEWS" \
-            --pr-body "$RUNNER_TEMP/pr-body.md" \
+            --pr-body "$RUNNER_TEMP/pr-body.md" --pr-number "$PR_NUMBER" \
             --out "$OUT" --summary "$GITHUB_STEP_SUMMARY"
           echo "results=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
 

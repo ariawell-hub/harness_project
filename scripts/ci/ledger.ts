@@ -1,7 +1,7 @@
 // 지적 원장(10.2절 (4)·(5)): PR마다 리뷰 지적의 등급과 처리 상태를 추적한다.
 // 이 파일은 순수 함수만 둔다(네트워크·git 호출 없음). 기록 job이 PR 댓글로 읽고 쓴다(step1).
 // 댓글에는 사람이 읽는 표와 기계가 읽는 숨은 자료가 함께 있고, 기계는 숨은 자료만 읽는다. 형식: scripts/cross-review/ledger.md
-import { SHA_RE } from './results.ts';
+import { PLAN_HASH_RE, SHA_RE } from './results.ts';
 import {
   LIMITS,
   RESOLUTION_ID_RE,
@@ -55,6 +55,16 @@ export interface CiFailure {
   run: string;
 }
 
+/** 계획 검증(G1, 4.1·10.3절)의 승인 기록. 계획만 바꾼 PR head(mode=plan)의 판정으로만 남긴다 */
+export interface PlanReview {
+  /** 승인받은 계획 핵심 섹션 해시(plan-hash.ts) */
+  hash: string;
+  /** 이 해시의 승인이 마지막으로 기록된 PR head */
+  head: string;
+  /** 이 해시의 계획을 승인한 검증자. 위험도 기준으로 실행하지 않은 검증자(해당 없음 = 통과)도 들어간다 */
+  approvals: Reviewer[];
+}
+
 export interface Ledger {
   version: 1;
   /** 1라운드의 base SHA. 이 PR의 모든 라운드가 이 버전의 프롬프트를 쓴다(10.2절 (2)) */
@@ -64,6 +74,8 @@ export interface Ledger {
   ciFailures: CiFailure[];
   /** 원장이 가득 찼거나 댓글 상한에 걸려 등록하지 않은 P2·P3 수 */
   dropped: number;
+  /** 계획 승인. 계획 검증을 받은 적이 없으면 없다(이 필드가 생기기 전의 원장도 그렇다) */
+  planReview?: PlanReview;
 }
 
 export function emptyLedger(promptBase: string): Ledger {
@@ -189,6 +201,31 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
   return out;
 }
 
+export interface PlanReviewOptions {
+  reviewer: Reviewer;
+  /** 판정한 head의 계획 해시 */
+  hash: string;
+  headSha: string;
+  /** true: 승인(review/* success), false: 수정 요청, null: 판정 없음(error) */
+  approved: boolean | null;
+}
+
+/**
+ * 계획 전용 head의 판정 하나를 계획 승인에 반영한 새 원장을 돌려준다(입력은 바꾸지 않는다).
+ * 해시가 바뀌면 이전 승인을 모두 지운다. 수정 요청은 그 검증자의 승인만 지우고, 판정이 없으면 그대로 둔다
+ */
+export function applyPlanReview(l: Ledger, o: PlanReviewOptions): Ledger {
+  const cur =
+    l.planReview?.hash === o.hash ? l.planReview : { hash: o.hash, head: o.headSha, approvals: [] };
+  if (o.approved === null) return { ...l, planReview: { ...cur, approvals: [...cur.approvals] } };
+  const others = cur.approvals.filter((r) => r !== o.reviewer);
+  const approvals = REVIEWERS.filter((r) => others.includes(r) || (o.approved && r === o.reviewer));
+  return {
+    ...l,
+    planReview: { hash: o.hash, head: o.approved ? o.headSha : cur.head, approvals },
+  };
+}
+
 /**
  * review-ledger 판정(R16): open인 P0·P1이 없어야 한다.
  * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다
@@ -246,6 +283,13 @@ export function renderLedger(l: Ledger): string {
       );
     }
     lines.push('');
+  }
+  if (l.planReview) {
+    const p = l.planReview;
+    lines.push(
+      `계획 검증(G1): 해시 \`${p.hash.slice(0, 12)}\` · 승인: ${p.approvals.join(', ') || '없음'} · head \`${p.head.slice(0, 12)}\``,
+      '',
+    );
   }
   if (l.dropped > 0) lines.push(`원장이 가득 차 등록하지 않은 P2·P3: ${l.dropped}건`, '');
   if (l.ciFailures.length) {
@@ -316,6 +360,20 @@ function validEntry(e: unknown): e is Entry {
   );
 }
 
+function validPlanReview(p: unknown): p is PlanReview {
+  return (
+    isObj(p) &&
+    keysAre(p, ['hash', 'head', 'approvals']) &&
+    typeof p.hash === 'string' &&
+    PLAN_HASH_RE.test(p.hash) &&
+    typeof p.head === 'string' &&
+    SHA_RE.test(p.head) &&
+    Array.isArray(p.approvals) &&
+    p.approvals.every(isReviewer) &&
+    new Set(p.approvals).size === p.approvals.length
+  );
+}
+
 /** 댓글 본문에서 원장을 읽는다. 숨은 자료가 없거나 둘 이상이거나 형식이 다르면 null */
 export function parseLedger(body: string): Ledger | null {
   const found = [...body.matchAll(DATA_RE)];
@@ -327,8 +385,11 @@ export function parseLedger(body: string): Ledger | null {
     return null;
   }
   if (!isObj(raw)) return null;
-  if (!keysAre(raw, ['version', 'promptBase', 'rounds', 'findings', 'ciFailures', 'dropped']))
+  // planReview는 없어도 된다(계획 검증을 받지 않은 PR, 이 필드가 생기기 전의 원장)
+  const { planReview, ...rest } = raw;
+  if (!keysAre(rest, ['version', 'promptBase', 'rounds', 'findings', 'ciFailures', 'dropped']))
     return null;
+  if ('planReview' in raw && !validPlanReview(planReview)) return null;
   if (raw.version !== 1) return null;
   if (typeof raw.promptBase !== 'string' || !SHA_RE.test(raw.promptBase)) return null;
   if (!Number.isInteger(raw.dropped) || (raw.dropped as number) < 0) return null;

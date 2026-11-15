@@ -3,6 +3,7 @@
 // 읽지 못하거나 깨졌으면 예외를 던지고, 기록 쪽은 review-ledger를 error로 남긴다(fail-closed).
 import {
   LEDGER_MARKER,
+  applyPlanReview,
   applyVerdict,
   emptyLedger,
   ledgerStatus,
@@ -12,7 +13,13 @@ import {
   type ReproResult,
   type Reviewer,
 } from './ledger.ts';
-import { LEDGER_CONTEXT, SHA_RE, cleanDescription, type StatusPayload } from './results.ts';
+import {
+  LEDGER_CONTEXT,
+  PLAN_HASH_RE,
+  SHA_RE,
+  cleanDescription,
+  type StatusPayload,
+} from './results.ts';
 import type { Verdict } from './verdict.ts';
 
 /** GitHub 댓글 본문 상한 */
@@ -120,6 +127,11 @@ export interface RecordLedgerOptions extends Where {
   changedSinceLastRound: readonly string[] | null;
   /** 재현 job 결과(판정 findings 순번 → 결과). 없으면 재현 표시 없이 등록한다 */
   repro?: ReadonlyMap<number, ReproResult>;
+  /**
+   * 계획 전용 head(mode=plan)일 때만 준다(G1, 4.1절). 코드가 섞인 head의 판정은 계획 승인으로 남기지 않는다.
+   * approved: 이 검증자의 review/*가 success면 true, failure면 false, error면 null
+   */
+  plan?: { hash: string; approved: boolean | null };
   /** 원장 댓글을 읽고 쓸 API(Pull requests 쓰기 토큰). 토큰을 받지 못했으면 null */
   api: LedgerApi | null;
   post: (p: StatusPayload) => Promise<void>;
@@ -127,7 +139,7 @@ export interface RecordLedgerOptions extends Where {
 
 /**
  * 판정을 원장에 반영해 댓글을 쓰고 review-ledger 상태를 head에 기록한다.
- * 판정이 없어도 지금 원장으로 판정한다. 원장이 없고 지적도 없으면 댓글을 만들지 않는다.
+ * 판정이 없어도 지금 원장으로 판정한다. 원장이 없고 지적도 계획 승인도 없으면 댓글을 만들지 않는다.
  */
 export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayload> {
   const done = async (state: StatusPayload['state'], description: string) => {
@@ -140,8 +152,14 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
     const stored = await loadLedger({ ...o, get: o.api.get });
     let ledger = stored.ledger;
     const v = o.verdict;
-    if (v && (ledger || v.findings.length > 0)) {
+    // 계획 승인은 둘 곳이 원장뿐이라 지적이 없어도 원장을 만든다
+    const planApproved = o.plan?.approved === true;
+    const before = ledger ? JSON.stringify(ledger) : '';
+    const checkBase = () => {
       if (!SHA_RE.test(o.promptBase)) throw new Error('프롬프트 버전 SHA 형식 오류');
+    };
+    if (v && (ledger || v.findings.length > 0 || planApproved)) {
+      checkBase();
       ledger = applyVerdict(ledger ?? emptyLedger(o.promptBase), {
         reviewer: o.reviewer,
         verdict: v,
@@ -149,8 +167,19 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         changedSinceLastRound: o.changedSinceLastRound,
         repro: o.repro,
       });
-      await saveLedger({ ...o, send: o.api.send, commentId: stored.commentId, ledger });
     }
+    if (o.plan && (ledger || planApproved)) {
+      if (!PLAN_HASH_RE.test(o.plan.hash)) throw new Error('계획 해시 형식 오류');
+      if (!ledger) checkBase();
+      ledger = applyPlanReview(ledger ?? emptyLedger(o.promptBase), {
+        reviewer: o.reviewer,
+        hash: o.plan.hash,
+        headSha: o.headSha,
+        approved: o.plan.approved,
+      });
+    }
+    if (ledger && JSON.stringify(ledger) !== before)
+      await saveLedger({ ...o, send: o.api.send, commentId: stored.commentId, ledger });
     if (!ledger) return done('success', '원장 없음(등록된 지적이 없다)');
     const s = ledgerStatus(ledger);
     return done(s.state, s.description);

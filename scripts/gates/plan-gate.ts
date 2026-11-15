@@ -1,5 +1,5 @@
-// plan-gate (R1, G1, 10.3절). 1단계 버전: 계획 파일·필수 섹션·size·risk·step 상태·자기 step AC 불변·발견 사항 처리.
-// 중·대 규모의 G1 계획 교차 검증 결과 확인은 2단계(planReview.required)에서 켠다.
+// plan-gate (R1, G1, 10.3절): 계획 파일·필수 섹션·size·risk·step 상태·자기 step AC 불변·발견 사항 처리.
+// 중·대 규모의 G1(계획 교차 검증 확인)은 호출자가 넘긴 해시와 원장의 계획 승인으로 판정한다. planReview.required로 켠다.
 // CI에서는 main의 이 스크립트가 PR head 체크아웃(pr/)을 데이터로만 읽는다. PR 코드를 실행하지 않는다.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -30,6 +30,21 @@ import type { Problem } from '../lib/util.ts';
 const DOC = 'docs/harness/design.md R1, 8절 / docs/harness/workflow.md';
 const P = (what: string, how: string): Problem => ({ rule: 'R1 plan-gate', what, how, doc: DOC });
 
+/** G1 판정 자료(4.1·10.3절). 해시는 ci/plan-hash.ts가 계산하고 호출자(ci/gates.ts, CLI)가 넘긴다 */
+export interface PlanG1 {
+  /** 지금 계획의 핵심 섹션 해시 */
+  hash: string;
+  /** merge-base에 있는 같은 계획의 해시. 계획이 없었으면 null */
+  baseHash: string | null;
+  /**
+   * 원장(검증 App 봇 댓글)의 계획 승인. 승인 기록이 없으면 null.
+   * 원장을 보지 않는 실행(로컬)은 이 값을 주지 않는다(undefined)
+   */
+  review?: { hash: string; approvals: readonly string[] } | null;
+  /** 계획 승인에 필요한 검증자 */
+  reviewers: readonly string[];
+}
+
 export interface PlanGateOptions {
   root: string;
   base: string | null;
@@ -37,12 +52,63 @@ export interface PlanGateOptions {
   /** pr: PR 병합 판정, plan: 계획 작성 직후 구조 검사(runner) */
   mode: 'pr' | 'plan';
   cfg: HarnessConfig;
+  /** 없으면 G1을 확인하지 않고 참고만 남긴다(runner 등). 최종 판정은 CI의 plan-gate다 */
+  g1?: PlanG1;
 }
 
 export interface PlanGateResult {
   problems: Problem[];
   notes: string[];
   plan: PlanRef | null;
+}
+
+const PLAN_ONLY_HOW =
+  '계획만 담은 커밋(코드 변경 없음)을 push해 필요한 검증자의 승인을 받아라. 코드를 이미 올렸으면 되돌리는 커밋으로 계획만 남긴다(절차서 2절)';
+
+/**
+ * G1: (a) merge-base의 같은 계획과 해시가 같으면 통과, (b) 원장의 계획 승인이 지금 해시의 것이고
+ * 필요한 검증자가 모두 승인했으면 통과, (c) 그 밖은 실패. 원장을 보지 않은 실행은 판정하지 않는다(ok: null)
+ */
+function checkG1(g: PlanG1 | undefined): { ok: boolean | null; what: string; how: string } {
+  if (!g)
+    return {
+      ok: null,
+      what: 'G1: 계획 승인은 이 실행에서 확인하지 않았다(CI의 plan-gate가 원장으로 확인한다)',
+      how: '',
+    };
+  const short = g.hash.slice(0, 12);
+  if (g.baseHash === g.hash) return { ok: true, what: '', how: '' };
+  if (g.review === undefined)
+    return {
+      ok: null,
+      what: `G1: 계획 핵심 섹션이 base와 다르다(해시 ${short}). 병합하려면 계획만 담은 커밋에서 검증자 승인을 받아야 한다(CI가 원장으로 확인한다)`,
+      how: '',
+    };
+  if (!g.review)
+    return {
+      ok: false,
+      what: `G1: 중·대 규모 계획이 교차 검증 승인을 받지 않았다(해시 ${short})`,
+      how: PLAN_ONLY_HOW,
+    };
+  if (g.review.hash !== g.hash)
+    return {
+      ok: false,
+      what: `G1: 승인받은 뒤 계획 핵심 섹션이 바뀌었다(승인 ${g.review.hash.slice(0, 12)}, 지금 ${short})`,
+      how: `목표·수용 기준, 범위, 관련 파일, step의 작업·AC를 바꿨으면 다시 검증받는다. ${PLAN_ONLY_HOW}`,
+    };
+  const approvals = g.review.approvals;
+  const missing = g.reviewers.filter((r) => !approvals.includes(r));
+  if (missing.length)
+    return {
+      ok: false,
+      what: `G1: 계획 승인이 부족하다(해시 ${short}): ${missing.join(', ')} 미승인`,
+      how: '계획만 담은 커밋의 판정에서 남은 검증자의 승인을 받아라(지적은 원장과 기록 job 로그에 있다)',
+    };
+  return {
+    ok: true,
+    what: `G1: 계획 승인 확인(해시 ${short}, ${g.reviewers.join('·')})`,
+    how: '',
+  };
 }
 
 function read(root: string, rel: string): string | null {
@@ -281,13 +347,12 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
     );
   }
 
-  if (o.cfg.planReview.required && fm.size !== 'small') {
-    problems.push(
-      P(
-        '중·대 규모 계획의 G1 교차 검증 결과가 없다',
-        '2단계 교차 검증이 계획을 검증해야 한다(10.1절)',
-      ),
-    );
+  // G1(4.1절): 중·대 규모 계획의 교차 검증 확인. 꺼져 있어도 자료가 오면 결과를 참고로 남긴다(켜기 전 실제 PR 확인용)
+  const enforce = o.cfg.planReview.required;
+  if (ref.kind === 'multi' && fm.size !== 'small' && (enforce || o.g1)) {
+    const g = checkG1(o.g1);
+    if (g.ok === false && enforce) problems.push({ ...P(g.what, g.how), rule: 'G1 plan-gate' });
+    else if (g.what) notes.push(enforce ? g.what : g.what.replace(/^G1/, 'G1(꺼짐)'));
   }
   return { problems, notes, plan: ref };
 }

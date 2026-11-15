@@ -91,6 +91,12 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step3: AC 실행 결과. `node --test scripts/test/repro.test.ts scripts/test/ledger.test.ts scripts/test/verdict.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep` 2개 통과, `node scripts/harness.ts check` 종료 코드 0.
 - 2026-11-15 step3: PR #86 1차 판정(head cd8ff70). `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 1: 재현 테스트에 러너의 `HOME`을 넘긴다). 원장에 F1(P1, codex, `open`)이 등록되고 `review-ledger = failure — 열린 차단 지적 1건: F1`이 기록됐다(차단 지적이 원장으로 병합을 막는 첫 실제 사례). `risk-gate`는 예상대로 위험도 높음(`harness.config.json`의 `ci` 변경).
 - 2026-11-15 step3: F1 수정(지적이 타당해 반박하지 않았다). `HOME`이 러너의 것과 다르고 빈 폴더인지 보는 사례를 더했고, 옛 구현에서 종료 코드 1(7개 중 1개 실패), 새 구현에서 7개 통과를 확인했다. 재현 테스트의 `HOME`·임시 폴더를 실행용 빈 폴더로 바꿨다. `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step3: PR #86 2차 판정(head 47b588f, 실행 43698538681·43698538871). `review/claude` 승인(P2 1: 재현 job 권한이 step 본문의 `permissions: {}`와 다르다 → 원장 F2 `deferred`, 의사결정 로그에 이유가 있다), `review/codex` 2라운드 승인(`resolutions`로 F1을 `fixed`로 판정). 원장 F1이 `open` → `fixed`로 바뀌고 `review-ledger`가 `failure`(09:18:55, Claude 기록 시점) → `success`(09:19:29, Codex 기록 뒤)로 바뀌었다(수용 기준 2·3의 첫 실제 상태 전이). 제작자 head 승인(09:22) 뒤 병합.
+- 2026-11-15 step4: 시작. GitHub 확인: 열린 PR 없음, `needs-human` 없음, Issue #55 열림. 병합 직후 main의 `check`(push) 완료로 두 판정 워크플로가 새 정의로 시작해 모든 job이 `skipped`로 끝났다(실행 43699190511·43699190423, `repro` job 포함. 문법 오류 없음). 재현 job은 아직 실제 PR에서 돈 적이 없다. 이 step의 PR 첫 판정에서 확인한다.
+- 2026-11-15 step4: PR #86에서 본 것. Claude의 첫 판정(head cd8ff70, 지적 없음)은 원장이 생기기 전이라 라운드로 남지 않았고, 다음 판정(head 47b588f)이 "claude 1라운드"로 돌았다(`review-plan: claude 1라운드 … 바뀐 파일 알 수 없음`). 의사결정 로그("지적이 없던 라운드는 원장을 만들지 않는다")대로다. 전체를 다시 검토하는 쪽이라 놓치는 것은 없다. 발견 사항에 적었다.
+- 2026-11-15 step4: 테스트 먼저. `node --test scripts/test/plan-hash.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts scripts/test/ci.test.ts` 종료 코드 1(파일 4개 모두 실패: `scripts/ci/plan-hash.ts` 없음, `ledger.ts`에 `applyPlanReview` 없음, `review-round.ts`에 `promptFiles` 없음. 테스트별 실패는 따로 보지 못했다). 구현 뒤 64개 통과.
+- 2026-11-15 step4: 명령을 이어 붙인 테스트(`record.test.ts`, 가짜 GitHub API 서버)를 구현과 함께 썼다: `review-plan`(mode=plan, 해시) → `record-review --mode plan` 두 검증자 → 코드 추가 → `gates --pr-number`의 `plan-gate` 통과, 승인 뒤 다른 step의 AC를 고치면 실패, 원장 읽기 실패는 `error`. 처음에 한 번 실패했다(테스트가 `review-plan`이 쓴 `.harness-review/`를 함께 커밋해 계획 전용이 아니게 됐다. 테스트 리포에 `.gitignore`를 두어 고쳤다. CI는 매번 새로 체크아웃해 해당 없다).
+- 2026-11-15 step4: AC 실행 결과. `node --test scripts/test/plan-hash.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep`·`test -f` 통과, `node scripts/harness.ts check` 종료 코드 0. `planReview.required`는 `false` 그대로다.
 
 ## 의사결정 로그
 
@@ -116,6 +122,14 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 원장 댓글을 쓰려면 검증 App에 Pull requests 쓰기 권한이 필요하다(지금은 읽기, 설계서 0.2절). 제작자 작업이라 step1에서 필요한 다른 작업과 함께 한 번에 요청한다(R20). 권한이 오기 전까지 step0은 순수 로직만 만든다.
 - 재현 job은 판정 워크플로(`workflow_run`, main 정의) 안의 job으로 두고 권한·environment를 주지 않는다. 설계서 10.4절 표는 `pull_request_target`으로 적었지만 조건(main 정의, 비밀·쓰기 없음)은 같고, 판정 결과를 job 출력으로 바로 받을 수 있다. step3에서 설계서를 고친다.
 - G1의 승인 기록은 원장 JSON의 `planReview`(해시, head, 검증자별 판정)에 둔다. 뒤 step의 PR은 계획이 main의 것과 해시가 같으면 통과한다. 이유: 계획은 첫 step PR에서 검증받고 main에 들어간다. 뒤 step에서 핵심 섹션을 고치면 그 PR에서 다시 계획 전용 커밋으로 검증받는다.
+- 계획 해시(`planHash`)는 `plan.md`의 세 섹션과 계획 폴더의 모든 `step<N>.md`(번호순)의 두 섹션을 `[이름, 본문]` 목록의 JSON으로 만들어 sha256(64자)을 낸다. 본문은 줄 끝 공백과 섹션 앞뒤 빈 줄을 뗀다. 경로(`active/`·`completed/`)·frontmatter·`index.json`은 넣지 않는다. 이유: 완료 처리(상태·위치 이동)와 진행 로그로는 해시가 바뀌지 않아야 한다. step 파일은 `index.json`이 아니라 폴더 목록에서 찾는다(상태 파일이 해시 대상을 정하지 않게 한다).
+- `plan-gate`(`gates/`)는 해시를 직접 계산하지 않는다. `ci/gates.ts`와 CLI가 `ci/plan-hash.ts`로 계산해 `g1`(지금 해시, merge-base 해시, 원장의 계획 승인)로 넘긴다. 이유: 레이어 규칙(`gates/`는 `ci/`를 import하지 않는다). runner처럼 `g1`을 넘기지 않는 호출은 G1을 확인하지 않고 참고만 남긴다. 최종 판정은 CI의 `plan-gate`다(설계서 4.1절).
+- `mode=plan`은 "PR의 merge-base 대비 변경이 모두 이 브랜치 계획의 폴더(`active/<id>/`·`completed/<id>/`) 안"일 때다. 커밋 하나가 아니라 PR 전체로 본다. 이유: 검증자는 PR 전체 diff를 보므로, 앞 커밋에 코드가 있으면 그 판정은 계획만 본 것이 아니다. 코드를 먼저 올렸다면 되돌리는 커밋으로 계획만 남긴 뒤 검증받는다.
+- 계획 승인은 `mode=plan`인 head에서 `review/<검증자>`가 success일 때 기록한다(승인 판정, 위험도 기준 "해당 없음", 이어받음). failure면 그 검증자의 승인을 지우고, error면 그대로 둔다. `plan-gate`는 두 검증자가 모두 `approvals`에 있어야 통과시킨다. 이유: 필요한 검증자는 판정 워크플로의 plan job이 그 커밋에서 정한다. `plan-gate`가 뒤 커밋에서 다시 계산하면 코드가 섞인 diff의 위험도로 바뀐다. 버린 대안: `plan-gate`가 계획 `risk`로 필요한 검증자를 다시 계산(계산이 두 곳으로 갈린다).
+- 계획 승인이 있으면 지적이 없어도 원장 댓글을 만든다. 이유: 승인을 둘 곳이 원장뿐이다. 이때부터 라운드도 기록되고 프롬프트 버전이 고정된다.
+- 원장의 `planReview`는 없어도 되는 필드다(버전은 1 그대로). 이유: 이 변경 전에 만들어진 원장 댓글을 그대로 읽어야 한다.
+- `planReview.required`가 `false`인 동안에도 `plan-gate`는 G1을 계산해 결과를 참고(`G1(꺼짐)`)로 남긴다. 이유: step5에서 켜기 전에 실제 PR에서 원장 읽기와 판정을 볼 수 있어야 한다(step4 금지사항). 꺼져 있을 때 원장을 읽지 못하면 참고로만 남기고, 켜져 있으면 `plan-gate`가 `error`다(fail-closed).
+- `prompt-plan.md`는 `review-prompt --mode plan`이 첫 파일 바로 뒤에 붙인다(Codex는 꼬리말 앞). 프롬프트 버전이 이 파일이 생기기 전 커밋으로 고정된 PR이 계획 전용이 되면 판정이 실패하는데, 지금 열린 PR이 없어 해당하는 PR이 없다(2026-11-15 확인).
 
 ## 발견 사항
 
@@ -126,6 +140,7 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - `Ledger`에 `dropped` 필드가 있다(step0 본문의 정의에는 없다, PR #83 Claude P3). 형식 문서에 적혀 있다. → 처리: [ledger.md](../../../../scripts/cross-review/ledger.md)
 - 판정 워크플로의 `record` job은 `scripts`만 받아 `harness.config.json`이 없었다. 원장은 `ci.recorderBot`이 필요해 설정 파일도 받게 했다. → 처리: 해당 없음
 - #54 step4의 Claude 검증자 P3: `CHANGELOG`의 설계서 v0.7.28 항목이 v0.7.24 항목 앞에 있다(main 병합 때 번호만 다시 매겼다). step0에서 순서를 맞춘다. → 처리: [CHANGELOG](../../../harness/CHANGELOG.md)
+- 원장이 생기기 전의 판정(지적 없음)은 라운드로 남지 않는다. 그 검증자의 다음 판정은 1라운드로 돌아 전체를 다시 검토한다(PR #86의 Claude). 계획 승인으로 원장이 먼저 생기는 PR(G1)에서는 첫 판정부터 라운드가 남는다. → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -138,4 +153,4 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step4(계획 검증, G1). 시작할 때 step3의 실제 동작(재현 job)을 확인한다. 반박 전달(step2)은 열린 P0·P1 지적이 있어야 실제로 볼 수 있다. 기회가 오면 진행 로그에 남기고, 없으면 step5에서 미확인으로 정리한다.
+- step5(실제 PR 확인, `review-ledger` 필수 체크 등록, `planReview.required: true`). step4의 워크플로 변경(`mode`·`plan_hash`, `gates --pr-number`)은 main 병합 뒤 step5의 PR에서 처음 돈다. `plan-gate` 상세의 `G1(꺼짐)` 참고 줄과 plan job 로그의 `review-plan: mode=` 줄로 확인한다. 계획만 담은 커밋의 계획 검증(mode=plan)은 새 계획의 첫 PR이어야 볼 수 있다(step5의 PR은 계획이 main과 같다). 반박 전달(step2)은 열린 P0·P1 지적이 있어야 실제로 볼 수 있다. 기회가 없으면 step5에서 미확인으로 정리한다.

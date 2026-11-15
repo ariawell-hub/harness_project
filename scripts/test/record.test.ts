@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ledgerData, parseLedger, parseLedgerData } from '../ci/ledger.ts';
-import { HARNESS_ROOT, commitAll, gitInit, sh, tmp, write } from './helpers.ts';
+import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const BOT = 'harness-recorder[bot]';
 const BASE = 'a'.repeat(40);
@@ -274,6 +274,9 @@ test('review-plan: plan job은 원장을 읽어 출력으로 넘기고, 판정 j
       .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
   );
   assert.equal(outputs.round, '2');
+  // 계획 폴더가 없는 브랜치: 계획 전용이 아니다
+  assert.equal(outputs.mode, 'code');
+  assert.equal(outputs.plan_hash, '');
   assert.equal(outputs.prompt_base, BASE);
   assert.deepEqual(parseLedgerData(outputs.ledger), stored);
   // 직전 판정 head(HEAD)는 이 저장소에 없다: 바뀐 파일을 모른다
@@ -424,4 +427,237 @@ test('repro → record-review: 재현 job 결과가 원장의 재현 칸에 들�
   );
   assert.equal(none.code, 0, none.out);
   assert.match(none.out, /판정을 읽지 못해/);
+});
+
+// ---------- 계획 검증(G1, 4.1·10.3절. 계획 20261115-review-ledger step4) ----------
+
+const PLAN_ID = '20261111-demo';
+const PLAN_DIR = `docs/exec-plans/active/${PLAN_ID}`;
+const PLAN_BRANCH = `feat/${PLAN_ID}-s0`;
+const PLAN_MD = `---
+id: ${PLAN_ID}
+issue: 3
+type: feat
+status: active
+size: medium
+risk: normal
+author: claude-code
+owner: runner-1
+claimed_at: 2026-11-11T09:00:00+09:00
+---
+# 데모
+
+## 목표와 수용 기준
+- 데모 함수를 만든다
+
+## 범위 / 비범위
+- src/demo.ts만
+
+## 관련 파일·문서
+- src/demo.ts
+
+## 발견 사항
+- 없음
+
+## 검증 방법과 결과
+- node --test
+`;
+const stepMd = (n: number, ac = `test -f s${n}.txt`) =>
+  `# Step ${n}: s${n}\n\n## 작업\n- 파일을 만든다\n\n## Acceptance Criteria\n\`\`\`bash\n${ac}\n\`\`\`\n`;
+const indexJson = (statuses: string[]) =>
+  JSON.stringify({
+    plan: PLAN_ID,
+    steps: statuses.map((status, i) => ({ step: i, name: `s${i}`, status })),
+  });
+const outputsOf = (file: string) =>
+  Object.fromEntries(
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
+  );
+const asCodex = (args: string[]) => args.map((a) => (a === 'review/claude' ? 'review/codex' : a));
+
+test('계획 검증(G1): 계획만 담은 커밋의 승인이 원장에 남고, 코드를 더한 뒤 plan-gate가 그 승인으로 통과한다', async () => {
+  reset();
+  // main 설정(판정 기준): G1을 켠다
+  const root = tmp();
+  gitInit(root);
+  write(
+    root,
+    'harness.config.json',
+    JSON.stringify(fixtureConfig({ planReview: { required: true }, ci: { recorderBot: BOT } })),
+  );
+  // review-plan이 쓰는 검증 입력 폴더가 이 테스트의 커밋에 섞이지 않게 한다(CI는 매번 새로 체크아웃한다)
+  write(root, '.gitignore', '.harness-review/\n');
+  const base = commitAll(root, 'init');
+  sh('git', ['checkout', '-q', '-b', PLAN_BRANCH], root);
+  write(root, `${PLAN_DIR}/plan.md`, PLAN_MD);
+  write(root, `${PLAN_DIR}/index.json`, indexJson(['pending', 'pending']));
+  write(root, `${PLAN_DIR}/step0.md`, stepMd(0));
+  write(root, `${PLAN_DIR}/step1.md`, stepMd(1));
+  commitAll(root, 'plan');
+
+  const plan = async () => {
+    const out = path.join(tmp(), 'out');
+    writeFileSync(out, '');
+    const r = await run(
+      [
+        'review-plan',
+        '--repo',
+        root,
+        '--config-root',
+        root,
+        '--base',
+        base,
+        '--head-ref',
+        PLAN_BRANCH,
+      ],
+      { GITHUB_OUTPUT: out },
+    );
+    assert.equal(r.code, 0, r.out);
+    return outputsOf(out);
+  };
+  const gates = async () => {
+    const out = path.join(tmp(), 'gates.json');
+    const r = await run(
+      [
+        'gates',
+        '--repo',
+        root,
+        '--config-root',
+        root,
+        '--base',
+        base,
+        '--head-ref',
+        PLAN_BRANCH,
+        '--out',
+        out,
+        '--pr-number',
+        '7',
+      ],
+      { GH_TOKEN: 'read-token', GITHUB_REPOSITORY: 'o/r' },
+    );
+    assert.equal(r.code, 0, r.out);
+    const results = JSON.parse(readFileSync(out, 'utf8')).results as {
+      context: string;
+      state: string;
+      description: string;
+      details: string[];
+    }[];
+    return results.find((x) => x.context === 'plan-gate')!;
+  };
+
+  // plan job: PR이 계획 폴더만 바꿨다
+  const p1 = await plan();
+  assert.equal(p1.mode, 'plan');
+  assert.match(p1.plan_hash, /^[0-9a-f]{64}$/);
+  const hash = p1.plan_hash;
+  const cfgArgs = ['--config-root', root, '--pr-number', '7', '--prompt-base', BASE];
+  const v = verdictFile({});
+
+  // 코드가 섞인 판정(mode=code)과 형식이 다른 해시는 계획 승인으로 남기지 않는다(지적도 없어 원장도 없다)
+  for (const extra of [
+    ['--mode', 'code', '--plan-hash', hash],
+    ['--mode', 'plan', '--plan-hash', 'abc'],
+    ['--mode', 'plan', '--plan-hash', ''],
+  ]) {
+    const r = await run(recordArgs(v, [...cfgArgs, ...extra]), tokens);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(state.comments.length, 0, extra.join(' '));
+  }
+
+  // Claude 승인: 지적이 없어도 원장이 생기고 계획 승인과 라운드가 남는다
+  const planArgs = [...cfgArgs, '--mode', 'plan', '--plan-hash', hash];
+  const c1 = await run(recordArgs(v, planArgs), tokens);
+  assert.equal(c1.code, 0, c1.out);
+  assert.match(c1.out, /계획 검증\(G1\)/);
+  assert.equal(state.comments.length, 1);
+  assert.equal(state.comments[0].user.login, BOT);
+  let ledger = parseLedger(state.comments[0].body);
+  assert.deepEqual(ledger?.planReview, { hash, head: HEAD, approvals: ['claude'] });
+  assert.deepEqual(ledger?.rounds, [{ reviewer: 'claude', head: HEAD }]);
+  assert.equal(ledger?.promptBase, BASE);
+  assert.equal(state.statuses.at(-1)?.context, 'review-ledger');
+  assert.equal(state.statuses.at(-1)?.state, 'success');
+  // 한 검증자의 승인만으로는 plan-gate가 통과하지 않는다
+  const half = await gates();
+  assert.equal(half.state, 'failure');
+  assert.match(half.details.join('\n'), /codex/);
+
+  // Codex는 이 위험도에서 실행하지 않았다(해당 없음 = 통과): 계획 전용 커밋에서는 승인으로 센다
+  const c2 = await run(
+    asCodex(recordArgs(v, planArgs)).map((a, i, all) => (all[i - 1] === '--needed' ? 'false' : a)),
+    tokens,
+  );
+  assert.equal(c2.code, 0, c2.out);
+  ledger = parseLedger(state.comments[0].body);
+  assert.deepEqual(ledger?.planReview?.approvals, ['claude', 'codex']);
+  assert.equal(state.comments.length, 1);
+
+  // 코드를 더하고 step0을 완료 처리한다: 계획 전용이 아니게 되지만 해시는 같다
+  write(root, 'src/demo.ts', 'export {}\n');
+  write(root, `${PLAN_DIR}/index.json`, indexJson(['completed', 'pending']));
+  commitAll(root, 'step0');
+  const p2 = await plan();
+  assert.equal(p2.mode, 'code');
+  assert.equal(p2.plan_hash, hash);
+  const ok = await gates();
+  assert.equal(ok.state, 'success', ok.details.join('\n'));
+  assert.match(ok.details.join('\n'), /G1.*승인/);
+  // 읽기 토큰으로 댓글만 읽었다
+  assert.ok(state.auth.some((a) => a === 'GET /repos/o/r/issues/7/comments Bearer read-token'));
+
+  // 코드가 섞인 커밋의 판정은 계획 승인을 바꾸지 않는다
+  const code = await run(
+    recordArgs(verdictFile({ verdict: 'request_changes', findings: [finding()] }), [
+      ...cfgArgs,
+      '--mode',
+      'code',
+      '--plan-hash',
+      hash,
+    ]),
+    tokens,
+  );
+  assert.equal(code.code, 0, code.out);
+  assert.deepEqual(parseLedger(state.comments[0].body)?.planReview?.approvals, ['claude', 'codex']);
+
+  // 승인 뒤 다른 step의 AC를 약하게 고치면 해시가 달라져 plan-gate가 막는다
+  write(root, `${PLAN_DIR}/step1.md`, stepMd(1, 'true'));
+  commitAll(root, 'weaken');
+  const p3 = await plan();
+  assert.notEqual(p3.plan_hash, hash);
+  const stale = await gates();
+  assert.equal(stale.state, 'failure');
+  assert.match(stale.description, /G1/);
+
+  // 원장을 읽지 못하면 plan-gate는 error다(fail-closed)
+  state.failComments = true;
+  const denied = await gates();
+  assert.equal(denied.state, 'error');
+  assert.match(denied.description, /원장/);
+  state.failComments = false;
+
+  // 계획만 남기고 다시 검증받는다: 수정 요청이면 승인이 남지 않고, 새 해시의 승인은 옛 승인을 지운다
+  sh('git', ['rm', '-q', 'src/demo.ts'], root);
+  commitAll(root, 'plan only again');
+  const p4 = await plan();
+  assert.equal(p4.mode, 'plan');
+  const again = [...cfgArgs, '--mode', 'plan', '--plan-hash', p4.plan_hash];
+  const rejected = await run(
+    recordArgs(
+      verdictFile({
+        verdict: 'request_changes',
+        findings: [finding({ file: `${PLAN_DIR}/step1.md`, title: 'AC가 항상 통과한다' })],
+      }),
+      again,
+    ),
+    tokens,
+  );
+  assert.equal(rejected.code, 0, rejected.out);
+  assert.deepEqual(parseLedger(state.comments[0].body)?.planReview, {
+    hash: p4.plan_hash,
+    head: HEAD,
+    approvals: [],
+  });
 });

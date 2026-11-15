@@ -64,6 +64,7 @@ review_cycle: quarterly
   - v0.7.29 (2026-11-15): 지적 원장 연결. 기록 job이 판정을 원장 댓글에 반영하고 `review-ledger`를 기록한다. 원장은 검증 App 봇의 댓글만 인정하고, 두 판정 워크플로의 기록 job은 PR마다 차례로 돈다. 검증자 입력에 원장과 직전 판정 이후 diff를 넣고, 2라운드부터 원장의 1라운드 base SHA의 프롬프트를 쓴다. 검증 App 권한에 Pull requests 쓰기를 더한다(0.2절, 10.1절, 10.2절 (4)·(5), Issue #55)
   - v0.7.30 (2026-11-15): 반박 전달 구현. PR 작성자의 댓글에서 세 줄 형식(지적·근거·요지)에 맞는 문단만 골라 검증자 입력에 다시 써 준다. 근거는 커밋 SHA·리포 안 경로·이 리포 링크만 받는다(10.2절 (4), 절차서 8절, Issue #55)
   - v0.7.31 (2026-11-15): 재현 job 구현. 판정 워크플로(`workflow_run`) 안의 job으로 두고 비밀·environment·쓰기 권한 없이 검증자의 재현 테스트를 PR head에 붙여 실행한다. 단언 실패만 "재현됨"으로 센다. 근거 없는 P1은 P2로 내리고, 재현된 P1은 동결하지 않는다(10.2절 (3)·(5), 10.4절, Issue #55)
+  - v0.7.32 (2026-11-15): 계획 검증(G1) 구현. 계획 핵심 섹션 해시, 계획만 바꾼 PR(`mode=plan`)의 판정에 계획 검증 프롬프트, 그 판정의 승인을 원장의 `planReview`에 기록, `plan-gate`가 merge-base 해시 또는 원장의 승인으로 확인한다. `planReview.required`는 아직 끈 채로 결과를 참고로만 남긴다(4.1절, 10.3절, Issue #55)
 
 ### 0.1 전제 조건
 
@@ -218,6 +219,10 @@ review_cycle: quarterly
 - 무인 실행에서는 runner가 ⑤~⑩을 step마다 새 세션으로 반복한다(4.5절).
 
 - **G1 확인 내용**: 계획 파일 존재, 필수 섹션(목표·수용 기준, 범위, 검증 방법) 작성, `size`·`risk` 지정. 중·대 규모는 draft PR에서 CI가 계획을 교차 검증한 결과가 있고, 그 검증이 코드 변경이 없는 커밋에서 이뤄졌는지까지 확인한다. 최종 판정은 `plan-gate` 필수 체크가 한다(10.3절).
+  - **계획만 담은 커밋을 먼저 올린다.** 판정 워크플로의 plan job이 PR의 merge-base 대비 변경을 보고, 바뀐 파일이 그 계획의 폴더 안뿐이면 `mode=plan`으로 판정한다(`scripts/ci/plan-hash.ts`의 `planMode`). 커밋 하나가 아니라 PR 전체 변경으로 본다. 검증자가 보는 것이 PR 전체 diff이기 때문이다. 코드를 이미 올렸으면 되돌리는 커밋으로 계획만 남긴 뒤 검증받는다.
+  - `mode=plan`이면 판정 job이 공통 프롬프트 뒤에 계획 검증 항목(`scripts/cross-review/prompt-plan.md`: 수용 기준의 검증 가능성, step 분할과 AC, 범위, 위험도, 설계 결함)을 덧붙인다. 지적은 코드 검증과 같은 원장에 등록되고 P0·P1은 `review-ledger`를 막는다.
+  - 기록 job은 `mode=plan`인 head에서 `review/<검증자>`가 success일 때(승인, 위험도 기준 "해당 없음", 이어받음) 원장의 `planReview`(`{ hash, head, approvals }`)에 그 검증자를 넣는다. 해시가 바뀌면 이전 승인을 지우고, 수정 요청이면 그 검증자의 승인을 지운다. 코드가 섞인 head의 판정은 계획 승인으로 남기지 않는다. 계획 승인이 있으면 지적이 없어도 원장 댓글을 만든다.
+  - `plan-gate`의 판정과 해시 대상은 10.3절 승인 결속 기준에 있다. 설정 `planReview.required`가 `false`인 동안은 같은 판정을 하되 결과를 참고(`G1(꺼짐)`)로만 남긴다. 실제 PR에서 확인한 뒤 켠다.
 - **G2**: 로컬에서 push·PR 직전에 `check` 전체를 실행한다(R7). CI가 같은 검사를 다시 실행한다.
 - **G3**: 10.3절의 필수 상태 체크가 모두 통과해야 GitHub이 병합한다.
 
@@ -866,6 +871,12 @@ pnpm test src/auth/login-guard.spec.ts
 | 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
+- **계획 검증(G1) 구현**(`scripts/ci/plan-hash.ts`, `scripts/gates/plan-gate.ts`)
+  - 계획 해시: `plan.md`의 "목표와 수용 기준"·"범위 / 비범위"·"관련 파일·문서" 섹션과 계획 폴더의 모든 `step<N>.md`(번호순)의 "작업"·"Acceptance Criteria" 섹션을 이름과 함께 이어 sha256(64자)을 낸다. 줄 끝 공백과 섹션 앞뒤 빈 줄은 뗀다. frontmatter, 진행·의사결정 로그, `index.json`, 폴더 위치(`active/`·`completed/`)는 넣지 않는다. 그래서 계획 전용 커밋(완료 처리)으로는 해시가 바뀌지 않는다.
+  - `plan-gate`는 중·대 규모 계획에서 차례로 본다. (a) merge-base에 있는 같은 계획의 해시가 지금 해시와 같으면 통과(이미 main에 들어간 계획이다. 뒤 step의 PR이 여기에 해당한다). (b) 아니면 원장의 `planReview.hash`가 지금 해시와 같고 두 검증자가 모두 `approvals`에 있으면 통과. (c) 그 밖은 실패. 뒤 step의 PR에서 핵심 섹션을 고치면 (a)가 성립하지 않아 그 PR에서 다시 검증받는다(8.2절).
+  - 필요한 검증자는 판정 워크플로의 plan job이 계획 전용 head에서 위험도로 정한다. 실행하지 않은 검증자("해당 없음")도 `approvals`에 들어가므로 `plan-gate`는 두 검증자를 모두 요구한다. `plan-gate`가 뒤 커밋에서 필요한 검증자를 다시 계산하지 않는다(코드가 섞인 diff의 위험도로 바뀐다).
+  - 원장은 `gates` 워크플로의 판정 job이 읽기 권한(`pull-requests: read`)으로 읽고, 작성자가 검증 App 봇인 댓글만 인정한다(10.2절 (4)). 계획이 merge-base와 같으면 읽지 않는다. 읽지 못하면 `plan-gate`는 `error`다(fail-closed). `planReview.required`가 꺼져 있으면 참고만 남긴다.
+  - 해시는 base 스크립트가 PR 트리를 데이터로 읽어 계산한다. 로컬(`node scripts/harness.ts plan-gate`, runner)은 원장을 보지 않고, 계획이 base와 다르면 "CI에서 계획 승인이 필요하다"를 참고로 알린다.
 - PR 갱신은 rebase가 아니라 `origin/main` 병합이다(ADR-0006). 병합 뒤 PR head와 main의 merge-base는 병합한 main 커밋이라, "merge-base 대비 diff"는 PR이 main에 더하는 변경과 같다. 충돌 없이 병합했으면 patch-id가 같아 승인을 이어받고, 충돌을 해결하며 PR 변경이 바뀌면 patch-id가 달라져 다시 검증한다. Q20에서 main 병합 갱신과 GitHub "Update branch" 모두 patch-id가 같고, 충돌 해결로 PR 변경이 바뀌면 달라짐을 확인했다.
 - 기록 job이 새 head로 승인을 옮길 때는 PR ref(`refs/pull/<n>/head`, `headRefOid`)가 아니라 이벤트의 head SHA로 patch-id를 잰다. GitHub은 push 직후 PR head를 늦게 반영해서 PR ref가 옛 head를 가리킬 수 있다(Q20).
 - **구현**(`scripts/ci/binding.ts`): 판정 워크플로의 `plan` job이 base 스크립트로 patch-id(`git diff --binary --full-index <merge-base>...HEAD | git patch-id --stable`)를 재고 이어받기를 판정한다. 기록 job은 승인 상태의 description 끝에 ` patch:<id 40자>`를 적는다(예: `승인 (P2 1) patch:…`). 이어받으면 판정 job은 돌지 않고 기록 job이 `이어받음 <원래 head 앞 12자> patch:<id>`를 success로 쓴다.

@@ -104,6 +104,14 @@ export function writeRoundInput(o: {
   return { round, promptBase: o.ledger.promptBase, changed };
 }
 
+/** 계획만 바꾼 PR(mode=plan)의 판정에 덧붙이는 계획 검증 항목(G1, 4.1절) */
+export const PLAN_PROMPT = 'prompt-plan.md';
+
+/** 판정에 쓸 프롬프트 파일 목록. mode가 plan이면 계획 검증 프롬프트를 첫 파일(공통 프롬프트) 바로 뒤에 넣는다 */
+export function promptFiles(files: readonly string[], mode: string | undefined): string[] {
+  return mode === 'plan' ? [...files.slice(0, 1), PLAN_PROMPT, ...files.slice(1)] : [...files];
+}
+
 const PROMPT_DIR = 'scripts/cross-review';
 const PROMPT_FILE_RE = /^[a-z][a-z0-9-]*\.md$/;
 
