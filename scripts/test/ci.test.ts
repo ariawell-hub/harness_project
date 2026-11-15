@@ -556,6 +556,8 @@ test('judge-codex.yml: 설정 → 사전 측정 → 판정 → 유출 검사 →
     assert.ok(judge.includes(flag), flag);
   assert.doesNotMatch(judge, /read-only|danger|--sandbox|codex logout|bypass/);
   assert.match(judge, /@openai\/codex@\d+\.\d+\.\d+\b/);
+  // 샌드박스 안에서 Codex가 자기 실행 파일을 다시 실행한다. 권한 프로필의 읽기 범위(:minimal) 안에 설치한다
+  assert.match(judge, /npm install -g --prefix \/usr\/local [^\n]*@openai\/codex@/);
   assert.match(judge, /libsodium-wrappers@\d+\.\d+\.\d+ /);
   assert.match(judge, /--ignore-scripts/);
   assert.match(judge, /core\.symlinks false/);
