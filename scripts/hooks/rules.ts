@@ -6,7 +6,14 @@ import path from 'node:path';
 import type { RepoInfo } from '../lib/git.ts';
 import { PLANS_DIR, parseBranch } from '../lib/plan.ts';
 import type { Problem } from '../lib/util.ts';
-import { baseName, commandName, parseShell, type Dialect, type SimpleCommand } from './shell.ts';
+import {
+  baseName,
+  commandName,
+  parseSequence,
+  parseShell,
+  type Dialect,
+  type SimpleCommand,
+} from './shell.ts';
 
 export type ToolKind = 'bash' | 'read' | 'write' | 'other';
 
@@ -713,6 +720,92 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
   return null;
 }
 
+// ---------- 검사 순서 (R4, TD-29) ----------
+
+/** `node …/scripts/harness.ts <sub>`의 sub. 하네스 명령이 아니면 null */
+function harnessSub(c: SimpleCommand): string | null {
+  if (!c.argv.length || commandName(c.argv[0]) !== 'node') return null;
+  const k = c.argv.findIndex((a, i) => i > 0 && /(?:^|[\\/])harness\.ts$/.test(a));
+  return k > 0 ? (c.argv[k + 1] ?? null) : null;
+}
+
+function isCheckCommand(c: SimpleCommand): boolean {
+  const sub = harnessSub(c);
+  return sub === 'check' || sub === 'test';
+}
+
+/** 검사가 통과한 뒤에만 실행돼야 하는 작업의 이름. 아니면 null */
+function followUp(c: SimpleCommand): string | null {
+  const sub = harnessSub(c);
+  if (sub === 'complete-step' || sub === 'pr-ready') return sub;
+  if (!c.argv.length) return null;
+  const head = commandName(c.argv[0]);
+  if (head === 'git' && gitSplit(c.argv).sub === 'push') return 'git push';
+  if (head === 'gh' && c.argv[1] === 'pr' && (c.argv[2] === 'create' || c.argv[2] === 'ready'))
+    return `gh pr ${c.argv[2]}`;
+  return null;
+}
+
+/** `set -e`, `set -eu`, `set -o errexit`, `set -o pipefail` 같은 셸 옵션 */
+function setOptions(c: SimpleCommand): { errexit: boolean; pipefail: boolean } {
+  const none = { errexit: false, pipefail: false };
+  if (!c.argv.length || c.argv[0] !== 'set') return none;
+  const a = c.argv.slice(1);
+  return {
+    errexit: a.some(
+      (x, i) =>
+        (/^-[a-zA-Z]+$/.test(x) && x.includes('e')) ||
+        (x === 'errexit' && /^-[a-zA-Z]*o$/.test(a[i - 1] ?? '')),
+    ),
+    pipefail: a.some((x, i) => x === 'pipefail' && /^-[a-zA-Z]*o$/.test(a[i - 1] ?? '')),
+  };
+}
+
+const CHECK_HOW =
+  '검사 결과는 종료 코드로 이어라. 출력은 파일로 보낸다: ' +
+  '`node scripts/harness.ts check > check.log 2>&1 && <다음 명령>`. ' +
+  '출력을 줄여 보려면 앞에 `set -o pipefail`을 둔다';
+
+/**
+ * 검사 명령(`harness.ts check`·`test`)의 실패가 가려지는 꼴을 막는다(절차서 4절, TD-29).
+ * 1. 출력 가림: 검사 명령 바로 뒤가 파이프인데 `set -o pipefail`이 없다.
+ * 2. 실패 뒤 진행: 검사 명령과 그 뒤 완료 처리·push·PR 생성 사이가 `&&`로만 이어지지 않았다(`set -e`가 없을 때).
+ */
+function sequenceRules(command: string): Problem | null {
+  let errexit = false;
+  let pipefail = false;
+  let checked = false; // 검사 명령이 앞에 있었다
+  let broken = false; // 그 뒤 `&&`가 아닌 연산자로 이어진 적이 있다
+  for (const { cmd, next } of parseSequence(command, 'posix')) {
+    const opts = setOptions(cmd);
+    errexit ||= opts.errexit;
+    pipefail ||= opts.pipefail;
+    const isCheck = isCheckCommand(cmd);
+    const piped = next === '|' || next === '|&';
+    if (isCheck && piped && !pipefail) {
+      return v(
+        'R4 검사 우회',
+        '검사 명령의 출력을 파이프로 넘겼다. 파이프의 종료 코드는 마지막 명령의 것이라 검사가 실패해도 통과로 보인다',
+        CHECK_HOW,
+        'docs/harness/workflow.md 4절, TD-29',
+      );
+    }
+    const what = followUp(cmd);
+    if (what && checked && broken && !errexit) {
+      return v(
+        'R4 검사 우회',
+        `검사 명령 뒤에 \`&&\`가 아닌 연산자(\`;\`·줄바꿈·\`||\`·\`&\`)를 거쳐 ${what}이(가) 이어진다. 검사가 실패해도 실행된다`,
+        CHECK_HOW,
+        'docs/harness/workflow.md 4절, TD-29',
+      );
+    }
+    if (isCheck) checked = true;
+    // pipefail이 켜진 파이프는 검사의 종료 코드를 그대로 넘긴다
+    if (checked && next !== null && next !== '&&' && !piped) broken = true;
+  }
+  return null;
+}
+
 // ---------- 진입점 ----------
 
 export function evaluateBash(
@@ -734,7 +827,7 @@ export function evaluateBash(
       (c.argv.length ? externalRules(c) : null);
     if (r) return r;
   }
-  return null;
+  return dialect === 'posix' ? sequenceRules(command) : null;
 }
 
 /**

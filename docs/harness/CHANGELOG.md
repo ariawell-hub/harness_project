@@ -48,6 +48,7 @@ review_cycle: on-change
 - `docs/SECURITY.md`(Issue #73): Codex CI 인증 등록 절차(임시 `CODEX_HOME` 로그인, `auth.json` 파일 내용을 파일에서 직접 복사)와 흔한 실수·로그 증상. 첫 등록 때 로그인 주소가 들어가 판정이 실패했다.
 - 절차서 4절(Issue #72): push 전 `check` 결과는 종료 코드로 확인한다. `check | tail && git push` 꼴은 실패를 가린다(나쁜 예·좋은 예).
 - 반복 문제 방지 규칙(Issue #78 step0): 승인 요청 전 조건(초안으로 올리고 끝난 뒤 한 번만 요청), 제작자 작업을 모아 요청하는 형식, 위험도 high를 붙이는 범위(기준은 그대로), 대기 상태 보고, 명령 작성 규칙(절차서 1·5·7절, AGENTS.md). 문서만 바꾸고 검사·권한은 그대로다.
+- 설계서 v0.7.25 · L1 검사 순서 규칙(Issue #78 step1, TD-29 해결): `harness.ts check`·`test`의 출력을 파이프로 가리는 명령(`set -o pipefail`이 없을 때)과, 검사 뒤 `&&`가 아닌 연산자를 거쳐 `complete-step`·`pr-ready`·`git push`·`gh pr create`·`gh pr ready`로 이어지는 명령(`set -e`가 없을 때)을 R4로 막는다. `shell.ts`에 `parseSequence`를 더했고 기존 규칙·`parseShell`은 그대로다. 차단을 더하기만 한다.
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
