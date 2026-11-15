@@ -187,6 +187,11 @@ export type Task =
   | { kind: 'report-stall'; local: LocalPlan; pr: PullRequest; waiting: string[] }
   /** 필수 체크가 모두 통과했는데 자동 병합이 꺼져 있다: 다시 켠다 */
   | { kind: 'arm-merge'; local: LocalPlan; pr: PullRequest }
+  /**
+   * 검증자의 수정 요청이나 원장의 열린 차단 지적에 대응한다(10.2절 (6)).
+   * phase: plan = 계획 검증 중인 PR(계획 파일만 고친다), code = 구현을 올린 PR
+   */
+  | { kind: 'review'; local: LocalPlan; pr: PullRequest; phase: 'plan' | 'code' }
   /** 계획 검증 대상 계획을 다 썼다: 계획만 담은 커밋을 push하고 초안 PR을 연다(G1, 4.1절) */
   | { kind: 'plan-push'; local: LocalPlan }
   /** main에 뒤처지거나 충돌한 PR을 origin/main 병합으로 갱신(ADR-0006) */
@@ -606,8 +611,6 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
     } else ci++;
     return null;
   };
-  /** 열린 차단 지적이 있어 사람 대기로 센 PR(대응은 계획 20261115-runner-pr-flow step3) */
-  const reviewPrs: number[] = [];
   const now = env.now?.() ?? Date.now();
   for (const l of mine) {
     const pr = l.pr;
@@ -656,9 +659,10 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
           humanIssues.add(l.issue);
           break;
         case 'review':
-          reviewPrs.push(pr.number);
-          humanIssues.add(l.issue);
-          break;
+          return act(
+            { kind: 'review', local: l, pr, phase: inPlanReview(l) ? 'plan' : 'code' },
+            `PR #${pr.number}에 검증자의 수정 요청 또는 열린 차단 지적이 있다`,
+          );
         case 'wait-ci':
         case 'infra-error': {
           const stall = waitOrStall(
@@ -828,14 +832,11 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
     }
   }
 
-  const idleBase = ci
+  const idle = ci
     ? `CI·병합 대기 ${ci}건`
     : humanIssues.size
       ? `사람 대기 ${humanIssues.size}건`
       : '할 일 없음';
-  const idle = reviewPrs.length
-    ? `${idleBase} (열린 차단 지적: ${reviewPrs.map((n) => `PR #${n}`).join(', ')} — 원장의 P0·P1에 대응해야 한다)`
-    : idleBase;
   return {
     task: { kind: 'idle' },
     reason: excluded.length

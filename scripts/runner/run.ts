@@ -26,6 +26,7 @@ import {
   isClean,
   remoteBranchDiverged,
   repoInfo,
+  revParse,
   updateBranchFromBase,
   type RepoInfo,
 } from '../lib/git.ts';
@@ -39,6 +40,7 @@ import {
   type OpenQuestion,
   type PlanRef,
 } from '../lib/plan.ts';
+import type { Entry } from '../ci/ledger.ts';
 import { log, nowIso, warn } from '../lib/util.ts';
 import { runCheck } from '../commands/check.ts';
 import {
@@ -72,7 +74,29 @@ import {
   type LocalPlan,
   type Pick,
 } from './next.ts';
-import { conflictPrompt, planningPrompt, stepPrompt } from './prompt.ts';
+import { readPrLedger } from './ledger-read.ts';
+import {
+  conflictPrompt,
+  planningPrompt,
+  reviewPrompt,
+  stepPrompt,
+  type ReviewFinding,
+} from './prompt.ts';
+import {
+  commitSubject,
+  failedResponses,
+  findingLine,
+  lastRoundFindings,
+  markCounted,
+  maxFindingId,
+  openBlocking,
+  readReviewState,
+  reviewerJudgedResponse,
+  reviewerKey,
+  reviewerOfContext,
+  settledResponses,
+  writeReviewState,
+} from './review.ts';
 
 export interface RunnerOptions {
   cwd: string;
@@ -122,7 +146,7 @@ function event(ctx: Ctx, ev: string, data: Record<string, unknown> = {}): void {
 function recordSession(
   ctx: Ctx,
   l: LocalPlan,
-  kind: 'planning' | 'step' | 'conflict',
+  kind: 'planning' | 'step' | 'conflict' | 'review',
   attempt: number,
   s: SessionResult,
 ): void {
@@ -132,7 +156,9 @@ function recordSession(
     mkdirSync(dir, { recursive: true });
     const stamp = nowIso().replace(/[:+]/g, '-');
     const part =
-      kind === 'planning' ? 'plan' : `s${l.step ?? 0}${kind === 'conflict' ? '-conflict' : ''}`;
+      kind === 'planning'
+        ? 'plan'
+        : `s${l.step ?? 0}${kind === 'conflict' ? '-conflict' : kind === 'review' ? '-review' : ''}`;
     // 환경 장애 재시도는 시도 번호가 같고 같은 초에 끝날 수 있다. 덮어쓰지 않게 번호를 붙인다
     const base = path.join(dir, `${stamp}-${l.id}-${part}-${attempt}`);
     file = `${base}.log`;
@@ -205,6 +231,8 @@ async function blockPlan(
   l: LocalPlan,
   reason: string,
   decision = DEFAULT_DECISION,
+  /** 중단 보고의 "교차 검증 의견": 지적 대응으로 멈췄으면 열린 지적의 ID·검증자·위치·제목 */
+  opinion?: string,
 ): Promise<void> {
   const info = repoInfo(l.worktree);
   const attempts = readAttempts(info)
@@ -234,7 +262,7 @@ async function blockPlan(
 ${attempts.map((a) => `  - ${a.ts} [${a.key}] ${(a.detail ?? '').split('\n').filter(Boolean).slice(-1)[0] ?? ''}`).join('\n') || '  - (기록 없음)'}
 - 3회차 방법 전환 내용과 이유: 계획의 "의사결정 로그" 참조 (브랜치 \`${l.branch}\`)
 - 추정 원인: ${reason}
-- 교차 검증 의견: (2단계에서 추가)
+- 교차 검증 의견: ${opinion || '(이 PR의 원장에 열린 지적 없음)'}
 - 사람이 결정할 것: ${decision}`;
   try {
     ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
@@ -631,6 +659,22 @@ async function doStep(
     return 'blocked';
   }
 
+  const judged = await judgeStep(ctx, l, ref);
+  if (!judged.ok) return 'fail';
+  return publishStep(ctx, l, ref, judged.acs);
+}
+
+/**
+ * runner가 직접 판정한다(4.5절 한 바퀴 3): step의 AC 명령과 `check`. 세션의 "완료" 주장은 근거가 아니다.
+ * 결과는 실패 기록에 남는다. `acs`는 실행한 AC 명령 수다
+ */
+async function judgeStep(
+  ctx: Ctx,
+  l: LocalPlan,
+  ref: PlanRef,
+): Promise<{ ok: boolean; acs: number }> {
+  const info = repoInfo(l.worktree);
+  const cfg = loadConfig(l.worktree);
   // ---- runner가 직접 판정 (세션의 "완료" 주장은 근거가 아니다) ----
   const acs = acceptanceCommands(l.worktree, ref, l.step);
   let ok = acs.length > 0;
@@ -668,9 +712,24 @@ async function doStep(
       step: l.step,
       detail: `AC ${acs.length}개, check 실패: ${failed.join(', ') || '없음'}`,
     });
-    return 'fail';
+    return { ok: false, acs: acs.length };
   }
+  return { ok: true, acs: acs.length };
+}
 
+/**
+ * 판정을 통과한 step을 올린다: 남은 변경 커밋 → 계획 전용 커밋(완료 처리) → plan-gate → 일반 push →
+ * PR(없으면 만들고, 계획 검증 때 연 초안이면 해제) → 자동 병합. step 세션과 지적 대응이 함께 쓴다
+ */
+async function publishStep(
+  ctx: Ctx,
+  l: LocalPlan,
+  ref: PlanRef,
+  acCount: number,
+): Promise<'ok' | 'fail' | 'env' | 'blocked'> {
+  const info = repoInfo(l.worktree);
+  const cfg = loadConfig(l.worktree);
+  const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
   // ---- 통과: 남은 변경 커밋 → 계획 전용 커밋 → push → PR → 자동 병합 ----
   if (!isClean(l.worktree)) {
     git(['add', '-A'], l.worktree);
@@ -758,7 +817,7 @@ async function doStep(
 
 - 계획: \`${l.id}\`${l.step === null ? '' : ` step ${l.step}${entry ? ` (${entry.name})` : ''}`}
 - 요약: ${entry?.summary ?? '(계획 파일 참조)'}
-- 판정: runner가 AC ${acs.length}개와 \`check\`를 직접 실행해 통과했다.
+- 판정: runner가 AC ${acCount}개와 \`check\`를 직접 실행해 통과했다.
 - 자체 리뷰: scripts/cross-review/checklist.md (2단계부터 CI 교차 검증)
 
 🤖 harness runner (${ctx.o.worker}, ${ctx.o.tool})`;
@@ -1081,6 +1140,308 @@ async function doFixPR(
   return doStep(ctx, fresh, prompt);
 }
 
+// ---------- 지적 대응 (10.2절 (4)·(6), 9.2절) ----------
+
+const REPRO_TEXT: Record<string, string> = {
+  '': '—',
+  reproduced: '재현됨',
+  'not-reproduced': '재현 안 됨',
+  error: '실행 못 함',
+};
+
+const toPromptFinding = (e: Entry): ReviewFinding => ({
+  id: e.id,
+  severity: e.severity,
+  reviewer: e.reviewer,
+  file: e.file,
+  line: e.line,
+  title: e.title,
+  repro: REPRO_TEXT[e.repro] ?? '—',
+});
+
+/** 계획 검증 단계의 판정: 계획 구조(plan-gate 계획 모드)와 계획 전용 변경. 통과하면 null, 아니면 이유 */
+function judgePlanOnly(ctx: Ctx, l: LocalPlan): string | null {
+  const gate = planGate({
+    root: l.worktree,
+    base: null,
+    branch: l.branch,
+    mode: 'plan',
+    cfg: loadConfig(l.worktree),
+  });
+  if (gate.problems.length)
+    return gate.problems.map((p) => `[${p.rule}] ${p.what} → ${p.how}`).join('\n');
+  const { remote, defaultBranch } = ctx.cfg.github;
+  const base = defaultBase(l.worktree, remote, defaultBranch);
+  if (!base || planMode({ root: l.worktree, base, branch: l.branch }).mode !== 'plan')
+    return '계획 폴더 밖 변경이 커밋돼 있다. 계획 검증은 계획만 담은 커밋에서 받는다. 그 파일의 내용을 되돌려라';
+  return null;
+}
+
+/**
+ * 검증자의 수정 요청이나 원장의 열린 차단 지적에 대응한다.
+ * - 원장은 읽기만 한다(작성자가 검증 App 봇인 댓글). 상태는 검증자 판정으로만 바뀐다
+ * - 대응한 뒤 그 검증자가 다시 판정했는데도 열려 있는 지적은 실패 키 `F<번호>`로 한 번 센다. 닫히면 0으로 돌아간다
+ * - 열린 차단 지적마다 세션 하나(10.2절 (6)). 세션 뒤 runner가 직접 판정한다(code: AC와 check, plan: 계획 구조와 계획 전용 변경)
+ * - 한 라운드의 대응은 모아서 한 번만 push한다(push마다 check와 두 검증자 판정이 돈다)
+ * - 차단 지적 없이 수정을 요청한 검증자가 있으면 그 검증자가 마지막 판정에서 낸 지적을 한 세션에 넘긴다
+ */
+async function doReview(
+  ctx: Ctx,
+  l0: LocalPlan,
+  pr: PullRequest,
+  phase: 'plan' | 'code',
+): Promise<'ok' | 'fail' | 'env' | 'blocked'> {
+  let l = l0;
+  const info = repoInfo(l.worktree);
+  const wait = (reason: string): 'env' => {
+    event(ctx, 'review-wait', { plan: l.id, pr: pr.number, reason });
+    return 'env';
+  };
+  let ledger;
+  try {
+    ledger = readPrLedger(ctx.gh, ctx.cfg, pr.number);
+  } catch (e) {
+    return wait(`원장을 읽지 못했다: ${(e as Error).message}`);
+  }
+  if (!ledger) return wait('원장 댓글(검증 App 봇)이 아직 없다');
+
+  // ---- 앞선 대응의 결과를 실패 기록에 반영한다 ----
+  let state = readReviewState(l.worktree);
+  const byId = new Map(ledger.findings.map((e) => [e.id, e]));
+  const failed = failedResponses(state, ledger);
+  for (const id of failed)
+    recordAttempt(info, {
+      plan: l.id,
+      step: l.step,
+      key: id,
+      ok: false,
+      kind: 'review',
+      detail: `대응한 뒤에도 열려 있다: ${findingLine(byId.get(id)!)}`,
+    });
+  const settled = settledResponses(state, ledger);
+  for (const id of settled)
+    recordAttempt(info, { plan: l.id, step: l.step, key: id, ok: true, kind: 'review' });
+  state = markCounted(state, [...failed, ...settled]);
+
+  // ---- 이번에 대응할 것 ----
+  const blocking = openBlocking(ledger);
+  interface Target {
+    key: string;
+    findings: Entry[];
+  }
+  let targets: Target[] = blocking.map((e) => ({ key: e.id, findings: [e] }));
+  let noFindings: string | null = null;
+  if (!targets.length) {
+    // 차단 지적은 없는데 수정을 요청한 검증자: 그 검증자가 마지막 판정에서 낸 지적을 한 세션에 넘긴다
+    for (const r of l.required ?? []) {
+      const reviewer = reviewerOfContext(r.context);
+      if (!reviewer || r.state !== 'failure') continue;
+      const key = reviewerKey(reviewer);
+      if (reviewerJudgedResponse(state, ledger, reviewer)) {
+        recordAttempt(info, {
+          plan: l.id,
+          step: l.step,
+          key,
+          ok: false,
+          kind: 'review',
+          detail: `대응한 뒤에도 ${reviewer} 검증자가 수정을 요청한다(차단 지적 없음)`,
+        });
+        state = markCounted(state, [key]);
+      }
+      const findings = lastRoundFindings(ledger, reviewer);
+      if (findings.length) targets.push({ key, findings });
+      else noFindings = reviewer;
+    }
+  }
+  writeReviewState(l.worktree, state);
+  const opinion = targets
+    .flatMap((t) => t.findings)
+    .map(findingLine)
+    .join(' / ');
+
+  /** 완료된 step을 먼저 되돌린다: 완료 상태에 blocked를 올리거나 코드를 고치지 않는다(8.3절) */
+  const reopen = (why: string) => {
+    if (phase !== 'code') return;
+    const ref = findPlan(l.worktree, l.id) ?? l.ref;
+    const done =
+      ref.kind === 'multi'
+        ? readIndex(l.worktree, ref).steps[l.step ?? 0]?.status === 'completed'
+        : ref.where === 'completed';
+    if (!done) return;
+    reopenStep(l.worktree, why);
+    l = { ...l, ref: findPlan(l.worktree, l.id) ?? l.ref, stepStatus: 'in_progress' };
+  };
+
+  const v = judge(readAttempts(info), l.id, l.step, limitsOf(ctx.cfg));
+  if (v.action === 'stop') {
+    reopen('지적 대응 실패 한도');
+    await blockPlan(ctx, l, v.reason ?? '지적 대응 반복 실패', undefined, opinion);
+    return 'blocked';
+  }
+  if (!targets.length) {
+    if (noFindings) {
+      reopen('검증자 수정 요청(지적 없음)');
+      await blockPlan(
+        ctx,
+        l,
+        `${noFindings} 검증자가 수정을 요청했지만 원장에 등록된 지적이 없다. 판정 실행의 record job 로그에서 요약을 확인한다`,
+        'A) 판정 로그의 요약을 보고 무엇을 고칠지 답한다(추천) / B) 판정 워크플로를 다시 실행한다 / C) 포기(abandoned). 이 Issue에 제작자 계정으로 답을 달면 runner가 이어 간다.',
+      );
+      return 'blocked';
+    }
+    return wait('대응할 지적이 없다(원장과 커밋 상태가 아직 맞지 않는다)');
+  }
+
+  reopen(`지적 대응: ${targets.map((t) => t.key).join(', ')}`);
+  const answerFile = path.join(harnessStateDir(info, 'worktree'), 'answer.md');
+  const answer = existsSync(answerFile)
+    ? `## 제작자 답변 (9.1절, 이 지시를 따른다)\n${readFileSync(answerFile, 'utf8')}`
+    : undefined;
+  let acCount = 0;
+  for (const t of targets) {
+    if (state.pending.includes(t.key)) continue;
+    const ref = findPlan(l.worktree, l.id) ?? l.ref;
+    const attempts = readAttempts(info);
+    const fails = keyFailures(attempts, l.id).get(t.key) ?? 0;
+    const before = revParse('HEAD', l.worktree);
+    const prompt = reviewPrompt({
+      root: l.worktree,
+      ref,
+      id: l.id,
+      step: l.step,
+      branch: l.branch,
+      phase,
+      findings: t.findings.map(toPromptFinding),
+      attempts,
+      attemptNo: fails + 1,
+      switchApproach: fails >= ctx.cfg.failure.switchAt,
+      extra: answer,
+    });
+    event(ctx, 'session-start', {
+      plan: l.id,
+      step: l.step,
+      kind: 'review',
+      finding: t.key,
+      attempt: fails + 1,
+    });
+    const s = await runSession(
+      ctx.o.tool,
+      prompt,
+      l.worktree,
+      ctx.main,
+      ctx.cfg,
+      ctx.cfg.limits.sessionTimeoutMin * 60_000,
+    );
+    recordSession(ctx, l, 'review', fails + 1, s);
+    if (s.envFailure) {
+      recordAttempt(info, {
+        plan: l.id,
+        step: l.step,
+        key: 'session',
+        ok: false,
+        kind: 'session',
+        env: true,
+        durationMs: s.durationMs,
+        detail: tail(s.output, 10),
+      });
+      event(ctx, 'env-failure', { plan: l.id, detail: tail(s.output, 3) });
+      return 'env';
+    }
+    recordAttempt(info, {
+      plan: l.id,
+      step: l.step,
+      key: s.timedOut ? 'session:timeout' : 'session',
+      ok: !s.timedOut,
+      kind: 'session',
+      durationMs: s.durationMs,
+    });
+    // 세션이 남긴 새 질문(TD-24와 같은 처리): 판정 전에 보고 제작자에게 올린다
+    const qref = findPlan(l.worktree, l.id) ?? ref;
+    const qs = readQuestionState(info);
+    const fresh = openQuestions(
+      parseDoc(readFileSync(path.join(l.worktree, qref.file), 'utf8')).body,
+    ).filter((q) => !qs.reported.includes(q.title));
+    if (fresh.length) {
+      await askQuestions(ctx, l, qref, fresh, qs, 'step');
+      return 'blocked';
+    }
+    const fail = (detail: string): 'fail' => {
+      recordAttempt(info, {
+        plan: l.id,
+        step: l.step,
+        key: t.key,
+        ok: false,
+        kind: 'review',
+        detail,
+      });
+      event(ctx, 'review-fail', { plan: l.id, pr: pr.number, finding: t.key, detail });
+      return 'fail';
+    };
+    if (isClean(l.worktree) && revParse('HEAD', l.worktree) === before)
+      return fail(`세션이 아무것도 바꾸지 않았다(${t.key}에 대응하지 못했다)`);
+    const subject = `fix(${t.findings[0].id}): ${commitSubject(t.findings[0].title)}`;
+    const commitRest = () => {
+      if (isClean(l.worktree)) return;
+      git(['add', '-A'], l.worktree);
+      git(['commit', '--quiet', '-m', subject], l.worktree);
+    };
+    if (phase === 'plan') {
+      // 계획 전용 변경인지는 커밋된 변경으로 본다
+      commitRest();
+      const problem = judgePlanOnly(ctx, l);
+      if (problem) return fail(`수정 뒤 계획 판정 실패:\n${problem}`);
+    } else {
+      const judged = await judgeStep(ctx, l, ref);
+      if (!judged.ok)
+        return fail(
+          '수정 뒤 판정(AC·check)이 실패했다. 실패한 검사는 같은 기록의 ac·check 항목에 있다',
+        );
+      acCount = judged.acs;
+      commitRest();
+    }
+    state = { ...state, pending: [...state.pending, t.key] };
+    writeReviewState(l.worktree, state);
+  }
+
+  // ---- 한 라운드의 대응을 한 번에 올린다 ----
+  const ref = findPlan(l.worktree, l.id) ?? l.ref;
+  if (phase === 'code') {
+    const r = await publishStep(ctx, l, ref, acCount);
+    if (r !== 'ok') return r;
+  } else {
+    const push = gitTry(
+      ['push', '--quiet', ctx.cfg.github.remote, `HEAD:refs/heads/${l.branch}`],
+      l.worktree,
+    );
+    if (!push.ok) {
+      event(ctx, 'push-fail', { plan: l.id, detail: push.stderr });
+      return 'env';
+    }
+  }
+  const head = revParse('HEAD', l.worktree) ?? '';
+  const responses = { ...state.responses };
+  for (const key of state.pending)
+    responses[key] = [...(responses[key] ?? []), { head, kind: 'fix', counted: false }];
+  writeReviewState(l.worktree, {
+    responses,
+    round: {
+      base: pr.headSha,
+      head,
+      open: blocking.map((e) => e.id),
+      maxId: maxFindingId(ledger),
+    },
+    pending: [],
+  });
+  if (existsSync(answerFile)) unlinkSync(answerFile);
+  event(ctx, 'review-pushed', {
+    plan: l.id,
+    pr: pr.number,
+    head,
+    reason: `대응: ${state.pending.join(', ')}`,
+  });
+  return 'ok';
+}
+
 // ---------- 승인 요청·오래된 대기 알림·자동 병합 (4.5절 우선순위 2번, 10.3절) ----------
 
 const sameWorker = (ctx: Ctx, l: LocalPlan) => String(l.fm.owner ?? '') === ctx.o.worker;
@@ -1319,6 +1680,9 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
             break;
           case 'fix-pr':
             outcome = await doFixPR(ctx, t.local, t.failing);
+            break;
+          case 'review':
+            outcome = await doReview(ctx, t.local, t.pr, t.phase);
             break;
           case 'request-approval':
             outcome = doRequestApproval(ctx, t.local, t.pr);

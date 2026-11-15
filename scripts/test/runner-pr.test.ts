@@ -65,8 +65,8 @@ function setup() {
 
 type T = ReturnType<typeof setup>;
 
-const run = (root: string) =>
-  runRunner({ cwd: root, worker: 'runner-1', tool: 'fake', maxIterations: 40, noWait: true });
+const run = (root: string, once = false) =>
+  runRunner({ cwd: root, worker: 'runner-1', tool: 'fake', maxIterations: 40, noWait: true, once });
 
 /** Issue 하나를 계획·step0까지 진행해 PR이 열리고 CI를 기다리는 상태로 만든다 */
 async function openPr(t: T) {
@@ -188,7 +188,7 @@ test('runner: 대기가 아닌 상태가 되면 그 head의 대기 기록을 지
     });
     // 판정이 끝나 수정 요청 상태가 됐다(대기가 아니다)
     setAll(t, pr.head(), { 'review/claude': 'failure', 'review-ledger': 'failure' });
-    await run(t.fx.root);
+    await run(t.fx.root, true);
     assert.equal(readPrWait(pr.worktree), null, '옛 대기 시각을 남기지 않는다');
     assert.equal(t.raw().issues[0].comments.filter((c) => c.body.includes('CI 대기가')).length, 0);
   } finally {
@@ -238,19 +238,20 @@ test('runner: risk-gate만 실패면 수정 세션 없이 제작자 승인을 he
   }
 });
 
-test('runner: review/*·review-ledger 실패는 세션 없이 사람 대기로 센다(대응은 step3)', async () => {
+test('runner: review/*·review-ledger 실패는 check 실패용 수정 세션이 아니라 지적 대응 작업이다. 원장이 보이지 않으면 세션 없이 기다린다', async () => {
   const t = setup();
   try {
     const pr = await openPr(t);
     const sessions = t.prompts().length;
     setAll(t, pr.head(), { 'review/claude': 'failure', 'review-ledger': 'failure' });
     const p = pick(t.fx.root);
-    assert.equal(p.task.kind, 'idle');
-    assert.deepEqual(p.waiting, { ci: 0, human: 1 });
-    assert.match(p.reason, /열린 차단 지적.*#\d+/);
-    assert.equal(await run(t.fx.root), 'human');
+    assert.equal(p.task.kind, 'review');
+    assert.match(p.reason, /#\d+.*(수정 요청|차단 지적)/);
+    // 원장 댓글(검증 App 봇)이 아직 없다: 지적을 모르는 채로 세션을 띄우지 않는다(대응 자체는 runner-review.test.ts)
+    await run(t.fx.root, true);
     assert.equal(t.prompts().length, sessions);
     assert.equal(t.raw().prs[0].state, 'open');
+    assert.equal(pr.head(), headOf(t, pr.branch));
   } finally {
     t.fx.cleanup();
   }
@@ -269,10 +270,10 @@ test('runner: 뒤처진 PR은 필수 체크가 모두 success일 때만 갱신�
     assert.equal(pick(t.fx.root).task.kind, 'idle');
     await run(t.fx.root);
     assert.equal(pr.head(), head, '판정 중에는 갱신하지 않는다');
-    // 수정 요청
+    // 수정 요청: 갱신이 아니라 지적 대응이 먼저다
     setAll(t, head, { 'review/codex': 'failure' });
-    assert.equal(pick(t.fx.root).task.kind, 'idle');
-    await run(t.fx.root);
+    assert.equal(pick(t.fx.root).task.kind, 'review');
+    await run(t.fx.root, true);
     assert.equal(pr.head(), head, '수정 요청 상태에서는 갱신하지 않는다');
     // 모두 success
     t.gh.setCheck(head, { context: 'review/codex', creator: BOT });
