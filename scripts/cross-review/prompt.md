@@ -44,3 +44,4 @@ P0·P1은 병합을 막는다. 그래서 `evidence`에 위치(파일·라인)와
 - `risk`: 네가 보는 위험도(low | normal | high). 보안·권한·인증, 마이그레이션·데이터 스크립트, 검사 약화가 보이면 high
 - `summary`: 판정 이유 요약
 - `findings`: 지적마다 `severity`, `file`, `line`(모르면 0), `title`, `evidence`, `suggestion`
+- `resolutions`: 지적 원장의 지적에 대한 판정. 입력에 원장(`.harness-review/ledger.md`)이 없으면 빈 배열

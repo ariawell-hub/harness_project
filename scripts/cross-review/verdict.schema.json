@@ -1,11 +1,20 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "risk", "summary", "findings"],
+  "required": ["verdict", "risk", "summary", "findings", "resolutions"],
   "properties": {
-    "verdict": { "type": "string", "enum": ["approve", "request_changes"] },
-    "risk": { "type": "string", "enum": ["low", "normal", "high"] },
-    "summary": { "type": "string", "maxLength": 1000 },
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "request_changes"]
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["low", "normal", "high"]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 1000
+    },
     "findings": {
       "type": "array",
       "maxItems": 30,
@@ -14,12 +23,53 @@
         "additionalProperties": false,
         "required": ["severity", "file", "line", "title", "evidence", "suggestion"],
         "properties": {
-          "severity": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
-          "file": { "type": "string", "maxLength": 300 },
-          "line": { "type": "integer", "minimum": 0 },
-          "title": { "type": "string", "maxLength": 200 },
-          "evidence": { "type": "string", "maxLength": 1500 },
-          "suggestion": { "type": "string", "maxLength": 1000 }
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          },
+          "file": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "evidence": {
+            "type": "string",
+            "maxLength": 1500
+          },
+          "suggestion": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    "resolutions": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "note"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^F[1-9][0-9]{0,3}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["fixed", "rejected", "open"]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 300
+          }
         }
       }
     }
