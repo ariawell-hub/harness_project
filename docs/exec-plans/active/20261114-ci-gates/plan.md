@@ -68,6 +68,8 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - 2026-11-15: step1 PR #59 병합. 그 PR에서 step0의 `gates`가 처음 돌았다: `evaluate` 성공, `record`는 검증 App이 없어 실패(`client-id` 빈 값). `recorder` environment는 GitHub이 브랜치 제한 없이 자동 생성했다(예상한 대로, Q20).
 - 2026-11-15: 제작자가 `recorder` 브랜치 제한(`main`만)·검증 App·변수·시크릿을 준비했다(봇 API로 제한과 변수 이름 확인). 실패했던 실행 43653153698의 `record`를 다시 돌려 PR #59 head에 `plan-gate` = success가 `harness-recorder[bot]` 이름으로 기록됨을 확인했다(수용 기준 7의 첫 근거).
 - 2026-11-15 step2: `scripts/test/harness-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND: scripts/gates/harness-guard.ts`) → 구현 뒤 34개 통과. `ci.environments` 설정, `gates`의 `--pr-body`, PR 템플릿 항목. 이 PR은 `harness.config.json`에 `ci` 키를 더하므로 자기 규칙으로도 신호가 된다(계획 risk가 이미 high).
+- 2026-11-15: step2 PR #60 병합. 그 PR head(570450a)에 검증 App(`harness-recorder[bot]`)이 `plan-gate` = success, `risk-gate` = failure("위험도 높음: 제작자 head 승인 필요 — 계획 risk: high")를 기록했다. `risk-gate`가 필수 체크가 아니라 병합은 됐다.
+- 2026-11-15 step3: `scripts/test/deps-guard.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → `scripts/lib/lockfile.ts`, `scripts/gates/deps-guard.ts`, 설정 `deps`, `runGates` async 전환 뒤 42개 통과. `gates.yml`은 바꾸지 않았다.
 
 ## 의사결정 로그
 
@@ -85,6 +87,10 @@ claimed_at: 2026-11-14T14:00:56+09:00 # new-task가 채운다
 - `harness-guard`가 예외로 죽으면 `risk-gate`에 높음 신호를 넣는다. 이유: 신호를 알 수 없는데 낮은 위험도로 통과시키면 안 된다(fail-closed).
 - 위험 플래그(`--dangerously-…` 등) 탐지는 보호 경로의 `.md`가 아닌 파일에 새로 들어간 줄만 본다. 이유: 설계서·절차서는 이 문자열을 설명하려고 적는다. `harness-guard.ts`와 테스트는 문자열을 나눠 적어 자기 탐지를 피한다.
 - 캐시 검사는 바뀐 파일이 아니라 head의 모든 워크플로를 본다. 이유: 비밀 job과 main에서 도는 워크플로를 가려내는 것보다 전면 금지가 단순하고, 지금 어떤 워크플로도 캐시를 쓰지 않는다.
+- 게시 시각·라이선스는 npm 전체 메타데이터(packument)에서 읽는다. 이유: 버전별 `time`이 축약 형식에는 없다. 큰 패키지는 응답이 크지만 lockfile이 바뀐 PR에서만 조회한다. 버린 대안: `npm view` 실행(판정 job에 도구 의존을 더함).
+- 취약점은 `osv-scanner` 바이너리 대신 OSV `querybatch` API로 조회한다. 이유: 바이너리 내려받기·체크섬 관리가 없고 새 버전만 물으면 된다.
+- SPDX 식으로 읽히지 않는 라이선스 문자열(`SEE LICENSE IN …`, 없음)은 허용하지 않는다. 이유: fail-closed. 필요하면 제작자가 허용 목록이나 예외를 정한다.
+- 새 직접 의존성의 "ADR 링크"는 같은 PR에서 바뀐 `docs/decisions/ADR-*.md`가 패키지 이름을 언급하는지로 확인한다. 이유: PR 본문 링크는 내용을 보장하지 않고, ADR 파일은 리포에 남는다.
 - (제작자 결정, 2026-11-14 대화) 보호 경로의 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조를 탐지하면 `harness-guard`는 표시만 하고 `risk-gate`가 위험도를 "높음"으로 올린다. 제작자 head 승인이 있어야 병합된다. 캐시 사용·`CHANGELOG`·체크리스트 누락은 작성자가 고칠 수 있으므로 `harness-guard` 실패다. 이유: 10.1절 "위험도는 올릴 수만 있다"와 같은 방향이고, 정당한 변경을 막지 않으면서 사람 확인을 강제한다. 버린 대안: 탐지 즉시 실패(정당한 완화도 제작자가 보호 설정을 풀어야 함), 표시만(②가 생기기 전엔 아무도 막지 않음).
 - (제작자 결정, 2026-11-14 대화) `deps-guard` 라이선스 허용 목록: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC. SPDX 식은 `OR` 중 하나, `AND`는 모두 허용이어야 통과. 이유: ISC는 MIT 수준의 허용 라이선스이고 npm에서 흔하다. 버린 대안: Q14 그대로(ISC 전이 의존성마다 막힘). 설계서 18절 Q14에 반영한다(step3).
 
@@ -113,4 +119,4 @@ step0이 병합되기 전에 제작자가 준비한다. 봇은 관리자 권한�
 
 ## 다음 할 일
 
-- step3 deps-guard. step2 PR에서 `risk-gate` 상태(step1 정의)가 검증 App 이름으로 기록되는지 확인한다.
+- step4 required-checks. 시작 전에 제작자에게 (1) 검증 App ID, (2) main 필수 체크를 `check`(Actions) + `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`(출처 = 검증 App)로 바꾸는 일을 요청한다. step3 PR 다음 PR부터 네 상태가 모두 보고된다.

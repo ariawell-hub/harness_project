@@ -207,19 +207,19 @@ test('신호: Codex 설정·훅, 위험 플래그, .gitignore의 .env', () => {
   assert.match(reasons(run({ '.gitignore': '.env.*\nnode_modules/\n' })), /\.gitignore.*\.env/);
 });
 
-test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승인이 있어야 통과', () => {
+test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승인이 있어야 통과', async () => {
   const r = repo();
   write(r.root, '.codex/config.toml', CODEX.replace('on-request', 'never'));
   write(r.root, LOG, '# 이력\n- 변경\n');
   const head = commitAll(r.root, 'change');
   const o = { ...r, branch: 'feat/20261114-demo-s0', headSha: head, prBody: BODY };
-  const no = runGates({ ...o, reviews: [] });
+  const no = await runGates({ ...o, reviews: [] });
   const get = (x: typeof no, c: string) => x.results.find((g) => g.context === c)!;
   assert.equal(get(no, 'harness-guard').state, 'success');
   assert.match(get(no, 'harness-guard').description, /신호 1건/);
   assert.equal(no.risk, 'high');
   assert.equal(get(no, 'risk-gate').state, 'failure');
-  const yes = runGates({
+  const yes = await runGates({
     ...o,
     reviews: [{ user: 'maker', state: 'APPROVED', commitId: head, submittedAt: 't' }],
   });

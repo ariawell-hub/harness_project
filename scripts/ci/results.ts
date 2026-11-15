@@ -2,7 +2,7 @@
 // 기록 job은 이 형식을 통과한 값만 커밋 상태로 쓴다. 결과가 없거나 깨지면 아는 context 모두 error(fail-closed).
 
 /** 기록 job이 쓰는 기계 판정 context(판정 순서). harness-guard의 신호를 risk-gate가 받으므로 앞에 둔다 */
-export const GATE_CONTEXTS = ['plan-gate', 'harness-guard', 'risk-gate'] as const;
+export const GATE_CONTEXTS = ['plan-gate', 'harness-guard', 'risk-gate', 'deps-guard'] as const;
 
 export type GateState = 'success' | 'failure' | 'error';
 const STATES: readonly string[] = ['success', 'failure', 'error'];

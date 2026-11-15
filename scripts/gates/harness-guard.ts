@@ -25,6 +25,7 @@ const CONFIG_KEYS = [
   'failure',
   'planReview',
   'ci',
+  'deps',
   'agents',
 ];
 // 이 파일 자신이 "새로 들어간 위험 플래그"로 잡히지 않게 나눠 적는다

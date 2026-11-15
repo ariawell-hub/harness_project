@@ -93,18 +93,18 @@ function results(over: Partial<GateResults> = {}): GateResults {
 
 // ---------- runGates ----------
 
-test('runGates: 계획이 있는 step 브랜치는 plan-gate success, head SHA를 담는다', () => {
+test('runGates: 계획이 있는 step 브랜치는 plan-gate success, head SHA를 담는다', async () => {
   const { root, base, head } = prRepo();
-  const r = runGates({ root, cfg: loadConfig(root), base, branch: BRANCH, headSha: head });
+  const r = await runGates({ root, cfg: loadConfig(root), base, branch: BRANCH, headSha: head });
   assert.equal(r.version, 1);
   assert.equal(r.headSha, head);
   const pg = r.results.find((x) => x.context === 'plan-gate')!;
   assert.equal(pg.state, 'success', pg.details.join('\n'));
 });
 
-test('runGates: 계획 없는 브랜치는 plan-gate failure, 첫 문제와 건수를 description에', () => {
+test('runGates: 계획 없는 브랜치는 plan-gate failure, 첫 문제와 건수를 description에', async () => {
   const { root, base, head } = prRepo();
-  const r = runGates({
+  const r = await runGates({
     root,
     cfg: loadConfig(root),
     base,
@@ -118,11 +118,11 @@ test('runGates: 계획 없는 브랜치는 plan-gate failure, 첫 문제와 건�
   assert.match(summaryMarkdown(r), /plan-gate/);
 });
 
-test('runGates: 검사가 예외를 던지면 그 context만 error', () => {
+test('runGates: 검사가 예외를 던지면 그 context만 error', async () => {
   const { root, base, head } = prRepo();
   // planReview가 빠진 설정으로 plan-gate 안에서 TypeError를 일으킨다
   const cfg = { ...loadConfig(root), planReview: undefined } as unknown as HarnessConfig;
-  const r = runGates({ root, cfg, base, branch: BRANCH, headSha: head });
+  const r = await runGates({ root, cfg, base, branch: BRANCH, headSha: head });
   const pg = r.results.find((x) => x.context === 'plan-gate')!;
   assert.equal(pg.state, 'error');
   assert.ok(pg.description.length > 0);
