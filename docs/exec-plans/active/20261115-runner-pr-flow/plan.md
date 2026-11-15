@@ -86,6 +86,7 @@ claimed_at: 2026-11-15T20:49:34+09:00 # new-task가 채운다
 - 2026-11-15 step0: PR #92 병합(`2e8c59c`). 구현 head `073935d`에서 `review/claude`·`review/codex` 모두 승인(지적 없음), `plan-gate`는 원장의 계획 승인(해시 4215e28f88b8)으로 통과. `pr-state`로 `분류: ready`, `mergeStateStatus=CLEAN`을 확인한 뒤 GitHub이 자동 병합했다.
 - 2026-11-15 step1: 테스트 먼저. `node --test scripts/test/runner-pr.test.ts` 종료 코드 1(`next.ts`에 `readPrWait` export 없음). 구현 뒤 9개 통과. AC 테스트(`next`·`runner-pr`·`runner`·`start`·`pr-state`) 종료 코드 0(101개 통과).
 - 2026-11-15 step1: 작업 목록에 없던 것 세 가지를 더했다(의사결정 로그). 알림으로 붙인 `needs-human` 떼기(`settleNotices`), 알림에 대한 제작자 답 처리(`doAnswered`가 완료된 step을 되돌리지 않는다), 통과한 체크의 `pr:<context>` 키 초기화(`trackPrs`). `pickNext`는 읽은 worktree 목록(`locals`)을 함께 돌려주고 runner가 그것으로 대기 기록을 쓴다.
+- 2026-11-15T22:07:35+09:00 step1 재작업: PR #93 원장 F2(Codex P1) 수정
 
 ## 의사결정 로그
 
