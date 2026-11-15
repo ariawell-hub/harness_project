@@ -74,6 +74,8 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step1: 처음에는 판정 job의 입력 단계에 읽기 전용 `github.token`을 주어 원장을 읽게 했다. 기존 불변식 테스트("판정 job에는 `GH_TOKEN`이 없다")에 걸려, plan job이 원장을 읽어 job 출력으로 넘기는 방식으로 바꿨다. 판정 job에는 여전히 GitHub 토큰이 없다.
 - 2026-11-15 step1: AC 실행 결과. `node --test scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts scripts/test/record.test.ts scripts/test/ci.test.ts` 종료 코드 0, `grep` 3개 통과, `node scripts/harness.ts check` 종료 코드 0.
 - 2026-11-15 step1: 제작자에게 요청(대화): 검증 App `harness-recorder`의 Pull requests 권한을 읽기·쓰기로 올리고 설치에서 수락. 절차와 확인 방법은 [SECURITY.md](../../../SECURITY.md) "검증 App 권한 변경". 수락 전에는 `review-ledger`가 `error`로 남고 `review/*`는 그대로 기록된다(원장 토큰 단계는 `continue-on-error`). 이 PR의 워크플로 변경은 main 병합 뒤 다음 PR(step2)에서 처음 돈다.
+- 2026-11-15 step1: PR #84 1차 판정에서 두 검증자 승인(`review/claude` P2 2, `review/codex` 지적 없음). `harness-guard`가 워크플로의 새 `permission-pull-requests: write`를 신호로 잡아 `risk-gate`가 위험도 높음(제작자 head 승인 필요)으로 판정했다. 계획 위험도는 보통이지만 이 PR은 제작자 승인을 받는다.
+- 2026-11-15 step1: Claude P2 반영. plan job이 원장을 읽지 못하면 로그만 남기고 1라운드처럼 진행하던 것을, 판정 없이 실패하게 바꿨다(테스트 추가: `record.test.ts`). 다른 P2(`queue: max`의 실제 동작)는 step2 PR의 첫 실행에서 확인한다.
 
 ## 의사결정 로그
 

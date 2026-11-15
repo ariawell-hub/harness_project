@@ -430,7 +430,7 @@ async function main(argv: string[]): Promise<number> {
           `patch=${c.patch}\ncarry_claude=${c.claude}\ncarry_codex=${c.codex}\n`,
         );
       }
-      // 라운드 입력(10.2절 (5)). 원장을 읽지 못하면 1라운드처럼 전체를 검토하게 한다(기록 job이 error를 남긴다)
+      // 라운드 입력(10.2절 (5))
       const reviewer = str('reviewer');
       const passed = str('ledger');
       const fromApi = Number.isInteger(number) && number > 0;
@@ -452,9 +452,11 @@ async function main(argv: string[]): Promise<number> {
               })
             ).ledger;
           } catch (e) {
-            log(
-              `review-plan: 원장을 읽지 못했다 — ${oneLine(e instanceof Error ? e.message : '오류')}`,
+            // 원장이 있는데 읽지 못한 채 판정하면 프롬프트 버전 고정과 라운드 규칙이 조용히 풀린다. 판정 없이 실패한다(fail-closed)
+            process.stderr.write(
+              `review-plan: 원장을 읽지 못했다 — ${oneLine(e instanceof Error ? e.message : '오류')}\n`,
             );
+            return 1;
           }
           appendFileSync(output, `ledger=${ledger ? ledgerData(ledger) : ''}\n`);
         } else if (passed) {

@@ -791,7 +791,7 @@ pnpm test src/auth/login-guard.spec.ts
   - 원장으로 인정하는 댓글은 작성자가 검증 App 봇(`ci.recorderBot`)인 것뿐이다. 봇 PAT과 PR 작성자도 같은 표식의 댓글을 쓸 수 있기 때문이다(ADR-0003). 봇 원장이 여럿이면 가장 오래된 것을 쓴다.
   - 두 판정 워크플로의 기록 job이 판정을 검사한 뒤 원장을 읽고-고치고-쓰고, 지금 원장으로 `review-ledger`를 head에 기록한다. 판정이 없는 기록(해당 없음, 이어받음, error)도 `review-ledger`를 다시 기록한다. 한 댓글을 고치므로 기록 job은 PR마다 차례로 돈다(job 단위 concurrency `ledger-<PR 번호>`, 취소 없음).
   - 원장이 없고 지적도 없으면 댓글을 만들지 않고 통과다. 원장을 읽거나 쓰지 못하면 `review-ledger`는 `error`다(fail-closed). 그때도 `review/*`는 기록한다. 원장 댓글용 토큰(Pull requests 쓰기)은 상태용 토큰과 따로 받는다.
-  - 판정 job에는 GitHub 토큰을 주지 않는다. plan job(비밀 없음)이 원장을 읽어 job 출력으로 넘기고, 판정 job은 그 값으로 검증 입력(`.harness-review/ledger.md`, `round-changed.txt`, `round-diff.patch`)을 만든다.
+  - 판정 job에는 GitHub 토큰을 주지 않는다. plan job(비밀 없음)이 원장을 읽어 job 출력으로 넘기고, 판정 job은 그 값으로 검증 입력(`.harness-review/ledger.md`, `round-changed.txt`, `round-diff.patch`)을 만든다. plan job이 원장을 읽지 못하면 판정 없이 실패한다(읽지 못한 채 판정하면 프롬프트 버전 고정과 라운드 규칙이 풀린다). 그때 `review/*`는 `error`로 남고 다시 실행하면 된다.
   - `check`가 실패로 끝나면 기록 전용 job(`ci-failure`)이 실패한 실행을 원장에 남긴다(최근 30건). 이 job도 같은 concurrency 그룹에서 돈다.
 
 **(5) 라운드 규칙 (지적 동결)**

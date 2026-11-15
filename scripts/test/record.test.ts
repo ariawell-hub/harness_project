@@ -278,6 +278,17 @@ test('review-plan: plan job은 원장을 읽어 출력으로 넘기고, 판정 j
   const md = path.join(root, '.harness-review/ledger.md');
   assert.match(readFileSync(md, 'utf8'), /F1 \| P1 \| claude \| open/);
 
+  // 원장을 읽지 못하면 plan이 실패한다(읽지 못한 채 판정하면 프롬프트 버전 고정이 풀린다)
+  state.failComments = true;
+  const denied = await run([...common, '--pr-number', '7', '--reviewer', 'claude'], {
+    GH_TOKEN: 'read-token',
+    GITHUB_OUTPUT: path.join(tmp(), 'out-denied'),
+    GITHUB_REPOSITORY: 'o/r',
+  });
+  assert.equal(denied.code, 1, denied.out);
+  assert.match(denied.out, /원장을 읽지 못했다/);
+  state.failComments = false;
+
   // 판정 job: 토큰·PR 번호 없이 받은 원장으로 같은 입력을 만든다
   const calls = state.auth.length;
   const out2 = path.join(tmp(), 'out2');
