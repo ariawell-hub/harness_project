@@ -313,7 +313,7 @@ test('fetchCandidates: 최신이 먼저(지금 head 포함), 판정된 head를 �
     const m = /commits\/([0-9a-f]{40})\/statuses/.exec(p);
     return m ? (statuses[m[1]] ?? []) : null;
   };
-  const o = { api, repo: 'o/r', number: 7, headSha: sha('4'), recorderBot: BOT, contexts: [CTX] };
+  const o = { api, repo: 'o/r', number: 7, recorderBot: BOT, contexts: [CTX] };
   const got = await fetchCandidates(o);
   assert.deepEqual(
     got.map((c) => c.sha),

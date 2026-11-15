@@ -76,6 +76,8 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step3: AC 실행 결과 — `node --test scripts/test/binding.test.ts scripts/test/verdict.test.ts scripts/test/protection.test.ts` 통과, `grep -q "export function carryOver" scripts/ci/binding.ts`·`grep -q "recorderBot" harness.config.json` 통과. 이어받기는 이 PR(위험도 높음)에서 일어나지 않는다. `review-plan`을 이 브랜치에 돌려 `patch=<40자>`, `carry_claude=`, `carry_codex=`(높음이라 다시 검증)를 확인했다. 실제 이어받기 확인과 필수 체크 등록은 step4.
 - 2026-11-15: PR #68(step3)이 제작자 승인 뒤 병합됐다. 제작자가 `CODEX_AUTH_JSON`을 다시 등록했다(봇 API의 갱신 시각 2026-11-15T03:40:16Z). 앞서 들어 있던 값은 인증 파일이 아니라 로그인 URL이었다(제작자 확인).
 - 2026-11-15 step4: `planCarry` 테스트를 먼저 써서 실패 확인(export 없음) → `review-plan`의 이어받기 연결부를 `scripts/ci/binding.ts`의 `planCarry`로 옮기고 가짜 API로 성공·위험도 높음·봇 설정 없음·조회 실패를 테스트했다. `init` 안내의 필수 체크 목록에 `review/*`를 더했다.
+- 2026-11-15 step4: 초안 PR #69에서 재등록된 인증으로 `judge-codex`가 돌았다(실행 43673752078). 인증 복원(필드 9개, API 키 없음), 판정 설정, 봉인, 저장(`store`가 `CODEX_AUTH_JSON` 재등록)이 처음 성공했다. 다음 실행(PR #71)이 그 저장값으로 같은 인증(sha8 일치)을 복원해 봉인 → 저장 → 복원 왕복을 확인했다. 실행 전후 인증 변화는 없었다(`changed=false`, 갱신 미관찰). 샌드박스 준비는 `bwrap: execvp …/codex: No such file or directory`로 실패했다(Codex 설치 위치가 권한 프로필 읽기 범위 밖). Issue #70 / PR #71로 고쳐 병합했다.
+- 2026-11-15 step4: 같은 PR에서 step3 변경이 실제로 돌았다. `review/claude = success — 승인 (P3 1) patch:<40자>`(작성자 `harness-recorder[bot]`), 기록 job 로그에 판정 요약과 지적 본문이 나왔다. 지적(P3: `fetchCandidates`가 `headSha`를 쓰지 않는다)을 반영해 인자를 뺐다.
 
 ## 의사결정 로그
 
@@ -105,6 +107,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 이어받기 후보는 가장 최근에 판정된 앞선 head 하나다. 그 head의 마지막 판정이 success가 아니거나 patch가 다르면 더 옛 head의 승인으로 거슬러 가지 않는다. 이유: 같은 patch의 최신 판정이 실패인데 옛 승인을 되살리면 안 된다.
 - 기록 job은 검사를 통과한 판정의 요약과 지적을 로그에 한 줄씩 낸다(원장 #55 전의 임시 통로). 이유: step3 PR에서 `수정 요청 (P1 2)`만 보이고 무엇을 고칠지 알 수 없었다. 본문은 형식 검사와 시크릿 스캔을 통과한 뒤에만, 제어 문자를 공백으로 바꿔 낸다.
 - `restoreAuth`는 JSON 파싱에 실패하면 줄바꿈을 빼고 한 번 더 읽는다. 그래도 안 되면 값 없이 길이·줄 수·첫 글자 종류만 오류에 적는다. 이유: 터미널 폭 줄바꿈이 섞인 붙여넣기는 Claude 토큰에서도 겪은 문제이고(13.3절), 첫 실행의 "JSON이 아니다"만으로는 원인을 좁힐 수 없었다.
+- (제작자 결정, 2026-11-15 대화, "검사 약화 권한 변경이 없는 수정에 한해 위험도 보통으로 올려") 판정 워크플로(`judge-*`)의 후속 수정 PR은 검사 약화·권한 변경이 없으면 계획 `risk: normal`로 올린다(자동 병합). 이유: 이 워크플로들은 main에 병합돼야 검증되므로 추정이 틀릴 때마다 승인이 한 번씩 더 든다. 검사 약화·권한 완화·environment 밖 참조·새 write 권한은 `harness-guard`가 잡아 높음으로 올린다. #54 계획 자체의 step PR은 앞의 결정대로 높음이다.
 - (제작자 결정, 2026-11-15 대화) 이 계획(#54)은 `risk: high`를 유지해 PR마다 제작자 head 승인을 받는다. 구독 토큰·Codex 인증·인증 저장 App이 실제로 CI에 들어가는 작업이기 때문이다. #55·#56·#57의 계획은 `risk: normal`로 만든다. 그 PR들은 자동 병합되고, `harness-guard`가 검사 약화·권한 완화 신호를 잡았거나 경로 표가 높음인 PR만 승인을 요구한다. 이유: 구축 단계에서는 보호 경로도 자동 병합한다는 결정(설계서 10.4절)과 맞추되, 인증을 직접 다루는 구간만 사람이 본다. 버린 대안: 전부 높음(PR마다 승인, #53에서 겪은 부담), #54도 보통(검증자가 완성되기 전에 인증 워크플로가 사람 눈 없이 병합됨).
 
 ## 발견 사항

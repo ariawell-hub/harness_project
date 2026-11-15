@@ -169,7 +169,6 @@ export async function fetchCandidates(o: {
   api: (path: string) => Promise<unknown>;
   repo: string;
   number: number;
-  headSha: string;
   recorderBot: string;
   contexts: readonly string[];
   limit?: number;
@@ -241,7 +240,6 @@ export async function planCarry(o: {
           api: o.api,
           repo: o.repo,
           number: o.number,
-          headSha: gitTry(['rev-parse', 'HEAD'], o.root).stdout.trim(),
           recorderBot: o.recorderBot,
           contexts: keys.map((k) => `review/${k}`),
         })
