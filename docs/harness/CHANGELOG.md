@@ -41,6 +41,7 @@ review_cycle: on-change
 - 설계서 v0.7.20 · 필수 체크 출처 전환(Issue #53 step4, TD-2 해결): 옛 `.github/workflows/plan-gate.yml` 삭제(같은 검사를 `gates`의 판정 job이 돌리고 검증 App이 기록한다). 새 명령 `harness.ts required-checks`와 설정 `ci.requiredChecks`·`ci.recorderAppId`: main에 등록된 필수 체크와 출처(`check` = GitHub Actions, 나머지 = 검증 App)를 봇 토큰으로 읽어 비교한다. `GitHubPort.branchInfo`.
 - 교차 검증 판정 기반(Issue #54 step0): 검증 프롬프트 `scripts/cross-review/prompt.md`와 판정 스키마 `verdict.schema.json`(verdict·risk·summary·findings). `scripts/ci/verdict.ts`(형식 검사, 비밀 원문·base64·hex·URL 인코딩·16자 조각 스캔, 고엔트로피 문자열, 승인이고 P0·P1이 없을 때만 통과), `review-plan.ts`(낮음은 다른 도구 1명, 보통·높음은 둘 다), `record.ts`의 `recordReview`와 `harness.ts record-review`(`review/claude`·`review/codex`, 필요 없는 검증자는 "해당 없음" 통과, 판정이 없거나 깨지거나 비밀이 보이면 error). 워크플로는 아직 없다.
 - `AGENTS.md` 작업 루프(Issue #64, 제작자 지시): 제작자 승인을 요청한 PR에는 커밋을 더 올리지 않는다. 꼭 올려야 하면 push 전에 먼저 알린다. PR #62·#63에서 승인 뒤 push로 승인이 철회되어 다시 승인해야 했다.
+- 설계서 v0.7.21 · Claude 판정 워크플로(Issue #54 step1): `.github/workflows/judge-claude.yml` 추가. `check` 완료(`workflow_run`, 성공한 같은 리포 PR)로 시작한다. `plan`(비밀 없음, 위험도·필요한 검증자) → `judge`(`judge-claude` environment, Claude Code 2.1.314를 `--restricted --tools Read,Grep,Glob --permission-mode dontAsk --strict-mcp-config`로 실행, 같은 job의 유출 검사 `claude-scan`) → `record`(`recorder` environment, `review/claude` 기록). 새 명령 `review-plan`·`claude-scan`, 검증 입력 폴더 `pr/.harness-review/`(`.gitignore`에 추가). `review/claude`는 아직 필수 체크가 아니다(step3에서 등록).
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

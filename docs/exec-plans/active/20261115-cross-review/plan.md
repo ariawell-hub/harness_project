@@ -63,6 +63,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 2026-11-15 step0: `scripts/test/verdict.test.ts`를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`) → 스키마·프롬프트, `scripts/ci/{verdict,review-plan}.ts`, `recordReview`, `record-review` 명령 구현 뒤 `verdict`·`ci` 테스트 24개 통과.
 - 2026-11-15 step0: 첫 `check`가 secret-scan에서 실패했다(테스트의 가짜 토큰 리터럴이 실제 토큰 형식으로 검출). 실패한 채 `complete-step`까지 이어 실행한 것은 명령을 `;`로 이은 실수였다. push 전이라 로컬 커밋을 계획 커밋 위에서 다시 만들고(`reset --soft`), 테스트 값은 런타임에 조각을 이어 붙이게 바꿨다. `check` 통과를 확인한 뒤 완료 처리했다.
 - 2026-11-15: #53의 마지막 PR #62가 제작자 재승인 뒤 병합됐다.
+- 2026-11-15 step1: `scripts/test/claude-scan.test.ts`와 `ci.test.ts`의 입력 폴더·워크플로 테스트를 먼저 써서 실패 확인(`ERR_MODULE_NOT_FOUND`: `claude-scan.ts`, `review-input.ts`) → `scanClaudeRun`, `writeReviewInput`, `planReview`, 명령 `review-plan`·`claude-scan`, `judge-claude.yml` 구현 뒤 `claude-scan`·`ci`·`verdict` 테스트 42개 통과. `review-plan`을 이 브랜치에 직접 돌려 출력(`risk=high`, `claude=true`, `codex=true`)과 입력 폴더를 확인했다. 워크플로는 `workflow_run`이라 이 PR에서는 돌지 않는다. 실제 판정은 step2 PR에서 확인한다.
 
 ## 의사결정 로그
 
@@ -76,6 +77,10 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 - 승인의 patch-id는 커밋 상태 description에 적고, 이어받을 때는 그 상태의 작성자가 검증 App 봇(`ci.recorderBot`)인지 확인한다. 이유: 별도 저장소 없이 head SHA에 묶이고, 봇 PAT이 쓴 같은 이름의 상태를 거를 수 있다.
 - 고엔트로피 검사는 40자 이상 이어진 base64/hex 꼴 조각 중 대문자·소문자·숫자가 섞이고 문자 엔트로피 4.3비트 이상인 것만 잡는다. 이유: 커밋 SHA(소문자 hex)와 긴 경로·식별자를 지적에 적는 일이 흔해 오탐이면 판정 전체가 error가 된다. 놓치는 토큰이 있을 수 있지만 이 검사는 보조 수단이다(10.4절).
 - 판정에 비밀이 보이면 failure가 아니라 error로 기록하고 사유에 값을 넣지 않는다. 이유: 유출은 검증 결과가 아니라 판정 job의 장애이고, 다시 돌려야 한다.
+- `review-plan`은 PR을 직접 해석하지 않고 기존 `ci-pr` 다음에 돈다(step1 파일의 `--event` 인자와 다르다). 이유: `pr/`를 체크아웃하려면 head SHA를 먼저 알아야 하고, PR 해석은 `gates`가 쓰는 `ci-pr`이 이미 한다. `skip`·`head_sha`는 `ci-pr`이, `risk`·`claude`·`codex`는 `review-plan`이 출력한다.
+- 판정 워크플로의 concurrency는 head 리포 + 브랜치 단위로 묶고 진행 중인 실행을 취소한다. 이유: 새 커밋의 `check`가 통과하면 옛 head의 판정은 쓸모가 없고 구독 한도만 쓴다. 리포 이름을 넣어 포크의 같은 이름 브랜치가 실행을 취소하지 못하게 한다. 취소된 실행은 아무것도 기록하지 않는다.
+- 유출 검사에서 `pr/` 밖 대상의 도구 결과를 알 수 없으면(결과 이벤트 없음) 성공한 것으로 보고 실패시킨다. Q20의 표식 파일 검사(시험용 훅·MCP 미끼)는 옮기지 않고, 대신 init 이벤트의 도구 목록·MCP 서버 목록에 허용 밖 항목이 있으면 실패시킨다. init이 없어도 실패다(fail-closed).
+- Claude 판정의 모델은 지정하지 않는다(Q20과 같은 조건, 구독 기본 모델). 판정 품질 때문에 고정이 필요해지면 설정 값으로 올린다.
 - (제작자 결정, 2026-11-15 대화) 이 계획(#54)은 `risk: high`를 유지해 PR마다 제작자 head 승인을 받는다. 구독 토큰·Codex 인증·인증 저장 App이 실제로 CI에 들어가는 작업이기 때문이다. #55·#56·#57의 계획은 `risk: normal`로 만든다. 그 PR들은 자동 병합되고, `harness-guard`가 검사 약화·권한 완화 신호를 잡았거나 경로 표가 높음인 PR만 승인을 요구한다. 이유: 구축 단계에서는 보호 경로도 자동 병합한다는 결정(설계서 10.4절)과 맞추되, 인증을 직접 다루는 구간만 사람이 본다. 버린 대안: 전부 높음(PR마다 승인, #53에서 겪은 부담), #54도 보통(검증자가 완성되기 전에 인증 워크플로가 사람 눈 없이 병합됨).
 
 ## 발견 사항
@@ -91,4 +96,4 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step1 judge-claude.
+- step2 judge-codex. 그 PR에서 `judge-claude` 실제 동작(판정, `review/claude` 작성자 = 검증 App)을 확인해 진행 로그에 남긴다.
