@@ -23,6 +23,7 @@ claimed_at: 2026-11-15T14:38:11+09:00
 ## 진행 로그
 
 - 2026-11-15: TD-29 등록. 이 PR은 #54 step4의 승인 이어받기 실제 확인에 쓴다. 두 검증자 승인 뒤 바로 병합하지 않고, main이 한 번 나아간 뒤 `origin/main`을 병합해 이어받기 기록을 본다. 결과는 #54 계획 진행 로그에 남긴다.
+- 2026-11-15: 검증 결과 — `grep -q "TD-29" docs/exec-plans/tech-debt-tracker.md` 종료 코드 0, `node scripts/harness.ts check` 종료 코드 0(fmt·lint·test·doc-lint·bypass-scan·secret-scan 통과). Codex 검증자가 실행 결과 기록이 없다고 지적해(P1) 더했다.
 
 ## 발견 사항
 
