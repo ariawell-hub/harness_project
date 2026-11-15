@@ -81,6 +81,16 @@ node scripts/harness.ts complete-step     # 계획 전용 커밋
 node scripts/harness.ts plan-gate         # PR 모드 확인
 ```
 
+- **`check` 결과는 종료 코드로 확인한다.** 출력을 줄이려고 파이프를 붙이면 `&&`가 실패를 보지 못한다. 파이프의 종료 코드는 마지막 명령의 것이기 때문이다. 실패한 채 push·`complete-step`이 이어진 사례가 있다(Issue #72, TD-29).
+
+  ```bash
+  # 나쁜 예: check가 실패해도 push된다
+  node scripts/harness.ts check 2>&1 | tail -1 && git push
+
+  # 좋은 예: 출력은 파일로 보내고 종료 코드로 잇는다
+  node scripts/harness.ts check > check.log 2>&1 && git push
+  ```
+
 - 자체 리뷰는 [검증 체크리스트](../../scripts/cross-review/checklist.md)로 하고 결과를 PR에 남긴다.
 - **발견 사항 처리**: `complete-step` 전에 "발견 사항"의 각 항목 끝에 처리를 적는다. 셋 중 하나다.
   - `→ 처리: [반영한 문서](경로)`: 다음 에이전트가 알아야 할 것은 문서로 옮긴다
