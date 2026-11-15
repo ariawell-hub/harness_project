@@ -1,0 +1,9 @@
+{
+  "plan": "20261115-cross-review",
+  "steps": [
+    { "step": 0, "name": "verdict-core", "status": "in_progress" },
+    { "step": 1, "name": "judge-claude", "status": "pending" },
+    { "step": 2, "name": "judge-codex", "status": "pending" },
+    { "step": 3, "name": "approval-binding", "status": "pending" }
+  ]
+}
