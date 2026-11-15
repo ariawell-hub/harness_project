@@ -51,6 +51,9 @@ CI(gates 워크플로, 10.4절):
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
+  record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
+                --head-sha <sha> --repo-slug <owner/name> --target-url <url>
+                                           검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
   required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
 
 설정:
