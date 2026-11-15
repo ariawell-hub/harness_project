@@ -11,7 +11,9 @@
     {
       "step": 1,
       "name": "pick-by-state",
-      "status": "pending"
+      "status": "completed",
+      "summary": "`next.ts`: `LocalPlan.prState`·`required`(내 열린 PR, `inspectPr`), `PrWait`·`readPrWait`·`writePrWait`(`pr-wait.json`), 작업 `request-approval`·`report-stall`·`arm-merge`, `fix-pr.failing`, `Pick.locals`. `review` 분류는 아직 사람 대기(`reviewPrs`, 3번 \"PR이 열려 있으면 건너뛴다\"는 그대로). `run.ts`: `doRequestApproval`·`doReportStall`·`doArmMerge`·`trackPrs`·`settleNotices`, `doFixPR(ctx, l, failing)`. 가짜 GitHub `mergeRequires`(출처별 success가 모두 있어야 병합, `setCheck`가 병합 재시도). 테스트 도우미는 `scripts/test/runner-pr.test.ts`의 `setup`·`openPr`·`setAll`",
+      "completed_at": "2026-11-15T22:08:55+09:00"
     },
     {
       "step": 2,

@@ -72,6 +72,16 @@ export interface FakeState {
   requiredChecks?: { context: string; app_id: number | null }[];
   /** 커밋 SHA → 그 커밋의 커밋 상태·check run 기록(setCheck가 쓴다) */
   checks?: Record<string, CommitCheck[]>;
+  /**
+   * 병합에 필요한 체크와 출처(선택). 있으면 `ciCommand` 대신 "PR head에 그 출처의 가장 최근 결과가 모두 success인가"로
+   * 병합을 정하고(브랜치 보호의 출처 지정 흉내), 초안 PR은 병합하지 않는다
+   */
+  mergeRequires?: {
+    context: string;
+    kind: 'status' | 'check-run';
+    creator?: string;
+    appId?: number;
+  }[];
 }
 
 export function initFakeState(file: string, s: Partial<FakeState> & { remote: string }): FakeState {
@@ -272,6 +282,11 @@ export class FakeGitHub implements GitHubPort {
       at: stamp(s),
     });
     this.save(s);
+    // 자동 병합이 켜진 PR의 head면 GitHub처럼 병합 조건을 다시 본다
+    for (const pr of s.prs) {
+      if (pr.state === 'open' && pr.autoMerge && this.toPR(s, pr).headSha === sha)
+        this.tryMerge(pr.number);
+    }
   }
   createPR(p: {
     head: string;
@@ -323,13 +338,27 @@ export class FakeGitHub implements GitHubPort {
     const s = this.load();
     const pr = s.prs.find((p) => p.number === n);
     if (!pr || pr.state !== 'open' || !pr.autoMerge) return false;
+    if (s.mergeRequires) {
+      if (pr.isDraft) return false;
+      const checks = newestFirst([...(s.checks?.[this.toPR(s, pr).headSha] ?? [])]);
+      const ok = s.mergeRequires.every((w) => {
+        const latest = checks.find(
+          (c) =>
+            c.context === w.context &&
+            c.kind === w.kind &&
+            (w.kind === 'status' ? c.creator === w.creator : c.appId === w.appId),
+        );
+        return latest?.state === 'success';
+      });
+      if (!ok) return false;
+    }
     const dir = mkdtempSync(path.join(tmpdir(), 'fake-gh-merge-'));
     try {
       git(['clone', '-q', s.remote, dir], tmpdir());
       git(['config', 'user.email', 'fake@github.invalid'], dir);
       git(['config', 'user.name', 'fake-github'], dir);
       git(['checkout', '-q', pr.base], dir);
-      if (s.ciCommand) {
+      if (s.ciCommand && !s.mergeRequires) {
         git(['checkout', '-q', `origin/${pr.head}`], dir);
         const r = runSync('sh', ['-c', s.ciCommand], { cwd: dir, timeoutMs: 600_000 });
         git(['checkout', '-q', pr.base], dir);

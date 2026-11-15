@@ -355,6 +355,38 @@ test('toIssue: 작성자 login을 꺼내고, 삭제된 계정(null)이나 누락
   assert.equal(toIssue({ ...base, state: 'CLOSED' }).state, 'closed');
 });
 
+test('loadConfig: limits.ciStallHours는 없으면 24이고, 양수가 아니면 ConfigError다', () => {
+  const dir = tmp('harness-next-cfg-');
+  const base = fixtureConfig({ github: GITHUB }) as { limits: Record<string, unknown> };
+  const put = (limits: Record<string, unknown>) =>
+    writeFileSync(
+      path.join(dir, 'harness.config.json'),
+      JSON.stringify({ ...base, limits: { ...base.limits, ...limits } }),
+    );
+  put({});
+  assert.equal(loadConfig(dir).limits.ciStallHours, 24);
+  put({ ciStallHours: 6 });
+  assert.equal(loadConfig(dir).limits.ciStallHours, 6);
+  for (const bad of [0, -1, '24', null]) {
+    put({ ciStallHours: bad });
+    if (bad === null) {
+      // null은 "없음"과 같다
+      assert.equal(loadConfig(dir).limits.ciStallHours, 24);
+      continue;
+    }
+    assert.throws(
+      () => loadConfig(dir),
+      (e: unknown) => e instanceof ConfigError && /limits\.ciStallHours는 양수/.test(e.message),
+    );
+  }
+});
+
+test('이 리포의 설정: limits.ciStallHours가 적혀 있다', () => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  assert.equal(loadConfig(root).limits.ciStallHours, 24);
+  assert.match(readFileSync(path.join(root, 'harness.config.json'), 'utf8'), /"ciStallHours": 24/);
+});
+
 test('loadConfig: github.collaborators는 없으면 []이고, 문자열 배열이 아니면 ConfigError다', () => {
   const dir = tmp('harness-next-cfg-');
   const put = (github: Record<string, unknown>) =>

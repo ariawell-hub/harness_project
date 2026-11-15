@@ -190,6 +190,26 @@ test('classifyPr 5: step이 끝나지 않은 PR(계획 검증 중)은 plan-gate�
   ]);
 });
 
+test('classifyPr 5: step이 끝나지 않은 PR에서도 deps-guard·harness-guard 실패는 fix다(plan-gate·risk-gate만 보지 않는다, PR #93 F2)', () => {
+  const o = { stepCompleted: false };
+  const v = classify(
+    {
+      'plan-gate': 'failure',
+      'risk-gate': 'failure',
+      'harness-guard': 'failure',
+      'deps-guard': 'failure',
+      'review/claude': 'failure',
+    },
+    o,
+  );
+  assert.equal(v.kind, 'fix');
+  assert.deepEqual(v.kind === 'fix' ? v.failing.map((f) => f.context) : [], [
+    'deps-guard',
+    'harness-guard',
+  ]);
+  assert.equal(classify({ 'plan-gate': 'failure', 'deps-guard': 'failure' }, o).kind, 'fix');
+});
+
 test('classifyPr 6: plan-gate·deps-guard·harness-guard 실패는 설명을 담은 fix이고 review보다 앞선다', () => {
   const v = classify({
     'harness-guard': 'failure',

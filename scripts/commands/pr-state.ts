@@ -4,17 +4,43 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { worktreeOfBranch } from '../lib/approval.ts';
 import { loadConfig } from '../lib/config.ts';
-import { gitTry, isBehind, repoInfo } from '../lib/git.ts';
+import { gitTry, isBehind, repoInfo, showFile } from '../lib/git.ts';
 import { getGitHub, type PullRequest } from '../lib/github.ts';
-import { findPlan, parseBranch, parseDoc, readIndex } from '../lib/plan.ts';
+import { findPlan, findPlanAt, parseBranch, parseDoc, parseIndex, readIndex } from '../lib/plan.ts';
 import { log } from '../lib/util.ts';
 import { classifyPr, describeVerdict, requiredStates } from '../runner/pr-state.ts';
 
 /**
- * PR이 맡은 step이 completed인가. 그 브랜치의 worktree에서 계획을 읽는다.
- * worktree나 계획을 찾지 못하면 true로 본다(완료된 step의 PR로 다룬다: 실패한 게이트를 숨기지 않는다)
+ * 커밋 `rev`의 트리에서 그 브랜치가 맡은 step이 completed인가. 커밋이나 계획을 읽지 못하면 null.
+ * PR 분류는 PR head의 상태로 한다: 수정하다 실패해 step을 되돌린 커밋이 로컬에만 있으면
+ * worktree의 상태(in_progress)는 PR head(completed)와 다르다
  */
-export function stepCompletedOf(cwd: string, branch: string): boolean {
+export function stepCompletedAt(cwd: string, rev: string, branch: string): boolean | null {
+  try {
+    const b = parseBranch(branch);
+    if (!b || !/^[0-9a-f]{40}$/.test(rev)) return null;
+    const read = (f: string) => showFile(cwd, rev, f);
+    const ref = findPlanAt(read, b.id);
+    if (!ref) return null;
+    if (ref.kind === 'multi') {
+      const text = read(`${ref.dir}/index.json`);
+      if (text === null) return null;
+      return parseIndex(text).steps[b.step ?? 0]?.status === 'completed';
+    }
+    const text = read(ref.file);
+    return text === null ? null : parseDoc(text).frontmatter?.status === 'completed';
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PR이 맡은 step이 completed인가. PR head(`headSha`)의 계획을 먼저 보고, 읽지 못하면 그 브랜치의 worktree에서 읽는다.
+ * 둘 다 못 읽으면 true로 본다(완료된 step의 PR로 다룬다: 실패한 게이트를 숨기지 않는다)
+ */
+export function stepCompletedOf(cwd: string, branch: string, headSha = ''): boolean {
+  const atHead = headSha ? stepCompletedAt(cwd, headSha, branch) : null;
+  if (atHead !== null) return atHead;
   try {
     const wt = worktreeOfBranch(cwd, branch);
     const b = parseBranch(branch);
@@ -72,7 +98,7 @@ export function prState(cwd: string, prNumber: number | null): number {
   }
   const { remote, defaultBranch } = cfg.github;
   const behind = behindOf(info.root, remote, defaultBranch, pr.headSha);
-  const stepCompleted = stepCompletedOf(info.root, pr.head);
+  const stepCompleted = stepCompletedOf(info.root, pr.head, pr.headSha);
   const verdict = classifyPr({ pr, required, behind: behind === true, stepCompleted });
   log(
     `분류: ${describeVerdict(verdict)} · 뒤처짐: ${behind === null ? '알 수 없음' : behind ? '예' : '아니오'} · step 완료: ${stepCompleted ? '예' : '아니오'}`,

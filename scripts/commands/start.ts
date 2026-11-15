@@ -23,7 +23,13 @@ export function describeTask(t: ReturnType<typeof pickNext>['task']): string {
     case 'answered':
       return `답을 받은 #${t.issue} 이어 가기${t.local ? ` (worktree ${t.local.worktree})` : ''}`;
     case 'fix-pr':
-      return `PR #${t.pr.number} 체크 실패 수정 (worktree ${t.local.worktree})`;
+      return `PR #${t.pr.number} 체크 실패 수정${t.failing.length ? `: ${t.failing.map((f) => f.context).join(', ')}` : ''} (worktree ${t.local.worktree})`;
+    case 'request-approval':
+      return `PR #${t.pr.number}의 현재 head 승인을 제작자에게 요청 (risk-gate. 대화 세션은 worktree ${t.local.worktree}에서 \`node scripts/harness.ts pr-ready\`)`;
+    case 'report-stall':
+      return `PR #${t.pr.number}의 오래된 CI 대기를 제작자에게 알림: ${t.waiting.join(', ')} (\`node scripts/harness.ts pr-state --pr ${t.pr.number}\`로 상태 확인)`;
+    case 'arm-merge':
+      return `PR #${t.pr.number} 자동 병합 켜기: \`gh pr merge ${t.pr.number} --auto --squash\``;
     case 'update':
       return `PR #${t.pr.number}를 origin/main 병합으로 갱신 (rebase·force push 없이, worktree ${t.local.worktree}, 절차서 5절)`;
     case 'plan':

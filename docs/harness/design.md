@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.35 · 상태: 초안 · 최종 갱신: 2026-11-15
+> 버전 v0.7.36 · 상태: 초안 · 최종 갱신: 2026-11-15
 
 ---
 
@@ -68,6 +68,7 @@ review_cycle: quarterly
   - v0.7.33 (2026-11-15): 계획 검증(G1)을 켠다(`planReview.required: true`). `review-ledger`를 검증 App 출처의 필수 체크로 등록한다. 지적 원장·재현 job·계획 검증을 실제 PR에서 확인한 결과를 적었다. 계획 검증이 실행 중인 step에 일을 더하라고 지적하면 새 step을 더한다(0.2절, 4.1절, 8.2절, Issue #55)
   - v0.7.34 (2026-11-15): 계획 해시와 자기 step 불변 규칙에 step의 금지사항을 더한다. 승인 뒤 금지사항을 지우는 것은 AC를 약하게 고치는 것과 같은 우회다. 묶는 섹션 목록은 한 곳(`STEP_BOUND_SECTIONS`)에 둔다(8.2절, 8.3절, 10.3절, Issue #55)
   - v0.7.35 (2026-11-15): PR의 필수 체크를 출처 기준으로 판정한다. 설정의 context마다 기대 출처(검증 App 봇의 커밋 상태, GitHub Actions의 check run)가 쓴 가장 최근 결과만 보고, PR 상태를 분류하는 함수와 `pr-state` 명령을 둔다. runner 연결은 다음 변경이다(10.3절, Issue #56 step0)
+  - v0.7.36 (2026-11-15): runner가 내 PR을 출처 기준 분류로 다룬다. `check` 실패와 기계 판정 실패만 수정 세션으로 보내고, 제작자 승인 대기(`risk-gate`)는 head마다 한 번 요청하며, 뒤처진 PR은 필수 체크가 모두 통과한 뒤에만 갱신해 승인을 이어받는다. 같은 head의 CI 대기가 `limits.ciStallHours`를 넘으면 알린다(4.5절, 10.3절, Issue #56 step1)
 
 ### 0.1 전제 조건
 
@@ -275,7 +276,7 @@ review_cycle: quarterly
 
 **다음 할 일 우선순위** (S1. 대화 세션의 세션 시작 절차도 같은 순서를 쓴다, 7.1절)
 1. 답을 받은 `needs-human` 항목(`blocked` 해제)
-2. 내 PR 중 조치가 필요한 것: main에 뒤처짐·충돌(`origin/main` 병합으로 갱신, ADR-0006), 체크 실패, 원장의 P0·P1 지적
+2. 내 PR 중 조치가 필요한 것: 충돌, `check`·기계 판정 실패, 원장의 P0·P1 지적, 필수 체크가 모두 통과한 뒤의 뒤처짐(`origin/main` 병합으로 갱신, ADR-0006), 제작자 승인 요청. 판단은 필수 체크를 출처로 거른 분류로 한다(아래 "내 PR 다루기")
 3. 내가 맡은 계획의 진행 중인 step(실패 후 재시도 포함)
 4. 앞 step이 병합된 계획의 다음 step(`index.json` 순서)
 5. 선점되지 않은 Issue 중 제작자(`github.owner`)·외주 개발자(`github.collaborators`) 계정이 만든 것(우선순위 라벨 순). `github.botIssues`가 `owner-approved`면 제작자 승인 댓글(`/harness accept`)이 있는 봇 Issue도 고른다. 그 밖의 봇 계정 Issue는 고르지 않는다(14.6절). 작성자 때문에 뺀 Issue는 번호와 이유를 `start`·`next` 출력에 보인다
@@ -287,13 +288,23 @@ review_cycle: quarterly
 **실패와 대기**
 - 실패 횟수는 9.2절을 따른다. 3회째 세션의 프롬프트에는 "지금까지의 방법을 버리고 다른 방법으로" 지시와 지난 시도 기록을 넣는다. 5회 또는 총량 상한이면 그 계획만 `blocked` + `needs-human`이 되고, runner는 다음 할 일로 넘어간다.
 - 환경 장애(사용량 한도, 네트워크, 서비스 장애)는 실패로 세지 않는다. 기다렸다가 같은 step을 다시 시도한다.
+- **내 PR 다루기**(`scripts/runner/next.ts`, 분류는 10.3절 `classifyPr`. 설정 `ci.requiredChecks`가 빈 리포는 지금까지처럼 체크 요약으로 실패를 찾는다)
+  - `check`(GitHub Actions) 실패는 바로 수정 세션을 띄운다. 그 밖의 판단은 필수 체크가 모두 끝난 뒤에 한다. 진행 중이거나 아직 없으면 CI 대기다. 검증 App이 아닌 계정이 쓴 같은 이름의 결과는 없는 것으로 본다.
+  - `plan-gate`·`deps-guard`·`harness-guard` 실패는 상태 설명을 넣은 수정 세션을 띄운다. 실패 키는 체크마다 `pr:<context>`이고, 그 체크가 통과하면 0으로 돌아간다(9.2절).
+  - `risk-gate`만 실패면 세션을 띄우지 않는다. Issue에 `needs-human`과 제작자 멘션으로 현재 head 승인을 요청하고 승인 요청 표시(`scripts/lib/approval.ts`)를 그 head로 남긴다. 같은 head에는 다시 요청하지 않고, head가 바뀌면 다시 요청한다. runner는 승인하지 않는다(R20).
+  - `review/*`·`review-ledger` 실패(검증자의 수정 요청, 열린 차단 지적)에는 `check` 실패용 수정 세션을 띄우지 않는다. 지적 대응이 들어오기 전(Issue #56 step3)에는 사람 대기로 세고 다음 할 일의 이유에 PR 번호를 적는다.
+  - 뒤처진 PR은 필수 체크가 모두 success일 때(위험도 높음은 `risk-gate`를 뺀 나머지)만 갱신한다. 승인 이어받기(10.3절)는 앞선 head의 판정이 success일 때만 되므로, 수정 요청 상태나 판정 중에 갱신하면 변경이 없어도 검증자 판정이 한 번 더 돈다. 충돌(`mergeStateStatus`가 DIRTY)은 `pull_request` 워크플로가 돌지 않아 아무것도 진행되지 않으므로 바로 갱신한다.
+  - 필수 체크가 모두 통과했는데 자동 병합이 꺼져 있으면 다시 켠다.
+  - push한 커밋이 PR head에 아직 반영되지 않았으면(원격 추적 브랜치와 PR head가 다르다, Q20) 옛 head의 결과로 판단하지 않고 기다린다.
+  - 같은 head에서 CI 대기나 판정 없음(`error`)이 `limits.ciStallHours`(기본 24시간, 9.1절 "검증자 장애 24시간")를 넘으면 Issue에 `needs-human`과 기다리는 체크·실행 링크를 한 번 알린다. 기다리기 시작한 head와 시각은 worktree 하네스 상태(`pr-wait.json`)에 두고 runner만 쓴다. 대기가 아닌 상태(수정 요청, 승인 대기 등)가 되면 알리지 않은 기록은 지워, 같은 head가 다시 대기할 때 새로 센다. runner는 판정 워크플로를 다시 실행하지 않는다.
+  - 승인 요청·대기 알림으로 붙인 `needs-human`은 그 PR이 병합됐거나 조치할 것이 없어지면 runner가 뗀다(할 일이 없는 바퀴에서, 병합된 worktree를 지우기 전에). 제작자가 그 Issue에 답하면 라벨만 떼고 완료된 step의 상태는 바꾸지 않는다.
 - 세션이 시간 제한(Q19)을 넘기면 runner가 세션을 끝내고 실패 1회로 기록한다. runner 자신은 죽지 않는다.
 - 계획 작성 세션이 "열린 질문"에 `### 질문:`(9.1절 형식)을 남기면 runner는 그 계획을 `blocked`로 커밋·push하고 Issue에 `needs-human` 라벨과 제작자 멘션으로 질문 전문을 올린다. 같은 질문은 다시 올리지 않는다. 제작자 답을 받으면 계획을 `draft`로 되돌리고 답을 넣어 계획 작성 세션을 다시 띄운다(Issue #33). step 세션이 남긴 새 질문도 runner가 AC 판정 전에 보고 같은 방법으로 올린다. 그 step은 실패로 세지 않고, 답을 받으면 계획을 `active`, step을 `in_progress`로 되돌려 답을 넣은 step 세션을 다시 띄운다(Issue #43).
 - 내 PR을 `origin/main`으로 갱신하다 충돌하면(ADR-0006) runner는 병합을 취소하고 Issue에 `needs-human`과 중단 보고를 남긴다. 계획 파일은 바꾸지 않는다(완료된 step의 PR에 `blocked`를 올리면 plan-gate가 실패한다). 대기는 worktree 하네스 상태(`conflict.json`)에 두고, 답을 받기 전에는 그 PR을 다시 고르지 않는다. 제작자 답을 받으면 runner가 `origin/main`을 다시 병합해 충돌을 남긴 채 충돌 해결 세션을 띄운다(답 본문을 넣는다). 세션은 파일만 고치고, runner가 충돌 표시·미병합 경로·step AC·`check`를 직접 확인한 뒤에만 병합 커밋을 만들어 일반 push한다. 실패하면 `git merge --abort`로 되돌리고 실패 1회(`pr:conflict`)로 센다. 5회면 다시 사람에게 넘긴다. 답 없이 자동으로 푸는 것은 2단계다(TD-9).
 - 세션이 띄운 프로세스(`dev` 서버 등)는 세션이 끝날 때 runner가 정리한다.
 
 **runner가 멈추는 조건** (이 밖에는 멈추지 않는다)
-- 할 일이 없고, 기다리는 것도 사람의 승인·답변뿐이다. 기다리는 것이 CI라면 정해진 간격으로 확인하며 대기한다.
+- 할 일이 없고, 기다리는 것도 사람의 승인·답변뿐이다. 기다리는 것이 CI라면 정해진 간격으로 확인하며 대기한다. 오래된 CI 대기를 이미 알린 PR과 열린 차단 지적이 있는 PR은 사람 대기로 센다.
 - 사용량 한도가 정해진 시간 넘게 풀리지 않는다.
 - 전체 실행 시간 상한(Q19)에 닿았다.
 - 멈출 때는 이유를 남기고 알린다(9.1절). 다시 시작하면 `index.json`과 원격 상태에서 이어 간다.
@@ -893,14 +904,14 @@ pnpm test src/auth/login-guard.spec.ts
 - merge queue는 개인 계정 리포에서 쓸 수 없다. GitHub 문서상 조직 소유 공개 리포와 GitHub Enterprise Cloud 조직의 비공개 리포만 대상이다(Q20). 위의 "최신 브랜치 필수 + 새 head의 `check`"가 같은 역할을 한다.
 - **체크 요약 API는 출처를 보지 않는다.** 필수 체크의 출처 지정(0.2절)은 병합 판정(`mergeStateStatus`)에만 반영된다. PR 체크 요약(GraphQL `statusCheckRollup.state`, `isRequired`)은 이름만 본다. 그래서 흉내 체크만 있는 PR도 요약은 `SUCCESS`이고 흉내 체크가 필수로 표시된다(Q20). 도구가 "검증 통과"를 판단할 때는 요약이 아니라 `mergeStateStatus`나 체크를 만든 App을 확인한다.
   - **구현**(`scripts/runner/pr-state.ts`, `scripts/lib/github.ts`의 `commitChecks`): 커밋의 커밋 상태 전체 기록과 check run을 출처와 함께 읽고, 설정 `ci.requiredChecks`의 context마다 기대 출처가 쓴 가장 최근 결과를 고른다. `recorder`는 작성자가 `ci.recorderBot`인 커밋 상태, `actions`는 GitHub Actions App의 check run이다. 다른 계정·App이 쓴 같은 이름의 결과는 없는 것(`missing`)으로 보고, 나중에 쓰였어도 기대 출처의 결과를 가리지 않는다. context별 최신 하나만 주는 API(체크 요약, combined status)는 쓰지 않는다.
-  - PR 분류(`classifyPr`): 충돌 → `check` 실패(바로 수정) → 진행 중·아직 없음(CI 대기) → 기계 판정 실패(수정) → 검증자 수정 요청·열린 차단 지적(지적 대응) → 판정 없음(`error`, 대기) → 뒤처짐(갱신) → 제작자 승인 대기 → 조치 없음 순으로 처음 맞는 것이다. 뒤처짐은 `mergeStateStatus`가 아니라 로컬 git(`origin/main`이 PR head의 조상인가)으로 본다. step이 끝나지 않은 PR(계획 검증 중)은 `plan-gate`·`risk-gate` 실패와 뒤처짐을 보지 않는다.
-  - `node scripts/harness.ts pr-state [--pr <번호>]`가 필수 체크별 출처·상태·설명과 분류를 보여 준다(읽기만). runner의 다음 할 일 고르기는 아직 체크 요약으로 실패를 찾는다. 분류로 바꾸는 것은 Issue #56 step1이다.
+  - PR 분류(`classifyPr`): 충돌 → `check` 실패(바로 수정) → 진행 중·아직 없음(CI 대기) → 기계 판정 실패(수정) → 검증자 수정 요청·열린 차단 지적(지적 대응) → 판정 없음(`error`, 대기) → 뒤처짐(갱신) → 제작자 승인 대기 → 조치 없음 순으로 처음 맞는 것이다. 뒤처짐은 `mergeStateStatus`가 아니라 로컬 git(`origin/main`이 PR head의 조상인가)으로 본다. step이 끝나지 않은 PR(계획 검증 중)은 `plan-gate`·`risk-gate` 실패와 뒤처짐을 보지 않는다. `deps-guard`·`harness-guard` 실패는 step 완료와 무관하게 고친다. step 완료 여부는 worktree가 아니라 PR head의 계획에서 읽는다(수정하다 실패해 step을 되돌린 커밋이 로컬에만 있어도 PR head는 완료된 step의 PR이다).
+  - `node scripts/harness.ts pr-state [--pr <번호>]`가 필수 체크별 출처·상태·설명과 분류를 보여 준다(읽기만). runner의 다음 할 일 고르기도 이 분류를 쓴다(4.5절 "내 PR 다루기").
 
 **절차**
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).
 2. 필수 체크가 모두 통과하면 GitHub이 squash merge 한다. 커밋 메시지에 계획 id를 넣는다.
 3. 위험도에 맞는 검증자가 모두 승인하면 계획 전용 커밋으로 계획을 완료 처리한다(8.3절). 위험도 높음이면 그 뒤에 제작자가 head를 승인한다.
-4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 병합이 충돌하면 병합을 취소하고 `needs-human`으로 넘기며, 제작자 답을 받으면 충돌 해결 세션으로 푼다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증하고, 위험도 높음이면 제작자도 새 head를 다시 승인한다.
+4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 병합을 취소하고 `needs-human`으로 넘기며, 제작자 답을 받으면 충돌 해결 세션으로 푼다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증하고, 위험도 높음이면 제작자도 새 head를 다시 승인한다.
 5. 병합되면 head 브랜치는 리포 설정으로 삭제되고, worktree는 runner의 다음 바퀴나 다음 세션 시작 시 정리한다(4.5절, 7.1절). 마지막 step이 병합되면 Issue가 자동으로 닫히고 `claim/<issue>` 브랜치도 정리한다. 남은 step이 있으면 runner가 다음 step을 시작한다. `merge` 스크립트는 이 정리를 수동으로 할 때 쓰는 편의 도구이며 강제 장치가 아니다.
 
 **병합 후 main CI가 실패하면**
