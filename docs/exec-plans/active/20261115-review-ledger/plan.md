@@ -117,6 +117,7 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step5: 제작자에게 요청(대화, 한 건): `review-ledger`를 main의 필수 상태 체크로 등록하고 출처를 검증 App `harness-recorder`로 지정. 절차는 [SECURITY.md](../../../SECURITY.md) "필수 체크 등록". 확인은 봇이 `node scripts/harness.ts required-checks`로 한다. 요청 전 확인: `review-ledger`는 PR #85·#86·#87·#88의 모든 판정에서 `harness-recorder[bot]`이 기록했다(금지사항 1).
 - 2026-11-15 step5: 제작자가 `review-ledger`를 필수 체크로 등록했다(대화 통보). 확인: `GET repos/ariawell-hub/harness_project/branches/main`의 `protection.required_status_checks.checks`에 `review-ledger`가 `app_id` 5764201(검증 App `harness-recorder`)로 있다. `node scripts/harness.ts required-checks` 종료 코드 0(`✓ review-ledger: 출처 recorder(5764201)` 포함 8개 모두 통과, `required-checks: 통과`). 수용 기준 9의 등록이 끝났다(PR #88 F4).
 - 2026-11-15 step5: AC 실행 결과. `node --test scripts/test/protection.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts` 종료 코드 0(33개 통과), `node scripts/harness.ts required-checks` 종료 코드 0, `grep -q '"required": true' harness.config.json` 통과.
+- 2026-11-15 step5: PR #88 판정(head 033e52d, 실행 43706570531·43706570542). 두 검증자 4라운드 승인(지적 없음). Codex가 F4를 `fixed`로 판정했고 `review-ledger`가 `failure`(Claude 기록 시점) → `success — 차단 지적 없음 (전체 4, 미룸 1)`로 바뀌었다. `review-ledger`가 필수 체크로 등록된 뒤의 첫 판정이다. `risk-gate`는 위험도 높음이라 완료 처리 뒤 제작자 head 승인을 요청한다.
 
 ## 의사결정 로그
 
@@ -182,6 +183,6 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step5 진행 중. 순서: ① 계획 수정(step6 추가)의 계획 검증 승인 확인(원장의 `계획 검증(G1)` 줄에 두 검증자) → ② `ci.requiredChecks`에 `review-ledger`, `init` 안내, `planReview.required: true`, 문서 → ③ 제작자에게 `review-ledger` 필수 체크 등록 요청 → ④ `required-checks` 통과 확인 뒤 완료 처리, 초안 해제와 승인 요청(`ci` 설정 변경이라 위험도 높음).
-- step6(금지사항을 해시와 자기 step 불변 규칙에): step5 병합 뒤 `new-task --plan 20261115-review-ledger --step 6`. 마지막 step이라 `Closes #55`.
-- 실제 PR에서 아직 보지 못한 것: 재현 테스트를 실제로 붙여 실행하는 경로, 반박 전달, 2라운드 동결(바뀌지 않은 파일의 새 P1). 기회가 없으면 미확인으로 정리한다.
+- step5: 완료 처리 뒤 초안을 해제하고 제작자 head 승인을 기다린다(위험도 높음). 병합되면 `planReview.required: true`와 `review-ledger` 필수 체크가 main에 적용된다.
+- step6(금지사항을 해시와 자기 step 불변 규칙에): step5 병합 뒤 `new-task --plan 20261115-review-ledger --step 6`. 마지막 step이라 `Closes #55`. step5 세션에서 써 둔 구현과 테스트가 있었지만 리포에 남기지 않았다. step6.md의 작업대로 테스트부터 다시 쓴다.
+- 실제 PR에서 보지 못한 것(진행 로그 "작업 1 정리"): 재현 테스트의 실제 실행, 반박 전달, 2라운드 동결, `ci-failure` job. 뒤 Issue(#56, #57)의 PR에서 기회가 생기면 확인한다.

@@ -34,7 +34,8 @@
     {
       "step": 5,
       "name": "verify-register",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T20:01:41+09:00"
     },
     {
       "step": 6,
