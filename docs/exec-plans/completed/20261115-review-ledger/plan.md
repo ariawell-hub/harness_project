@@ -2,7 +2,7 @@
 id: 20261115-review-ledger
 issue: 55 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -123,6 +123,8 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step6: 제작자 결정(대화): PR #88 F2(step5 작업 4의 괄호)는 step5.md를 고치지 않고 발견 사항에 남긴다. 켜진 상태의 `plan-gate` 통과는 이 PR에서 확인해 적는다.
 - 2026-11-15 step6: 테스트 먼저. `node --test scripts/test/plan-hash.test.ts scripts/test/plan-gate.test.ts scripts/test/gates.test.ts` 종료 코드 1(24개 중 3개 실패: 금지사항을 고쳐도 해시가 같다, 승인 뒤 금지사항을 고쳐도 G1이 통과한다, 자기 step의 금지사항을 지워도 통과한다). 구현 뒤 24개 통과. "금지사항을 고쳐도 해시가 같다"던 단언은 "읽어야 할 파일만 고치면 같다"로 바꾸고 금지사항은 "다르다" 쪽으로 옮겼다.
 - 2026-11-15 step6: AC 실행 결과. 위 테스트 명령 종료 코드 0, `grep -q "STEP_BOUND_SECTIONS"` 두 개 통과, `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step6: PR #89 판정(head 8ee9ed5). `gates`(실행 43708109196)는 main의 설정(`planReview.required: true`)으로 돈 첫 실행이다. `plan-gate` 상세에 G1 실패도 `G1(꺼짐)` 참고 줄도 없다. 계획 핵심 섹션이 main과 같아 (a) 경로로 통과했고 원장을 읽지 않았다(plan job 로그 `mode=code, 계획 해시 0fc4d16a42b8`, PR #88에서 승인받은 해시와 같다). `plan-gate`의 실패 두 건은 완료 처리 전이라 나온 것이다. `risk-gate` 위험도 보통, `harness-guard` 통과(보호 경로 10개).
+- 2026-11-15 step6: 두 검증자 1라운드 승인(지적 없음, 실행 43708293802·43708293786). `review-ledger = success — 원장 없음(등록된 지적이 없다)`. 지적이 없는 PR에서도 필수 체크 `review-ledger`가 기록되는 것을 확인했다(원장 댓글은 만들지 않는다).
 
 ## 의사결정 로그
 
@@ -190,5 +192,5 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step6(마지막 step): PR의 `plan-gate`가 `planReview.required: true` 아래에서 통과하는지 확인해 진행 로그에 적고, 두 검증자 승인 뒤 완료 처리한다(`Closes #55`).
-- 실제 PR에서 보지 못한 것(진행 로그 "작업 1 정리"): 재현 테스트의 실제 실행, 반박 전달, 2라운드 동결, `ci-failure` job. 뒤 Issue(#56, #57)의 PR에서 기회가 생기면 확인한다.
+- 이 계획은 step6으로 끝난다(Issue #55). 다음은 #56(runner 연결)이다. #56은 중·대 규모 새 계획이면 계획만 담은 커밋으로 먼저 계획 검증을 받아야 한다(`planReview.required: true`, 절차서 2절).
+- 실제 PR에서 보지 못한 것(진행 로그 "작업 1 정리"): 재현 테스트의 실제 실행, 반박 전달, 2라운드 동결, `ci-failure` job. #56·#57의 PR에서 기회가 생기면 확인한다.
