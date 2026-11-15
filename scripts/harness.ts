@@ -28,6 +28,7 @@ import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
 import { describeExcluded, describeTask, start } from './commands/start.ts';
+import { prReady } from './commands/pr-ready.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
 import { docLint, printDocLint } from './gates/doc-lint.ts';
@@ -49,6 +50,7 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
            [--owner <이름>] [--title <제목>] [--no-claim] [--no-setup] [--no-github]
   new-task --plan <계획 id> --step <N>     다음 step의 브랜치·worktree
   complete-step                            계획 전용 커밋(현재 worktree의 step 완료 처리)
+  pr-ready [--undo]                        승인 요청 전 조건 확인 뒤 PR 초안 해제(--undo: 초안으로 되돌림)
   claim-heartbeat --issue <N>              선점 생존 확인
   run [--worker runner-1] [--tool claude|codex] [--once] [--max-iterations N]   runner
 
@@ -117,6 +119,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   check: { type: 'boolean' },
   ci: { type: 'boolean' },
   'no-cache': { type: 'boolean' },
+  undo: { type: 'boolean' },
   base: { type: 'string' },
   only: { type: 'string' },
   repo: { type: 'string' },
@@ -594,6 +597,15 @@ async function main(argv: string[]): Promise<number> {
       const r = completeStep(cwd);
       log(
         `계획 전용 커밋 ${r.commit.slice(0, 10)}: ${r.id} ${r.step === null ? '' : `step${r.step} `}완료${r.last ? ' (마지막 step: completed/로 이동)' : ''}`,
+      );
+      return 0;
+    }
+    case 'pr-ready': {
+      const r = prReady(cwd, { undo: flag('undo') });
+      log(
+        r.undone
+          ? `pr-ready: PR #${r.pr}을 초안으로 되돌리고 승인 요청 표시를 지웠다`
+          : `pr-ready: PR #${r.pr}의 초안을 해제했다(승인 요청, head ${r.sha?.slice(0, 10)}). 이 뒤로는 커밋을 더 올리지 않는다`,
       );
       return 0;
     }

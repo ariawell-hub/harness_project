@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { commandName, parseShell } from '../hooks/shell.ts';
+import { commandName, parseSequence, parseShell } from '../hooks/shell.ts';
 
 const argvs = (s: string) => parseShell(s).map((c) => c.argv);
 const ps = (s: string) => parseShell(s, 'powershell').map((c) => c.argv);
@@ -108,4 +108,34 @@ test('heredoc 본문은 명령으로 보지 않는다', () => {
 
 test('주석은 무시한다', () => {
   assert.deepEqual(argvs('ls # git push origin main'), [['ls']]);
+});
+
+test('parseSequence: 최상위 명령과 그 뒤 연산자를 돌려준다', () => {
+  const seq = (s: string) => parseSequence(s).map((x) => [x.cmd.argv.join(' '), x.next]);
+  assert.deepEqual(seq('a && b; c | d'), [
+    ['a', '&&'],
+    ['b', ';'],
+    ['c', '|'],
+    ['d', null],
+  ]);
+  assert.deepEqual(seq('a\nb'), [
+    ['a', ';'],
+    ['b', null],
+  ]);
+  // 묶음 괄호는 연산자로 세지 않는다: 닫는 괄호 뒤의 연산자가 마지막 명령의 연산자다
+  assert.deepEqual(seq('(cd x && a) && b'), [
+    ['cd x', '&&'],
+    ['a', '&&'],
+    ['b', null],
+  ]);
+  assert.deepEqual(seq('{ a; } || b'), [
+    ['a', '||'],
+    ['b', null],
+  ]);
+  // 접두어를 벗기고, 치환·bash -c 안으로는 들어가지 않는다
+  assert.deepEqual(seq('FOO=1 sudo a x > out 2>&1 && bash -c "b; c"'), [
+    ['a x > out 2>&1', '&&'],
+    ['bash -c b; c', null],
+  ]);
+  assert.deepEqual(seq('echo "$(a | b)"'), [['echo $(…)', null]]);
 });

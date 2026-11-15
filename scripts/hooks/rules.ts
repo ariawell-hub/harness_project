@@ -6,7 +6,14 @@ import path from 'node:path';
 import type { RepoInfo } from '../lib/git.ts';
 import { PLANS_DIR, parseBranch } from '../lib/plan.ts';
 import type { Problem } from '../lib/util.ts';
-import { baseName, commandName, parseShell, type Dialect, type SimpleCommand } from './shell.ts';
+import {
+  baseName,
+  commandName,
+  parseSequence,
+  parseShell,
+  type Dialect,
+  type SimpleCommand,
+} from './shell.ts';
 
 export type ToolKind = 'bash' | 'read' | 'write' | 'other';
 
@@ -36,6 +43,13 @@ export interface GuardContext {
   planOwner?: (root: string, id: string) => string | null;
   /** 현재 작업자 이름(HARNESS_WORKER, 없으면 session) */
   worker?: string;
+  /**
+   * 승인 요청 표시가 있는 브랜치면 표시 뒤에 더한 병합이 아닌 커밋 수. 표시가 없거나 모르면 null.
+   * branch가 null이면 dir의 현재 브랜치다(Issue #78 step2)
+   */
+  approvalPending?: (dir: string, branch: string | null) => number | null;
+  /** 브랜치 계획의 위험도(low|normal|high). 모르면 null */
+  planRisk?: (dir: string, branch: string | null) => string | null;
 }
 
 const D = 'docs/harness/design.md';
@@ -124,6 +138,27 @@ function gitSplit(argv: string[]): { configs: string[]; sub: string; args: strin
   return { configs, sub: argv[i] ?? '', args: argv.slice(i + 1) };
 }
 
+/** `git -C <dir>`가 가리키는 폴더. 없으면 cwd */
+function gitWorkDir(argv: string[], cwd: string): string {
+  let dir = cwd;
+  for (let i = 1; i < argv.length && argv[i].startsWith('-'); i++) {
+    if (argv[i] === '-C' && argv[i + 1]) dir = path.resolve(dir, argv[i + 1]);
+    if (GIT_GLOBAL_WITH_VALUE.has(argv[i])) i++;
+  }
+  return dir;
+}
+
+/** push refspec의 원본 브랜치. `HEAD`나 빈 값이면 null(현재 브랜치) */
+function refSource(ref: string): string | null {
+  const src = ref
+    .replace(/^\+/, '')
+    .split(':')[0]
+    .replace(/^refs\/heads\//, '');
+  return src === '' || src === 'HEAD' ? null : src;
+}
+
+const APPROVAL_DOC = 'docs/harness/workflow.md 5절 "승인 요청 전 조건", AGENTS.md 작업 루프 6번';
+
 function shortCluster(a: string, letter: string): boolean {
   return /^-[a-zA-Z]+$/.test(a) && a.slice(1).includes(letter);
 }
@@ -211,6 +246,22 @@ function gitRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | n
         '작업 브랜치에서 push하고 PR을 열어라. 브랜치·worktree는 `node scripts/harness.ts new-task`가 만든다',
         `${D} R2`,
       );
+    }
+    if (ctx.approvalPending) {
+      const dir = gitWorkDir(c.argv, cwd);
+      for (const branch of refs.length ? refs.map(refSource) : [null]) {
+        const extra = ctx.approvalPending(dir, branch);
+        if (extra) {
+          return v(
+            '승인 요청 뒤 push',
+            `승인을 요청한 PR 브랜치(${branch ?? '현재 브랜치'})에 새 커밋 ${extra}개를 push하려 했다. head가 바뀌면 승인이 철회된다`,
+            '미룰 수 있는 변경은 다음 PR에 넣어라. 꼭 올려야 하면 제작자에게 먼저 알리고 ' +
+              '`node scripts/harness.ts pr-ready --undo`로 승인 요청을 거둔 뒤 push하고, 끝나면 `pr-ready`로 다시 요청하라. ' +
+              'main 병합 갱신(병합 커밋만 더함)은 막지 않는다',
+            APPROVAL_DOC,
+          );
+        }
+      }
     }
   }
   if (sub === 'add' && args.some((a) => a === '--force' || shortCluster(a, 'f'))) {
@@ -307,7 +358,7 @@ function gitRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | n
 const SENSITIVE_API =
   /(?:^|\/)(?:branches\/[^/]+\/protection|rulesets|environments|actions\/(?:secrets|variables|permissions|runners)|dependabot\/secrets|codespaces\/secrets|collaborators|invitations|keys|hooks|autolinks|teams|installation|pulls\/\d+\/reviews|actions\/workflows\/[^/]+\/disable)(?:\/|$|\?)/;
 
-function ghRules(c: SimpleCommand): Problem | null {
+function ghRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | null {
   const a = c.argv.slice(1);
   const [g1, g2] = a;
   const r20 = (what: string) =>
@@ -387,6 +438,33 @@ function ghRules(c: SimpleCommand): Problem | null {
         return r20(`gh api ${method} ${endpoint}로 보호 설정·시크릿·승인을 바꾸려 했다`);
       if (/^repos\/[^/]+\/[^/]+\/?$/.test(endpoint) && method !== 'POST')
         return r20(`gh api ${method} ${endpoint}로 리포 설정을 바꾸려 했다`);
+    }
+  }
+  if (g1 === 'pr' && g2 === 'ready') {
+    return v(
+      '승인 요청 순서',
+      'gh pr ready를 직접 실행하려 했다. 초안 해제는 승인 요청이라 조건 확인이 먼저다',
+      'worktree 안에서 `node scripts/harness.ts pr-ready`를 써라(완료 처리·push·main 병합을 확인하고 초안을 해제한다). ' +
+        '초안으로 되돌릴 때는 `node scripts/harness.ts pr-ready --undo`',
+      APPROVAL_DOC,
+    );
+  }
+  if (g1 === 'pr' && g2 === 'create' && ctx.planRisk) {
+    let head: string | null = null;
+    let draft = false;
+    for (let i = 2; i < a.length; i++) {
+      const x = a[i];
+      if (x === '--head' || x === '-H') head = a[++i] ?? null;
+      else if (x.startsWith('--head=')) head = x.slice(7);
+      else if (x === '--draft' || x === '-d') draft = true;
+    }
+    if (!draft && ctx.planRisk(cwd, head) === 'high') {
+      return v(
+        '승인 요청 순서',
+        '위험도 높음 계획의 PR을 초안이 아닌 상태로 만들려 했다. 만들자마자 승인 요청이 된다',
+        '`gh pr create --draft`로 올리고, 끝난 뒤 `node scripts/harness.ts pr-ready`로 초안을 해제하라',
+        APPROVAL_DOC,
+      );
     }
   }
   return null;
@@ -713,6 +791,92 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
   return null;
 }
 
+// ---------- 검사 순서 (R4, TD-29) ----------
+
+/** `node …/scripts/harness.ts <sub>`의 sub. 하네스 명령이 아니면 null */
+function harnessSub(c: SimpleCommand): string | null {
+  if (!c.argv.length || commandName(c.argv[0]) !== 'node') return null;
+  const k = c.argv.findIndex((a, i) => i > 0 && /(?:^|[\\/])harness\.ts$/.test(a));
+  return k > 0 ? (c.argv[k + 1] ?? null) : null;
+}
+
+function isCheckCommand(c: SimpleCommand): boolean {
+  const sub = harnessSub(c);
+  return sub === 'check' || sub === 'test';
+}
+
+/** 검사가 통과한 뒤에만 실행돼야 하는 작업의 이름. 아니면 null */
+function followUp(c: SimpleCommand): string | null {
+  const sub = harnessSub(c);
+  if (sub === 'complete-step' || sub === 'pr-ready') return sub;
+  if (!c.argv.length) return null;
+  const head = commandName(c.argv[0]);
+  if (head === 'git' && gitSplit(c.argv).sub === 'push') return 'git push';
+  if (head === 'gh' && c.argv[1] === 'pr' && (c.argv[2] === 'create' || c.argv[2] === 'ready'))
+    return `gh pr ${c.argv[2]}`;
+  return null;
+}
+
+/** `set -e`, `set -eu`, `set -o errexit`, `set -o pipefail` 같은 셸 옵션 */
+function setOptions(c: SimpleCommand): { errexit: boolean; pipefail: boolean } {
+  const none = { errexit: false, pipefail: false };
+  if (!c.argv.length || c.argv[0] !== 'set') return none;
+  const a = c.argv.slice(1);
+  return {
+    errexit: a.some(
+      (x, i) =>
+        (/^-[a-zA-Z]+$/.test(x) && x.includes('e')) ||
+        (x === 'errexit' && /^-[a-zA-Z]*o$/.test(a[i - 1] ?? '')),
+    ),
+    pipefail: a.some((x, i) => x === 'pipefail' && /^-[a-zA-Z]*o$/.test(a[i - 1] ?? '')),
+  };
+}
+
+const CHECK_HOW =
+  '검사 결과는 종료 코드로 이어라. 출력은 파일로 보낸다: ' +
+  '`node scripts/harness.ts check > check.log 2>&1 && <다음 명령>`. ' +
+  '출력을 줄여 보려면 앞에 `set -o pipefail`을 둔다';
+
+/**
+ * 검사 명령(`harness.ts check`·`test`)의 실패가 가려지는 꼴을 막는다(절차서 4절, TD-29).
+ * 1. 출력 가림: 검사 명령 바로 뒤가 파이프인데 `set -o pipefail`이 없다.
+ * 2. 실패 뒤 진행: 검사 명령과 그 뒤 완료 처리·push·PR 생성 사이가 `&&`로만 이어지지 않았다(`set -e`가 없을 때).
+ */
+function sequenceRules(command: string): Problem | null {
+  let errexit = false;
+  let pipefail = false;
+  let checked = false; // 검사 명령이 앞에 있었다
+  let broken = false; // 그 뒤 `&&`가 아닌 연산자로 이어진 적이 있다
+  for (const { cmd, next } of parseSequence(command, 'posix')) {
+    const opts = setOptions(cmd);
+    errexit ||= opts.errexit;
+    pipefail ||= opts.pipefail;
+    const isCheck = isCheckCommand(cmd);
+    const piped = next === '|' || next === '|&';
+    if (isCheck && piped && !pipefail) {
+      return v(
+        'R4 검사 우회',
+        '검사 명령의 출력을 파이프로 넘겼다. 파이프의 종료 코드는 마지막 명령의 것이라 검사가 실패해도 통과로 보인다',
+        CHECK_HOW,
+        'docs/harness/workflow.md 4절, TD-29',
+      );
+    }
+    const what = followUp(cmd);
+    if (what && checked && broken && !errexit) {
+      return v(
+        'R4 검사 우회',
+        `검사 명령 뒤에 \`&&\`가 아닌 연산자(\`;\`·줄바꿈·\`||\`·\`&\`)를 거쳐 ${what}이(가) 이어진다. 검사가 실패해도 실행된다`,
+        CHECK_HOW,
+        'docs/harness/workflow.md 4절, TD-29',
+      );
+    }
+    if (isCheck) checked = true;
+    // pipefail이 켜진 파이프는 검사의 종료 코드를 그대로 넘긴다
+    if (checked && next !== null && next !== '&&' && !piped) broken = true;
+  }
+  return null;
+}
+
 // ---------- 진입점 ----------
 
 export function evaluateBash(
@@ -723,18 +887,21 @@ export function evaluateBash(
 ): Problem | null {
   const raw = rawRules(command);
   if (raw) return raw;
+  let procedural: Problem | null = null;
   for (const c of parseShell(command, dialect)) {
     const head = c.argv.length ? commandName(c.argv[0]) : '';
     const r =
       secretRules(c, ctx) ??
       (head === 'git' ? gitRules(c, cwd, ctx) : null) ??
-      (head === 'gh' ? ghRules(c) : null) ??
+      (head === 'gh' ? ghRules(c, cwd, ctx) : null) ??
       (c.argv.length ? dbRules(c, ctx) : null) ??
       (c.argv.length ? rmRule(c, cwd, ctx) : null) ??
       (c.argv.length ? externalRules(c) : null);
-    if (r) return r;
+    // 금지 규칙(R…)이 먼저다. 승인 요청 순서 같은 절차 안내는 뒤 명령의 금지 규칙과 검사 순서 규칙을 가리지 않는다
+    if (r && /^R\d/.test(r.rule)) return r;
+    procedural ??= r;
   }
-  return null;
+  return (dialect === 'posix' ? sequenceRules(command) : null) ?? procedural;
 }
 
 /**

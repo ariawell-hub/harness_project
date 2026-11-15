@@ -411,6 +411,50 @@ export function parseShell(src: string, dialect: Dialect = 'posix'): SimpleComma
   return out;
 }
 
+export interface SequencedCommand {
+  cmd: SimpleCommand;
+  /** 이 명령 바로 뒤의 연산자(`&&`, `||`, `;`, `|`, `|&`, `&`). 줄바꿈은 `;`, 마지막 명령은 null */
+  next: string | null;
+}
+
+const GROUP_OPS = new Set(['(', ')', '{', '}']);
+
+/**
+ * 최상위 명령을 순서대로, 그 뒤 연산자와 함께 돌려준다(검사 순서 규칙용).
+ * `parseShell`과 달리 치환·`bash -c` 안으로 들어가지 않는다. 묶음 괄호는 연산자로 세지 않는다.
+ */
+export function parseSequence(src: string, dialect: Dialect = 'posix'): SequencedCommand[] {
+  const out: SequencedCommand[] = [];
+  let cur: string[] = [];
+  const flush = (op: string | null) => {
+    if (cur.length) {
+      const one: SimpleCommand[] = [];
+      normalize(cur, one, MAX_DEPTH, dialect);
+      if (one.length) out.push({ cmd: one[0], next: op });
+    }
+    cur = [];
+  };
+  // 묶음을 닫기 직전의 `;`(예: `{ a; } && b`)는 묶음 뒤 연산자로 바꿔 읽는다
+  let semiJustNow = false;
+  for (const t of tokenize(src, [], dialect)) {
+    if (t.kind !== 'op') {
+      cur.push(t.value);
+      semiJustNow = false;
+      continue;
+    }
+    const op = t.value === ';;' ? ';' : t.value;
+    const group = GROUP_OPS.has(op);
+    const last = out[out.length - 1];
+    if (cur.length) flush(group ? null : op);
+    else if (group) {
+      if ((op === ')' || op === '}') && semiJustNow && last) last.next = null;
+    } else if (last && last.next === null) last.next = op;
+    semiJustNow = op === ';';
+  }
+  flush(null);
+  return out;
+}
+
 export function baseName(cmd: string): string {
   const parts = cmd.split(/[\\/]/);
   return parts[parts.length - 1];

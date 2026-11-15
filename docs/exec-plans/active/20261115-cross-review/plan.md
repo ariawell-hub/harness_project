@@ -83,7 +83,7 @@ claimed_at: 2026-11-15T10:10:42+09:00 # new-task가 채운다
   - head 767915d: `review/claude` 승인, `review/codex` 수정 요청(P1: 검증 결과 기록 없음) → 기록을 더한 head 0220bd3에서 둘 다 `승인 (지적 없음) patch:c0070d71…`.
   - main이 PR #76 병합으로 나아간 뒤 `origin/main`을 병합한 head 26876ba: 두 워크플로 모두 `plan`이 `이어받음 ← 0220bd33c5b0`을 내고 판정 job(`judge`, Codex는 `pubkey`·`store`도)은 건너뛰었다. `record`가 `이어받음 0220bd33c5b0 patch:c0070d71…`을 success로 기록했다(작성자 `harness-recorder[bot]`). PR API의 `base.sha`는 main 최신이었다(merge-base가 병합한 main 커밋이라 patch가 같았다).
   - 공백만 바꾼 head ce86556(로컬에서 잰 patch-id는 전과 같음): `다시 검증 — PR 파일의 내용이 다르다`로 두 검증자가 다시 판정했다. 공백은 되돌렸다.
-- 2026-11-15 step4: 문서 갱신. 설계서 0.2절 필수 체크 목록, 10.3절·13.3절 실제 확인 결과(v0.7.25), 절차서 5절 필수 체크 문장, TD-1 비고. Codex 실행 중 인증 갱신은 관찰하지 못했다(모든 실행에서 `changed=false`). TD-1 비고에 확인 방법을 남겼다.
+- 2026-11-15 step4: 문서 갱신. 설계서 0.2절 필수 체크 목록, 10.3절·13.3절 실제 확인 결과(v0.7.28, main 병합 때 v0.7.25에서 다시 매김), 절차서 5절 필수 체크 문장, TD-1 비고. Codex 실행 중 인증 갱신은 관찰하지 못했다(모든 실행에서 `changed=false`). TD-1 비고에 확인 방법을 남겼다.
 
 ## 의사결정 로그
 
