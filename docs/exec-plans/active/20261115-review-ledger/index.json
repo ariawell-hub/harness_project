@@ -1,0 +1,35 @@
+{
+  "plan": "20261115-review-ledger",
+  "steps": [
+    {
+      "step": 0,
+      "name": "ledger-core",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "ledger-record",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "rebuttal",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "repro-job",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "plan-review",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "verify-register",
+      "status": "pending"
+    }
+  ]
+}
