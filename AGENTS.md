@@ -22,6 +22,8 @@ node scripts/harness.ts start
 5. **완료 처리**: `node scripts/harness.ts complete-step` (계획 전용 커밋)
 6. **PR**: push → PR(`Refs #N`, 마지막 step만 `Closes #N`) → `gh pr merge --auto --squash`
    - main에 뒤처지거나 충돌한 PR은 rebase하지 않고 `origin/main`을 병합해 일반 push로 갱신한다([workflow.md](docs/harness/workflow.md) 5절, ADR-0006).
+   - **승인 요청은 PR이 끝난 뒤에 한 번만 한다.** 위험도 높음 PR은 초안으로 올리고, 완료 처리·기록·main 병합·`check`·제작자 작업 반영이 끝난 뒤 초안을 해제하며 승인을 요청한다([workflow.md](docs/harness/workflow.md) 5절 "승인 요청 전 조건").
+   - **제작자 작업은 한 번에 모아 요청한다.** 순서, 확인 방법, 절차 문서 링크, 넣을 값의 형식을 함께 적는다.
    - **제작자 승인을 요청한 PR에는 커밋을 더 올리지 않는다.** 승인은 head 커밋에 묶여 있어 새 커밋이 올라가면 철회되고 다시 승인해야 한다. 꼭 올려야 하면 push 전에 제작자에게 먼저 알린다. 미룰 수 있는 변경(기록, 문서 보완)은 다음 PR에 넣는다.
 7. 남은 step은 병합 뒤 `new-task --plan <id> --step <N>`으로 새 브랜치에서 이어 간다.
 
@@ -29,7 +31,18 @@ node scripts/harness.ts start
 
 - step 하나 = 세션 하나 = PR 하나.
 - 판단이 필요하면 혼자 추측하지 말고 묻는다. 단, "반드시 묻는 것"이 아니면 추천안으로 진행하고 의사결정 로그에 남긴다. 질문은 작업 시작 때 모은다. 기준과 형식은 [workflow.md](docs/harness/workflow.md) 7절 "에스컬레이션".
+- 추천안이 있으면 묻지 않고 그대로 진행한다. 물을 때는 "반드시 묻는다"의 어느 항목에 해당하는지 적는다.
+- 멈추거나 기다릴 때는 무엇을 기다리는지, 누가 풀어야 하는지(봇·제작자·CI), 그동안 무엇을 하는지를 알린다. 제작자 차례가 아니면 막히지 않은 일을 이어 간다.
 - 제작자가 대화로 직접 지시한 일은 묻지 않고 봇이 Issue를 등록해 시작한다([workflow.md](docs/harness/workflow.md) 1절).
+- 위험도 high는 기준(보안·인증·마이그레이션·데이터 스크립트)에 해당하는 작업에만 붙인다. 애매하면 high다([workflow.md](docs/harness/workflow.md) 1절).
+
+## 명령 작성 규칙
+
+- `check`·`test`의 출력을 `| tail`, `| head`, `| grep`으로 자르지 않는다. 실패가 가려진다. 출력은 파일로 보낸다.
+- `check`와 `complete-step`·`git push`·`gh pr create`는 `&&`로만 잇는다. `;`나 줄바꿈으로 이으면 실패한 뒤에도 실행된다.
+- 기다릴 때는 `sleep N; <명령>`이 아니라 `until <조건>; do sleep 10; done`을 쓴다.
+- 임시 폴더는 `mktemp -d`로 새로 만들고 지우지 않는다. 변수 경로를 재귀 삭제하지 않는다(R14).
+- 명령에 `GH_TOKEN=…`을 붙이지 않는다. 세션이 받은 봇 토큰이 그대로 쓰인다(R20).
 
 ## 표준 명령
 

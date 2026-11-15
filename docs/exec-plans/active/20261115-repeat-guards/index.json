@@ -1,0 +1,25 @@
+{
+  "plan": "20261115-repeat-guards",
+  "steps": [
+    {
+      "step": 0,
+      "name": "rules-doc",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "command-guard",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "approval-guard",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "session-hooks",
+      "status": "pending"
+    }
+  ]
+}
