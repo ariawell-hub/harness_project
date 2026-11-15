@@ -80,8 +80,8 @@ test('planHash: 진행 로그·상태·위치·줄 끝 공백이 바뀌어도 �
   write(root, `${DIR}/plan.md`, PLAN({ status: 'completed', log: '- 시작\n- step0 완료' }));
   write(root, `${DIR}/index.json`, INDEX(['completed', 'in_progress']));
   assert.equal(planHash(root, DIR), h);
-  // 해시에 들어가지 않는 step 섹션
-  write(root, `${DIR}/step0.md`, STEP(0, { read: '- docs/a.md', ban: '- X를 하지 마라. 이유: Y' }));
+  // 해시에 들어가지 않는 step 섹션(안내용 "읽어야 할 파일")
+  write(root, `${DIR}/step0.md`, STEP(0, { read: '- docs/a.md' }));
   assert.equal(planHash(root, DIR), h);
   // 줄 끝 공백, CRLF, 섹션 앞뒤 빈 줄
   write(
@@ -95,7 +95,7 @@ test('planHash: 진행 로그·상태·위치·줄 끝 공백이 바뀌어도 �
   assert.equal(planHash(moved, DONE), h);
 });
 
-test('planHash: 목표·범위·관련 파일, step의 작업·AC, step 파일 수가 바뀌면 다르다', () => {
+test('planHash: 목표·범위·관련 파일, step의 작업·AC·금지사항, step 파일 수가 바뀌면 다르다', () => {
   const base = planHash(planDir(), DIR);
   const changed: [string, (root: string) => void][] = [
     ['목표', (r) => write(r, `${DIR}/plan.md`, PLAN({ goal: '- 데모 함수를 둘 만든다' }))],
@@ -104,6 +104,12 @@ test('planHash: 목표·범위·관련 파일, step의 작업·AC, step 파일 �
     ['작업', (r) => write(r, `${DIR}/step1.md`, STEP(1, { work: '- 파일을 지운다' }))],
     ['AC', (r) => write(r, `${DIR}/step1.md`, STEP(1, { ac: 'true' }))],
     ['AC 줄 안 공백', (r) => write(r, `${DIR}/step1.md`, STEP(1, { ac: 'test  -f s1.txt' }))],
+    // 승인 뒤 금지사항을 지우거나 고치는 것도 계획 수정이다(PR #87 F2)
+    ['금지사항', (r) => write(r, `${DIR}/step1.md`, STEP(1, { ban: '- X를 하지 마라. 이유: Y' }))],
+    [
+      '금지사항 섹션 삭제',
+      (r) => write(r, `${DIR}/step1.md`, STEP(1).replace(/\n## 금지사항[\s\S]*$/, '')),
+    ],
     ['새 step', (r) => write(r, `${DIR}/step2.md`, STEP(2))],
     // 같은 내용이라도 다른 step에 있으면 다른 계획이다
     [

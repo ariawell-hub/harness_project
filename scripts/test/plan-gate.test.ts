@@ -117,6 +117,12 @@ test('G1 (c): 계획 승인이 없거나 승인 뒤 핵심 섹션이 바뀌었�
   const stale = gate(o, g1(o.root, { review: { hash, approvals: [...BOTH] } }));
   assert.notEqual(planHash(o.root, DIR), hash);
   assert.match(whats(stale), /G1/);
+  assert.match(stale.problems[0].how, /금지사항/);
+  // 다른 step의 금지사항을 고쳐도 승인이 무효가 된다
+  write(o.root, `${DIR}/step1.md`, `${STEP(1)}\n## 금지사항\n- X를 하지 마라. 이유: Y\n`);
+  const ban = gate(o, g1(o.root, { review: { hash, approvals: [...BOTH] } }));
+  assert.notEqual(planHash(o.root, DIR), hash);
+  assert.match(whats(ban), /G1/);
   // merge-base의 해시와도 다르면 (a)로 통과하지 않는다
   const moved = gate(o, g1(o.root, { baseHash: hash, review: null }));
   assert.match(whats(moved), /G1/);

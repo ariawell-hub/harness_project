@@ -40,7 +40,8 @@
     {
       "step": 6,
       "name": "bind-prohibitions",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-15T20:22:43+09:00"
     }
   ]
 }

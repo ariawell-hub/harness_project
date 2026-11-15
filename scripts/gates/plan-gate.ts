@@ -1,4 +1,4 @@
-// plan-gate (R1, G1, 10.3절): 계획 파일·필수 섹션·size·risk·step 상태·자기 step AC 불변·발견 사항 처리.
+// plan-gate (R1, G1, 10.3절): 계획 파일·필수 섹션·size·risk·step 상태·자기 step 작업·AC·금지사항 불변·발견 사항 처리.
 // 중·대 규모의 G1(계획 교차 검증 확인)은 호출자가 넘긴 해시와 원장의 계획 승인으로 판정한다. planReview.required로 켠다.
 // CI에서는 main의 이 스크립트가 PR head 체크아웃(pr/)을 데이터로만 읽는다. PR 코드를 실행하지 않는다.
 import { existsSync, readFileSync } from 'node:fs';
@@ -9,6 +9,7 @@ import {
   PLAN_STATUSES,
   RISKS,
   SIZES,
+  STEP_BOUND_SECTIONS,
   STEP_STATUSES,
   extractCommands,
   findPlan,
@@ -94,7 +95,7 @@ function checkG1(g: PlanG1 | undefined): { ok: boolean | null; what: string; how
     return {
       ok: false,
       what: `G1: 승인받은 뒤 계획 핵심 섹션이 바뀌었다(승인 ${g.review.hash.slice(0, 12)}, 지금 ${short})`,
-      how: `목표·수용 기준, 범위, 관련 파일, step의 작업·AC를 바꿨으면 다시 검증받는다. ${PLAN_ONLY_HOW}`,
+      how: `목표·수용 기준, 범위, 관련 파일, step의 작업·AC·금지사항을 바꿨으면 다시 검증받는다. ${PLAN_ONLY_HOW}`,
     };
   const approvals = g.review.approvals;
   const missing = g.reviewers.filter((r) => !approvals.includes(r));
@@ -304,7 +305,7 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
       problems.push(P('남은 step이 있는데 계획이 completed/에 있다', '계획을 active/로 되돌려라'));
   }
 
-  // 자기 step 파일의 작업·AC는 바꿀 수 없다 (8.2절)
+  // 자기 step 파일의 작업·AC·금지사항은 바꿀 수 없다 (8.2절)
   if (o.base && ref.kind === 'multi' && b.step !== null) {
     const readBase = (f: string) => showFile(o.root, o.base!, f);
     const baseRef = findPlanAt(readBase, b.id);
@@ -314,10 +315,10 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
         const headText = read(o.root, stepFile(ref, i));
         if (baseText === null || headText === null) {
           if (baseText === null && i <= b.step && b.step > 0)
-            notes.push(`step${i} 파일이 base에 없다: 계획 수정으로 본다(2단계에서 G1 재검증 대상)`);
+            notes.push(`step${i} 파일이 base에 없다: 계획 수정으로 본다(G1 재검증 대상)`);
           continue;
         }
-        const changed = ['작업', 'Acceptance Criteria'].filter(
+        const changed = STEP_BOUND_SECTIONS.filter(
           (s) => hashText(section(baseText, s) ?? '') !== hashText(section(headText, s) ?? ''),
         );
         if (!changed.length) continue;
@@ -325,13 +326,11 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
           problems.push(
             P(
               `이 PR이 실행하는 step${i}의 ${changed.join('·')} 섹션을 바꿨다`,
-              'step의 작업·AC는 실행 PR에서 바꿀 수 없다. 계획을 고쳐야 하면 별도 계획 수정으로 처리하라(G1)',
+              'step의 작업·AC·금지사항은 실행 PR에서 바꿀 수 없다. 계획을 고쳐야 하면 별도 계획 수정으로 처리하라(G1)',
             ),
           );
         } else {
-          notes.push(
-            `step${i}의 ${changed.join('·')}가 바뀌었다: 계획 수정(2단계에서 G1 재검증 대상)`,
-          );
+          notes.push(`step${i}의 ${changed.join('·')}가 바뀌었다: 계획 수정(G1 재검증 대상)`);
         }
       }
     }
