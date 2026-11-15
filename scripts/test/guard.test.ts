@@ -543,3 +543,94 @@ test('검사 순서 규칙은 POSIX 방언에만 적용한다', () => {
     null,
   );
 });
+
+// ---------- 승인 요청 뒤 push·초안 해제 (Issue #78 step2) ----------
+
+test('승인 요청 규칙: gh pr ready 직접 실행, 승인 요청 뒤 push, 위험도 높음의 초안 아닌 PR 생성을 막는다', () => {
+  const seen: [string, string | null][] = [];
+  const c = ctx({
+    approvalPending: (dir, branch) => {
+      seen.push([dir, branch]);
+      if (branch === 'feat/20261115-asked-s0') return 2;
+      if (branch === 'feat/20261115-merged-s0') return 0;
+      if (branch === null && dir === '/work/asked') return 1;
+      return null;
+    },
+    planRisk: (_dir, branch) => (branch === 'feat/20261115-high-s0' ? 'high' : 'normal'),
+  });
+  const blocked = (cmd: string, re: RegExp) => {
+    const p = bash(cmd, c);
+    assert.ok(p, `차단되어야 한다: ${cmd}`);
+    assert.match(p.rule, /^승인 요청/, cmd);
+    assert.match(p.how, re, cmd);
+  };
+  blocked('gh pr ready 12', /pr-ready/);
+  blocked('gh pr ready --undo 12', /pr-ready --undo/);
+  blocked('git push origin feat/20261115-asked-s0', /pr-ready --undo/);
+  blocked('git push -u origin feat/20261115-asked-s0:feat/20261115-asked-s0', /제작자/);
+  blocked('git -C /work/asked push', /pr-ready --undo/);
+  blocked('git -C /work/asked push origin HEAD', /pr-ready --undo/);
+  blocked('gh pr create --head feat/20261115-high-s0 --title x --body y', /--draft/);
+  blocked('gh pr create -H feat/20261115-high-s0 --title x --body y', /--draft/);
+  // main 병합 커밋만 더한 push, 표시가 없는 브랜치, 초안 PR, 위험도 보통은 허용한다
+  assert.equal(bash('git push origin feat/20261115-merged-s0', c), null);
+  assert.equal(bash('git push origin feat/20261115-free-s0', c), null);
+  assert.equal(bash('gh pr create --draft --head feat/20261115-high-s0 --title x', c), null);
+  assert.equal(bash('gh pr create -d -H feat/20261115-high-s0 --title x', c), null);
+  assert.equal(bash('gh pr create --head feat/20261115-free-s0 --title x --body y', c), null);
+  assert.equal(bash('node scripts/harness.ts pr-ready', c), null);
+  assert.equal(bash('gh pr view 12', c), null);
+  // 기존 규칙이 먼저다: force push는 R14, main push는 R2
+  assert.match(bash('git push -f origin feat/20261115-asked-s0', c)!.rule, /^R14/);
+  assert.match(bash('git push origin main', c)!.rule, /^R2/);
+  // -C가 있으면 그 폴더 기준으로 조회한다
+  assert.ok(seen.some(([d, b]) => d === '/work/asked' && b === null));
+  // 조회 함수가 없는 문맥(다른 도구·테스트)에서는 push·PR 생성을 막지 않는다
+  assert.equal(bash('git push origin feat/20261115-asked-s0'), null);
+  assert.equal(bash('gh pr create --head feat/20261115-high-s0 --title x --body y'), null);
+});
+
+test('승인 요청 규칙: 실제 worktree의 표시와 계획 위험도로 판정한다', () => {
+  const dir = tmp();
+  const main = path.join(dir, 'repo');
+  gitInit(main);
+  write(main, 'README.md', 'x');
+  commitAll(main);
+  const branch = 'feat/20261115-asked-s0';
+  const wt = path.join(dir, 'repo.worktrees', 'asked');
+  sh('git', ['worktree', 'add', '-q', '-b', branch, wt], main);
+  write(
+    wt,
+    'docs/exec-plans/active/20261115-asked/plan.md',
+    '---\nid: 20261115-asked\nowner: session\nrisk: high # 주석\n---\n',
+  );
+  const asked = commitAll(wt, 'plan');
+  const c = buildContext(main);
+  const run = (cmd: string) => evaluate({ kind: 'bash', command: cmd, cwd: main }, c);
+  // 표시가 없으면 push를 막지 않는다. 위험도 높음은 초안으로만 PR을 연다
+  assert.equal(run(`git push origin ${branch}`), null);
+  assert.match(run(`gh pr create --head ${branch} --title x --body y`)!.rule, /^승인 요청/);
+  assert.equal(run(`gh pr create --draft --head ${branch} --title x --body y`), null);
+  // 표시를 남긴 뒤: 새 커밋이 없으면 허용, 병합이 아닌 커밋을 더하면 막는다
+  const gitDir = sh('git', ['rev-parse', '--absolute-git-dir'], wt);
+  write(gitDir, 'harness/approval-requested', `${asked}\n`);
+  assert.equal(run(`git push origin ${branch}`), null);
+  write(wt, 'src/a.ts', 'export const a = 1;\n');
+  commitAll(wt, 'extra');
+  const p = run(`git push origin ${branch}`)!;
+  assert.match(p.rule, /^승인 요청/);
+  assert.match(p.what, /1개/);
+  assert.match(run(`git -C ${wt} push origin HEAD`)!.rule, /^승인 요청/);
+  // 인자 없는 push는 지금처럼 세션 위치(main) 기준으로 R2다
+  assert.match(run(`git -C ${wt} push`)!.rule, /^R2/);
+  // 다른 브랜치의 push는 영향을 받지 않는다
+  assert.equal(run('git push origin feat/20261115-other-s0'), null);
+});
+
+test('승인 요청 규칙은 같은 명령 안의 금지 규칙(R…)을 가리지 않는다', () => {
+  const c = ctx({ approvalPending: () => 3, planRisk: () => 'high' });
+  assert.match(bash('gh pr ready 1; gh pr review 1 --approve', c)!.rule, /^R20/);
+  assert.match(bash('git push origin feat/a; git push -f origin feat/b', c)!.rule, /^R14/);
+  assert.match(bash('gh pr ready 1 && rm -rf $X', c)!.rule, /^R14/);
+  assert.match(bash('gh pr ready 1', c)!.rule, /^승인 요청/);
+});

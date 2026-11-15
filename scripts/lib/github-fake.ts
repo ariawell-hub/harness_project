@@ -261,6 +261,13 @@ export class FakeGitHub implements GitHubPort {
     const { base: _b, autoMerge: _a, ...out } = pr;
     return out;
   }
+  setDraft(n: number, draft: boolean): void {
+    const s = this.load();
+    const pr = s.prs.find((p) => p.number === n);
+    if (!pr) throw new Error(`[fake-gh] PR #${n} 없음`);
+    pr.isDraft = draft;
+    this.save(s);
+  }
   enableAutoMerge(n: number): void {
     const s = this.load();
     const pr = s.prs.find((p) => p.number === n);

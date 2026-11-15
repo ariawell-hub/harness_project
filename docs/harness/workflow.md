@@ -108,11 +108,14 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`다. 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약은 출처를 보지 않으니, 병합 가능 여부는 `mergeStateStatus`로 본다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
-- **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 초안을 해제하며 승인을 요청한다.
+- **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 worktree 안에서 `node scripts/harness.ts pr-ready`로 초안을 해제하며 승인을 요청한다.
   - `complete-step` 커밋까지 push했다.
   - 의사결정 로그·발견 사항 등 이 PR에 넣을 기록을 다 넣었다. 승인 요청 뒤에 생긴 기록은 다음 PR에 넣는다.
   - `origin/main`을 병합해 최신이고 `check`가 통과했다.
   - 이 PR에 반영해야 하는 제작자 작업(App ID 같은 설정값)을 먼저 받아 반영했다.
+  - `pr-ready`는 완료 처리, 커밋하지 않은 변경, push 여부, `origin/main` 병합 여부를 확인한다. 하나라도 안 되면 이유를 출력하고 PR은 그대로 둔다. 통과하면 초안을 해제하고 worktree에 승인 요청 표시(그때의 HEAD)를 남긴다.
+  - L1 훅이 순서를 지키게 한다: `gh pr ready` 직접 실행, 위험도 높음 계획의 초안 아닌 `gh pr create`, 승인 요청 표시가 있는 브랜치에 새 커밋을 올리는 push를 막는다. `origin/main` 병합 커밋만 더한 push는 막지 않는다.
+  - 승인 요청 뒤에 꼭 커밋을 올려야 하면 제작자에게 먼저 알리고 `node scripts/harness.ts pr-ready --undo`로 초안으로 되돌린 뒤 push한다. 끝나면 `pr-ready`로 다시 요청한다.
 - **제작자 작업 요청**: 제작자만 할 수 있는 일(시크릿·environment 등록, 필수 체크 등록, App 설정)은 한 번에 모아 요청한다. 항목마다 아래를 적는다.
   - 순서: 무엇을 먼저 해야 하는지, 승인·병합보다 앞인지 뒤인지.
   - 넣을 값의 형식: 예) "`auth.json` 파일 내용 전체. `{`로 시작한다. 로그인 URL이 아니다."

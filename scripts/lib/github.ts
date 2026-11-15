@@ -138,6 +138,8 @@ export interface GitHubPort {
     draft?: boolean;
   }): PullRequest;
   enableAutoMerge(n: number): void;
+  /** PR을 초안으로 바꾸거나(draft=true) 초안을 해제한다. 승인·병합과는 무관하다 */
+  setDraft(n: number, draft: boolean): void;
   /** `GET repos/{repo}/branches/{branch}` 원본(필수 체크 등록 확인용, 봇 토큰으로 읽을 수 있다) */
   branchInfo(branch: string): unknown;
 }
@@ -407,6 +409,9 @@ export class GhCli implements GitHubPort {
   }
   enableAutoMerge(n: number): void {
     gh(['pr', 'merge', String(n), '--auto', '--squash'], this.cwd);
+  }
+  setDraft(n: number, draft: boolean): void {
+    gh(['pr', 'ready', String(n), ...(draft ? ['--undo'] : [])], this.cwd);
   }
 }
 

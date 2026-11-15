@@ -22,7 +22,7 @@ node scripts/harness.ts start
 5. **완료 처리**: `node scripts/harness.ts complete-step` (계획 전용 커밋)
 6. **PR**: push → PR(`Refs #N`, 마지막 step만 `Closes #N`) → `gh pr merge --auto --squash`
    - main에 뒤처지거나 충돌한 PR은 rebase하지 않고 `origin/main`을 병합해 일반 push로 갱신한다([workflow.md](docs/harness/workflow.md) 5절, ADR-0006).
-   - **승인 요청은 PR이 끝난 뒤에 한 번만 한다.** 위험도 높음 PR은 초안으로 올리고, 완료 처리·기록·main 병합·`check`·제작자 작업 반영이 끝난 뒤 초안을 해제하며 승인을 요청한다([workflow.md](docs/harness/workflow.md) 5절 "승인 요청 전 조건").
+   - **승인 요청은 PR이 끝난 뒤에 한 번만 한다.** 위험도 높음 PR은 초안으로 올리고, 완료 처리·기록·main 병합·`check`·제작자 작업 반영이 끝난 뒤 `node scripts/harness.ts pr-ready`로 초안을 해제하며 승인을 요청한다([workflow.md](docs/harness/workflow.md) 5절 "승인 요청 전 조건").
    - **제작자 작업은 한 번에 모아 요청한다.** 순서, 확인 방법, 절차 문서 링크, 넣을 값의 형식을 함께 적는다.
    - **제작자 승인을 요청한 PR에는 커밋을 더 올리지 않는다.** 승인은 head 커밋에 묶여 있어 새 커밋이 올라가면 철회되고 다시 승인해야 한다. 꼭 올려야 하면 push 전에 제작자에게 먼저 알린다. 미룰 수 있는 변경(기록, 문서 보완)은 다음 PR에 넣는다.
 7. 남은 step은 병합 뒤 `new-task --plan <id> --step <N>`으로 새 브랜치에서 이어 간다.
