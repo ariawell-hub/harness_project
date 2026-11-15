@@ -70,7 +70,7 @@ GitHub → Settings → Environments → `judge-codex` → `CODEX_AUTH_JSON`에 
 | 적용됨                           | `record-review: review-ledger = success` 또는 `failure`                                        |
 | 권한을 저장하지 않았거나 수락 전 | "검증 App 토큰 (지적 원장 댓글 읽기·쓰기)" 단계 실패, `review-ledger = error — 원장 토큰 없음` |
 
-권한이 없어도 `review/claude`·`review/codex`는 그대로 기록된다. `review-ledger`만 `error`로 남는다.
+권한이 없어도 `review/claude`·`review/codex`는 그대로 기록된다. `review-ledger`만 `error`로 남는다. `review-ledger`는 필수 체크라 `error`인 동안 PR이 병합되지 않는다.
 
 ## 유출 대응
 

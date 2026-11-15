@@ -65,6 +65,7 @@ review_cycle: quarterly
   - v0.7.30 (2026-11-15): 반박 전달 구현. PR 작성자의 댓글에서 세 줄 형식(지적·근거·요지)에 맞는 문단만 골라 검증자 입력에 다시 써 준다. 근거는 커밋 SHA·리포 안 경로·이 리포 링크만 받는다(10.2절 (4), 절차서 8절, Issue #55)
   - v0.7.31 (2026-11-15): 재현 job 구현. 판정 워크플로(`workflow_run`) 안의 job으로 두고 비밀·environment·쓰기 권한 없이 검증자의 재현 테스트를 PR head에 붙여 실행한다. 단언 실패만 "재현됨"으로 센다. 근거 없는 P1은 P2로 내리고, 재현된 P1은 동결하지 않는다(10.2절 (3)·(5), 10.4절, Issue #55)
   - v0.7.32 (2026-11-15): 계획 검증(G1) 구현. 계획 핵심 섹션 해시, 계획만 바꾼 PR(`mode=plan`)의 판정에 계획 검증 프롬프트, 그 판정의 승인을 원장의 `planReview`에 기록, `plan-gate`가 merge-base 해시 또는 원장의 승인으로 확인한다. `planReview.required`는 아직 끈 채로 결과를 참고로만 남긴다(4.1절, 10.3절, Issue #55)
+  - v0.7.33 (2026-11-15): 계획 검증(G1)을 켠다(`planReview.required: true`). `review-ledger`를 검증 App 출처의 필수 체크로 등록한다. 지적 원장·재현 job·계획 검증을 실제 PR에서 확인한 결과를 적었다. 계획 검증이 실행 중인 step에 일을 더하라고 지적하면 새 step을 더한다(0.2절, 4.1절, 8.2절, Issue #55)
 
 ### 0.1 전제 조건
 
@@ -87,7 +88,7 @@ review_cycle: quarterly
   - 필수 상태 체크(10.3절). `check`를 뺀 모든 필수 체크(`review/*`, `plan-gate`, `risk-gate` 등 기록 job이 쓰는 체크)는 검증 App이 보낸 상태만 인정하도록 출처를 지정한다. PR에 같은 이름의 job을 가진 워크플로를 넣어 체크를 흉내 내는 것을 막기 위해서다
     - Q20에서 확인: 같은 이름의 job(check run), PR 워크플로가 `permissions: statuses: write`로 쓴 status(리포 기본 권한이 읽기 전용이어도 받는다), 봇 PAT로 쓴 status가 모두 이 지정으로 병합이 막혔다. 막힘은 병합 판정에만 나타난다(10.3절 "체크 요약 API")
     - 등록은 검증 App이 그 체크를 한 번 보고한 뒤에 한다. admin이 아닌 봇도 `GET repos/<리포>/branches/main`의 `protection.required_status_checks.checks[].app_id`로 등록된 출처를 확인할 수 있다
-    - 등록하는 필수 체크는 `check`(GitHub Actions)와 검증 App 출처의 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`다. `review/*`는 두 판정 워크플로가 실제 PR에서 판정을 내는 것을 확인한 뒤 등록한다. 검증자가 고장 난 채 필수가 되면 모든 PR의 병합이 막힌다(Issue #54)
+    - 등록하는 필수 체크는 `check`(GitHub Actions)와 검증 App 출처의 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review/*`는 두 판정 워크플로가 실제 PR에서 판정을 내는 것을 확인한 뒤 등록한다. 검증자가 고장 난 채 필수가 되면 모든 PR의 병합이 막힌다(Issue #54). `review-ledger`도 기록 job이 실제 PR에서 원장 댓글과 상태를 쓰는 것을 확인한 뒤 등록한다(Issue #55). 기록 job은 `review/*`를 쓸 때마다 `review-ledger`도 쓰므로, `review/*`가 기록되는 PR에는 `review-ledger`도 있다
     - 기대하는 등록(`harness.config.json`의 `ci.requiredChecks`, 검증 App ID는 `ci.recorderAppId`)과 실제 등록은 `node scripts/harness.ts required-checks`로 비교한다. 읽기만 하고 바꾸지 않는다. 이미 다른 출처로 등록된 체크(1단계의 `plan-gate`)는 검증 App이 같은 이름을 보고한 뒤 제작자가 출처를 바꾸고, 그다음에 옛 job을 지운다. 순서가 바뀌면 그 체크를 아무도 채우지 못해 모든 PR이 막힌다(Issue #53)
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
@@ -222,7 +223,7 @@ review_cycle: quarterly
   - **계획만 담은 커밋을 먼저 올린다.** 판정 워크플로의 plan job이 PR의 merge-base 대비 변경을 보고, 바뀐 파일이 그 계획의 폴더 안뿐이면 `mode=plan`으로 판정한다(`scripts/ci/plan-hash.ts`의 `planMode`). 커밋 하나가 아니라 PR 전체 변경으로 본다. 검증자가 보는 것이 PR 전체 diff이기 때문이다. 코드를 이미 올렸으면 되돌리는 커밋으로 계획만 남긴 뒤 검증받는다.
   - `mode=plan`이면 판정 job이 공통 프롬프트 뒤에 계획 검증 항목(`scripts/cross-review/prompt-plan.md`: 수용 기준의 검증 가능성, step 분할과 AC, 범위, 위험도, 설계 결함)을 덧붙인다. 지적은 코드 검증과 같은 원장에 등록되고 P0·P1은 `review-ledger`를 막는다.
   - 기록 job은 `mode=plan`인 head에서 `review/<검증자>`가 success일 때(승인, 위험도 기준 "해당 없음", 이어받음) 원장의 `planReview`(`{ hash, head, approvals }`)에 그 검증자를 넣는다. 해시가 바뀌면 이전 승인을 지우고, 수정 요청이면 그 검증자의 승인을 지운다. 코드가 섞인 head의 판정은 계획 승인으로 남기지 않는다. 계획 승인이 있으면 지적이 없어도 원장 댓글을 만든다.
-  - `plan-gate`의 판정과 해시 대상은 10.3절 승인 결속 기준에 있다. 설정 `planReview.required`가 `false`인 동안은 같은 판정을 하되 결과를 참고(`G1(꺼짐)`)로만 남긴다. 실제 PR에서 확인한 뒤 켠다.
+  - `plan-gate`의 판정과 해시 대상은 10.3절 승인 결속 기준에 있다. 설정 `planReview.required`가 `true`면 G1 실패가 `plan-gate`를 실패시킨다. 이 리포는 실제 PR(#88)에서 계획 전용 커밋의 계획 검증과 원장의 계획 승인을 확인한 뒤 켰다(Issue #55). `false`면 같은 판정을 하되 결과를 참고(`G1(꺼짐)`)로만 남긴다. 하네스를 새로 들이는 리포는 판정 워크플로가 동작하는 것을 확인한 뒤 켠다.
 - **G2**: 로컬에서 push·PR 직전에 `check` 전체를 실행한다(R7). CI가 같은 검사를 다시 실행한다.
 - **G3**: 10.3절의 필수 상태 체크가 모두 통과해야 GitHub이 병합한다.
 
@@ -561,7 +562,7 @@ pnpm test src/auth/login-guard.spec.ts
 5. **AC는 실행 가능한 명령**: "동작해야 한다"가 아니라 실제로 실행하는 명령으로 쓴다. runner가 이 명령으로 판정한다(4.5절). POSIX `sh` 문법으로 쓰고 한 OS에만 있는 명령(`pbcopy`, `open`, PowerShell cmdlet 등)을 쓰지 않는다. macOS와 Windows runner가 같은 AC로 판정한다(6절).
 6. **금지사항은 구체적으로**: "X를 하지 마라. 이유: Y" 형식으로 쓴다.
 7. **이름**: kebab-case 한두 단어(예: `project-setup`, `api-layer`).
-- step을 실행하는 PR은 자기 step 파일의 작업·AC를 바꿀 수 없다(`plan-gate`가 확인). 다른 step 파일의 작업·AC를 바꾸는 것은 계획 수정이며, 계획 검증 해시(10.3절 결속 기준)에 들어가므로 계획을 다시 검증한다(G1). 앞 step에서 다음 step의 AC를 약하게 고쳐 통과시키는 것도 막기 위해서다.
+- step을 실행하는 PR은 자기 step 파일의 작업·AC를 바꿀 수 없다(`plan-gate`가 확인). 다른 step 파일의 작업·AC를 바꾸는 것은 계획 수정이며, 계획 검증 해시(10.3절 결속 기준)에 들어가므로 계획을 다시 검증한다(G1). 앞 step에서 다음 step의 AC를 약하게 고쳐 통과시키는 것도 막기 위해서다. 계획 검증이 실행 중인 step에 일을 더하라고 지적해도 그 step의 작업·AC는 고치지 않고 새 step을 더한다(PR #88).
 
 **경량 템플릿 (소규모)**: frontmatter는 같고, 본문은 아래 세 줄과 "관련 파일"만 둔다. 이 파일 자체가 step 하나이며, "검증" 줄은 runner가 실행하는 명령으로 쓴다.
 
@@ -705,7 +706,7 @@ pnpm test src/auth/login-guard.spec.ts
 **실행 방식 (CI)**
 - PR head에서 `check`가 통과하면(R16) 판정 job이 위험도에 맞는 검증자를 새 세션으로 실행한다(예: `claude -p`, `codex exec`). 검증자는 셸·MCP·웹 도구 없이, 체크아웃한 PR 범위 안의 읽기 도구만 쓴다(10.4절 판정 job 규칙).
 - **검증자에게 넘기는 입력**: 계획, 수용 기준, diff, `check`·`verify` 결과, 관련 문서, 지적 원장, 정해진 형식의 반박. 작성자의 대화와 추론 과정은 넘기지 않는다.
-- **결과 기록**: 판정 job은 `verdict.json`만 산출물로 낸다. 기록 job이 이를 검사한 뒤 head SHA에 커밋 상태(`review/claude`, `review/codex`)를 기록하고 지적 원장 댓글을 갱신한다. 작성 에이전트는 이 상태를 만들 수 없다(10.4절). 위험도 때문에 실행하지 않은 검증자의 상태는 기록 job이 "해당 없음(통과)"으로 기록한다. 기록 job은 검사를 통과한 판정의 요약과 지적 본문(근거·제안)을 로그에 한 줄씩 낸다(제어 문자는 공백으로 바꾼다). 원장에는 지적의 위치와 제목만 남는다.
+- **결과 기록**: 판정 job은 `verdict.json`만 산출물로 낸다. 기록 job이 이를 검사한 뒤 head SHA에 커밋 상태(`review/claude`, `review/codex`)를 기록하고, 지적 원장 댓글을 갱신해 `review-ledger`를 기록한다(10.2절 (4)). 작성 에이전트는 이 상태를 만들 수 없다(10.4절). 위험도 때문에 실행하지 않은 검증자의 상태는 기록 job이 "해당 없음(통과)"으로 기록한다. 기록 job은 검사를 통과한 판정의 요약과 지적 본문(근거·제안)을 로그에 한 줄씩 낸다(제어 문자는 공백으로 바꾼다). 원장에는 지적의 위치와 제목만 남는다.
 - **검증 항목**
   - 수용 기준을 충족하는가
   - 정확성: 버그, 엣지 케이스
@@ -1391,7 +1392,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 |---|---|---|
 | 0 | 전제 조건(E1~E5)과 리포 설정(0.2절) | 에이전트가 제작자 권한 없이 봇 계정으로 PR을 만들 수 있다. 에이전트가 실행되는 모든 머신(macOS·Windows)에 제작자의 GitHub 토큰(`gh` 로그인, git 자격증명 도우미·OS 자격증명 저장소 등)이 없다(E5) |
 | 1 | 최소 구성: `AGENTS.md`, `CLAUDE.md`, `docs/` 구조, `workflow.md`, 계획·step 템플릿, `new-task`(claim 브랜치, step별 브랜치), 표준 명령(시간 제한 포함), **금지 훅(R4, R13, R14, R20)**, 무인 권한 프로필, **runner 최소 형태**(작업자 1개, step 실행·AC 판정·재시도·세션 시간 제한), CI `check`, `plan-gate`. 체크가 생길 때마다 필수 체크로 등록하고 자동 병합 시작 | 새 세션 에이전트가 S1을 만족하고, 계획 없는 PR이 막히고, 제작자 권한 명령이 실제로 차단된다. runner가 step 2개 이상인 계획을 사람 개입 없이 마지막 step까지 진행한다 |
-| 2 | 착수 조건: Q20 시험 통과(2026-11-14 조건부 통과. 시험 결과로 고친 10.3·10.4·13.3절 규칙을 따른다. 남은 확인: Codex 실행 중 인증 갱신과 재저장, check run을 쓰기로 하면 App check run의 출처 인정). CI 교차 검증: 판정·기록·재현 job 분리(역할별 environment), `review/*`, `review-ledger`, `risk-gate`(경로별 위험도, `stage`), `deps-guard`, `harness-guard`, `revert-check`. runner와 PR 흐름 연결(CI 대기, 뒤처진 PR main 병합 갱신, 지적 대응, WIP 상한, 작업자 2개). 하네스 자체 테스트 기본 시나리오(12.4절) | 위험도별 검증이 같은 형식으로 동작하고, 작성자가 승인을 만들 수 없다. 운영 전환 체크리스트(10.4절)를 충족하고 운영 단계로 전환한다 |
+| 2 | 착수 조건: Q20 시험 통과(2026-11-14 조건부 통과. 시험 결과로 고친 10.3·10.4·13.3절 규칙을 따른다. 남은 확인: Codex 실행 중 인증 갱신과 재저장, check run을 쓰기로 하면 App check run의 출처 인정). CI 교차 검증: 판정·기록·재현 job 분리(역할별 environment), `review/*`, `review-ledger`, `risk-gate`(경로별 위험도, `stage`), `deps-guard`, `harness-guard`, `revert-check`(진행: 기계 판정 #53, 판정 job·`review/*` #54, 지적 원장·재현 job·계획 검증 G1 #55. 남은 것: #56·#57). runner와 PR 흐름 연결(CI 대기, 뒤처진 PR main 병합 갱신, 지적 대응, WIP 상한, 작업자 2개). 하네스 자체 테스트 기본 시나리오(12.4절) | 위험도별 검증이 같은 형식으로 동작하고, 작성자가 승인을 만들 수 없다. 운영 전환 체크리스트(10.4절)를 충족하고 운영 단계로 전환한다 |
 | 3 | 파일럿(운영 단계): 웹 프로젝트 하나에서 실제 작업 5~10건. 버그 수정 PR은 `web-verify` 증거 필수. 하네스 조정 PR은 보호 경로 변경이라 제작자 승인으로 병합된다 | 17.2절 파일럿 판정 지표가 수집된다 |
 | 4 | 조정과 확장: 지표로 규칙과 기준값(Q9, Q14, Q15, Q19)을 고치고, L0 샌드박스, 가독성 Tier 1 확대, 정기 작업(하네스 자체 테스트 정기 실행 포함)을 붙이고, 보류 목록(부록 C)을 검토한다 | 리뷰가 대부분 3라운드 안에 수렴하고, 병합 후 결함이 기준 이하다 |
 | 5 | 프로파일 분기(웹 먼저, 이후 게임) | 코어 수정 없이 웹 프로파일을 적용한다(S5) |

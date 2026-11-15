@@ -1,9 +1,14 @@
 // 필수 체크 출처 확인(0.2절, 운영 전환 체크리스트 1). 계획 20261114-ci-gates step4.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import path from 'node:path';
+import { LEDGER_CONTEXT } from '../ci/results.ts';
 import { ACTIONS_APP_ID, compareRequiredChecks, toRequiredChecks } from '../ci/protection.ts';
+import { requiredCheckGuide } from '../commands/init.ts';
 import { loadConfig } from '../lib/config.ts';
 import { fixtureConfig, tmp, write } from './helpers.ts';
+
+const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 
 const APP = 4242;
 const want = [
@@ -74,4 +79,38 @@ test('compareRequiredChecks: recorderAppId가 없으면 recorder 출처를 확�
   const r = compareRequiredChecks(ok, { requiredChecks: want, recorderAppId: null });
   assert.equal(r.ok, false);
   assert.match(r.lines.join('\n'), /recorderAppId/);
+});
+
+// 계획 20261115-review-ledger step5
+test('이 리포의 설정: review-ledger가 검증 App 출처의 필수 체크이고 계획 검증(G1)이 켜져 있다', () => {
+  const cfg = loadConfig(REPO_ROOT);
+  assert.deepEqual(
+    cfg.ci.requiredChecks.find((c) => c.context === LEDGER_CONTEXT),
+    { context: 'review-ledger', source: 'recorder' },
+  );
+  // review-ledger는 판정 워크플로의 기록 job이 review/*와 함께 쓴다. 둘은 같이 등록한다
+  for (const c of ['review/claude', 'review/codex'])
+    assert.ok(cfg.ci.requiredChecks.some((x) => x.context === c && x.source === 'recorder'));
+  assert.equal(cfg.planReview.required, true);
+  // 등록에 review-ledger가 빠져 있으면 required-checks가 알려 준다
+  const registered = cfg.ci.requiredChecks.map((c) => ({
+    context: c.context,
+    appId: c.source === 'actions' ? ACTIONS_APP_ID : cfg.ci.recorderAppId,
+  }));
+  assert.equal(compareRequiredChecks(registered, cfg.ci).ok, true);
+  const missing = compareRequiredChecks(
+    registered.filter((c) => c.context !== LEDGER_CONTEXT),
+    cfg.ci,
+  );
+  assert.equal(missing.ok, false);
+  assert.match(missing.lines.join('\n'), /review-ledger.*등록되지 않았다/);
+});
+
+test('init 안내: 등록할 필수 체크 목록은 설정(ci.requiredChecks)에서 만든다', () => {
+  const guide = requiredCheckGuide(loadConfig(REPO_ROOT).ci.requiredChecks);
+  assert.match(guide, /check\(GitHub Actions\)/);
+  assert.match(guide, /review\/codex·review-ledger\(출처 = 검증 App/);
+  for (const c of loadConfig(REPO_ROOT).ci.requiredChecks) assert.ok(guide.includes(c.context));
+  // 설정에 필수 체크가 없으면 목록 대신 설정을 채우라고 안내한다
+  assert.match(requiredCheckGuide([]), /ci\.requiredChecks/);
 });

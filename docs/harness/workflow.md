@@ -61,11 +61,11 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 6. **금지사항은 구체적으로**: "X를 하지 마라. 이유: Y".
 7. **이름**: kebab-case 한두 단어.
 
-- step을 실행하는 PR은 **자기 step 파일의 "작업"·"Acceptance Criteria"를 바꿀 수 없다**(plan-gate). 계획을 고쳐야 하면 진행 로그에 이유를 적고 제작자에게 알린다.
+- step을 실행하는 PR은 **자기 step 파일의 "작업"·"Acceptance Criteria"를 바꿀 수 없다**(plan-gate). 계획을 고쳐야 하면 진행 로그에 이유를 적고 제작자에게 알린다. 실행 중인 step에 일을 더해야 하면 새 step을 더하고 계획만 담은 커밋으로 다시 검증받는다(아래 "계획 검증").
 
 ### 계획 검증 (중·대 규모, G1)
 
-중·대 규모 계획은 구현 전에 교차 검증을 받는다. `plan-gate`가 확인한다(`harness.config.json`의 `planReview.required`가 `true`일 때 병합을 막는다. 꺼져 있으면 결과를 참고로만 남긴다).
+중·대 규모 계획은 구현 전에 교차 검증을 받는다. `plan-gate`가 확인하고, 승인이 없으면 병합되지 않는다(`harness.config.json`의 `planReview.required: true`. `false`인 리포에서는 결과를 참고로만 남긴다).
 
 1. **계획만 담은 커밋을 먼저 올린다.** 계획 폴더(`docs/exec-plans/active/<id>/`)의 파일만 커밋해 push하고 초안 PR을 연다(`gh pr create --draft`). 코드·문서·설정을 함께 올리면 계획 검증으로 판정되지 않는다.
 2. `check`가 통과하면 판정 워크플로가 계획 검증 항목(수용 기준의 검증 가능성, step 분할과 AC, 범위, 위험도)으로 판정한다. plan job 로그의 `review-plan: mode=plan` 줄로 확인한다.
@@ -120,7 +120,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 
 - 제목: `<type>(<계획 id>): step<N> <이름>`. 본문 첫 줄은 마지막 step만 `Closes #<issue>`, 나머지는 `Refs #<issue>`.
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
-- 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`다. 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약은 출처를 보지 않으니, 병합 가능 여부는 `mergeStateStatus`로 본다.
+- 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약은 출처를 보지 않으니, 병합 가능 여부는 `mergeStateStatus`로 본다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
 - **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 worktree 안에서 `node scripts/harness.ts pr-ready`로 초안을 해제하며 승인을 요청한다.
   - `complete-step` 커밋까지 push했다.

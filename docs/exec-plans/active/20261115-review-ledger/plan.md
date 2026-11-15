@@ -109,6 +109,10 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 2026-11-15 step5: PR #88 계획 검증 1차(head dd41c80, 실행 43703055110·43703055109). 계획 전용 커밋의 계획 검증이 실제 PR에서 처음 돌았다: plan job `review-plan: mode=plan, 계획 해시 61b9a21b9f55`, 판정 job `review-prompt: … 파일 prompt.md, prompt-plan.md`, 재현 job `실행한 재현 테스트가 없다`, 기록 job `계획 검증(G1) 해시 61b9a21b9f55 — review/claude 승인 아님`. 원장 댓글에 `계획 검증(G1): 해시 61b9a21b9f55 · 승인: 없음` 줄이 생겼다. `risk-gate`는 위험도 보통(계획 `risk`), `harness-guard`는 보호 경로 변경 없음.
 - 2026-11-15 step5: 그 판정은 두 검증자 모두 수정 요청이다. Claude P1(원장 F1)·Codex P1(F3): 수용 기준 8에 금지사항 해시를 넣었는데 그것을 맡는 step의 작업·AC가 없다. Claude P2(F2, `deferred`): step5 작업 4의 "이 계획은 main의 것과 해시가 같다"가 사실과 달라졌다. `review-ledger = failure — 열린 차단 지적 2건: F1, F3`. 지적이 타당해 반박하지 않는다.
 - 2026-11-15 step5: 두 검증자는 step5의 작업·AC에 더하라고 제안했지만 `plan-gate`가 실행 중인 step의 작업·AC 수정을 막는다(설계서 8.2절). 그래서 금지사항 해시 작업을 새 step6(`bind-prohibitions`)으로 더했다. step5는 그대로 두고 마지막 step이 step6이 된다(PR #88은 `Refs #55`). 제작자에게 알린다(대화).
+- 2026-11-15 step5: PR #88 계획 검증 2차(head c9f0d4b, 실행 43703896693·43703896625). 두 검증자 2라운드 승인(지적 없음). 2라운드 입력과 프롬프트 고정이 계획 검증에서도 돌았다(`review-plan: claude 2라운드, 프롬프트 버전 9028a631c049, 직전 판정 이후 바뀐 파일 3`, `review-prompt: … 파일 prompt.md, prompt-plan.md`). 원장 F1·F3이 `open` → `fixed`, `review-ledger`가 `failure`(Claude 기록 시점) → `success`(Codex 기록 뒤). 기록 job 로그 `계획 검증(G1) 해시 0fc4d16a42b8 — review/claude 승인`·`review/codex 승인`, 원장 댓글 `계획 검증(G1): 해시 0fc4d16a42b8 · 승인: claude, codex · head c9f0d4ba94d0`. 해시가 1차(61b9a21b9f55)와 달라 이전 기록(승인 없음)이 새 해시로 바뀌었다. 계획 전용 커밋의 계획 검증과 원장의 계획 승인 기록을 실제 PR에서 확인했다(수용 기준 8·9).
+- 2026-11-15 step5: 테스트 먼저. `node --test scripts/test/protection.test.ts scripts/test/plan-gate.test.ts scripts/test/ledger.test.ts` 종료 코드 1(`protection.test.ts` 파일 실패: `commands/init.ts`에 `requiredCheckGuide` export 없음. 테스트별 실패는 따로 보지 못했다). 구현과 설정(`ci.requiredChecks`에 `review-ledger`, `planReview.required: true`) 뒤 33개 통과. `node scripts/harness.ts check` 종료 코드 0.
+- 2026-11-15 step5: `init` 출력만 보려고 `init --profile core`를 실행했다가 worktree의 `harness.config.json`이 다시 쓰였다(`init`은 `--repo`를 받지 않고 현재 리포에 적용한다). 커밋 전이라 그 파일을 HEAD로 되돌리고 의도한 두 곳만 다시 고쳤다. 안내 문구는 `requiredCheckGuide` 테스트로 확인한다.
+- 2026-11-15 step5: 작업 1 정리. 실제 PR에서 확인한 것: 원장 댓글(작성자 `harness-recorder[bot]`, #85), 두 기록 job이 한 댓글을 차례로 고침(#85), 2라운드 입력·프롬프트 버전 고정(#85, #88), 상태 전이 `open` → `fixed`와 `review-ledger` failure → success(#86, #87, #88), 재현 job 실행과 job 출력 연결(#87, #88), 계획 전용 커밋의 계획 검증과 계획 승인(#88). 보지 못한 것: 검증자가 붙인 재현 테스트의 실제 실행(붙인 판정이 없었다), 반박 전달(지적이 모두 타당해 반박하지 않았다), 2라운드 동결(바뀌지 않은 파일의 새 P1이 없었다), `ci-failure` job(`check`가 실패한 PR head가 없었다). 이 넷은 단위 테스트와 명령 연결 테스트(`ledger.test.ts`, `rebuttal.test.ts`, `repro.test.ts`, `record.test.ts`)로만 확인했다.
 
 ## 의사결정 로그
 
@@ -147,6 +151,8 @@ claimed_at: 2026-11-15T16:00:39+09:00 # new-task가 채운다
 - 금지사항 해시는 step5가 아니라 새 step6에서 한다(PR #88 F1·F3). 이유: 수용 기준마다 그것을 맡는 step의 작업·AC가 있어야 하는데, 실행 중인 step5의 작업·AC는 고칠 수 없다(`plan-gate`). 버린 대안: step5 작업 1의 "기대와 다른 것은 이 step에서 고친다"로 보고 step5에서 하기(해시가 금지사항을 포함하는지 판정하는 AC가 없어 새 세션이 하지 않고 끝낼 수 있다), 반박하기(지적이 타당하다).
 - `planReview.required`는 step5에서 켜고 해시 정의는 step6에서 바꾼다. 처음에는 켜기 전에 바꾸려 했다. 순서가 바뀌어도 무효가 되는 승인이 없다: 해시 정의가 바뀔 때 영향받는 것은 "원장에 계획 승인이 기록된 채 열려 있는 다른 PR"뿐이고, step6이 병합 전에 그런 PR이 없는지 확인한다(step6 작업 6). step6 PR 자신은 계획이 main과 같아 다시 검증받지 않는다(판정은 main의 옛 정의로 지금과 base를 함께 계산한다).
 - step5 작업 4의 "(이 계획은 main의 것과 해시가 같다)"는 고치지 않는다(PR #88 F2). 실행 중인 step의 작업이라 고칠 수 없다. 이 PR의 계획 해시는 main과 다르고, `plan-gate`의 G1은 이 PR의 계획 전용 커밋에서 받은 계획 승인의 해시로 확인된다. CI의 `gates`는 main의 설정으로 돌아 `planReview.required: true`는 병합 뒤 PR부터 적용되므로, 이 PR에서는 `plan-gate` 상세의 `G1(꺼짐)` 줄로 판정 결과를 본다.
+- `init` 안내의 필수 체크 목록은 문구로 적지 않고 설정(`ci.requiredChecks`)에서 만든다(`requiredCheckGuide`). 이유: 체크를 더할 때 안내와 설정이 어긋나지 않는다(이번에 `review-ledger`를 더하며 두 곳을 고쳐야 했다).
+- `review-ledger`는 `review/*`와 같은 조건으로 등록한다. 이유: 기록 job이 `review/*`를 쓸 때마다 `review-ledger`도 쓴다(판정 없음·해당 없음·이어받음·원장 실패 포함). `review/*`가 기록되는 PR에서 `review-ledger`만 빠지는 경로가 없다.
 
 ## 발견 사항
 
