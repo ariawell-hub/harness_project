@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ACTIONS_APP_ID, compareRequiredChecks, toRequiredChecks } from '../ci/protection.ts';
+import { loadConfig } from '../lib/config.ts';
+import { fixtureConfig, tmp, write } from './helpers.ts';
 
 const APP = 4242;
 const want = [
@@ -55,6 +57,17 @@ test('compareRequiredChecks: 누락, 출처 다름, 출처 없음(아무 출처)
   const extra = compareRequiredChecks([...ok, { context: 'old', appId: null }], ci);
   assert.equal(extra.ok, false);
   assert.match(extra.lines.join('\n'), /old.*설정에 없다/);
+});
+
+test('loadConfig: ci.recorderBot이 문자열이 아니면 설정 오류', () => {
+  const root = tmp('config-');
+  const cfg = fixtureConfig() as { ci?: Record<string, unknown> };
+  cfg.ci = { ...(cfg.ci ?? {}), recorderBot: 5764201 };
+  write(root, 'harness.config.json', JSON.stringify(cfg));
+  assert.throws(() => loadConfig(root), /ci\.recorderBot/);
+  cfg.ci.recorderBot = 'harness-recorder[bot]';
+  write(root, 'harness.config.json', JSON.stringify(cfg));
+  assert.equal(loadConfig(root).ci.recorderBot, 'harness-recorder[bot]');
 });
 
 test('compareRequiredChecks: recorderAppId가 없으면 recorder 출처를 확인할 수 없어 실패', () => {

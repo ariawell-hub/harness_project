@@ -7,7 +7,13 @@ import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.t
 import { changedFiles, defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
 import { runGates, summaryMarkdown } from './ci/gates.ts';
-import { carryOver, changedOnBaseSince, fetchCandidates, patchId } from './ci/binding.ts';
+import {
+  carryOver,
+  changedOnBaseSince,
+  fetchCandidates,
+  patchId,
+  samePrContent,
+} from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
   diffAuth,
@@ -21,7 +27,7 @@ import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-sca
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
-import { githubStatusPoster, recordReview, recordStatuses } from './ci/record.ts';
+import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
@@ -317,11 +323,14 @@ async function main(argv: string[]): Promise<number> {
         carriedFrom: str('carried-from') || undefined,
         // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장(#55) 전에는 기록 job 로그가 지적을 보는 곳이다
         onVerdict: (v) => {
-          log(`record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${v.summary}`);
+          // 본문은 PR 내용에 영향받는 LLM 출력이다. 한 줄로 만들고 접두어를 붙여 워크플로 명령 줄이 생기지 않게 한다
+          log(
+            `record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${oneLine(v.summary)}`,
+          );
           for (const f of v.findings) {
-            log(`  [${f.severity}] ${f.file}:${f.line} ${f.title}`);
-            log(`    근거: ${f.evidence}`);
-            log(`    제안: ${f.suggestion}`);
+            log(`  [${f.severity}] ${oneLine(f.file)}:${f.line} ${oneLine(f.title)}`);
+            log(`    근거: ${oneLine(f.evidence)}`);
+            log(`    제안: ${oneLine(f.suggestion)}`);
           }
         },
       });
@@ -372,6 +381,7 @@ async function main(argv: string[]): Promise<number> {
               prFiles,
               candidates,
               changedOnBaseSince: (old) => changedOnBaseSince(root, baseSha, old),
+              samePrContent: (old) => samePrContent(root, old, prFiles),
               recorderBot: bot,
               context: `review/${k}`,
             });

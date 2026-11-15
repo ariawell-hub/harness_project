@@ -58,6 +58,14 @@ export async function recordStatuses(
   return { ok: value !== null, reason };
 }
 
+/** 로그 한 줄로: 줄바꿈·제어 문자를 공백으로. 판정 본문이 러너의 워크플로 명령 줄(`::…`)을 만들지 못하게 한다 */
+export function oneLine(s: string): string {
+  return s
+    .replace(/\p{Cc}+/gu, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
 export interface RecordReviewOptions {
   context: string;
   /** 위험도·작성 도구 기준으로 이 검증자가 필요한가 */

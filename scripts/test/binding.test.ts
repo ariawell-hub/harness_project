@@ -5,12 +5,14 @@ import { test } from 'node:test';
 import {
   carryOver,
   changedOnBaseSince,
+  fetchCandidates,
+  samePrContent,
   patchId,
   patchOf,
   withPatch,
   type Candidate,
 } from '../ci/binding.ts';
-import { recordReview } from '../ci/record.ts';
+import { oneLine, recordReview } from '../ci/record.ts';
 import type { StatusPayload } from '../ci/results.ts';
 import { commitAll, gitInit, sh, tmp, write } from './helpers.ts';
 
@@ -101,6 +103,7 @@ function carry(over: Partial<Parameters<typeof carryOver>[0]> = {}) {
     prFiles: ['a.txt'],
     candidates: [{ sha: '1'.repeat(40), statuses: [ok()] }],
     changedOnBaseSince: () => ['b.txt'],
+    samePrContent: () => true,
     recorderBot: BOT,
     context: CTX,
     ...over,
@@ -131,6 +134,8 @@ test('carryOver: 위험도 높음, patch 없음·다름, 겹침, 조회 실패�
   assert.match(no(carry({ patch: PATCH.slice(0, 16) + 'deadbeef'.repeat(3) })), /patch/);
   assert.match(no(carry({ changedOnBaseSince: () => ['x.txt', 'a.txt'] })), /겹친다/);
   assert.match(no(carry({ changedOnBaseSince: () => null })), /조회|조상/);
+  // patch-id는 공백을 무시한다. PR 파일이 바이트 단위로 같지 않으면 이어받지 않는다
+  assert.match(no(carry({ samePrContent: () => false })), /내용이 다르다/);
   assert.match(no(carry({ candidates: [] })), /없다/);
   assert.match(no(carry({ recorderBot: '' })), /recorderBot/);
 });
@@ -251,4 +256,69 @@ test('recordReview: 검사를 통과한 판정의 지적을 onVerdict로 넘긴�
     onVerdict: (v) => seen.push(v),
   });
   assert.equal(seen.length, 1);
+});
+
+test('samePrContent: main 병합 갱신은 같고, 공백만 바꾼 커밋은 patch-id가 같아도 다르다', () => {
+  const { root, oldHead } = repo();
+  const before = patchId(root, mergeBase(root));
+  mainCommit(root, 'b.txt', 'b1\nb2\n');
+  sh('git', ['merge', '-q', '--no-edit', 'main'], root);
+  assert.equal(samePrContent(root, oldHead, ['a.txt']), true);
+  // 공백만 바꾼 후속 커밋: patch-id는 그대로다
+  write(root, 'a.txt', 'a1\na2    changed\na3\n');
+  commitAll(root, 'whitespace only');
+  assert.equal(patchId(root, mergeBase(root)), before);
+  assert.equal(samePrContent(root, oldHead, ['a.txt']), false);
+  assert.equal(samePrContent(root, 'f'.repeat(40), ['a.txt']), false);
+  assert.equal(samePrContent(root, oldHead, []), false);
+});
+
+test('patchId: 바이너리 파일의 내용이 바뀌면 달라진다', () => {
+  const { root } = repo();
+  write(root, 'bin.dat', 'x\u0000y1');
+  commitAll(root, 'bin');
+  const one = patchId(root, mergeBase(root));
+  write(root, 'bin.dat', 'x\u0000y2');
+  commitAll(root, 'bin2');
+  assert.notEqual(patchId(root, mergeBase(root)), one);
+});
+
+test('fetchCandidates: 최신이 먼저, 지금 head 제외, 판정된 head를 찾으면 멈춘다', async () => {
+  const sha = (c: string) => c.repeat(40);
+  const calls: string[] = [];
+  const statuses: Record<string, unknown[]> = {
+    [sha('3')]: [{ context: 'check', state: 'success', description: '', creator: { login: 'x' } }],
+    [sha('2')]: [
+      { context: CTX, state: 'success', description: 'd', creator: { login: BOT } },
+      { context: CTX, state: 'success', description: 'forged', creator: { login: 'harness-bot' } },
+    ],
+    [sha('1')]: [{ context: CTX, state: 'success', description: 'old', creator: { login: BOT } }],
+  };
+  const api = async (p: string) => {
+    calls.push(p);
+    if (p.includes('/pulls/7/commits')) return ['1', '2', '3', '4'].map((c) => ({ sha: sha(c) }));
+    const m = /commits\/([0-9a-f]{40})\/statuses/.exec(p);
+    return m ? (statuses[m[1]] ?? []) : null;
+  };
+  const o = { api, repo: 'o/r', number: 7, headSha: sha('4'), recorderBot: BOT, contexts: [CTX] };
+  const got = await fetchCandidates(o);
+  assert.deepEqual(
+    got.map((c) => c.sha),
+    [sha('3'), sha('2')],
+  );
+  assert.deepEqual(got[1].statuses[0], {
+    context: CTX,
+    state: 'success',
+    description: 'd',
+    creator: BOT,
+  });
+  assert.ok(!calls.some((c) => c.includes(sha('1')) || c.includes(`${sha('4')}/statuses`)));
+  // limit
+  assert.equal((await fetchCandidates({ ...o, limit: 1 })).length, 1);
+  // 응답 형식이 다르면 예외(이어받지 않는다)
+  await assert.rejects(fetchCandidates({ ...o, api: async () => ({}) }), /배열이 아니다/);
+});
+
+test('oneLine: 줄바꿈·제어 문자를 공백으로(기록 job 로그에 워크플로 명령 줄이 생기지 않게)', () => {
+  assert.equal(oneLine('a\n::add-mask::x\r\n\u001b[31mb\tc'), 'a ::add-mask::x [31mb c');
 });

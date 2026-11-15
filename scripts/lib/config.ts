@@ -175,6 +175,10 @@ export function loadConfig(repoRoot: string): HarnessConfig {
     recorderAppId: ci.recorderAppId ?? null,
     recorderBot: ci.recorderBot ?? null,
   };
+  if (cfg.ci.recorderBot !== null && typeof cfg.ci.recorderBot !== 'string')
+    throw new ConfigError(
+      `${CONFIG_FILE} 검증 실패:\n- ci.recorderBot은 문자열(검증 App 봇의 login)`,
+    );
   for (const c of cfg.ci.requiredChecks) {
     if (typeof c?.context !== 'string' || (c.source !== 'actions' && c.source !== 'recorder'))
       throw new ConfigError(

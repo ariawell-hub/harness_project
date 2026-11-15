@@ -6,14 +6,21 @@
 import type { Risk } from '../gates/risk-gate.ts';
 import { runSync } from '../lib/exec.ts';
 import { git, gitTry } from '../lib/git.ts';
-import { SHA_RE } from './results.ts';
-
-const MAX_DESCRIPTION = 140;
+import { DESCRIPTION_MAX, SHA_RE } from './results.ts';
 
 /** merge-base 대비 diff의 patch-id. 변경이 없으면 '' */
 export function patchId(root: string, base: string): string {
   const diff = git(
-    ['diff', '--no-ext-diff', '--no-textconv', '--no-color', `${base}...HEAD`],
+    // --binary --full-index: 바이너리 파일의 내용과 전체 blob id가 patch에 들어가게 한다
+    [
+      'diff',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      '--binary',
+      '--full-index',
+      `${base}...HEAD`,
+    ],
     root,
   );
   if (!diff.trim()) return '';
@@ -32,7 +39,7 @@ const validPatch = (patch: string) => /^[0-9a-f]{40}$/.test(patch);
 export function withPatch(description: string, patch: string): string {
   if (!validPatch(patch)) return description;
   const tag = ` patch:${patch}`;
-  return description.slice(0, MAX_DESCRIPTION - tag.length) + tag;
+  return description.slice(0, DESCRIPTION_MAX - tag.length) + tag;
 }
 
 export function patchOf(description: string): string | null {
@@ -59,6 +66,16 @@ export function changedOnBaseSince(
   return d.ok ? d.stdout.split('\0').filter(Boolean) : null;
 }
 
+/**
+ * PR이 바꾼 파일이 옛 head와 지금 head에서 바이트 단위로 같은가.
+ * `git patch-id`는 공백을 무시하므로, 승인 뒤 공백만 바꾼 커밋(들여쓰기, 따옴표 안의 공백)을 patch-id로는 걸러 내지 못한다.
+ * main 병합 갱신은 PR 파일을 건드리지 않으므로(겹침은 따로 본다) 항상 같다.
+ */
+export function samePrContent(root: string, oldHead: string, prFiles: string[]): boolean {
+  if (!SHA_RE.test(oldHead) || !prFiles.length) return false;
+  return gitTry(['diff', '--quiet', '--no-ext-diff', oldHead, 'HEAD', '--', ...prFiles], root).ok;
+}
+
 export interface CommitStatus {
   context: string;
   state: string;
@@ -82,6 +99,8 @@ export interface CarryOptions {
   /** 이 PR의 앞선 head들. 최신이 먼저 */
   candidates: Candidate[];
   changedOnBaseSince: (oldHead: string) => string[] | null;
+  /** PR 파일이 옛 head와 지금 head에서 바이트 단위로 같은가 */
+  samePrContent: (oldHead: string) => boolean;
   /** 검증 App 봇의 login(`ci.recorderBot`) */
   recorderBot: string;
   context: string;
@@ -107,6 +126,8 @@ export function carryOver(o: CarryOptions): { from: string } | { no: string } {
     const overlap = changed.filter((f) => mineFiles.has(f));
     if (overlap.length)
       return { no: `그사이 main에서 바뀐 파일이 PR 파일과 겹친다: ${overlap[0]}` };
+    if (!o.samePrContent(c.sha))
+      return { no: 'PR 파일의 내용이 다르다(patch-id는 공백 차이를 보지 않는다)' };
     return { from: c.sha };
   }
   return { no: '앞선 head에 검증 App의 판정이 없다' };

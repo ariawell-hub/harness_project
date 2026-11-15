@@ -23,6 +23,11 @@
       "step": 3,
       "name": "approval-binding",
       "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "verify-register",
+      "status": "pending"
     }
   ]
 }
