@@ -21,7 +21,11 @@ import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-sca
 import { githubGet, resolvePr } from './ci/pr.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
+import { REVIEWERS, ledgerData, parseLedgerData, type Ledger, type Reviewer } from './ci/ledger.ts';
+import { githubLedgerApi, loadLedger, recordCiFailure, recordLedger } from './ci/ledger-store.ts';
 import { githubStatusPoster, oneLine, recordReview, recordStatuses } from './ci/record.ts';
+import { pinnedPrompt, writeRoundInput } from './ci/review-round.ts';
+import type { Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
@@ -68,10 +72,19 @@ CI(gates 워크플로, 10.4절):
 
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
                 --head-sha <sha> --repo-slug <owner/name> --target-url <url> [--patch <id>] [--carried-from <sha>]
+                [--pr-number <N> --config-root <base> --prompt-base <sha> --round-changed <base64 JSON>]
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
-  review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N> --base-sha <sha>]
+                                           PR 번호를 주면 지적 원장 댓글을 고치고 review-ledger도 기록한다(토큰은 LEDGER_TOKEN)
+  review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N>] [--base-sha <sha>]
+              [--reviewer <claude|codex>] [--ledger <base64 JSON>]
                                            위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
-                                           PR 번호를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
+                                           PR 번호와 base SHA를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
+                                           검증자와 PR 번호(원장을 API로 읽고 ledger 출력) 또는 --ledger(받은 원장)를 주면
+                                           원장·라운드 입력을 쓰고 round, prompt_base, round_changed를 낸다(10.2절)
+  review-prompt --base-dir <base> --files <a.md,b.md> --out <파일> [--prompt-base <sha>]
+                                           검증 프롬프트를 이어 붙인다. 프롬프트 버전이 있으면 그 커밋의 파일을 쓴다(10.2절 (2))
+  ledger-ci-failure --config-root <base> --pr-number <N> --head-sha <sha> --repo-slug <owner/name> --run-url <url> --prompt-base <sha>
+                                           check 실패를 지적 원장에 남긴다(토큰은 LEDGER_TOKEN)
   claude-scan --log <stream-json> --pr <pr 폴더> --out <verdict.json>
                                            Claude 실행 기록 유출 검사. 문제가 없을 때만 판정을 쓴다(비밀은 SCAN_SECRETS)
   codex-auth restore --home <CODEX_HOME>   시크릿(CODEX_AUTH_JSON) → auth.json(0600). 값은 출력하지 않는다
@@ -141,6 +154,13 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'base-sha': { type: 'string' },
   patch: { type: 'string' },
   'carried-from': { type: 'string' },
+  reviewer: { type: 'string' },
+  'prompt-base': { type: 'string' },
+  'round-changed': { type: 'string' },
+  'base-dir': { type: 'string' },
+  files: { type: 'string' },
+  'run-url': { type: 'string' },
+  ledger: { type: 'string' },
   home: { type: 'string' },
   auth: { type: 'string' },
   snap: { type: 'string' },
@@ -308,6 +328,7 @@ async function main(argv: string[]): Promise<number> {
       const headSha = str('head-sha') ?? '';
       const repo = str('repo-slug') ?? '';
       const targetUrl = str('target-url') ?? '';
+      let seen: Verdict | null = null;
       const p = await recordReview({
         context: str('context') ?? '',
         needed: needed === 'true',
@@ -315,11 +336,18 @@ async function main(argv: string[]): Promise<number> {
         secrets: (process.env.SCAN_SECRETS ?? '').split('\n').filter(Boolean),
         headSha,
         repo,
-        post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
+        post: githubStatusPoster({
+          token,
+          repo,
+          sha: headSha,
+          targetUrl,
+          apiUrl: process.env.GITHUB_API_URL,
+        }),
         patch: str('patch') || undefined,
         carriedFrom: str('carried-from') || undefined,
         // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장(#55) 전에는 기록 job 로그가 지적을 보는 곳이다
         onVerdict: (v) => {
+          seen = v;
           // 본문은 PR 내용에 영향받는 LLM 출력이다. 한 줄로 만들고 접두어를 붙여 워크플로 명령 줄이 생기지 않게 한다
           log(
             `record-review: 판정 ${v.verdict} (검증자가 본 위험도 ${v.risk}) — ${oneLine(v.summary)}`,
@@ -332,6 +360,38 @@ async function main(argv: string[]): Promise<number> {
         },
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
+      // 지적 원장(10.2절 (4)). 판정 워크플로만 PR 번호를 준다. 원장 실패는 review-ledger = error로 남고 이 job은 실패시키지 않는다
+      if (str('pr-number') !== undefined) {
+        // 기록 job은 scripts와 설정 파일만 체크아웃한다. 설정 위치는 --config-root로 받는다
+        const cfg = loadConfig(path.resolve(str('config-root') ?? '.'));
+        const ledgerToken = process.env.LEDGER_TOKEN ?? '';
+        let changed: string[] | null = null;
+        try {
+          const raw = JSON.parse(Buffer.from(str('round-changed') ?? '', 'base64').toString());
+          if (Array.isArray(raw) && raw.every((x) => typeof x === 'string')) changed = raw;
+        } catch {
+          // 목록이 없거나 깨졌으면 모르는 것으로 본다(2라운드부터 새 P1은 동결된다)
+        }
+        const l = await recordLedger({
+          reviewer: (p.context.split('/')[1] ?? '') as Reviewer,
+          verdict: seen,
+          headSha,
+          repo,
+          number: Number(str('pr-number')),
+          recorderBot: cfg.ci.recorderBot ?? '',
+          promptBase: str('prompt-base') ?? '',
+          changedSinceLastRound: changed,
+          api: ledgerToken ? githubLedgerApi(ledgerToken, process.env.GITHUB_API_URL) : null,
+          post: githubStatusPoster({
+            token,
+            repo,
+            sha: headSha,
+            targetUrl,
+            apiUrl: process.env.GITHUB_API_URL,
+          }),
+        });
+        log(`record-review: ${l.context} = ${l.state} — ${l.description}`);
+      }
       return p.state === 'error' ? 1 : 0;
     }
     case 'review-plan': {
@@ -370,10 +430,103 @@ async function main(argv: string[]): Promise<number> {
           `patch=${c.patch}\ncarry_claude=${c.claude}\ncarry_codex=${c.codex}\n`,
         );
       }
+      // 라운드 입력(10.2절 (5)). 원장을 읽지 못하면 1라운드처럼 전체를 검토하게 한다(기록 job이 error를 남긴다)
+      const reviewer = str('reviewer');
+      const passed = str('ledger');
+      const fromApi = Number.isInteger(number) && number > 0;
+      if (reviewer && (fromApi || passed !== undefined)) {
+        if (!(REVIEWERS as readonly string[]).includes(reviewer)) {
+          process.stderr.write('review-plan: --reviewer는 claude | codex다\n');
+          return 2;
+        }
+        let ledger: Ledger | null = null;
+        if (fromApi) {
+          // plan job: 검증 App 봇의 원장 댓글을 읽어 판정 job에 넘긴다(판정 job에는 GitHub 토큰을 주지 않는다)
+          try {
+            ledger = (
+              await loadLedger({
+                get: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                repo: process.env.GITHUB_REPOSITORY ?? '',
+                number,
+                recorderBot: cfg.ci.recorderBot ?? '',
+              })
+            ).ledger;
+          } catch (e) {
+            log(
+              `review-plan: 원장을 읽지 못했다 — ${oneLine(e instanceof Error ? e.message : '오류')}`,
+            );
+          }
+          appendFileSync(output, `ledger=${ledger ? ledgerData(ledger) : ''}\n`);
+        } else if (passed) {
+          ledger = parseLedgerData(passed);
+          if (!ledger) {
+            process.stderr.write('review-plan: --ledger 값이 원장 형식이 아니다\n');
+            return 1;
+          }
+        }
+        const round = writeRoundInput({ root, ledger, reviewer: reviewer as Reviewer });
+        // 명령 인자 하나의 길이 한도(약 128KB) 안에서만 넘긴다. 넘으면 모르는 것으로 본다(새 P1은 동결된다)
+        const encoded = round.changed
+          ? Buffer.from(JSON.stringify(round.changed)).toString('base64')
+          : '';
+        const changed = encoded.length <= 100_000 ? encoded : '';
+        appendFileSync(
+          output,
+          `round=${round.round}\nprompt_base=${round.promptBase}\nround_changed=${changed}\n`,
+        );
+        log(
+          `review-plan: ${reviewer} ${round.round}라운드, 프롬프트 버전 ${round.promptBase.slice(0, 12) || '지금'}, 직전 판정 이후 바뀐 파일 ${round.changed ? round.changed.length : '알 수 없음'}`,
+        );
+      }
       log(
         `review-plan: 위험도 ${r.risk}, 작성 도구 ${r.author || '알 수 없음'} → claude=${r.claude} codex=${r.codex}`,
       );
       for (const why of r.reasons) log(`  - ${why}`);
+      return 0;
+    }
+    case 'review-prompt': {
+      const baseDir = str('base-dir');
+      const files = (str('files') ?? '').split(',').filter(Boolean);
+      const out = str('out');
+      if (!baseDir || !files.length || !out) {
+        process.stderr.write('review-prompt: --base-dir, --files, --out이 필요하다\n');
+        return 2;
+      }
+      try {
+        const promptBase = str('prompt-base') ?? '';
+        writeFileSync(out, pinnedPrompt({ baseDir, promptBase, files }));
+        log(`review-prompt: 프롬프트 버전 ${promptBase.slice(0, 12) || '지금(base 체크아웃)'}`);
+      } catch (e) {
+        process.stderr.write(`review-prompt: 실패 — ${e instanceof Error ? e.message : '오류'}\n`);
+        return 1;
+      }
+      return 0;
+    }
+    case 'ledger-ci-failure': {
+      const token = process.env.LEDGER_TOKEN ?? '';
+      if (!token) {
+        process.stderr.write('ledger-ci-failure: 환경 변수 LEDGER_TOKEN(검증 App 토큰)이 없다\n');
+        return 1;
+      }
+      try {
+        // 기록 job은 scripts와 설정 파일만 체크아웃한다. 설정 위치는 --config-root로 받는다
+        const cfg = loadConfig(path.resolve(str('config-root') ?? '.'));
+        await recordCiFailure({
+          api: githubLedgerApi(token, process.env.GITHUB_API_URL),
+          repo: str('repo-slug') ?? '',
+          number: Number(str('pr-number')),
+          recorderBot: cfg.ci.recorderBot ?? '',
+          headSha: str('head-sha') ?? '',
+          run: str('run-url') ?? '',
+          promptBase: str('prompt-base') ?? '',
+        });
+        log('ledger-ci-failure: 원장에 check 실패를 남겼다');
+      } catch (e) {
+        process.stderr.write(
+          `ledger-ci-failure: 실패 — ${oneLine(e instanceof Error ? e.message : '오류')}\n`,
+        );
+        return 1;
+      }
       return 0;
     }
     case 'claude-scan': {
@@ -563,7 +716,13 @@ async function main(argv: string[]): Promise<number> {
         headSha,
         repo,
         targetUrl,
-        post: githubStatusPoster({ token, repo, sha: headSha, targetUrl }),
+        post: githubStatusPoster({
+          token,
+          repo,
+          sha: headSha,
+          targetUrl,
+          apiUrl: process.env.GITHUB_API_URL,
+        }),
       });
       log(
         r.ok

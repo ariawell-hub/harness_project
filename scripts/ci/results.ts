@@ -7,6 +7,9 @@ export const GATE_CONTEXTS = ['plan-gate', 'harness-guard', 'risk-gate', 'deps-g
 /** 검증자 판정 context(R12). 판정 워크플로의 기록 job이 쓴다 */
 export const REVIEW_CONTEXTS = ['review/claude', 'review/codex'] as const;
 
+/** 지적 원장 판정 context(R16). 판정 워크플로의 기록 job이 원장을 고친 뒤 쓴다 */
+export const LEDGER_CONTEXT = 'review-ledger';
+
 export type GateState = 'success' | 'failure' | 'error';
 const STATES: readonly string[] = ['success', 'failure', 'error'];
 

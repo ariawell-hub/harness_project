@@ -53,6 +53,25 @@ GitHub → Settings → Environments → `judge-codex` → `CODEX_AUTH_JSON`에 
 
 정상이면 `codex-auth: restore sha8=… fields=…tokens.access_token,…` 줄이 나온다. 값은 로그에 나오지 않고, 필드 이름과 해시 앞 8자만 나온다.
 
+## 검증 App 권한 변경 (제작자)
+
+검증 App(`harness-recorder`)은 커밋 상태와 지적 원장 댓글을 쓴다(설계서 0.2절, 10.2절 (4)). 필요한 권한은 Commit statuses 읽기·쓰기, Pull requests 읽기·쓰기, Contents 읽기다. 에이전트는 App 설정을 바꾸지 않는다(R20).
+
+권한을 더할 때(예: Pull requests를 읽기에서 읽기·쓰기로):
+
+1. GitHub → 오른쪽 위 프로필 → Settings → Developer settings → GitHub Apps → `harness-recorder` → Edit.
+2. 왼쪽 Permissions & events → Repository permissions → Pull requests를 "Read and write"로 바꾸고 맨 아래 Save changes.
+3. 설치에서 새 권한을 수락한다. Settings → Applications → Installed GitHub Apps → `harness-recorder` → Configure → "Review request"(또는 권한 변경 알림)에서 Accept new permissions. 수락하기 전에는 새 권한이 적용되지 않는다.
+
+확인: 그 뒤 아무 PR에서 판정 워크플로(`judge-claude` 또는 `judge-codex`)의 `record` job 로그를 본다.
+
+| 상태                             | `record` job 로그                                                                              |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 적용됨                           | `record-review: review-ledger = success` 또는 `failure`                                        |
+| 권한을 저장하지 않았거나 수락 전 | "검증 App 토큰 (지적 원장 댓글 읽기·쓰기)" 단계 실패, `review-ledger = error — 원장 토큰 없음` |
+
+권한이 없어도 `review/claude`·`review/codex`는 그대로 기록된다. `review-ledger`만 `error`로 남는다.
+
 ## 유출 대응
 
 시크릿 스캔(로컬·CI)이나 감사에서 시크릿이 검출되면 이미 원격에 올라간 것으로 본다.
