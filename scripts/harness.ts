@@ -2,6 +2,7 @@
 // 모든 명령은 비대화식이고, 종료 코드로 성공·실패를 알린다(6절).
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
@@ -66,6 +67,7 @@ import { secretScan } from './gates/secret-scan.ts';
 import { getGitHub } from './lib/github.ts';
 import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
+import { runWorkers, workerNames } from './runner/workers.ts';
 
 const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 
@@ -82,7 +84,9 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   pr-ready [--undo]                        승인 요청 전 조건 확인 뒤 PR 초안 해제(--undo: 초안으로 되돌림)
   pr-state [--pr <번호>]                   PR의 필수 체크를 출처와 함께 보이고 분류한다(읽기만. 번호가 없으면 현재 브랜치의 PR)
   claim-heartbeat --issue <N>              선점 생존 확인
-  run [--worker runner-1] [--tool claude|codex] [--once] [--max-iterations N]   runner
+  run [--worker <이름> | --prefix runner] [--tool claude|codex] [--once] [--max-iterations N] [--no-wait]
+                                           runner. --worker(또는 HARNESS_WORKER)가 없으면 limits.workers만큼
+                                           작업자 프로세스(<접두어>-1, <접두어>-2 …)를 띄운다
 
 게이트:
   plan-gate [--repo <dir>] [--config-root <dir>] [--base <sha>] [--head-ref <브랜치>] [--mode pr|plan]
@@ -225,6 +229,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'no-setup': { type: 'boolean' },
   'no-github': { type: 'boolean' },
   worker: { type: 'string' },
+  prefix: { type: 'string' },
   tool: { type: 'string' },
   once: { type: 'boolean' },
   'max-iterations': { type: 'string' },
@@ -956,9 +961,23 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'run': {
       const tool = (str('tool') ?? 'claude') as 'claude' | 'codex' | 'fake';
+      const single = str('worker') ?? process.env.HARNESS_WORKER;
+      if (!single) {
+        // 작업자 여러 개(4.5절 운영): 작업자마다 프로세스 하나. 이름은 <접두어>-<번호>라 서로 겹치지 않는다
+        const names = workerNames(
+          str('prefix') ?? 'runner',
+          loadConfig(repoInfo(cwd).mainRoot).limits.workers,
+        );
+        const pass = ['--tool', tool];
+        if (flag('once')) pass.push('--once');
+        if (str('max-iterations')) pass.push('--max-iterations', str('max-iterations')!);
+        if (flag('no-wait')) pass.push('--no-wait');
+        log(`runner 작업자 ${names.length}개: ${names.join(', ')}`);
+        return runWorkers({ cwd, script: fileURLToPath(import.meta.url), names, args: pass });
+      }
       const stop = await runRunner({
         cwd,
-        worker: str('worker') ?? process.env.HARNESS_WORKER ?? 'runner-1',
+        worker: single,
         tool,
         once: flag('once'),
         maxIterations: str('max-iterations') ? Number(str('max-iterations')) : undefined,

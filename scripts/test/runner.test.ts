@@ -318,12 +318,70 @@ test('runner: GitHub이 DIRTY라 해도 브랜치가 이미 최신이면 실패�
   }
 });
 
-test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 needs-human으로 한 번만 보고하며, 계획 파일은 바꾸지 않는다 (ADR-0006, TD-27)', async () => {
+const onceRunner = (root: string) =>
+  runRunner({ cwd: root, worker: 'runner-1', tool: 'fake', once: true, noWait: true });
+const conflictPrompts = (t: ReturnType<typeof setup>) =>
+  t.prompts().filter((p) => p.step === 'conflict');
+
+test('runner: main과 충돌한(DIRTY) PR은 제작자 답 없이 충돌 해결 세션을 띄우고, 풀리면 병합 커밋을 일반 push한다 (TD-9)', async () => {
   const t = setup();
   try {
     const task = await openPR(t, 'DIRTY', 'main\n');
     const head = sh('git', ['rev-parse', 'HEAD'], task.worktree);
-    assert.equal(await run(t.fx.root), 'human', '사람 답변만 기다리면 멈춘다');
+    writeFileSync(t.behavior, JSON.stringify({ demo: { conflict: ['ok'] } }));
+    await onceRunner(t.fx.root);
+    const prompts = conflictPrompts(t);
+    assert.equal(prompts.length, 1, '답을 기다리지 않고 해결 세션을 띄운다');
+    assert.match(prompts[0].prompt, /## 충돌 파일\n- `shared\.txt`/);
+    assert.doesNotMatch(prompts[0].prompt, /제작자 답변/, '제작자 답이 없으므로 답변 절이 없다');
+    const issue = t.gh().issues[0];
+    assert.ok(!issue.labels.includes('needs-human'));
+    assert.equal(issue.comments.filter((c) => /중단 보고/.test(c.body)).length, 0);
+    assert.equal(
+      gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
+      false,
+      '병합을 마쳤다',
+    );
+    const shared = readFileSync(path.join(task.worktree, 'shared.txt'), 'utf8');
+    assert.doesNotMatch(shared, /^(<{7}|>{7})/m, '충돌 표시 없음');
+    assert.match(shared, /pr/);
+    assert.match(shared, /main/);
+    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
+    assert.ok(
+      gitTry(['merge-base', '--is-ancestor', 'origin/main', `origin/${task.branch}`], t.fx.root).ok,
+      '해결한 병합 커밋을 push했다',
+    );
+    assert.ok(
+      gitTry(['merge-base', '--is-ancestor', head, `origin/${task.branch}`], t.fx.root).ok,
+      '옛 head가 새 head의 조상이다(force push 없음)',
+    );
+    const attempts = readAttempts(repoInfo(task.worktree));
+    assert.deepEqual(
+      attempts.filter((a) => a.key === 'pr:conflict').map((a) => a.ok),
+      [true],
+    );
+    assert.equal(attempts.filter((a) => a.key === 'pr:update' && !a.ok).length, 0);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('runner: 충돌 해결이 5회 실패하면 needs-human과 중단 보고를 한 번 올리고 그 뒤로는 답을 기다린다. 계획 파일은 바꾸지 않는다 (ADR-0006, TD-27)', async () => {
+  const t = setup();
+  try {
+    const task = await openPR(t, 'DIRTY', 'main\n');
+    const head = sh('git', ['rev-parse', 'HEAD'], task.worktree);
+    writeFileSync(
+      t.behavior,
+      JSON.stringify({ demo: { conflict: ['fail', 'fail', 'fail', 'fail', 'fail', 'ok'] } }),
+    );
+    assert.equal(await run(t.fx.root), 'human', '한도에 닿으면 사람 답변을 기다린다');
+    assert.equal(conflictPrompts(t).length, 5, '해결 세션은 5번까지다');
+    assert.match(
+      conflictPrompts(t)[3].prompt,
+      /방법 전환 지시/,
+      '3회 실패 뒤에는 방법 전환을 지시한다',
+    );
     assert.equal(
       sh('git', ['rev-parse', 'HEAD'], task.worktree),
       head,
@@ -339,28 +397,30 @@ test('runner: main과 충돌한(DIRTY) PR은 병합을 취소하고 needs-human�
       head,
       'PR 브랜치에 blocked를 push하지 않았다(PR plan-gate 유지)',
     );
-    const issue = t.gh().issues[0];
+    let issue = t.gh().issues[0];
     assert.ok(issue.labels.includes('needs-human'), 'Issue에 needs-human');
-    assert.equal(
-      issue.comments.filter((c) => /중단 보고/.test(c.body)).length,
-      1,
-      '같은 중단 보고를 반복하지 않는다',
-    );
+    assert.equal(issue.comments.filter((c) => /중단 보고/.test(c.body)).length, 1);
     assert.match(issue.comments.at(-1)!.body, /shared\.txt/);
+    assert.match(issue.comments.at(-1)!.body, /@maker/);
     assert.equal(
       gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
       false,
       '병합을 취소했다',
     );
-    sh('git', ['fetch', '-q', 'origin'], t.fx.root);
-    assert.equal(
-      gitTry(['merge-base', '--is-ancestor', 'origin/main', `origin/${task.branch}`], t.fx.root).ok,
-      false,
-      '충돌한 병합을 원격에 올리지 않았다',
+    const fails = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:conflict');
+    assert.deepEqual(
+      fails.map((a) => a.ok),
+      [false, false, false, false, false],
     );
-    const fails = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:update');
-    assert.equal(fails.length, 1);
-    assert.equal(fails[0].ok, false);
+    // 답을 기다리는 동안에는 세션도 보고도 더 없다
+    assert.equal(await run(t.fx.root), 'human');
+    issue = t.gh().issues[0];
+    assert.equal(conflictPrompts(t).length, 5);
+    assert.equal(
+      issue.comments.filter((c) => /중단 보고/.test(c.body)).length,
+      1,
+      '같은 중단 보고를 반복하지 않는다',
+    );
   } finally {
     t.fx.cleanup();
   }
@@ -496,24 +556,28 @@ test('runner: 선점 뒤 계획 작성 전에 허용 계정이 아닌 계정이 
   }
 });
 
-/** 충돌로 멈춘 PR에 제작자가 답하게 만든다. 답을 받는 바퀴와 갱신 바퀴를 한 번씩 돌린다 */
-async function answerConflict(t: ReturnType<typeof setup>, answer: string) {
-  const once = () =>
-    runRunner({ cwd: t.fx.root, worker: 'runner-1', tool: 'fake', once: true, noWait: true });
+/**
+ * 자동 해결이 한도(5회)까지 실패해 멈춘 PR에 제작자가 답하게 만든다. 답을 받는 바퀴와 갱신 바퀴를 한 번씩 돌린다.
+ * `then`은 답을 받은 뒤 해결 세션의 동작이다
+ */
+async function answerConflict(t: ReturnType<typeof setup>, answer: string, then: 'ok' | 'fail') {
+  writeFileSync(
+    t.behavior,
+    JSON.stringify({ demo: { conflict: ['fail', 'fail', 'fail', 'fail', 'fail', then] } }),
+  );
   assert.equal(await run(t.fx.root), 'human');
   new FakeGitHub(t.state).ownerComment(1, answer);
-  await once(); // 답 받음
-  await once(); // 충돌 해결 시도
+  await onceRunner(t.fx.root); // 답 받음
+  await onceRunner(t.fx.root); // 충돌 해결 시도
 }
 
-test('runner: 충돌 중단에 제작자가 답하면 충돌을 남긴 병합 + 해결 세션 뒤, runner가 판정해 병합 커밋을 일반 push한다 (TD-27)', async () => {
+test('runner: 한도에 닿아 멈춘 충돌에 제작자가 답하면 답을 넣은 해결 세션 뒤, runner가 판정해 병합 커밋을 일반 push한다 (TD-27)', async () => {
   const t = setup();
   try {
     const task = await openPR(t, 'DIRTY', 'main\n');
-    writeFileSync(t.behavior, JSON.stringify({ demo: { conflict: ['ok'] } }));
-    await answerConflict(t, '양쪽을 모두 살려라');
-    const prompt = t.prompts().find((p) => p.step === 'conflict');
-    assert.ok(prompt, '충돌 해결 세션을 띄웠다');
+    await answerConflict(t, '양쪽을 모두 살려라', 'ok');
+    assert.equal(conflictPrompts(t).length, 6, '답을 받은 뒤 해결 세션을 다시 띄웠다');
+    const prompt = conflictPrompts(t).at(-1)!;
     assert.match(prompt.prompt, /## 충돌 파일\n- `shared\.txt`/);
     assert.match(prompt.prompt, /양쪽을 모두 살려라/, '제작자 답을 넣는다');
     assert.equal(
@@ -533,7 +597,7 @@ test('runner: 충돌 중단에 제작자가 답하면 충돌을 남긴 병합 + 
     const resolved = readAttempts(repoInfo(task.worktree)).filter((a) => a.key === 'pr:conflict');
     assert.deepEqual(
       resolved.map((a) => a.ok),
-      [true],
+      [false, false, false, false, false, true],
     );
     assert.ok(!t.gh().issues[0].labels.includes('needs-human'));
   } finally {
@@ -547,8 +611,8 @@ test('runner: 해결 세션이 충돌을 풀지 못하면 병합을 취소하고
     const task = await openPR(t, 'DIRTY', 'main\n');
     const head = sh('git', ['rev-parse', 'HEAD'], task.worktree);
     writeFileSync(t.behavior, JSON.stringify({ demo: { conflict: ['fail'] } }));
-    await answerConflict(t, '풀어라');
-    assert.ok(t.prompts().some((p) => p.step === 'conflict'));
+    await onceRunner(t.fx.root);
+    assert.equal(conflictPrompts(t).length, 1);
     assert.equal(
       gitTry(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], task.worktree).ok,
       false,

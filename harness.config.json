@@ -23,7 +23,7 @@
     "stepFailedCheckLimit": 10,
     "stepSessionMinutesLimit": 120,
     "runnerMaxHours": 12,
-    "workers": 1,
+    "workers": 2,
     "wipPerWorker": 2,
     "claimExpiryHours": 24,
     "usageLimitMaxWaitMin": 180,
