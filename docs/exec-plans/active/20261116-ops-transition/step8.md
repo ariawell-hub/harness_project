@@ -40,7 +40,7 @@
    ```
 
    - 1번: `compareRequiredChecks` 결과(등록·출처가 `ci.requiredChecks`와 같다).
-   - 2번: `codeownersProblems`가 없다. 코드 오너 리뷰 필수 설정은 봇이 읽을 수 있으면 읽고(읽기 전용 조회 하나), 읽지 못하면 "설정은 시험 PR로 확인한다"를 `lines`에 적되 파일이 맞으면 `ok`로 둔다.
+   - 2번: `codeownersProblems`가 없다. 코드 오너 리뷰 필수 설정은 봇이 읽을 수 있으면 읽고(읽기 전용 조회 하나), 읽지 못하면 그 줄을 `?`로 표시하고 "설정은 step10의 시험 PR(`protected-needs-owner`)로 확인한다"를 `lines`에 적는다. 항목 상태는 파일이 맞으면 `ok`다. 이 항목에서 `ops-check`가 보증하는 것은 CODEOWNERS 파일이고, 리포 설정의 근거는 시험 PR 결과(`lab/ops-transition/results/`)다.
    - 3번: 봇 토큰의 권한 범위(`gh api -i user`의 `x-oauth-scopes` 응답 머리말)에 `workflow`가 없다. 머리말이 없으면(세분화 토큰) `unknown`이다. 토큰 값은 읽지도 출력하지도 않는다.
    - 출력은 항목별 `✓`/`✗`/`?`와 이유다. 모두 `ok`일 때만 종료 코드 0이다. `--allow-unknown`은 두지 않는다.
    - 읽기만 한다. 설정을 바꾸는 API를 부르지 않는다(R20).
