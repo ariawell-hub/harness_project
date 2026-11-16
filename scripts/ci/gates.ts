@@ -2,7 +2,7 @@
 // main(base/)의 이 스크립트가 PR head 체크아웃(pr/)을 데이터로만 읽는다. PR 코드를 실행하지 않고 비밀이 없다.
 // 설정(cfg)은 반드시 main 쪽에서 읽는다. PR이 판정 기준을 함께 바꿀 수 있기 때문이다.
 import type { HarnessConfig } from '../lib/config.ts';
-import { formatProblem } from '../lib/util.ts';
+import { formatProblem, matchesAny } from '../lib/util.ts';
 import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
 import { planGate, type PlanG1 } from '../gates/plan-gate.ts';
@@ -12,7 +12,13 @@ import {
   type RevertCheck,
   type TargetCheck,
 } from '../gates/revert-check.ts';
-import { riskGate, type Review, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
+import {
+  changedFiles,
+  riskGate,
+  type Review,
+  type Risk,
+  type RiskSignal,
+} from '../gates/risk-gate.ts';
 import { REVIEWERS, type PlanReview } from './ledger.ts';
 import { planHashes } from './plan-hash.ts';
 import { GATE_CONTEXTS, type GateResult, type GateResults } from './results.ts';
@@ -98,6 +104,18 @@ function planGateResult(o: RunGatesOptions, g1: PlanG1 | undefined): Omit<GateRe
     description: `${r.problems[0].what}${more}`,
     details: [...r.problems.map(formatProblem), ...r.notes.map((n) => `참고: ${n}`)],
   };
+}
+
+/**
+ * 이 PR에 자체 테스트(gates 워크플로 selftest job, 12.4절)가 필요한가: 보호 경로를 바꿨다(harness-guard와 같은 판단).
+ * 판단하지 못하면 true다(fail-closed)
+ */
+export function selfTestNeeded(o: { root: string; base: string; cfg: HarnessConfig }): boolean {
+  try {
+    return changedFiles(o.root, o.base).some((f) => matchesAny(f.path, o.cfg.protectedPaths));
+  } catch {
+    return true;
+  }
 }
 
 export async function runGates(o: RunGatesOptions): Promise<GateResults> {

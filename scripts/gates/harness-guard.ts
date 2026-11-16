@@ -1,6 +1,7 @@
 // harness-guard (10.3·10.4절, R9). 보호 경로를 바꾼 PR을 LLM 없이 규칙으로 검사한다.
-// 실패(작성자가 고칠 것): CHANGELOG 누락, PR 본문의 보호 경로 체크리스트 누락, 워크플로 캐시 사용.
-// 신호(제작자 결정 2026-11-14): 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조는 표시만 하고
+// 실패(작성자가 고칠 것): CHANGELOG 누락, PR 본문의 보호 경로 체크리스트 누락, 워크플로 캐시 사용,
+//   PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한.
+// 신호(제작자 결정 2026-11-14): 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조·기존 자체 테스트 파일 변경은 표시만 하고
 //   risk-gate가 위험도를 높음으로 올려 제작자 head 승인을 요구한다.
 // 기준선은 base 커밋의 파일과 main 설정(cfg)이다. PR 트리의 설정을 기준으로 쓰지 않는다.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -13,6 +14,13 @@ import { changedFiles, type RiskSignal } from './risk-gate.ts';
 
 export const CHANGELOG = 'docs/harness/CHANGELOG.md';
 const WORKFLOWS = '.github/workflows/';
+/** 자체 테스트의 실행기·시나리오(12.4절). base에 있던 파일을 고치거나 지우면 신호다 */
+const SELFTEST = 'scripts/selftest/';
+/** PR 코드를 실행하는 job(10.4절): job id이거나, 그 명령을 실행하는 job */
+const PR_CODE_JOBS = [
+  { id: 'repro', run: /harness\.ts repro\b/ },
+  { id: 'selftest', run: /harness\.ts self-test\b/ },
+];
 const DOC = 'docs/harness/design.md 10.4절 보호 경로 정책 / docs/harness/workflow.md 5절';
 /** harness.config.json에서 판정·권한에 걸리는 키. 바뀌면 신호다(TD-10) */
 const CONFIG_KEYS = [
@@ -84,8 +92,9 @@ const usesCache = (text: string) =>
     .some((l) => /uses:\s*actions\/cache/.test(l) || /^\s*cache(-dependency-path)?:/.test(l));
 
 /**
- * PR 코드를 실행하는 재현 job(10.4절)이 지켜야 할 것: environment·비밀·쓰기 권한이 없다.
- * 재현 job = id가 `repro`이거나 `harness.ts repro`를 실행하는 job. 어긴 내용을 돌려준다
+ * PR 코드를 실행하는 job(10.4절)이 지켜야 할 것: environment·비밀·쓰기 권한이 없다. 어긴 내용을 돌려준다.
+ * 대상: 재현 job(id가 `repro`이거나 `harness.ts repro`를 실행)과
+ * 자체 테스트 job(id가 `selftest`이거나 `harness.ts self-test`를 실행)
  */
 export function reproJobViolations(text: string): string[] {
   const i = text.search(/^jobs:\s*$/m);
@@ -103,7 +112,7 @@ export function reproJobViolations(text: string): string[] {
   const out: string[] = [];
   for (const [id, lines] of blocks) {
     const body = lines.join('\n');
-    if (id !== 'repro' && !/harness\.ts repro\b/.test(body)) continue;
+    if (!PR_CODE_JOBS.some((j) => j.id === id || j.run.test(body))) continue;
     if (environments(body).length) out.push(`${id}: environment를 참조한다`);
     if (/\bsecrets\./.test(body)) out.push(`${id}: 비밀을 참조한다`);
     if (writeLines(body).length) out.push(`${id}: 쓰기 권한이 있다`);
@@ -201,7 +210,7 @@ export function harnessGuard(o: {
     const text = readFileSync(path.join(wfDir, name), 'utf8');
     for (const v of reproJobViolations(text))
       failures.push(
-        `${WORKFLOWS}${name}: 재현 job ${v}\n  고치는 법: PR 코드를 실행하는 job에는 environment·비밀·쓰기 권한을 두지 마라\n  근거: docs/harness/design.md 10.4절 재현 job`,
+        `${WORKFLOWS}${name}: PR 코드를 실행하는 job ${v}\n  고치는 법: 재현 job과 자체 테스트 job에는 environment·비밀·쓰기 권한을 두지 마라\n  근거: docs/harness/design.md 10.4절 재현 job`,
       );
     if (usesCache(text))
       failures.push(
@@ -254,6 +263,9 @@ export function harnessGuard(o: {
       const gone = ['.env', '.env.*'].filter((e) => lines(b).includes(e) && !lines(h).includes(e));
       if (gone.length) add(`.gitignore에서 ${gone.join(', ')} 항목 삭제`);
     }
+    // 새 시나리오 추가는 신호가 아니다. 기존 실행기·시나리오를 바꾸면 자체 테스트가 약해질 수 있다(12.4절)
+    if (f.startsWith(SELFTEST) && b !== null)
+      add(`자체 테스트 파일 ${h === null ? '삭제' : '수정'}: ${f}`);
     if (h !== null && !f.endsWith('.md')) {
       const d = gitTry(['diff', '-U0', '--no-renames', `${o.base}...HEAD`, '--', f], o.root);
       const addedLines = d.stdout

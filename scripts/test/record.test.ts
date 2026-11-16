@@ -1,4 +1,5 @@
 // record-review·review-plan 명령과 지적 원장의 연결을 가짜 GitHub API 서버로 확인한다. 계획 20261115-review-ledger step1.
+// record-status가 자체 테스트 보고서를 harness-guard에 합치는 것도 여기서 본다. 계획 20261116-ops-security step3.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,6 +9,8 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ledgerData, parseLedger, parseLedgerData } from '../ci/ledger.ts';
 import { reviewLogLines } from '../ci/record.ts';
+import { GATE_CONTEXTS, type GateResult } from '../ci/results.ts';
+import { decodeSelfTest, mergeSelfTest, validateSelfTest } from '../ci/selftest-result.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const BOT = 'harness-recorder[bot]';
@@ -689,4 +692,214 @@ test('reviewLogLines: record-review가 판정을 로그에 내는 줄의 형식(
       '    제안: 제안',
     ],
   );
+});
+
+// ---------- 자체 테스트 결과를 harness-guard에 합치기 (12.4절, 계획 20261116-ops-security step3) ----------
+
+const GUARD_OK: GateResult = {
+  context: 'harness-guard',
+  state: 'success',
+  description: '보호 경로 변경 2개: 통과',
+  details: [],
+};
+const report = (
+  results: { id: unknown; state: unknown; covers?: string; detail?: string }[],
+  over: Record<string, unknown> = {},
+) => ({ version: 1, headSha: HEAD, results, ...over });
+const PASS2 = report([
+  { id: 'r1-plan-gate', state: 'pass', covers: 'R1', detail: 'ok' },
+  { id: 'r4-bypass', state: 'pass', covers: 'R4', detail: 'ok' },
+]);
+
+test('validateSelfTest: 형식·headSha·id를 검사하고 통과하지 못한 시나리오 id를 돌려준다', () => {
+  assert.deepEqual(validateSelfTest(PASS2, { headSha: HEAD }), { ok: true, failed: [], total: 2 });
+  const mixed = report([
+    { id: 'a', state: 'pass' },
+    { id: 'b-2', state: 'fail' },
+    { id: 'c', state: 'error' },
+  ]);
+  assert.deepEqual(validateSelfTest(mixed, { headSha: HEAD }), {
+    ok: true,
+    failed: ['b-2', 'c'],
+    total: 3,
+  });
+  const bad: unknown[] = [
+    null,
+    'text',
+    [],
+    { ...PASS2, version: 2 },
+    { ...PASS2, headSha: '' },
+    { ...PASS2, headSha: BASE },
+    { version: 1, headSha: HEAD },
+    { version: 1, headSha: HEAD, results: {} },
+    report([{ id: 'a', state: 'pass' }, 'x' as never]),
+    report([{ id: 'a', state: 'skipped' }]),
+    report([{ id: 'a' as unknown, state: undefined }]),
+    report([
+      { id: 'a', state: 'pass' },
+      { id: 'a', state: 'pass' },
+    ]),
+    // PR 코드가 쓸 수 있는 값이다: 형식 밖의 id는 받지 않는다
+    report([{ id: 'A', state: 'pass' }]),
+    report([{ id: 'a b', state: 'fail' }]),
+    report([{ id: 'x\n::error::y', state: 'fail' }]),
+    report([{ id: '<img src=x>', state: 'fail' }]),
+    report([{ id: 'a'.repeat(41), state: 'pass' }]),
+    report([{ id: 7, state: 'pass' }]),
+    report(Array.from({ length: 201 }, (_, i) => ({ id: `s${i}`, state: 'pass' }))),
+  ];
+  for (const raw of bad)
+    assert.equal(validateSelfTest(raw, { headSha: HEAD }).ok, false, JSON.stringify(raw));
+});
+
+test('mergeSelfTest: 필요 없으면 그대로, 결과가 없으면 error, 실패가 있으면 failure, 통과면 설명에 덧붙인다', () => {
+  const m = (guard: GateResult, needed: boolean, r: unknown | null) =>
+    mergeSelfTest(guard, { needed, report: r, headSha: HEAD });
+  assert.equal(m(GUARD_OK, false, null), GUARD_OK);
+  const pass = m(GUARD_OK, true, PASS2);
+  assert.equal(pass.state, 'success');
+  assert.equal(pass.description, '보호 경로 변경 2개: 통과 · 자체 테스트 통과 2');
+  assert.equal(pass.context, 'harness-guard');
+
+  for (const r of [null, {}, report([]), { ...PASS2, headSha: BASE }, 'text']) {
+    const none = m(GUARD_OK, true, r);
+    assert.equal(none.state, 'error', JSON.stringify(r));
+    assert.match(none.description, /^자체 테스트 결과가 없다/);
+  }
+  const failed = m(
+    GUARD_OK,
+    true,
+    report([
+      { id: 'r1-plan-gate', state: 'pass', detail: 'ok' },
+      { id: 'r4-bypass', state: 'fail', detail: '훅이 막지 않았다 ::error::x' },
+      { id: 'flow-full', state: 'error', detail: 'boom' },
+    ]),
+  );
+  assert.equal(failed.state, 'failure');
+  // 보고서의 글(detail)은 넣지 않는다. id만 넣는다
+  assert.equal(failed.description, '자체 테스트 실패: r4-bypass, flow-full');
+  assert.doesNotMatch(JSON.stringify(failed), /훅이 막지|boom|::error::/);
+  // 형식 밖의 id가 든 보고서는 통째로 버린다(error)
+  const odd = m(GUARD_OK, true, report([{ id: 'x`rm -rf`', state: 'fail' }]));
+  assert.equal(odd.state, 'error');
+  assert.doesNotMatch(odd.description, /rm -rf/);
+
+  // harness-guard 자신의 실패·오류는 유지하고 자체 테스트 결과를 덧붙인다
+  const guardFail: GateResult = { ...GUARD_OK, state: 'failure', description: 'CHANGELOG 누락' };
+  const ff = m(guardFail, true, PASS2);
+  assert.equal(ff.state, 'failure');
+  assert.equal(ff.description, 'CHANGELOG 누락 · 자체 테스트 통과 2');
+  assert.equal(m(guardFail, true, null).state, 'failure');
+  assert.match(m(guardFail, true, null).description, /^CHANGELOG 누락 · 자체 테스트 결과가 없다/);
+  const guardErr: GateResult = {
+    ...GUARD_OK,
+    state: 'error',
+    description: 'PR 본문을 읽지 못했다',
+  };
+  assert.equal(m(guardErr, true, PASS2).state, 'error');
+  assert.equal(
+    m(guardErr, true, report([{ id: 'r4-bypass', state: 'fail' }])).description,
+    'PR 본문을 읽지 못했다 · 자체 테스트 실패: r4-bypass',
+  );
+});
+
+test('decodeSelfTest: base64 JSON을 풀고, 없거나 깨졌으면 null', () => {
+  const b64 = Buffer.from(JSON.stringify(PASS2)).toString('base64');
+  assert.deepEqual(decodeSelfTest(b64), PASS2);
+  for (const x of [undefined, '', '  ', 'not base64 json', Buffer.from('{').toString('base64')])
+    assert.equal(decodeSelfTest(x), null, String(x));
+});
+
+function gatesFile(guard: Partial<GateResult> = {}): string {
+  const f = path.join(tmp(), 'gates.json');
+  writeFileSync(
+    f,
+    JSON.stringify({
+      version: 1,
+      headSha: HEAD,
+      results: GATE_CONTEXTS.map((context) =>
+        context === 'harness-guard'
+          ? { ...GUARD_OK, ...guard }
+          : { context, state: 'success', description: '통과', details: [] },
+      ),
+    }),
+  );
+  return f;
+}
+const statusArgs = (file: string, needed?: string) => [
+  'record-status',
+  '--results',
+  file,
+  '--head-sha',
+  HEAD,
+  '--repo-slug',
+  'o/r',
+  '--target-url',
+  'https://example.invalid/run/1',
+  ...(needed === undefined ? [] : ['--selftest-needed', needed]),
+];
+const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+const guardStatus = () => state.statuses.find((s) => s.context === 'harness-guard')!;
+const otherStates = () =>
+  state.statuses.filter((s) => s.context !== 'harness-guard').map((s) => s.state);
+
+test('record-status: 보호 경로 PR인데 자체 테스트 보고서가 없거나 깨졌으면 harness-guard를 error로 기록한다', async () => {
+  const env = { GH_TOKEN: 'app-token' };
+  for (const [needed, extra] of [
+    ['true', {}],
+    // 판정 job이 값을 남기지 못했으면(빈 값) 필요한 것으로 본다
+    ['', {}],
+    ['true', { SELFTEST_B64: 'not-json' }],
+    ['true', { SELFTEST_B64: b64({ ...PASS2, headSha: BASE }) }],
+    ['true', { SELFTEST_B64: b64(report([])) }],
+  ] as [string, Record<string, string>][]) {
+    reset();
+    const r = await run(statusArgs(gatesFile(), needed), { ...env, SELFTEST_B64: '', ...extra });
+    assert.equal(r.code, 0, r.out);
+    assert.equal(state.statuses.length, GATE_CONTEXTS.length);
+    assert.equal(guardStatus().state, 'error', JSON.stringify([needed, extra]));
+    assert.match(guardStatus().description, /^자체 테스트 결과가 없다/);
+    assert.equal(guardStatus().sha, HEAD);
+    // 다른 기계 판정은 그대로다
+    assert.deepEqual([...new Set(otherStates())], ['success']);
+  }
+});
+
+test('record-status: 실패한 시나리오가 있으면 failure, 모두 통과면 success. 필요 없으면 harness-guard 결과 그대로다', async () => {
+  const env = { GH_TOKEN: 'app-token' };
+  reset();
+  const failed = report([
+    { id: 'r1-plan-gate', state: 'pass', detail: 'ok' },
+    { id: 'mcp-guard', state: 'fail', detail: '훅 종료 코드가 2가 아니다(0)' },
+  ]);
+  await run(statusArgs(gatesFile(), 'true'), { ...env, SELFTEST_B64: b64(failed) });
+  assert.equal(guardStatus().state, 'failure');
+  assert.equal(guardStatus().description, '자체 테스트 실패: mcp-guard');
+
+  reset();
+  await run(statusArgs(gatesFile(), 'true'), { ...env, SELFTEST_B64: b64(PASS2) });
+  assert.equal(guardStatus().state, 'success');
+  assert.equal(guardStatus().description, '보호 경로 변경 2개: 통과 · 자체 테스트 통과 2');
+
+  // harness-guard가 이미 실패면 통과한 자체 테스트가 그것을 가리지 않는다
+  reset();
+  await run(statusArgs(gatesFile({ state: 'failure', description: 'CHANGELOG 누락' }), 'true'), {
+    ...env,
+    SELFTEST_B64: b64(PASS2),
+  });
+  assert.equal(guardStatus().state, 'failure');
+
+  // 보호 경로를 바꾸지 않은 PR: 보고서가 없어도, 있어도 그대로다
+  for (const extra of [{ SELFTEST_B64: '' }, { SELFTEST_B64: b64(failed) }]) {
+    reset();
+    const none = { description: '보호 경로 변경 없음' };
+    await run(statusArgs(gatesFile(none), 'false'), { ...env, ...extra });
+    assert.equal(guardStatus().state, 'success');
+    assert.equal(guardStatus().description, '보호 경로 변경 없음');
+  }
+  // 플래그 없이 부르면(옛 호출) 합치지 않는다
+  reset();
+  await run(statusArgs(gatesFile()), { ...env, SELFTEST_B64: '' });
+  assert.equal(guardStatus().description, '보호 경로 변경 2개: 통과');
+  assert.ok(state.auth.every((a) => a.endsWith('Bearer app-token')));
 });

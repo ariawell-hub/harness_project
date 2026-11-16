@@ -99,6 +99,9 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-16 step2: 구현. 설정 `guard.mcp`(`scripts/lib/config.ts`의 `McpGuardConfig`·`DEFAULT_MCP_GUARD`·`resolveMcpGuard`, `harness.config.json`, 프로파일 core·web), `scripts/hooks/guard.ts`(`normalize`의 `kind: 'mcp'`, 메인 체크아웃의 `guard.mcp` 읽기, 설정 오류 메시지), `scripts/hooks/rules.ts`(`evaluateMcp`), `.claude/settings.json`의 PreToolUse matcher에 `mcp__.*`, 자체 테스트 시나리오 `mcp-guard`. 테스트: `guard.test.ts` 8개, `lib.test.ts` 3개, `selftest.test.ts` 1개(약화된 사본 둘). 문서: 설계서 v0.7.48(0.1절 E5, 5.1절 R14·R20, 10.4절 체크리스트 3번, 12.4절 표, 13.1절, 13.2절), `docs/SECURITY.md`("에이전트용 브라우저 프로필 (제작자)", 강제 장치 표), `CLAUDE.md`, 코드 구조 문서, `CHANGELOG`, TD-13. step2의 AC 명령 4개가 종료 코드 0이었다.
 - 2026-11-16 step2: 이 Windows PC의 전체 `check`가 `test` 단계의 시간 제한(900초)에 걸렸다. #57 계획 step2(PR #106)의 트리에 main을 병합해 돌린 `check`가 두 번 연속 `test (900.6s)`로 실패했고(두 번째는 다른 작업 없이 실행), 같은 트리의 전체 테스트를 제한 없이 돌리니 951초에 실패 0건이었다(파일 40개, 파일별 합계 4516초. 긴 파일: `runner-review` 650초, `runner-pr` 588초, `runner` 536초, `selftest` 408초, `runner-plan-review` 390초). 이 PR에 `commands.test.timeoutSec` 900 → 1800을 함께 넣는다(의사결정 로그). PR #106은 이 PR이 병합된 뒤 main을 받아 다시 검사한다.
 - 2026-11-16 step2: PR #107 판정 1라운드(head `655bf33`)에서 두 검증자가 승인했다. `review/claude`의 P2 한 건(원장 F1: 금지 호스트 탐색이 표의 마침표 `。` 같은 유니코드 구분자를 정규화하지 않아 `https://github。com`이 통과한다)을 승인 요청 전에 고쳤다: 호스트를 찾기 전에 NFKC로 맞추고 U+3002·U+FF61을 `.`으로 바꾼다. 테스트 4건을 더했다.
+- 2026-11-16 step2: PR #107. 2라운드(head `e9562ae`)에서 두 검증자가 승인했고(지적 없음) 제작자가 그 head를 승인해 병합됐다(main `4c95a36`). F1 수정 뒤의 전체 `check`는 864.6초였다. #57 계획 step2(PR #106)는 그 뒤 main을 받아 병합됐고(main `0d4b6cc`) Issue #57이 닫혔다. main에서 설계서 변경 이력의 v0.7.48 줄이 v0.7.46 줄 앞에 들어가 있던 것은 PR #106이 오름차순으로 바로잡았다.
+- 2026-11-16 step3: 구현. `scripts/ci/selftest-result.ts`(`validateSelfTest`·`mergeSelfTest`·`decodeSelfTest`), `scripts/ci/gates.ts`의 `selfTestNeeded`, `gates` 명령의 `selftest` 출력, `record-status`의 `--selftest-needed`·`SELFTEST_B64`(`recordStatuses`의 `selfTest`), `gates.yml`의 `selftest` job과 `record`의 `needs`, `harness-guard`의 PR 코드 실행 job 검사 확대와 자체 테스트 파일 신호. 테스트: `harness-guard.test.ts` 5개(job 조건, 신호, `selfTestNeeded`, `gates` 명령의 출력, 이 리포의 `gates.yml`), `record.test.ts` 5개(검사, 합치기, 풀기, `record-status` 2개). 문서: 설계서 v0.7.49(10.3절, 10.4절, 12.4절), 절차서 5절, 코드 구조 문서, CHANGELOG, TD-41.
+- 2026-11-16 step3: CI의 `selftest` job과 같은 조건을 이 PC에서 확인했다. main을 새로 클론한 폴더 둘(`base/`, `pr/`, 의존성 설치 없음)에서 `node base/scripts/harness.ts self-test --harness pr --head-sha <sha> --out <파일>`을 실행했다. 결과는 PR 본문 "검증"에 적는다. 이 PR에서는 `selftest` job이 돌지 않는다(`gates`는 main의 정의로 돈다). 실제 러너에서는 이 PR이 병합된 뒤 보호 경로를 바꾸는 첫 PR(step4)에서 처음 돈다.
 
 ## 의사결정 로그
 
@@ -133,6 +136,13 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 결정(step2): PR #105 원장 F3(P2, 닫힌 에스컬레이션 Issue는 중복 생성 방지에 쓰이지 않는다)은 고치지 않는다. / 이유: 닫힌 Issue는 제작자가 처리를 끝냈다는 뜻이다. 같은 커밋의 `check`가 그 뒤에 다시 실패하면 새로 알리는 것이 맞다. 열린 Issue가 있는 동안의 중복만 막는다. / 버린 대안: 닫힌 Issue도 찾아 다시 열기(제작자가 닫은 Issue를 봇이 되살린다).
 - 결정(step2): 기본 `denyHosts`에 step 파일의 `github.com`·`*.github.com`에 더해 `github.dev`·`*.github.dev`를 넣었다. / 이유: 웹 편집기(`github.dev`)는 브라우저의 GitHub 로그인 세션으로 리포에 커밋한다. R20이 막으려는 것과 같은 경로이고, 정상 작업에서 열 일이 없는 주소라 넓혀도 잃는 것이 없다. / 버린 대안: step 파일의 두 값만 두기.
 - 결정(step2): 이 PR에 `commands.test.timeoutSec` 900 → 1800(`harness.config.json`, 프로파일 core)을 함께 넣는다. step 파일에 없는 변경이다. / 이유: 이 PC에서 전체 테스트가 951초 걸려 `check`가 통과하지 못한다(실패하는 테스트는 없다). 통과하지 못하면 이 PR도 #57의 PR #106도 push할 수 없다. 시간 제한은 멈춘 명령을 끊는 장치이고 판정 기준이 아니어서, 올려도 검사가 약해지지 않는다(테스트는 모두 그대로 돈다). GitHub Actions의 `check`는 6분 안팎이라 영향이 없다. `commands` 변경은 `harness-guard` 신호라 제작자 head 승인이 필요한데, 이 PR은 이미 위험도 높음이다. / 버린 대안: 별도 Issue로 올리기(지시 없는 Issue를 봇이 만들 수 없고 승인이 한 번 더 든다), 테스트 파일을 나누거나 줄이기(파일별 합계가 4516초라 나누는 것으로는 100초 넘게 줄지 않는다. 느린 원인을 줄이는 일은 TD-40에 남긴다), PR #106에 넣기(위험도 보통 계획에 판정 관련 설정 변경을 넣게 된다).
+- 결정(step3): `record-status`는 `--selftest-needed`의 값이 정확히 `false`일 때만 자체 테스트가 필요 없다고 본다. 빈 값(판정 job이 값을 남기지 못함)이나 다른 값이면 필요한 것으로 보고, 보고서가 없으면 `harness-guard`를 `error`로 쓴다. 플래그 자체가 없으면 합치지 않는다. / 이유: fail-closed(금지사항). 플래그 없는 호출은 이 리포의 워크플로에 없고(테스트가 `gates.yml`의 호출을 확인한다), 기록 job의 정의는 PR이 바꿀 수 없는 main의 것이다. / 버린 대안: 플래그가 없을 때도 필요한 것으로 보기(`recordStatuses`를 직접 쓰는 기존 테스트와 호출 형태가 모두 깨진다).
+- 결정(step3): `gates` 명령은 `selftest` 출력을 판정보다 먼저 쓴다. / 이유: 판정 도중 죽어도 값이 남는다. 그때는 결과 파일이 없어 기록 job이 모든 기계 판정을 `error`로 쓰므로 어느 쪽이든 success가 되지 않는다.
+- 결정(step3): 보고서의 항목 하나라도 형식이 틀리면(id가 `[a-z0-9-]{1,40}` 밖, 중복, state가 모르는 값, 200개 초과) 보고서 전체를 버리고 `error`로 본다. 상태 설명에는 검사를 통과한 id와 개수, 코드에 적힌 문구만 들어간다. / 이유: 보고서는 PR 코드를 실행한 job이 쓴 값이다. 틀린 항목만 빼고 나머지를 믿으면 실패한 시나리오를 틀린 id로 바꿔 숨길 수 있다.
+- 결정(step3): `harness-guard` 자신이 `failure`·`error`면 그 상태와 설명을 두고 자체 테스트 결과를 설명 끝에 붙인다. `success`일 때만 자체 테스트 결과가 상태를 정하고, 그때 설명은 자체 테스트 문구로 바꾼다(140자 제한에서 잘리지 않게). / 이유: step 파일의 갈래 그대로다. 작성자는 먼저 `harness-guard`의 실패를 고쳐야 한다.
+- 결정(step3): `selftest` job은 자체 테스트의 종료 코드 그대로 끝난다(시나리오가 실패하면 job도 실패로 보인다). 보고서는 그 전에 job 출력으로 넘긴다. `record`는 `!cancelled()` 조건이라 `selftest`가 실패·시간 초과여도 돈다. / 이유: Actions 화면에서 어느 job이 실패했는지 바로 보인다. 병합을 막는 것은 job 결과가 아니라 `harness-guard` 상태다.
+- 결정(step3): `reproJobViolations`의 이름은 그대로 두고 대상만 넓혔다(재현 job + 자체 테스트 job). 실패 문구는 "PR 코드를 실행하는 job"으로 바꿨다. / 이유: step 파일이 허용한 선택이고, 이름을 바꾸면 `ci.test.ts`의 기존 테스트까지 고쳐야 한다.
+- 결정(step3): 확인된 revert PR도 보호 경로를 바꾸면 자체 테스트를 받는다(step 파일 그대로). / 이유: step 파일은 "보호 경로를 바꿨으면"만 조건으로 둔다. 면제를 더하는 것은 판정을 푸는 변경이라 이 step에서 정하지 않고 TD-41로 남긴다. / 버린 대안: 확인된 revert PR은 `selftest=false`(작성자 체크리스트 면제와 같은 근거. step6에서 revert 흐름을 실제로 본 뒤 정한다).
 
 ## 발견 사항
 
@@ -141,6 +151,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 기본 `denyWords`의 `cancel`은 삭제가 아닌 도구도 막는다(예: Figma `weave_cancel_tool_run`은 실행 중인 작업을 멈출 뿐이다). `*.github.com`은 공개 문서(`docs.github.com`)를 브라우저로 여는 것도 막는다. step 파일의 기본값 그대로 두었다. 필요해지면 제작자가 `guard.mcp.allowTools`에 더하거나 `denyHosts`를 좁힌다(보호 경로라 PR과 승인이 필요하다). → 처리: TD-13
 - 이름이 규칙에 걸리지 않는 변경 도구는 통과한다: Drive `update_file`(덮어쓰기)·`share_file`, Notion `notion-move-pages`·`notion-update-page`, Calendar `respond_to_event`·`update_event`, Gmail `mark_message_spam`. 제작자 결정의 선(삭제만 금지)과 의사결정 로그("공유·초대는 설정으로 더할 수 있게 둔다")에 따른 것이다. 막으려면 `denyTools`에 더한다. → 처리: TD-13
 - Codex의 훅 설정(`.codex/hooks.json`)은 matcher가 `.*`라 MCP 호출이 훅에 올 수 있지만, Codex가 넘기는 도구 이름이 `mcp__…` 꼴인지는 확인하지 않았다. 다른 꼴이면 `evaluateMcp`를 타지 않는다. → 처리: TD-8
+- `selftest` job은 main의 시나리오로 PR의 하네스를 시험하므로, main의 시나리오가 요구하는 동작을 되돌리는 revert PR(예: 시나리오와 규칙을 함께 더한 커밋의 revert)은 그 시나리오가 실패해 `harness-guard`에서 막힌다. 자동 revert가 서지 않고, 시나리오를 먼저 고치는 PR 뒤에 일반 PR로 되돌려야 한다. → 처리: TD-41
+- 제작자가 PR을 승인하면 `review-trigger` → `gates`가 다시 돌고, 보호 경로 PR이면 `selftest` job도 다시 돈다. 승인에서 `risk-gate` 통과까지 자체 테스트 시간(이 PC에서 약 3분, 러너에서는 step4 PR에서 잰다)만큼 늦어진다. PR 본문을 고칠 때(`edited`)도 같다. → 처리: #102
 
 ## 열린 질문
 
@@ -155,7 +167,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step2(PR 병합) 뒤 step3(selftest-guard)을 시작한다. 선행: #57 계획 step2(PR #106)의 병합.
+- step3(PR 병합) 뒤 step4(ops-check)를 시작한다.
+- step4의 PR은 보호 경로를 바꾸므로 `gates` 워크플로의 `selftest` job이 실제 러너에서 처음 돈다. 그 PR에서 확인할 것: `selftest` job이 끝나고(걸린 시간을 적는다), `harness-guard` 설명 끝에 `자체 테스트 통과 <N>`이 붙는다. job이 러너 쪽 문제로 보고서를 남기지 못하면 `harness-guard`가 `error`가 되어 그것을 고치는 PR도 같은 이유로 병합되지 못한다. 그때는 원인을 job 로그로 확인해 제작자에게 알린다(제작자가 필수 체크에서 `harness-guard`를 잠시 빼고 수정 PR을 병합한 뒤 되돌려야 한다).
 - 이 계획의 PR은 모두 위험도 높음이다. 초안으로 올리고, 완료 처리·기록·main 병합·`check`가 끝난 뒤 `pr-ready`로 한 번만 승인을 요청한다.
 - 제작자 작업(한 번에 모아 요청, 절차는 step4에서 `docs/SECURITY.md`에 적는다):
   1. PR마다: head 승인(step0~7, 8회).
