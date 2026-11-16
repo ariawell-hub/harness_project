@@ -91,6 +91,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-16 step0: 코드 판정(head `3f43d66`)에서 두 검증자가 승인했다(지적 없음). 승인을 요청하기 전에 #57 계획의 step0(PR #101, 설계서 v0.7.43)이 먼저 병합됐다. 두 PR이 설계서 변경 이력·`CHANGELOG`·코드 구조 문서 표의 같은 자리를 고쳐 충돌했고(TD-39), `origin/main`을 병합해 풀었다: main의 줄을 앞에 두고 이 PR의 줄은 v0.7.44로 올렸다. 코드는 충돌하지 않았다. 병합한 트리에서 전체 `check`를 다시 돌린 뒤 승인을 요청한다.
 - 2026-11-16 step0: PR #103이 제작자 head 승인(`05ccfcd`)으로 병합됐다(main `5ac523a`).
 - 2026-11-16 step1: 구현. `scripts/ci/revert.ts`(`decideRevert`, `planRevert`·`sourcePrOf`·`irreversible`, `actRevert`, `parseRevertAction`), `scripts/harness.ts`의 `revert-plan`·`revert-act`, `GitHubPort.rerunFailed`(가짜 GitHub은 `reruns`에 기록), `.github/workflows/revert.yml`(`plan`: 읽기만, `act`: `revert` environment). `harness-guard`는 바꾸지 않았다(`revert.yml`이 실패·신호 없이 통과한다). 테스트 `scripts/test/revert.test.ts` 12개와 `harness-guard.test.ts` 1개. 문서: 설계서 v0.7.46(10.3절, 10.4절 표), `docs/SECURITY.md` 자격증명 표, 절차서 1절, 코드 구조 문서, `CHANGELOG`.
+- 2026-11-16 step1: step0의 `revert-check` 상태가 그 뒤의 PR(#104)에서 "revert PR 아님"(success)으로 기록되는 것을 확인했다. 필수 체크 등록은 step4에서 요청한다.
+- 2026-11-16 step1: PR을 올리기 전에 #57 계획의 step1(PR #104, 설계서 v0.7.45)이 먼저 병합돼 `origin/main`(`34ad3c1`)을 병합해 받았다. 충돌은 문서 두 곳(설계서 버전 줄·변경 이력, `CHANGELOG`)이었고 main의 v0.7.45 줄 뒤에 이 PR의 v0.7.46 줄을 뒀다(TD-39). 코드는 자동 병합됐고(`scripts/harness.ts`의 `self-test`와 `revert-plan`·`revert-act`), 병합한 트리에서 전체 `check`를 다시 돌렸다.
 
 ## 의사결정 로그
 

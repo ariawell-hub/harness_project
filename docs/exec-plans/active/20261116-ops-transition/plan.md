@@ -66,6 +66,9 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 2026-11-16 step0: 3라운드(head `53895e2`). `review/claude` 승인(P2 1건: 옮긴 step에 남은 옛 번호 "step9"). `review/codex`는 F1을 닫지 않았다("실제 GitHub 테스트, 보호 설정 및 봇 권한 동작 확인, `self-test --live`를 포함하므로 high 기준과 충돌한다"). 그 두 step(selftest-live, test-repo)도 보안 계획으로 옮겼다(그 계획의 step5·step6). 이 계획에는 실제 자격증명·실제 GitHub·실제 세션을 쓰지 않는 step 3개만 남는다.
 - 2026-11-16 step0: 4라운드(head `6a0e3f5`, step 3개)에서 두 검증자가 승인했다(G1, 지적 없음). 원장 F1은 닫혔다.
 - 2026-11-16 step0: 구현. `scripts/lib/revert-marker.ts`(`revertMarker`, `findRevertMarker`), `scripts/commands/task.ts`(`restorablePlan`, `restorePlan`, `findRestore`, `claimOwner`, `new-task`의 복원과 재선점). "확인할 것"(step0 작업 2번)에서 고칠 곳이 둘 나왔다. (1) 첫 step의 PR이 되돌려진 Issue는 닫힌 적이 없어 내 선점이 남는데, runner는 선점된 Issue를 고르지 않아 아무도 이어 가지 못한다. 내 선점이고 계획을 복원할 수 있으면 후보로 고르게 했다(`scripts/runner/next.ts`). (2) 복원한 작업은 되돌려진 PR과 브랜치 이름이 같아, 병합된 옛 PR이 이 작업의 PR로 잡혀 step을 건너뛰고 worktree 정리 대상이 된다. 병합된 PR인데 그 step이 worktree에서도 main에서도 끝나 있지 않으면 이 작업의 PR로 보지 않게 했다(`readLocalPlans`). runner의 다음 step 시작(`run.ts`)은 `new-task`가 선점을 다시 잡을 수 있게 GitHub 조회를 켰다. 테스트: `task.test.ts` 4개(표식, 첫 step 복원, 소규모 계획 복원, 마지막 step 재선점), `next.test.ts` 2개(후보 선택과 옛 PR, worktree가 뒤처진 병합 PR).
+- 2026-11-16 step0: PR #101 병합(main `cbe2f2e`). 보안 계획의 PR #103은 main을 병합해 갱신했다(TD-39의 순서).
+- 2026-11-16 step1: 구현. `scripts/selftest/run.ts`(`runSelfTest`, 샘플 리포, `ctx.cli`·`ctx.hook`, `assertBlocked`·`assertAllowed`, `formatSelfTest`), 시나리오 5개(`s1-next-task`, `r1-plan-gate`, `r4-bypass`, `r13-db`, `r20-owner-commands`), `scripts/harness.ts`의 `self-test`. 이 Windows PC에서 5개 실행에 약 40초다. 테스트 `selftest.test.ts` 6개(이 리포 전부 통과, 훅 종료 코드 1 사본에서 R20 실패, 항상 통과하는 `plan-gate` 사본에서 R1 실패, `--only`와 없는 id, 예외·assert 실패 뒤에도 나머지 실행, 자식 프로세스 환경 변수). 문서: 설계서 12.4절(v0.7.45), 코드 구조 문서, 절차서 4절, `CHANGELOG`.
+- 2026-11-16 step1: PR #104. 1라운드에서 `review/claude` 승인(지적 없음). 그 사이 보안 계획의 PR #103이 제작자 승인으로 병합돼(main `5ac523a`) `origin/main`을 병합해 갱신했다. 충돌은 문서 두 곳(설계서 버전 줄·변경 이력, `CHANGELOG`)이었고 main의 v0.7.44 줄 뒤에 이 PR의 v0.7.45 줄을 뒀다.
 
 ## 의사결정 로그
 
@@ -74,6 +77,11 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 결정: 병목을 줄이기 위해 두 계획을 병행한다. 보안 계획의 PR이 제작자 승인을 기다리는 동안 이 계획의 step을 진행한다. 이 계획의 step0~2는 보안 계획과 무관하게 시작할 수 있게 짰다(revert 표식은 양쪽이 같은 모듈 `scripts/lib/revert-marker.ts`를 쓰고 먼저 병합되는 쪽이 만든다). 이 계획의 step은 제작자 작업 없이 끝난다. / 이유: 한 계획 안의 step은 순서대로 병합돼야 다음으로 간다. 계획이 둘이면 한쪽이 승인 대기일 때 다른 쪽이 나아간다. / 버린 대안: 보안 계획이 끝난 뒤 이 계획 시작(승인 대기 동안 멈춘다).
 - 결정: `self-test --live`와 테스트 리포 확인(test-repo)은 보안 계획으로 옮긴다. / 이유: 두 step은 실제 자격증명이 있는 환경에서 보호 설정·봇 권한·금지 규칙의 실제 동작을 확인한다. 계획 검증 기준은 이런 일을 보안·권한 작업으로 본다(PR #101 원장 F1의 3라운드 답). 둘 다 대화 세션과 제작자 작업이 필요한 step이라 승인이 더해져도 대기가 늘지 않는다. / 버린 대안: 이 계획에 두고 재반박(같은 지적에 두 번째 반박이라 받아들여지지 않으면 교착이다).
 - 결정: 자체 테스트는 두 층으로 둔다. LLM 없는 시나리오(가짜 에이전트·가짜 GitHub·훅 프로세스 직접 호출)는 이 계획이 만들고 CI와 `harness-guard`에 연결한다(연결은 보안 계획 step3). 실제 세션 시나리오(`--live`, 보안 계획 step5)는 손으로 실행해 통과율만 기록한다. / 이유: PR 코드를 실행하는 job에는 구독 인증을 둘 수 없다(10.4절). 실제 세션은 실행마다 달라 병합 판정에 쓸 수 없다(12.4절). / 버린 대안: CI에서 실제 세션 실행.
+- 결정(step1): 실행기는 Node 내장 모듈만 쓰고 이 리포의 `scripts/lib/`도 import하지 않는다. 가짜 GitHub 상태 파일은 실행기가 JSON으로 직접 쓴다(제작자·봇 계정은 대상 하네스의 설정에서 읽는다). / 이유: 보안 계획 step3에서 main의 실행기가 PR의 하네스를 시험한다. 실행기가 기대는 것을 CLI·훅의 입출력과 상태 파일 형식으로 좁혀 둔다. / 버린 대안: 대상 하네스의 `github-fake.ts`를 import(다른 버전의 내부 모듈에 기댄다).
+- 결정(step1): step 파일의 인터페이스에 세 가지를 더했다. `Sample`의 모양(`root`, `remote`, `ghState`, `owner`, `bot`, `git`, `write`, `issue`: step 파일은 이름만 썼다), 시나리오가 함께 쓰는 `assertBlocked`(종료 코드가 정확히 2 + 규칙 이름)·`assertAllowed`, `runSelfTest`의 선택 인자 `scenarioDir`(실행기 테스트가 임시 시나리오 폴더를 준다). CLI에는 `scenarioDir`를 열지 않았다. / 이유: "예외 뒤에도 나머지를 돌린다"를 목록 파일 없이 시험하려면 시나리오 폴더를 바꿀 수 있어야 한다.
+- 결정(step1): `--only`에 없는 id가 있으면 실행하지 않고 종료 코드 2로 끝낸다. 시나리오 폴더가 비어도 같다. / 이유: 오타 하나로 "0개 실행, 통과"가 되면 보안 계획 step3의 게이트가 빈 채로 통과한다.
+- 결정(step1): R13의 대조군 "같은 클라이언트의 읽기 명령"은 같은 도구의 읽기 명령(`prisma migrate status`, `knex migrate:status`)으로 확인한다. / 이유: 훅은 `psql` 같은 DB 클라이언트를 읽기 명령이어도 직접 접속으로 막는다(설계서 14.3절 "직접 접속"). 클라이언트 실행 파일의 읽기 명령이 통과한다고 확인하면 설계와 어긋난다.
+- 결정(step1): 설계서 버전은 v0.7.45로 올린다. v0.7.44는 승인 요청을 앞둔 보안 계획의 PR #103이 쓴다. / 이유: 어느 쪽이 먼저 병합돼도 최종 변경 이력의 번호가 겹치지 않는다(TD-39).
 
 ## 발견 사항
 
