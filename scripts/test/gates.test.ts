@@ -5,6 +5,7 @@ import { loadConfig } from '../lib/config.ts';
 import { bypassScan, QUARANTINE } from '../gates/bypass-scan.ts';
 import { docLint } from '../gates/doc-lint.ts';
 import { planGate } from '../gates/plan-gate.ts';
+import { revertCheck } from '../gates/revert-check.ts';
 import { gitignoreProblems } from '../gates/secret-scan.ts';
 import { commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
@@ -305,4 +306,15 @@ test('plan-gate: 자기 step의 금지사항을 바꾼 PR은 실패한다. 다�
   const other = head('', BAN);
   assert.deepEqual(other.problems, []);
   assert.match(other.notes.join('\n'), /step0의 금지사항/);
+});
+
+test('revert-check: 계획 브랜치는 해당 없음. revert/<SHA> 브랜치는 대상이 main 이력에 없으면 실패', () => {
+  const root = repo();
+  const base = sh('git', ['rev-parse', 'HEAD'], root);
+  const plain = revertCheck({ root, base, branch: 'feat/20261111-demo-s0', targetCheck: null });
+  assert.deepEqual([plain.applies, plain.state], [false, 'success']);
+  const r = revertCheck({ root, base, branch: `revert/${'e'.repeat(40)}`, targetCheck: 'failure' });
+  assert.deepEqual([r.applies, r.verified, r.state], [true, false, 'failure']);
+  assert.match(r.details.join('\n'), /first-parent 이력에 없다/);
+  assert.match(r.details.join('\n'), /고치는 법: /);
 });
