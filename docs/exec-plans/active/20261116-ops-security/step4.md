@@ -2,7 +2,7 @@
 
 ## 읽어야 할 파일
 
-- `docs/exec-plans/active/20261116-ops-security/plan.md` (수용 기준 5, 의사결정 로그의 `ci.requiredChecks` 결정, "다음 할 일"의 제작자 작업 목록)
+- `docs/exec-plans/active/20261116-ops-security/plan.md` (수용 기준 6, 의사결정 로그의 `ci.requiredChecks` 결정, "다음 할 일"의 제작자 작업 목록)
 - `docs/harness/design.md` 0.1절(E1), 0.2절(리포 설정, "운영 단계에 추가"), 10.4절(보호 경로, 운영 전환 체크리스트), 16절
 - `docs/SECURITY.md`(자격증명 표, "필수 체크 등록 (제작자)" 절의 형식), `docs/decisions/ADR-0003-bot-token-classic-pat.md`, `docs/decisions/ADR-0004-q20-lab-repo.md`
 - `scripts/ci/protection.ts`(`compareRequiredChecks`), `scripts/harness.ts`의 `required-checks`, `scripts/lib/github.ts`·`github-fake.ts`
@@ -40,8 +40,8 @@
    ```
 
    - 1번: `compareRequiredChecks` 결과(등록·출처가 `ci.requiredChecks`와 같다).
-   - 2번: `codeownersProblems`가 없다. 코드 오너 리뷰 필수 설정은 봇이 읽을 수 있으면 읽고(읽기 전용 조회 하나), 읽지 못하면 그 줄을 `?`로 표시하고 "설정은 step5의 시험 PR(`protected-needs-owner`)로 확인한다"를 `lines`에 적는다. 항목 상태는 파일이 맞으면 `ok`다. 이 항목에서 `ops-check`가 보증하는 것은 CODEOWNERS 파일이고, 리포 설정의 근거는 시험 PR 결과(`lab/ops-transition/results/`)다.
-   - 3번: 봇 토큰의 권한 범위(`gh api -i user`의 `x-oauth-scopes` 응답 머리말)에 `workflow`가 없다. 머리말이 없으면(세분화 토큰) `unknown`이다. 토큰 값은 읽지도 출력하지도 않는다.
+   - 2번: `codeownersProblems`가 없다. 코드 오너 리뷰 필수 설정은 봇이 읽을 수 있으면 읽고(읽기 전용 조회 하나), 읽지 못하면 그 줄을 `?`로 표시하고 "설정은 step7의 시험 PR(`protected-needs-owner`)로 확인한다"를 `lines`에 적는다. 항목 상태는 파일이 맞으면 `ok`다. 이 항목에서 `ops-check`가 보증하는 것은 CODEOWNERS 파일이고, 리포 설정의 근거는 시험 PR 결과(`lab/ops-transition/results/`)다.
+   - 3번: 봇 토큰의 권한 범위(`gh api -i user`의 `x-oauth-scopes` 응답 머리말)에 `workflow`가 없다. 머리말이 없으면(세분화 토큰) `unknown`이다. 토큰 값은 읽지도 출력하지도 않는다. 이 항목이 보는 것은 이 명령을 실행한 머신의 토큰뿐이다. `revert` environment 시크릿(`REVERT_BOT_TOKEN`)이 같은 새 토큰으로 바뀌었는지는 봇이 읽을 수 없으므로 출력에 "제작자 확인" 한 줄로 적고, 확인 결과는 step7의 전환 PR 본문 표에 남긴다.
    - 출력은 항목별 `✓`/`✗`/`?`와 이유다. 모두 `ok`일 때만 종료 코드 0이다. `--allow-unknown`은 두지 않는다.
    - 읽기만 한다. 설정을 바꾸는 API를 부르지 않는다(R20).
    - 포트에 필요한 조회 메서드를 더하고 가짜 GitHub에도 넣는다.
@@ -53,7 +53,7 @@
    - "`revert-check` 필수 체크 등록": 기존 "필수 체크 등록" 절의 목록에 더한다. 확인: `required-checks`.
    - "코드 오너 리뷰 필수 (제작자, 운영 전환)": main 보호 규칙의 "Require a pull request before merging" 아래 "Require review from Code Owners"를 켜고 필수 승인 수는 0으로 둔다. 확인: 보호 경로를 바꾼 시험 PR이 승인 전에는 병합되지 않는다.
    - "봇 토큰의 `workflow` 권한 회수 (제작자, 운영 전환)": 봇 계정에서 `workflow` 없이 PAT를 재발급하고, 에이전트가 도는 머신의 토큰과 `revert` environment 시크릿을 바꾼다. 순서: 워크플로를 바꾸는 PR이 모두 병합된 뒤. 확인: `ops-check` 3번, 워크플로 파일 push 거부.
-   - "테스트 리포 준비 (제작자, #57 step4)": 새 비공개 리포, 봇 초대(Write, 시험 기간에만. ADR-0004 방식), 0.2절 보호 설정, environment 5개와 값의 형식(Claude 토큰은 새로 발급한 한 줄, Codex는 CI 전용 새 로그인의 `auth.json` 내용, 두 App은 테스트 리포에도 설치하고 Client ID 변수·개인 키 시크릿), 필수 체크는 첫 보고 뒤 등록, 제작자 계정으로 시험 Issue 2건. 시험 뒤: 자격증명 교체, 봇 초대 철회, 리포 보관.
+   - "테스트 리포 준비 (제작자, #102 step6)": 새 비공개 리포, 봇 초대(Write, 시험 기간에만. ADR-0004 방식), 0.2절 보호 설정, environment 5개와 값의 형식(Claude 토큰은 새로 발급한 한 줄, Codex는 CI 전용 새 로그인의 `auth.json` 내용, 두 App은 테스트 리포에도 설치하고 Client ID 변수·개인 키 시크릿), 필수 체크는 첫 보고 뒤 등록, 제작자 계정으로 시험 Issue 2건. 시험 뒤: 자격증명 교체, 봇 초대 철회, 리포 보관.
 
 5. 테스트
    - `codeownersText`: 이 리포의 `protectedPaths` 전체가 한 줄씩 있고 소유자가 제작자 계정이다. 옮길 수 없는 glob은 문제. `codeownersProblems`: 파일 없음, 한 줄 다름.
@@ -80,5 +80,5 @@ grep -q "REVERT_BOT_TOKEN" docs/SECURITY.md
 - 보호 설정·environment·시크릿을 바꾸는 API나 `gh` 명령을 부르지 마라. 이유: R20. `ops-check`는 읽기만 한다.
 - 토큰 값을 읽거나 출력하지 마라(`gh auth token` 포함). 이유: R20, R10. 권한 범위는 응답 머리말로만 본다.
 - `.github/CODEOWNERS`를 손으로 고치지 마라. 이유: `protectedPaths`가 단일 원본이다. 어긋나면 `check`가 실패한다.
-- 확인하지 못한 항목을 `ok`로 내지 마라. 이유: 운영 전환 PR(step5)이 이 명령의 종료 코드를 근거로 쓴다. 모르면 `unknown`이고 종료 코드는 0이 아니다(2번의 리포 설정 부분만 예외로, 시험 PR로 확인한다).
+- 확인하지 못한 항목을 `ok`로 내지 마라. 이유: 운영 전환 PR(step7)이 이 명령의 종료 코드를 근거로 쓴다. 모르면 `unknown`이고 종료 코드는 0이 아니다(2번의 리포 설정 부분만 예외로, 시험 PR로 확인한다).
 - `CHECK_STEPS`에 새 단계를 더하지 마라. 이유: 실패 키(`check:<단계>`)와 캐시가 단계 이름에 묶여 있다.

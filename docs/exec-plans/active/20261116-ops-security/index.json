@@ -28,6 +28,16 @@
     },
     {
       "step": 5,
+      "name": "selftest-live",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "test-repo",
+      "status": "pending"
+    },
+    {
+      "step": 7,
       "name": "operation",
       "status": "pending"
     }

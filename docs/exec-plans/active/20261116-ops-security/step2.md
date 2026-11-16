@@ -7,7 +7,7 @@
 - `docs/harness/design.md` 0.1절(E5), 5.1절 규칙 표(R14, R20), 13.1절(훅 구현 규칙), 13.2절(강제 계층), 14.4절
 - `scripts/hooks/guard.ts`(`normalize`, `decide`, `buildContext`), `scripts/hooks/rules.ts`(`GuardInput`, `GuardContext`, `evaluate`), `scripts/test/guard.test.ts`
 - `.claude/settings.json`(PreToolUse matcher), `scripts/lib/config.ts`(`guard`), `harness.config.json`, `profiles/`의 기본 설정
-- #57 계획(`20261116-ops-transition`)의 step1(selftest-core)이 만든 파일(먼저 병합돼 있어야 한다): `scripts/selftest/run.ts`(`hook`), `scripts/selftest/scenarios/r20-owner-commands.ts`(시나리오 형식)
+- #57 계획(`20261116-ops-transition`)의 step1(selftest-core)이 만든 파일(먼저 병합돼 있어야 한다): `scripts/selftest/run.ts`(`hook`), `scripts/selftest/scenarios/r20-owner-commands.ts`(시나리오 형식), `scripts/harness.ts`의 `self-test` 명령(`--only`. 이 step의 AC가 쓴다)
 
 ## 작업
 
