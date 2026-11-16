@@ -87,6 +87,8 @@ export interface FakeState {
   runLogs?: Record<string, string>;
   /** 실행 URL → runLog가 불린 횟수(테스트가 "한 번만 읽는다"를 확인한다) */
   runLogReads?: Record<string, number>;
+  /** rerunFailed가 받은 실행 번호(호출 순서대로) */
+  reruns?: number[];
   /**
    * 병합에 필요한 체크와 출처(선택). 있으면 `ciCommand` 대신 "PR head에 그 출처의 가장 최근 결과가 모두 success인가"로
    * 병합을 정하고(브랜치 보호의 출처 지정 흉내), 초안 PR은 병합하지 않는다
@@ -151,12 +153,14 @@ const MUTATORS = [
   'addLabel',
   'removeLabel',
   'reopenIssue',
+  'createIssue',
   'setCheck',
   'createPR',
   'setDraft',
   'enableAutoMerge',
   'tryMerge',
   'runLog',
+  'rerunFailed',
 ] as const;
 
 /** 이 프로세스가 상태 파일 잠금을 잡고 있는 깊이(잠금 안에서 다른 메서드를 부른다: enableAutoMerge → tryMerge) */
@@ -224,6 +228,11 @@ export class FakeGitHub implements GitHubPort {
     s.runLogReads[runUrl] = (s.runLogReads[runUrl] ?? 0) + 1;
     this.save(s);
     return s.runLogs?.[runUrl] ?? null;
+  }
+  rerunFailed(runId: number): void {
+    const s = this.load();
+    (s.reruns ??= []).push(runId);
+    this.save(s);
   }
   private load(): FakeState {
     return JSON.parse(readFileSync(this.file, 'utf8')) as FakeState;
@@ -335,6 +344,22 @@ export class FakeGitHub implements GitHubPort {
     const s = this.load();
     this.issue(s, n).state = 'open';
     this.save(s);
+  }
+  createIssue(p: { title: string; body: string }): number {
+    const s = this.load();
+    const number = s.next++;
+    s.issues.push({
+      number,
+      title: p.title,
+      body: p.body,
+      labels: [],
+      state: 'open',
+      createdAt: stamp(s),
+      author: s.me,
+      comments: [],
+    });
+    this.save(s);
+    return number;
   }
   /** 상태 파일의 PR → 포트의 PR. headSha는 원격 브랜치 끝(브랜치가 없으면 '') */
   private toPR(s: FakeState, { base: _b, ...p }: FakePR): PullRequest {
