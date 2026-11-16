@@ -1,0 +1,35 @@
+{
+  "plan": "20261116-ops-security",
+  "steps": [
+    {
+      "step": 0,
+      "name": "revert-check",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "revert-workflow",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "mcp-guard",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "selftest-guard",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "ops-check",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "operation",
+      "status": "pending"
+    }
+  ]
+}
