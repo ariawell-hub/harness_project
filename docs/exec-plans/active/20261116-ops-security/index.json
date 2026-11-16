@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "revert-workflow",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-16T15:29:43+09:00"
     },
     {
       "step": 2,

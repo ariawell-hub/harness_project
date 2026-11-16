@@ -78,6 +78,7 @@ review_cycle: quarterly
   - v0.7.43 (2026-11-16): revert된 계획을 복원해 이어 간다. revert 워크플로가 Issue에 다는 표식 댓글을 근거로 `new-task --issue`가 새 골격 대신 되돌려진 커밋의 계획을 같은 id로 `active/`에 복원하고(계획 해시는 그대로), 닫혔다 다시 열린 Issue의 남은 step은 `new-task --plan`이 다시 선점한다. "다음 할 일"은 내 선점이 남은 revert된 Issue를 고르고, 같은 브랜치 이름의 병합된 옛 PR을 새 작업의 PR로 보지 않는다(4.5절, 8.3절 "되돌리기", Issue #57 step0)
   - v0.7.44 (2026-11-16): `revert-check`를 더한다. `revert/<SHA>` PR이 main의 그 커밋을 파일 단위(경로·모드·blob)로 정확히 되돌리고 그 커밋의 main `check`가 실패했을 때만 계획 요구와 `review/*` 판정을 대신한다. 위험도와 `harness-guard` 신호, `deps-guard`는 그대로 판정한다(10.3절, 10.4절, Issue #102 step0)
   - v0.7.45 (2026-11-16): 하네스 자체 테스트를 두 층으로 둔다(12.4절). LLM 없는 시나리오는 `self-test` 명령이 임시 샘플 리포에 대상 하네스를 적용해 CLI와 L1 훅을 프로세스로 불러 판정하고, 실제 세션 시나리오는 통과율로만 기록한다. 첫 시나리오 다섯(S1, R1, R4, R13, R20)을 더했다. 훅 차단은 종료 코드가 정확히 2인지로 확인한다.
+  - v0.7.46 (2026-11-16): revert 워크플로를 더한다(10.3절 "병합 후 main CI가 실패하면", 10.4절). main의 `check`가 실패로 끝나면 한 번 다시 실행하고, 다시 실패하면 `revert` environment의 봇 토큰으로 `revert/<SHA>` PR을 만들어 자동 병합을 켜고 원래 Issue를 다시 열어 복원용 표식과 함께 알린다. 자동으로 되돌리지 않고 `needs-human`으로 넘기는 경우(원래 PR 없음, revert의 revert, 계획 `risk: high`·높음 경로, 충돌, push 거부)를 정했다.
   - v0.7.47 (2026-11-16): 자체 테스트에 runner 시나리오 셋을 더한다(12.4절): 9.2절(3회 전환·5회 중단), 4.5절(여러 Issue를 끝까지, AC로 판정, 시간 초과·중단 뒤에도 계속), 전체 흐름(선점 → 계획 초안 PR → 계획 승인 → step → 필수 체크 → 병합, 승인 이어받기). 가짜 에이전트를 `scripts/selftest/`로 옮겨 실행기 쪽 파일로 쓰고, CI 명령의 REST 조회에 답하는 읽기 전용 로컬 서버를 둔다. runner를 띄우는 시나리오의 시간 제한은 300초다.
 
 ### 0.1 전제 조건
@@ -967,8 +968,10 @@ pnpm test src/auth/login-guard.spec.ts
 5. 병합되면 head 브랜치는 리포 설정으로 삭제되고, worktree는 runner의 다음 바퀴나 다음 세션 시작 시 정리한다(4.5절, 7.1절). 마지막 step이 병합되면 Issue가 자동으로 닫히고 `claim/<issue>` 브랜치도 정리한다. 남은 step이 있으면 runner가 다음 step을 시작한다. `merge` 스크립트는 이 정리를 수동으로 할 때 쓰는 편의 도구이며 강제 장치가 아니다.
 
 **병합 후 main CI가 실패하면**
-- **코드만 되돌리면 복구되는 변경**: revert 워크플로가 `revert` environment(10.4절)의 봇 토큰으로 revert PR을 만든다. `revert-check`가 "대상 커밋의 정확한 역적용"을 확인하면 LLM 검증 없이 병합된다. 검증자 한도와 상관없이 main을 빨리 복구하기 위해서다. revert하면 계획 파일도 main에서 빠지므로, revert 워크플로가 원래 Issue를 다시 열고 다음 작업이 이전 계획을 `active`로 복원해 이어 간다(8.3절).
-- **마이그레이션, 데이터 변경, 외부 시스템 호출, 배포가 포함된 변경**: 자동으로 되돌리지 않는다. Git revert로는 데이터와 외부 상태가 복구되지 않기 때문이다. 원인과 영향 범위를 정리해 에스컬레이션한다(9.1절).
+- **먼저 한 번 다시 실행한다.** revert 워크플로(`revert.yml`, `check` 완료의 `workflow_run`)는 main의 push로 돈 `check`가 실패(`failure`·`timed_out`)로 끝났을 때만 움직인다. 첫 실패에서는 실패한 job만 다시 실행한다. 최신 브랜치 필수라 병합 결과 트리는 `check`를 통과한 PR head와 같으므로, 병합 후 실패는 흔들리는 테스트나 시간 의존일 가능성이 크기 때문이다.
+- **코드만 되돌리면 복구되는 변경**: 다시 실행해도 실패하면 revert 워크플로가 `revert` environment(10.4절)의 봇 토큰으로 `revert/<대상 SHA>` 브랜치에 `git revert` 커밋을 올리고 PR을 만들어 자동 병합을 켠다. main에 직접 push하지 않는다(R2). `revert-check`가 "대상 커밋의 정확한 역적용"을 확인하면 LLM 검증 없이 병합된다. 검증자 한도와 상관없이 main을 빨리 복구하기 위해서다. revert하면 계획 파일도 main에서 빠지므로, revert 워크플로가 원래 Issue(원래 PR 본문 첫 줄의 `Closes #N`·`Refs #N`)에 실패한 실행·revert PR·이어 가는 명령과 복원용 표식(`<!-- harness-revert target=<SHA> plan=<계획 id> -->`)을 댓글로 남기고, `Closes`였으면 Issue를 다시 연다. 다음 작업이 이전 계획을 `active`로 복원해 이어 간다(8.3절). 같은 대상의 `revert/` 브랜치나 PR이 이미 있으면 아무것도 하지 않는다.
+- **자동으로 되돌리지 않는 경우**: 원래 Issue(없으면 원래 PR)에 이유를 적어 제작자를 부르고 `needs-human`을 붙인다(9.1절). 원래 PR을 찾지 못해 알릴 Issue도 PR도 없으면 봇이 새 Issue를 만들어 같은 내용을 적고 `needs-human`을 붙인다. 같은 대상은 한 번만 알린다. 대상 커밋을 병합한 PR을 찾지 못함, 대상이 revert PR의 병합 커밋임(revert를 다시 되돌리면 원인이 대상이 아닐 때 끝없이 이어진다), `git revert` 충돌(대상 뒤에 main이 같은 곳을 바꿨다), 브랜치 push 거부(예: 워크플로 파일을 되돌리는데 토큰에 `workflow` 권한이 없다), 그리고 아래 항목이다.
+- **마이그레이션, 데이터 변경, 외부 시스템 호출, 배포가 포함된 변경**: 자동으로 되돌리지 않는다. Git revert로는 데이터와 외부 상태가 복구되지 않기 때문이다. 원인과 영향 범위를 정리해 에스컬레이션한다(9.1절). 기계 판정은 "대상 커밋 트리의 계획이 `risk: high`이거나 대상이 바꾼 파일이 경로 표의 높음 항목에 걸린다"이다(보호 경로의 단계별 위험도는 넣지 않는다).
 
 ### 10.4 신뢰 경계와 안전장치
 
@@ -992,6 +995,8 @@ pnpm test src/auth/login-guard.spec.ts
 | 판정 job: Codex (LLM) | `workflow_run`(`check` 완료, main 정의) | 위와 같음 | Codex 인증 파일(`judge-codex` environment)만. 인증 저장용 자격증명, Claude 토큰, 검증 App 키, GitHub 쓰기 권한은 없음 |
 | Codex 인증 저장 job | `workflow_run`(`check` 완료, main 정의). Codex 판정 job 앞(공개키 조회)과 뒤(저장) | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 판정 job이 `judge-codex`의 공개키로 봉인해 넘기고, 이 job은 풀지 않고 그대로 등록한다(13.3절) |
 | 기록 job | `pull_request_target` (main 정의) | 실행하지 않는다 | 검증 App 키(`recorder` environment). LLM 없음 |
+| revert 워크플로: 결정 job(`plan`) | `workflow_run`(`check` 완료, main 정의). main의 push 실행이 실패했을 때만 | 실행하지 않는다(main 체크아웃의 스크립트만) | 비밀·environment 없음. 토큰은 읽기뿐(`contents`·`pull-requests`·`checks`) |
+| revert 워크플로: 실행 job(`act`) | 위와 같음. 결정이 "아무것도 하지 않음"이 아닐 때만 | 실행하지 않는다 | revert용 봇 토큰(`revert` environment)으로 실패한 job 재실행, `revert/<SHA>` 브랜치 push·PR·자동 병합, Issue 재오픈·댓글. 워크플로 토큰에는 쓰기 권한 없음. LLM 없음. 결정 job의 출력은 형식을 다시 검사한 뒤에만 쓴다 |
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
 
 - 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).

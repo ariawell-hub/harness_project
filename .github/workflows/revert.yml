@@ -1,0 +1,84 @@
+# main의 check가 실패로 끝나면 한 번 다시 실행하고, 다시 실패하면 revert PR을 만든다(10.3절 "병합 후 main CI가 실패하면").
+# plan: main의 스크립트로 무엇을 할지 정한다. 읽기 권한만 있고 비밀·environment가 없다.
+# act: revert environment의 봇 토큰으로 실패한 job 재실행, revert/<SHA> 브랜치 push·PR·자동 병합, Issue 재오픈·댓글을 한다.
+#      워크플로의 GITHUB_TOKEN에는 쓰기 권한을 주지 않는다. main에 직접 push하지 않는다(R2): revert PR도 필수 체크를 거친다.
+# 이벤트 유래 값은 run 스크립트에 직접 넣지 않고 env·파일로만 넘긴다.
+# 두 job 모두 Actions 캐시를 쓰지 않는다(10.4절 캐시 규칙). 액션은 커밋 SHA로 고정한다.
+name: revert
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+
+permissions: {}
+
+# 같은 커밋의 실행(첫 실패, 재실행 뒤 실패)은 차례로 돈다. 그룹을 워크플로 전체 하나로 두면 안 된다:
+# 이 워크플로는 PR의 check가 끝날 때도 실행이 생기고(job은 건너뛴다), 같은 그룹의 대기 실행은 하나뿐이라
+# 뒤에 온 실행이 대기 중인 main 실패 처리를 취소시킨다.
+concurrency:
+  group: revert-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      data: ${{ steps.plan.outputs.data }}
+    steps:
+      - name: main 체크아웃 (실행할 스크립트와 전체 이력)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: revert-plan (조회와 결정, 읽기만)
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/harness.ts revert-plan --event "$GITHUB_EVENT_PATH"
+
+  act:
+    name: act
+    needs: plan
+    if: needs.plan.outputs.action != '' && needs.plan.outputs.action != 'skip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: revert
+    permissions:
+      contents: read
+    steps:
+      - name: main 체크아웃 (실행할 스크립트와 전체 이력)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: revert-act (봇 토큰으로 재실행 또는 revert PR)
+        env:
+          GH_TOKEN: ${{ secrets.REVERT_BOT_TOKEN }}
+          DATA: ${{ needs.plan.outputs.data }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          # git push 인증은 gh의 자격증명 도우미로 한다(토큰을 URL·명령 인자에 넣지 않는다)
+          gh auth setup-git
+          node scripts/harness.ts revert-act --data "$DATA" --run-url "$RUN_URL"

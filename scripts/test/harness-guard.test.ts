@@ -1,11 +1,12 @@
 // harness-guard(10.3·10.4절, R9). 계획 20261114-ci-gates step2.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { runGates } from '../ci/gates.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
-import { commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
+import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const BODY = '## 자체 리뷰\n- [x] 보호 경로 변경: CHANGELOG 갱신, 검사를 약화하지 않음\n';
 const LOG = 'docs/harness/CHANGELOG.md';
@@ -143,6 +144,14 @@ test('신호: 워크플로·job 삭제, environment 밖 참조, 새 write 권한
       '  c:\n    runs-on: ubuntu-latest\n    environment: revert\n    steps:\n      - run: echo c\n',
   });
   assert.deepEqual(ok.signals, []);
+});
+
+test('이 리포의 revert.yml을 더하는 PR: 캐시·environment 실패가 없고 신호도 없다', () => {
+  const wf = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/revert.yml'), 'utf8');
+  const g = run({ '.github/workflows/revert.yml': wf });
+  assert.equal(g.result.state, 'success', g.result.details.join('\n'));
+  // 정해 둔 environment(revert)만 참조하고 쓰기 권한을 더하지 않는다
+  assert.deepEqual(g.signals, []);
 });
 
 test('신호: harness.config.json의 판정 관련 키 변경(TD-10), 깨진 JSON', () => {

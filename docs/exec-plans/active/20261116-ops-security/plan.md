@@ -89,6 +89,11 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-16 step0: 계획 검증 2라운드(head `ba644d9`, step 8개)에서 두 검증자가 승인했다(G1). `review/claude`의 P2 4건(원장 F3~F6)은 모두 step6·step7의 내용이라 미뤘고, 그 step을 시작할 때 반영한다: 자기 PR에 자기 결과를 적는 `low-risk-auto-merge` 사례의 순환(F3), 봇 PAT 재발급 시점(F4), `workflow` 권한 회수 뒤 PR 갱신 push 사례(F5), `docs/index.md`(F6).
 - 2026-11-16 step0: 구현. `scripts/gates/revert-check.ts`(`revertTarget`, `revertCheck`)와 `scripts/ci/revert-evidence.ts`(`targetCheckOf`)를 만들고 기계 판정 묶음(`gates`)·검증자 계산(`review-plan`)·`harness-guard`(`skipAuthorChecks`)에 연결했다. `gates`·`judge-*` 워크플로의 해당 job에 `checks: read`를 더했다(대상 커밋의 `check` 결과 조회). 테스트 `scripts/test/revert-check.test.ts`(13개)와 `gates.test.ts` 1개. AC 명령과 이 PC의 전체 `check`가 종료 코드 0이었다(`test` 약 13분). `pull_request_target`으로 도는 변경이라 병합 뒤 다음 PR에서 `revert-check` 상태("해당 없음")가 기록되는지 확인한다.
 - 2026-11-16 step0: 코드 판정(head `3f43d66`)에서 두 검증자가 승인했다(지적 없음). 승인을 요청하기 전에 #57 계획의 step0(PR #101, 설계서 v0.7.43)이 먼저 병합됐다. 두 PR이 설계서 변경 이력·`CHANGELOG`·코드 구조 문서 표의 같은 자리를 고쳐 충돌했고(TD-39), `origin/main`을 병합해 풀었다: main의 줄을 앞에 두고 이 PR의 줄은 v0.7.44로 올렸다. 코드는 충돌하지 않았다. 병합한 트리에서 전체 `check`를 다시 돌린 뒤 승인을 요청한다.
+- 2026-11-16 step0: PR #103이 제작자 head 승인(`05ccfcd`)으로 병합됐다(main `5ac523a`).
+- 2026-11-16 step1: 구현. `scripts/ci/revert.ts`(`decideRevert`, `planRevert`·`sourcePrOf`·`irreversible`, `actRevert`, `parseRevertAction`), `scripts/harness.ts`의 `revert-plan`·`revert-act`, `GitHubPort.rerunFailed`(가짜 GitHub은 `reruns`에 기록), `.github/workflows/revert.yml`(`plan`: 읽기만, `act`: `revert` environment). `harness-guard`는 바꾸지 않았다(`revert.yml`이 실패·신호 없이 통과한다). 테스트 `scripts/test/revert.test.ts` 12개와 `harness-guard.test.ts` 1개. 문서: 설계서 v0.7.46(10.3절, 10.4절 표), `docs/SECURITY.md` 자격증명 표, 절차서 1절, 코드 구조 문서, `CHANGELOG`.
+- 2026-11-16 step1: step0의 `revert-check` 상태가 그 뒤의 PR(#104)에서 "revert PR 아님"(success)으로 기록되는 것을 확인했다. 필수 체크 등록은 step4에서 요청한다.
+- 2026-11-16 step1: PR을 올리기 전에 #57 계획의 step1(PR #104, 설계서 v0.7.45)이 먼저 병합돼 `origin/main`(`34ad3c1`)을 병합해 받았다. 충돌은 문서 두 곳(설계서 버전 줄·변경 이력, `CHANGELOG`)이었고 main의 v0.7.45 줄 뒤에 이 PR의 v0.7.46 줄을 뒀다(TD-39). 코드는 자동 병합됐고(`scripts/harness.ts`의 `self-test`와 `revert-plan`·`revert-act`), 병합한 트리에서 전체 `check`를 다시 돌렸다.
+- 2026-11-16 step1: PR #105 판정 1라운드(head `545214e`). `review/claude` 승인(F1, P2: `revert-act`가 재실행할 실행 번호와 `--run-url`을 대조하지 않는다). `review/codex` 수정 요청(F2, P1: 원래 PR을 찾지 못하면 `needs-human` 없이 워크플로가 오류로 끝난다. 수용 기준 2와 다르다). 둘 다 고쳤다: 알릴 Issue도 PR도 없으면 봇이 새 Issue를 만들어 `needs-human`을 붙이고(`GitHubPort.createIssue`, 같은 대상은 한 번만), `revert-act`는 재실행 번호가 `--run-url`의 실행과 다르면 종료 코드 1이다. 설계서 10.3절과 `CHANGELOG`를 맞췄다.
 
 ## 의사결정 로그
 
@@ -108,8 +113,18 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 결정: `selftest` job은 main의 시나리오(`base/scripts/selftest/`)를 PR의 하네스(`pr/`)에 대해 실행한다. 시나리오가 요구하는 동작을 바꾸려면 먼저 시나리오를 고치는 PR(신호, 위험도 높음)을 병합한다. / 이유: PR이 자기 시나리오를 함께 약화시키지 못한다. / 버린 대안: PR의 시나리오를 실행하기.
 - 결정: `selftest` job은 `gates` 워크플로(`pull_request_target`) 안에 두고 재현 job과 같은 조건(비밀·environment·쓰기 권한 없음, 캐시 없음)으로 PR 코드를 실행한다. / 이유: `harness-guard` 상태를 쓰는 기록 job이 같은 워크플로에 있어 결과를 합치기 쉽다. PR 코드 실행은 판정 워크플로의 재현 job이 이미 같은 조건으로 한다. 결과는 PR 코드가 조작할 수 있으므로 회귀를 잡는 용도이고, 악의적 약화는 검증자와 제작자 승인이 맡는다(한계로 문서에 적는다). / 버린 대안: PR 쪽 정의인 `check` 워크플로에서만 실행하기(시나리오 정의가 PR 것이 된다).
 - 결정: 체크리스트 6의 "위험도 낮음 PR"은 이 계획의 PR로는 만들 수 없어(계획 위험도 높음) 봇이 #102의 일부로 Issue를 등록해 소규모 계획(위험도 낮음, 보호 경로 밖 `lab/ops-transition/results/`만 변경)으로 올린다. / 이유: 체크리스트 문구를 그대로 지킨다. / 버린 대안: 다른 위험도의 PR로 갈음하기.
+- 결정(step1): `git revert`는 main 체크아웃이 아니라 임시 worktree(`origin/<기본 브랜치>`의 detached HEAD)에서 하고 `HEAD:refs/heads/revert/<대상>`으로 일반 push한다. / 이유: main 체크아웃의 브랜치와 작업 트리를 바꾸지 않는다(R3의 취지). 충돌하면 `git revert --abort` 뒤 worktree만 지우면 된다. / 버린 대안: main 체크아웃에서 브랜치를 바꿔 되돌리기.
+- 결정(step1): step 파일의 `RevertAction`에서 `escalate`에 `target`(실패한 커밋)을 더했다. / 이유: "같은 표식의 댓글이 마지막이면 다시 달지 않는다"의 표식(`<!-- harness-revert-escalate target=<SHA> -->`)을 대상 단위로 만들려면 실행 job이 대상을 알아야 한다. 이유 문구로 표식을 만들면 충돌·push 거부처럼 이유가 달라질 때마다 다시 알린다.
+- 결정(step1): 알릴 Issue도 PR도 없는 에스컬레이션(대상 커밋을 병합한 PR을 찾지 못함)은 `revert-act`를 종료 코드 1로 끝낸다. / 이유: 댓글을 달 곳이 없다. 실패한 워크플로 실행이 제작자에게 가는 알림이다. / 버린 대안: 새 Issue 만들기(포트에 Issue 생성이 없고, 원인 커밋이 PR 없이 main에 들어온 드문 경우다).
+- 결정(step1, 판정 1라운드 F2로 위 결정을 바꾼다): 알릴 Issue도 PR도 없는 에스컬레이션은 봇이 새 Issue(제목 `main check 실패: <SHA 12자>…`, 본문에 제작자 멘션·이유·실패한 커밋·실행 링크·표식)를 만들고 `needs-human`을 붙인다. 같은 표식의 봇 Issue가 열려 있으면 다시 만들지 않는다. / 이유: 수용 기준 2가 "원래 PR을 찾지 못함"을 `needs-human`으로 넘기는 경우로 적었다. 실패한 워크플로 실행만으로는 `start`의 needs-human 목록에 뜨지 않는다. 봇이 만든 Issue는 설정(`github.botIssues: exclude`)에 따라 runner의 작업 대상이 되지 않는다. / 버린 대안: 종료 코드 1로만 알리기(위 결정).
+- 결정(step1): 결정 job의 "이미 있는가"는 PR 조회(API)와 체크아웃의 원격 추적 브랜치로 본다. 실행 job은 push 직전에 `git ls-remote`와 PR 조회로 다시 본다. / 이유: 결정 job에는 git 인증을 두지 않는다(`persist-credentials: false`). 비공개 리포에서 `ls-remote`를 쓸 수 없다.
+- 결정(step1): Issue 댓글의 "이어 가는 명령"은 대상의 부모 커밋에 그 계획이 있는지로 고른다. 없으면(첫 PR이 되돌려짐) `new-task --issue <N>`(계획 복원), 있으면 `new-task --plan <id> --step <N>`. / 이유: #57 계획 step0의 복원 조건("main에 그 계획이 없다")과 같은 기준이다.
+- 결정(step1): 워크플로의 동시 실행 그룹은 워크플로 전체 하나가 아니라 실패한 커밋 단위(`revert-<head_sha>`, `cancel-in-progress: false`)로 둔다. step 파일은 "워크플로 단위 하나씩"이라고 적었다. / 이유: `workflow_run`은 PR의 `check`가 끝날 때도 이 워크플로의 실행을 만든다(job은 건너뛴다). GitHub은 같은 그룹의 대기 실행을 하나만 두고 새 실행이 오면 앞의 대기를 취소하므로, 그룹이 하나면 대기 중인 main 실패 처리가 PR의 실행에 밀려 사라질 수 있다. 커밋 단위 그룹은 step 파일의 목적(같은 대상의 처리가 겹치지 않는다)을 지키고, 다른 커밋의 실행과는 서로 막지 않는다(대상별 브랜치가 달라 독립이다). / 버린 대안: 워크플로 전체 하나.
 
 ## 발견 사항
+
+- revert 워크플로는 main의 스크립트로 돈다. 실패한 커밋이 `scripts/harness.ts`나 revert 코드 자체를 깨뜨렸으면 결정 job이 실패해 자동으로 되돌리지 못한다(실패한 실행으로만 드러난다). step6의 테스트 리포에서 이 경우 제작자가 손으로 되돌리는 절차를 확인해 `docs/SECURITY.md`에 적는다. → 처리: #102
+- 실패한 커밋 A 위에 다른 PR의 커밋 B가 병합돼 B의 `check`도 A 때문에 실패하면, 워크플로는 B도 되돌리려 한다(대상별로 독립해서 판단한다). 최신 브랜치 필수라 B의 PR head는 A를 포함한 채 `check`를 통과했어야 하므로 흔들리는 실패에서만 생긴다. step6의 revert 사례에서 실제 순서를 확인한다. → 처리: #102
 
 ## 열린 질문
 

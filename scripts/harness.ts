@@ -20,6 +20,7 @@ import {
 } from './ci/codex-auth.ts';
 import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
 import { githubGet, resolvePr } from './ci/pr.ts';
+import { RevertError, actRevert, parseRevertAction, planRevert } from './ci/revert.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
 import { REVIEWERS, ledgerData, parseLedgerData, type Ledger, type Reviewer } from './ci/ledger.ts';
@@ -66,7 +67,7 @@ import { revertCheck, revertTarget, type RevertCheck } from './gates/revert-chec
 import { docLint, printDocLint } from './gates/doc-lint.ts';
 import { planGate, type PlanG1 } from './gates/plan-gate.ts';
 import { secretScan } from './gates/secret-scan.ts';
-import { getGitHub } from './lib/github.ts';
+import { getGitHub, runIdOf } from './lib/github.ts';
 import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
 import { runWorkers, workerNames } from './runner/workers.ts';
@@ -130,6 +131,10 @@ CI(gates 워크플로, 10.4절):
   review-prompt --base-dir <base> --files <a.md,b.md> --out <파일> [--prompt-base <sha>] [--mode <plan|code>]
                                            검증 프롬프트를 이어 붙인다. 프롬프트 버전이 있으면 그 커밋의 파일을 쓴다(10.2절 (2))
                                            mode가 plan이면 계획 검증 프롬프트(prompt-plan.md)를 첫 파일 뒤에 붙인다
+  revert-plan --event <이벤트 JSON>        main check 실패(workflow_run) 뒤 할 일을 정해 $GITHUB_OUTPUT에 action·data를 쓴다(읽기만, 10.3절)
+  revert-act --data <base64 JSON> --run-url <url>
+                                           정한 일을 한다: 실패한 job 재실행 | revert/<SHA> PR·자동 병합·Issue 재오픈 | 에스컬레이션
+                                           (revert environment의 봇 토큰은 GH_TOKEN. main에 직접 push하지 않는다)
   ledger-ci-failure --config-root <base> --pr-number <N> --head-sha <sha> --repo-slug <owner/name> --run-url <url> --prompt-base <sha>
                                            check 실패를 지적 원장에 남긴다(토큰은 LEDGER_TOKEN)
   claude-scan --log <stream-json> --pr <pr 폴더> --out <verdict.json>
@@ -208,6 +213,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'base-dir': { type: 'string' },
   files: { type: 'string' },
   'run-url': { type: 'string' },
+  data: { type: 'string' },
   ledger: { type: 'string' },
   rebuttals: { type: 'string' },
   'repro-results': { type: 'string' },
@@ -842,6 +848,54 @@ async function main(argv: string[]): Promise<number> {
       );
       log(`ci-pr: PR #${r.number} head ${r.headSha.slice(0, 12)}`);
       return 0;
+    }
+    case 'revert-plan': {
+      const eventFile = str('event');
+      const output = process.env.GITHUB_OUTPUT;
+      const repo = process.env.GITHUB_REPOSITORY ?? '';
+      if (!eventFile || !output || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+        process.stderr.write(
+          'revert-plan: --event와 환경 변수 GITHUB_OUTPUT, GITHUB_REPOSITORY가 필요하다\n',
+        );
+        return 2;
+      }
+      const info = repoInfo(cwd);
+      const a = await planRevert({
+        root: info.root,
+        cfg: loadConfig(info.root),
+        repo,
+        api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+        event: JSON.parse(readFileSync(eventFile, 'utf8')),
+      });
+      const data = Buffer.from(JSON.stringify(a)).toString('base64');
+      appendFileSync(output, `action=${a.action}\ndata=${data}\n`);
+      log(`revert-plan: ${a.action}${'reason' in a ? ` — ${a.reason}` : ''}`);
+      return 0;
+    }
+    case 'revert-act': {
+      const data = str('data');
+      const runUrl = str('run-url');
+      if (!data || !runUrl) {
+        process.stderr.write('revert-act: --data, --run-url이 필요하다\n');
+        return 2;
+      }
+      const info = repoInfo(cwd);
+      const gh = getGitHub(info.root);
+      try {
+        // plan job의 출력도 다시 검사한다: 형식, 실행 URL이 이 리포의 것인가, 다시 실행할 실행이 그 실패한 실행인가
+        // (대상이 main 이력에 있는지는 actRevert가 본다)
+        const a = parseRevertAction(JSON.parse(Buffer.from(data, 'base64').toString('utf8')));
+        const failedRun = runIdOf(runUrl, gh.repoSlug());
+        if (!failedRun) throw new RevertError('--run-url이 이 리포의 Actions 실행 URL이 아니다');
+        if (a.action === 'rerun' && String(a.runId) !== failedRun)
+          throw new RevertError('다시 실행할 실행 번호가 --run-url의 실행과 다르다');
+        const r = actRevert({ root: info.root, gh, cfg: loadConfig(info.root), runUrl }, a);
+        log(`revert-act: ${r.done}`);
+        return 0;
+      } catch (e) {
+        process.stderr.write(`revert-act: 실패 — ${(e as Error).message}\n`);
+        return 1;
+      }
     }
     case 'gates': {
       const root = path.resolve(str('repo') ?? repoInfo(cwd).root);
