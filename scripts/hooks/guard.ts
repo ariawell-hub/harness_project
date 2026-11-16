@@ -5,6 +5,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { approvalPending, planRiskOf } from '../lib/approval.ts';
+import { ConfigError, resolveMcpGuard } from '../lib/config.ts';
 import { hasCommits, tryRepoInfo, type RepoInfo } from '../lib/git.ts';
 import { findPlan, parseDoc } from '../lib/plan.ts';
 import { formatProblem } from '../lib/util.ts';
@@ -51,6 +52,15 @@ export function normalize(
   platform: NodeJS.Platform = process.platform,
 ): GuardInput | null {
   const tool = String(payload.tool_name ?? payload.toolName ?? '');
+  if (/^mcp__/i.test(tool)) {
+    // MCP 도구 입력의 command·cwd·patch는 도구마다 뜻이 달라 셸 명령이나 패치로 읽지 않는다
+    return {
+      kind: 'mcp',
+      tool,
+      input: payload.tool_input ?? payload.toolInput ?? payload.input ?? {},
+      cwd: String(payload.cwd ?? process.cwd()),
+    };
+  }
   const ti = (payload.tool_input ?? payload.toolInput ?? payload.input ?? {}) as Json;
   const cwd = String(ti.workdir ?? ti.cwd ?? payload.cwd ?? process.cwd());
   const str = (x: unknown) => (typeof x === 'string' ? x : undefined);
@@ -89,14 +99,22 @@ export function normalize(
   return null;
 }
 
-function loadGuardConfig(root: string | null): { dbPatterns: string[]; dbClients: string[] } {
+function loadGuardConfig(root: string | null): {
+  dbPatterns: string[];
+  dbClients: string[];
+  mcp?: unknown;
+} {
   if (!root) return { dbPatterns: [], dbClients: [] };
   const f = path.join(root, 'harness.config.json');
   if (!existsSync(f)) return { dbPatterns: [], dbClients: [] };
   const cfg = JSON.parse(readFileSync(f, 'utf8')) as {
-    guard?: { dbPatterns?: string[]; dbClients?: string[] };
+    guard?: { dbPatterns?: string[]; dbClients?: string[]; mcp?: unknown };
   };
-  return { dbPatterns: cfg.guard?.dbPatterns ?? [], dbClients: cfg.guard?.dbClients ?? [] };
+  return {
+    dbPatterns: cfg.guard?.dbPatterns ?? [],
+    dbClients: cfg.guard?.dbClients ?? [],
+    mcp: cfg.guard?.mcp,
+  };
 }
 
 /** 경로가 속한 리포(worktree). 아직 없는 파일이면 존재하는 가장 가까운 상위 폴더로 찾는다 */
@@ -129,6 +147,7 @@ export function buildContext(
   worker = process.env.HARNESS_WORKER ?? 'session',
 ): GuardContext {
   const repo = tryRepoInfo(cwd);
+  const { dbPatterns, dbClients } = loadGuardConfig(repo?.root ?? null);
   return {
     repo,
     hasCommits: repo ? hasCommits(repo.root) : undefined,
@@ -138,7 +157,11 @@ export function buildContext(
     worker,
     approvalPending,
     planRisk: planRiskOf,
-    ...loadGuardConfig(repo?.root ?? null),
+    dbPatterns,
+    dbClients,
+    // MCP 규칙은 메인 체크아웃의 설정으로 판정한다(훅 코드도 그쪽 것이 돈다):
+    // worktree에서 고친, 아직 병합되지 않은 설정으로 규칙을 풀 수 없다. MCP 호출 때만 읽고, 틀리면 던져서 막는다
+    mcp: () => resolveMcpGuard(loadGuardConfig(repo?.mainRoot ?? null).mcp),
   };
 }
 
@@ -162,8 +185,11 @@ function main(): void {
     process.exit(0);
   } catch (e) {
     process.stderr.write(
-      `하네스 L1 훅 내부 오류로 안전을 위해 차단했다(fail-closed): ${(e as Error).message}\n` +
-        '고치는 법: scripts/hooks/guard.ts를 고치는 별도 계획을 만들어라. 근거: docs/harness/design.md 13.1절\n',
+      e instanceof ConfigError
+        ? `하네스 L1 훅이 설정을 읽지 못해 안전을 위해 차단했다(fail-closed): ${e.message}\n` +
+            '고치는 법: 메인 체크아웃의 harness.config.json을 고쳐야 한다(보호 경로). 제작자에게 알려라. 근거: docs/harness/design.md 13.1절\n'
+        : `하네스 L1 훅 내부 오류로 안전을 위해 차단했다(fail-closed): ${(e as Error).message}\n` +
+            '고치는 법: scripts/hooks/guard.ts를 고치는 별도 계획을 만들어라. 근거: docs/harness/design.md 13.1절\n',
     );
     process.exit(2);
   }

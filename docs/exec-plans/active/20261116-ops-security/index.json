@@ -16,7 +16,8 @@
     {
       "step": 2,
       "name": "mcp-guard",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-16T18:16:14+09:00"
     },
     {
       "step": 3,

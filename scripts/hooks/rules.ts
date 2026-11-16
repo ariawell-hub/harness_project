@@ -3,9 +3,10 @@
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import { DEFAULT_MCP_GUARD, type McpGuardConfig } from '../lib/config.ts';
 import type { RepoInfo } from '../lib/git.ts';
 import { PLANS_DIR, parseBranch } from '../lib/plan.ts';
-import type { Problem } from '../lib/util.ts';
+import { globToRegExp, type Problem } from '../lib/util.ts';
 import {
   baseName,
   commandName,
@@ -15,7 +16,7 @@ import {
   type SimpleCommand,
 } from './shell.ts';
 
-export type ToolKind = 'bash' | 'read' | 'write' | 'other';
+export type ToolKind = 'bash' | 'read' | 'write' | 'mcp' | 'other';
 
 export interface GuardInput {
   kind: ToolKind;
@@ -24,6 +25,10 @@ export interface GuardInput {
   dialects?: Dialect[];
   /** read/write 대상 파일들 */
   files?: string[];
+  /** MCP 도구의 전체 이름(`mcp__서버__도구`) */
+  tool?: string;
+  /** MCP 도구 입력. 객체가 아니면 해석하지 못한 호출이다 */
+  input?: unknown;
   cwd: string;
 }
 
@@ -50,6 +55,8 @@ export interface GuardContext {
   approvalPending?: (dir: string, branch: string | null) => number | null;
   /** 브랜치 계획의 위험도(low|normal|high). 모르면 null */
   planRisk?: (dir: string, branch: string | null) => string | null;
+  /** MCP 도구 규칙(`guard.mcp`). 없으면 기본값이다. 설정이 틀리면 던지고 훅이 막는다 */
+  mcp?: () => McpGuardConfig;
 }
 
 const D = 'docs/harness/design.md';
@@ -1016,7 +1023,130 @@ export function evaluateFile(
   return null;
 }
 
+// ---------- MCP 도구 (13.1절, TD-13) ----------
+
+/** 브라우저 도구 입력을 들여다보는 상한. 넘으면 판단하지 못한 것이므로 막는다 */
+const MCP_MAX_DEPTH = 16;
+const MCP_MAX_CHARS = 2_000_000;
+
+const globAny = (text: string, globs: string[]): boolean =>
+  globs.some((g) => new RegExp(globToRegExp(g).source, 'i').test(text));
+
+/** 도구 이름(서버 접두어 뒤)의 단어들. `_`·`-`와 대소문자·숫자 경계로 나눈다: `untrash`는 `trash`와 다른 단어다 */
+function mcpWords(tool: string): string[] {
+  const rest = tool.replace(/^mcp__/i, '');
+  const at = rest.indexOf('__');
+  return (at >= 0 ? rest.slice(at + 2) : rest)
+    .split(/[^A-Za-z0-9]+/)
+    .flatMap((w) =>
+      w.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=[0-9])/),
+    )
+    .filter(Boolean)
+    .map((w) => w.toLowerCase());
+}
+
+/** 입력의 모든 문자열 값(중첩 포함). 상한을 넘으면 null */
+function mcpStrings(value: unknown): string[] | null {
+  const out: string[] = [];
+  let chars = 0;
+  const walk = (x: unknown, depth: number): boolean => {
+    if (typeof x === 'string') {
+      chars += x.length;
+      out.push(x);
+      return chars <= MCP_MAX_CHARS;
+    }
+    if (typeof x !== 'object' || x === null) return true;
+    if (depth >= MCP_MAX_DEPTH) return false;
+    return Object.values(x).every((child) => walk(child, depth + 1));
+  };
+  return walk(value, 0) ? out : null;
+}
+
+/** 글에 든 호스트 이름 가운데 금지 호스트. URL 형식이 아니어도(`github.com/o/r`, `https:\/\/…`, %인코딩) 찾는다 */
+function deniedHost(text: string, hosts: string[]): string | null {
+  // 브라우저는 전각 글자와 전각·표의 마침표(．。｡)를 ASCII로 바꿔 연다. 같은 꼴로 맞춘 뒤 찾는다
+  const fold = (s: string) => s.normalize('NFKC').replace(/[\u3002\uff61]/g, '.');
+  const forms = [fold(text)];
+  try {
+    const decoded = fold(decodeURIComponent(text));
+    if (decoded !== forms[0]) forms.push(decoded);
+  } catch {
+    // 깨진 % 표기는 원문만 본다
+  }
+  for (const form of forms) {
+    // 호스트 이름에 쓰이는 글자의 덩어리로 나눈다(정규식 되짚기 없이 길이에 비례)
+    for (const token of form.toLowerCase().split(/[^a-z0-9.-]+/)) {
+      const host = token.replace(/^[.-]+|[.-]+$/g, '');
+      if (host.includes('.') && globAny(host, hosts)) return host;
+    }
+  }
+  return null;
+}
+
+/**
+ * MCP 도구 호출 판정. 막는 것은 삭제 계열·외부 발송(R14)과 브라우저 도구의 GitHub 접근(R20)뿐이다(제작자 결정 2026-11-16).
+ * 브라우저 안의 클릭으로 닿는 경로와 이름이 규칙에 걸리지 않는 도구는 보지 못한다(13.2절, E5).
+ */
+export function evaluateMcp(input: GuardInput, ctx: GuardContext): Problem | null {
+  const tool = input.tool ?? '';
+  const cfg = ctx.mcp ? ctx.mcp() : DEFAULT_MCP_GUARD;
+  const args = input.input;
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) {
+    return v(
+      'R14 MCP 도구',
+      `MCP 도구 호출을 해석하지 못했다(입력이 객체가 아니다): ${tool}`,
+      '도구 입력을 JSON 객체로 넘겨 다시 호출하라. 판단하지 못한 호출은 막는다',
+      `${D} 13.1절`,
+    );
+  }
+  if (!globAny(tool, cfg.allowTools)) {
+    if (globAny(tool, cfg.denyTools)) {
+      return v(
+        'R14 외부 발송',
+        `MCP 도구로 외부에 발송하려 했다: ${tool}`,
+        '초안까지만 만들어라(예: Gmail create_draft). 발송은 제작자가 직접 한다',
+        `${D} R14, 13.1절`,
+      );
+    }
+    const deny = new Set(cfg.denyWords.map((w) => w.toLowerCase()));
+    const word = mcpWords(tool).find((w) => deny.has(w));
+    if (word) {
+      return v(
+        'R14 데이터 삭제',
+        `MCP 도구로 데이터를 삭제하려 했다: ${tool} (도구 이름의 "${word}")`,
+        '삭제·휴지통 이동·취소는 제작자가 직접 한다. 삭제가 아닌 도구가 이름 때문에 막혔으면 제작자에게 guard.mcp.allowTools에 더해 달라고 요청하라',
+        `${D} R14, 13.1절`,
+      );
+    }
+  }
+  // allowTools는 위 두 규칙의 예외일 뿐이다: 브라우저의 GitHub 접근은 풀지 않는다
+  if (globAny(tool, cfg.browserTools)) {
+    const strings = mcpStrings(args);
+    if (!strings) {
+      return v(
+        'R20 제작자 권한',
+        `브라우저 자동화 도구의 입력이 너무 크거나 깊어 금지 주소가 있는지 확인하지 못했다: ${tool}`,
+        '입력을 나눠 다시 호출하라. 판단하지 못한 호출은 막는다',
+        `${D} R20, 13.1절`,
+      );
+    }
+    for (const s of strings) {
+      const host = deniedHost(s, cfg.denyHosts);
+      if (host) {
+        return v(
+          'R20 제작자 권한',
+          `브라우저 자동화 도구로 ${host}에 접근하려 했다: ${tool}`,
+          'GitHub 작업은 봇 토큰의 gh 명령으로 한다(gh pr view, gh api …). 브라우저로 GitHub을 열지 않는다',
+          `${D} R20, E5, 13.1절`,
+        );
+      }
+    }
+  }
+  return null;
+}
+
 export function evaluate(input: GuardInput, ctx: GuardContext): Problem | null {
+  if (input.kind === 'mcp') return evaluateMcp(input, ctx);
   if (input.kind === 'bash' && input.command) {
     for (const d of input.dialects ?? ['posix']) {
       const r = evaluateBash(input.command, input.cwd, ctx, d);

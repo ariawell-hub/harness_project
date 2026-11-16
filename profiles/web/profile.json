@@ -33,7 +33,20 @@
         "\\bknex\\s+migrate:rollback\\b.*--all",
         "\\bsupabase\\s+db\\s+reset\\b"
       ],
-      "dbClients": ["supabase-db"]
+      "dbClients": ["supabase-db"],
+      "mcp": {
+        "denyWords": ["delete", "trash", "remove", "destroy", "purge", "erase", "wipe", "cancel"],
+        "denyTools": ["mcp__*Gmail__send_message", "mcp__*Gmail__reply", "mcp__*Gmail__forward"],
+        "allowTools": [],
+        "browserTools": [
+          "mcp__claude-in-chrome__*",
+          "mcp__playwright__*",
+          "mcp__*Browser__*",
+          "mcp__computer-use__*",
+          "mcp__remote-devices__*"
+        ],
+        "denyHosts": ["github.com", "*.github.com", "github.dev", "*.github.dev"]
+      }
     },
     "bypass": {
       "extraPatterns": ["\\btest\\.fixme\\b"],
