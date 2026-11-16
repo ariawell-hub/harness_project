@@ -25,7 +25,7 @@ function setup(configOver: Record<string, unknown> = {}, fake: Partial<FakeState
   writeFileSync(behavior, '{}');
   writeFileSync(logFile, '');
   process.env.HARNESS_FAKE_GH = state;
-  process.env.HARNESS_FAKE_AGENT = path.join(HARNESS_ROOT, 'scripts/test/fake-agent.ts');
+  process.env.HARNESS_FAKE_AGENT = path.join(HARNESS_ROOT, 'scripts/selftest/fake-agent.ts');
   process.env.FAKE_BEHAVIOR = behavior;
   process.env.FAKE_LOG = logFile;
   delete process.env.HARNESS_WORKER;

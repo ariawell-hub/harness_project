@@ -70,7 +70,7 @@ function setup(over: Record<string, unknown> = {}) {
   writeFileSync(behavior, JSON.stringify({ 'demo-feature': { steps: 1 } }));
   writeFileSync(logFile, '');
   process.env.HARNESS_FAKE_GH = state;
-  process.env.HARNESS_FAKE_AGENT = path.join(HARNESS_ROOT, 'scripts/test/fake-agent.ts');
+  process.env.HARNESS_FAKE_AGENT = path.join(HARNESS_ROOT, 'scripts/selftest/fake-agent.ts');
   process.env.FAKE_BEHAVIOR = behavior;
   process.env.FAKE_LOG = logFile;
   const raw = () => JSON.parse(readFileSync(state, 'utf8')) as FakeState;

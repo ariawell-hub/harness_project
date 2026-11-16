@@ -2,7 +2,7 @@
 id: 20261116-ops-transition
 issue: 57 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -69,6 +69,13 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 2026-11-16 step0: PR #101 병합(main `cbe2f2e`). 보안 계획의 PR #103은 main을 병합해 갱신했다(TD-39의 순서).
 - 2026-11-16 step1: 구현. `scripts/selftest/run.ts`(`runSelfTest`, 샘플 리포, `ctx.cli`·`ctx.hook`, `assertBlocked`·`assertAllowed`, `formatSelfTest`), 시나리오 5개(`s1-next-task`, `r1-plan-gate`, `r4-bypass`, `r13-db`, `r20-owner-commands`), `scripts/harness.ts`의 `self-test`. 이 Windows PC에서 5개 실행에 약 40초다. 테스트 `selftest.test.ts` 6개(이 리포 전부 통과, 훅 종료 코드 1 사본에서 R20 실패, 항상 통과하는 `plan-gate` 사본에서 R1 실패, `--only`와 없는 id, 예외·assert 실패 뒤에도 나머지 실행, 자식 프로세스 환경 변수). 문서: 설계서 12.4절(v0.7.45), 코드 구조 문서, 절차서 4절, `CHANGELOG`.
 - 2026-11-16 step1: PR #104. 1라운드에서 `review/claude` 승인(지적 없음). 그 사이 보안 계획의 PR #103이 제작자 승인으로 병합돼(main `5ac523a`) `origin/main`을 병합해 갱신했다. 충돌은 문서 두 곳(설계서 버전 줄·변경 이력, `CHANGELOG`)이었고 main의 v0.7.44 줄 뒤에 이 PR의 v0.7.45 줄을 뒀다.
+- 2026-11-16 step1: PR #104 병합(main `34ad3c1`). 보안 계획의 step1(PR #105)이 main을 병합해 받았다.
+- 2026-11-16 step2: 구현. 가짜 에이전트를 `scripts/selftest/fake-agent.ts`로 옮기고(내용 그대로, runner 테스트 5개 파일의 경로만 수정) 실행기에 `ctx.agent`·`ctx.github`·`ctx.api`(읽기 전용 로컬 서버 `api-stub.ts`), `Sample.prompts`, `Scenario.timeoutSec`, `runnerConfig`를 더했다. 시나리오 `f92-switch-stop`(9.2절), `r45-runner`(4.5절), `flow-full`(전체 흐름과 승인 이어받기). 테스트: 이 리포는 시나리오 8개가 모두 `pass`, runner가 AC 결과를 보지 않는 사본에서 `r45-runner`가 `fail`, 실행기 테스트 1개(상태 파일 읽고 고치기, 가짜 에이전트 연결, 서버가 시나리오 뒤 꺼짐, 시나리오별 시간 제한). 문서: 설계서 v0.7.47(12.4절), 코드 구조 문서, `CHANGELOG`.
+- 2026-11-16 step2: 만들면서 어긋난 것은 모두 시나리오·샘플 쪽 원인이었고 대기 시간을 늘려 가린 것은 없다. (1) 샘플 리포에서 `check`의 doc-lint가 실패해(복사한 `AGENTS.md`가 가리키는 문서가 샘플에 없다) 모든 step이 `check:doc-lint`로 멈췄다 → `runnerConfig`가 복사한 문서를 doc-lint에서 뺀다. (2) 계획 frontmatter의 `status: blocked` 뒤에 주석이 붙는다 → 줄 끝까지가 아니라 값만 본다. (3) `flow-full`: step이 하나인 계획의 PR은 `Closes`다, CI 흉내 체크아웃이 새 head를 받아야 한다, main 병합 갱신 뒤의 기준 커밋은 앞서 나간 main과의 merge-base다.
+- 2026-11-16 step2: 흔들림 확인. `node scripts/harness.ts self-test --only f92-switch-stop,r45-runner,flow-full`을 이 Windows PC에서 5번 이어서 실행했다: 5번 모두 종료 코드 0(3개 모두 `pass`), 회당 143·142·140·138·144초. 4·5회차는 다른 worktree의 테스트(`revert.test.ts`)와 겹쳐 돌았다. AC의 테스트 명령(`selftest.test.ts`·`runner.test.ts`·`runner-workers.test.ts`)은 31개 통과, 363초였다(`selftest.test.ts`만 약 270초).
+- 2026-11-16 step2: PR #106. 1라운드(head `8d487ed`)에서 두 검증자가 승인했다(지적 없음). 보안 계획 step1(PR #105, 설계서 v0.7.46)이 제작자 승인으로 병합될 때까지 초안으로 두었고, 병합된 뒤(main `decf237`) `origin/main`을 병합해 받았다. 충돌은 문서 두 곳(설계서 버전 줄·변경 이력, `CHANGELOG`)이었고 main의 v0.7.46 줄 뒤에 이 PR의 v0.7.47 줄을 뒀다. 코드 충돌은 없었고, 병합한 트리에서 전체 `check`를 다시 돌렸다.
+- 2026-11-16 step2: 위 병합 트리의 전체 `check`가 `test` 시간 제한(900초)으로 두 번 실패했다(`test (900.6s)`. 두 번째는 다른 작업 없이 실행). 같은 트리의 전체 테스트를 제한 없이 돌리면 951초에 실패 0건이었다(파일 40개, 파일별 합계 4516초). 같은 방법을 다시 시도하지 않고, 제한을 1800초로 올리는 변경을 보안 계획 step2(PR #107, 위험도 높음)에 넣어 제작자 승인을 받았다(`commands` 변경은 `harness-guard` 신호라 이 PR에 넣으면 제작자 승인이 필요해진다). 병합 커밋은 그동안 push하지 않았다.
+- 2026-11-16 step2: PR #107(설계서 v0.7.48)이 병합된 뒤(main `4c95a36`) `origin/main`을 다시 병합해 받았다. 충돌 네 곳: 설계서 버전 줄(v0.7.48로 둔다. 이 PR의 변경 이력 줄은 v0.7.47 그대로), `CHANGELOG`(v0.7.47 줄 뒤에 v0.7.48 줄), 기술 부채 표(이 PR의 표에 main의 TD-13 행을 넣었다), `selftest.test.ts`(시나리오 9개: 이 PR의 셋과 main의 `mcp-guard`). main에서 변경 이력의 v0.7.48 줄이 v0.7.46 줄 앞에 들어가 있던 것을 v0.7.46 → v0.7.47 → v0.7.48 순서로 바로잡았다. TD-40의 문구를 "제한을 1800초로 올렸고 느린 원인을 줄이는 일이 남았다"로 고쳤다.
 
 ## 의사결정 로그
 
@@ -82,12 +89,22 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 결정(step1): `--only`에 없는 id가 있으면 실행하지 않고 종료 코드 2로 끝낸다. 시나리오 폴더가 비어도 같다. / 이유: 오타 하나로 "0개 실행, 통과"가 되면 보안 계획 step3의 게이트가 빈 채로 통과한다.
 - 결정(step1): R13의 대조군 "같은 클라이언트의 읽기 명령"은 같은 도구의 읽기 명령(`prisma migrate status`, `knex migrate:status`)으로 확인한다. / 이유: 훅은 `psql` 같은 DB 클라이언트를 읽기 명령이어도 직접 접속으로 막는다(설계서 14.3절 "직접 접속"). 클라이언트 실행 파일의 읽기 명령이 통과한다고 확인하면 설계와 어긋난다.
 - 결정(step1): 설계서 버전은 v0.7.45로 올린다. v0.7.44는 승인 요청을 앞둔 보안 계획의 PR #103이 쓴다. / 이유: 어느 쪽이 먼저 병합돼도 최종 변경 이력의 번호가 겹치지 않는다(TD-39).
+- 결정(step2): step 파일의 인터페이스에 네 가지를 더했다. `ctx.api(s, routes)`(읽기 전용 GitHub REST 흉내), `Sample.prompts()`(가짜 에이전트가 받은 프롬프트), `Scenario.timeoutSec`(기본 120초, runner 시나리오 300초), `runnerConfig(harness, over)`(runner 시나리오의 샘플 설정). / 이유: `review-plan`의 승인 이어받기는 가짜 GitHub 상태 파일이 아니라 REST(`GITHUB_API_URL`)로 조회한다. 실행기는 대상 CLI를 동기로 실행하므로 그 조회에 답할 서버는 다른 프로세스여야 하고, 시나리오가 끝나면 꺼야 해서 실행기가 수명을 맡는다. 시간 제한은 step 파일이 300초로 정했는데 step1의 시나리오는 120초로 충분하다. 설정은 세 시나리오가 같은 것을 쓴다. / 버린 대안: 서버 없이 `review-plan`을 부르기(조회 실패라 이어받기가 늘 비어, "main 병합 갱신에서는 채워진다"를 확인할 수 없다).
+- 결정(step2): `runnerConfig`는 대상 하네스의 설정에서 만든다(표준 명령 끔, 세션 1분·AC 60초·대기 0초·작업자 1개, 복사한 문서를 doc-lint에서 뺌). 고정 값의 설정 전체를 쓰지 않는다. / 이유: 대상 하네스(PR)가 설정 항목을 더하면 고정 값은 그 항목이 빠져 설정 검증에서 떨어진다. 표준 명령을 끄는 것은 샘플 리포에 의존성이 없어서고, runner의 AC 판정과 `check`의 나머지(doc-lint의 계획 폴더 검사, 우회 탐지, 시크릿 스캔)는 그대로 돈다.
+- 결정(step2): `flow-full`의 계획 승인 원장 댓글은 시나리오가 직접 만든다(표식 `harness-ledger:v1`과 숨은 자료). 필수 체크 결과도 상태 파일에 직접 넣는다. / 이유: 대상 하네스의 `record-review`·`record-status`는 REST로만 쓰고 가짜 GitHub 상태 파일에는 쓰지 못한다. 시나리오가 기대는 형식이 가짜 GitHub 상태 파일에 더해 원장 댓글 형식(v1)까지 늘어난다(설계서 12.4절에 적었다). / 버린 대안: 쓰기까지 받는 REST 서버를 만들어 상태 파일과 잇기(가짜 GitHub을 한 벌 더 만드는 일이다).
+- 결정(step2): `flow-full`에서 필수 체크를 넣은 뒤 PR의 자동 병합 표시를 꺼서 runner가 다시 켜게 한다(`arm-merge`). / 이유: 가짜 GitHub은 `setCheck`나 `enableAutoMerge`가 불릴 때만 병합 조건을 본다. 상태 파일에 체크를 직접 넣으면 다시 보지 않고, CLI에서 그 판정에 닿는 길은 runner의 자동 병합 켜기뿐이다. 그 전에 "필수 체크가 없는 head는 병합되지 않는다"를 먼저 확인한다.
+- 결정(step2): 승인 이어받기는 runner의 worktree가 아니라 원격을 새로 받은 체크아웃에서 확인한다. main의 앞선 커밋과 병합 갱신·공백 커밋은 그 체크아웃 안에만 만들고 push하지 않는다. / 이유: `review-plan`은 체크아웃 안에 검증 입력 폴더를 쓴다. runner의 worktree를 더럽히면 뒤의 병합 단계가 달라진다. CI도 새 체크아웃에서 돈다.
+- 결정(step2): `r45-runner`의 세션 시간 제한은 6초(0.1분)이고, 세션 횟수를 정확히 세지 않는다("다시 띄웠다"는 2회 이상으로 본다). `f92-switch-stop`은 세션 제한 1분에서 횟수(정확히 5회)를 센다. / 이유: 시간 초과 세션 하나가 제한만큼 걸려 짧아야 하지만, 부하가 걸린 PC에서 정상 세션이 제한을 넘으면 횟수가 달라진다. 횟수를 세는 시나리오에는 시간 초과를 넣지 않았다.
+- 결정(step2): 설계서 버전은 v0.7.47이다. v0.7.46은 보안 계획 step1(PR #105)이 쓴다. 이 PR은 PR #105가 병합된 뒤에 병합한다(그때까지 자동 병합을 켜지 않는다). / 이유: PR #105는 제작자 head 승인을 기다리는 위험도 높음 PR이라, 이 PR이 먼저 병합되면 문서 충돌로 PR #105에 커밋을 더 올려야 하고 승인 요청이 무효가 된다(TD-39). 보안 계획의 다음 step은 어차피 PR #105가 병합돼야 시작할 수 있어, 이 PR을 먼저 병합해도 앞당겨지는 일이 없다.
 
 ## 발견 사항
 
 - 이 Windows PC는 개발자 모드가 꺼져 있어 심볼릭 링크를 만들 수 없고, 파일 이름에 `:`·`*`를 쓸 수 없고, POSIX 권한 비트가 없다(#99). 이 계획에서 새로 쓰는 테스트·시나리오도 같은 제약을 지켜야 로컬 `check`가 통과한다(디렉터리 링크는 `'junction'`, 셸 명령에 넣는 경로는 `/`, 전체 `check`는 약 13분). → 처리: TD-14
 - 두 계획을 병행하면 step PR끼리 문서의 같은 자리(설계서 버전 줄, 변경 이력 끝, `CHANGELOG` 끝)에서 충돌한다. 먼저 병합된 쪽 때문에 나중 PR은 main을 병합해 갱신해야 하고, 그 PR이 제작자 승인을 기다리는 보안 계획의 PR이면 승인 요청이 무효가 된다. 이번에는 이 계획의 step0을 먼저 병합하고 보안 계획의 PR #103을 갱신한 뒤 승인을 요청하는 순서로 피한다. → 처리: TD-39
 - 복원 조건 "main에 그 계획이 없다"는 계획 id로만 본다. revert 뒤 같은 Issue에 새 계획(다른 id)이 이미 만들어져 병합됐다면 옛 계획도 복원 대상으로 남는다. 선점이 살아 있는 동안에는 그 작업자만 `new-task --issue`를 다시 실행할 수 있어 드물다. 보안 계획 step6(테스트 리포의 `plan-restore` 사례)에서 실제 흐름으로 본다. → 처리: #102
+- 자체 테스트의 샘플 리포는 `check`의 doc-lint를 통과하지 못한다. 복사한 `AGENTS.md`·절차서가 가리키는 문서(설계서, `docs/index.md`, ADR 등)가 샘플에 없다. runner 시나리오는 복사한 문서를 doc-lint에서 빼고 돈다. 하네스를 적용한 새 리포에서 문서 검사까지 통과하는지는 보안 계획 step6(테스트 리포)에서 본다. → 처리: #102
+- 가짜 GitHub은 체크가 상태 파일에 직접 들어오면 병합 조건을 다시 보지 않는다. 실제 GitHub의 "필수 체크 통과 → 자동 병합"은 자체 테스트가 아니라 보안 계획 step6(테스트 리포)에서 확인된다. → 처리: #102
+- 이 Windows PC에서 전체 `check`의 `test` 단계가 870~900초로, 시간 제한(`commands.test.timeoutSec` 900초)에 닿아 있다(오늘 8번 실행: 805~900초). 이 step으로 `selftest.test.ts`가 약 270초가 됐다(가장 긴 파일은 아니다). GitHub Actions의 `check`는 6분 안팎이라 CI에는 여유가 있다. main을 받은 트리에서는 951초로 제한을 넘었고, 제한은 보안 계획 step2(PR #107)가 1800초로 올렸다. 느린 원인을 줄이는 일이 남는다. → 처리: TD-40
 
 ## 열린 질문
 
@@ -100,5 +117,5 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- 나눈 계획을 계획만 담은 커밋으로 push해 PR #101에서 계획 검증(G1)을 다시 받는다. 승인 뒤 step0(plan-restore)부터 구현한다.
+- 이 계획의 step은 step2가 마지막이다. PR이 병합되면 Issue #57이 닫히고, #57의 남은 수용 기준(운영 전환 체크리스트, `stage: operation`)은 보안 계획(#102, `20261116-ops-security`)이 이어서 한다.
 - 이 계획에는 제작자 작업이 없다. 보안 계획(#102)의 제작자 작업은 그 계획의 "다음 할 일"에 있다.

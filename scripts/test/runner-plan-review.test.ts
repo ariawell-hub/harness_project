@@ -49,7 +49,7 @@ function setup(over: Record<string, unknown> = {}, steps = 2) {
   writeFileSync(behavior, JSON.stringify({ 'demo-feature': { steps } }));
   writeFileSync(logFile, '');
   process.env.HARNESS_FAKE_GH = state;
-  process.env.HARNESS_FAKE_AGENT = path.join(HARNESS_ROOT, 'scripts/test/fake-agent.ts');
+  process.env.HARNESS_FAKE_AGENT = path.join(HARNESS_ROOT, 'scripts/selftest/fake-agent.ts');
   process.env.FAKE_BEHAVIOR = behavior;
   process.env.FAKE_LOG = logFile;
   const raw = () => JSON.parse(readFileSync(state, 'utf8')) as FakeState;
@@ -422,10 +422,14 @@ test('describeTask: plan-push는 대화 세션에 "계획만 담은 커밋을 pu
     // 계획 작성 세션만 끝난 상태를 만든다: runner 대신 가짜 에이전트의 결과를 직접 커밋한다
     const wt = listWorktrees(t.fx.root).find((w) => w.branch?.includes('demo-feature'))!;
     const prompt = `# 이번 작업: 계획 작성\n계획 파일: \`docs/exec-plans/active/${wt.branch!.replace(/^[a-z]+\//, '').replace(/-s\d+$/, '')}/plan.md\`\n`;
-    const r = runSync(process.execPath, [path.join(HARNESS_ROOT, 'scripts/test/fake-agent.ts')], {
-      cwd: wt.path,
-      input: prompt,
-    });
+    const r = runSync(
+      process.execPath,
+      [path.join(HARNESS_ROOT, 'scripts/selftest/fake-agent.ts')],
+      {
+        cwd: wt.path,
+        input: prompt,
+      },
+    );
     assert.equal(r.code, 0, r.stderr);
     sh('git', ['add', '-A'], wt.path);
     sh('git', ['commit', '-q', '-m', 'plan'], wt.path);
