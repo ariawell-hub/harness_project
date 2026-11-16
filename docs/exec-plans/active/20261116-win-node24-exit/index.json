@@ -1,0 +1,4 @@
+{
+  "plan": "20261116-win-node24-exit",
+  "steps": [{ "step": 0, "name": "exit-code", "status": "pending" }]
+}
