@@ -241,6 +241,8 @@ export interface GitHubPort {
    * URL이 이 리포의 실행 URL 형식이 아니거나 읽지 못하면 null이다(예외를 던지지 않는다)
    */
   runLog(runUrl: string): string | null;
+  /** Actions 실행의 실패한 job만 다시 실행한다(revert 워크플로의 첫 실패, 10.3절) */
+  rerunFailed(runId: number): void;
 }
 
 /**
@@ -429,6 +431,11 @@ export class GhCli implements GitHubPort {
     return JSON.parse(
       gh(['api', `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}`], this.cwd),
     );
+  }
+  rerunFailed(runId: number): void {
+    if (!Number.isInteger(runId) || runId <= 0)
+      throw new GitHubError(`실행 번호 형식 오류: ${runId}`);
+    gh(['run', 'rerun', String(runId), '--failed'], this.cwd);
   }
   me(): string {
     this.login ??= gh(['api', 'user', '--jq', '.login'], this.cwd).trim();

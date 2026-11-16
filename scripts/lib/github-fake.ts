@@ -87,6 +87,8 @@ export interface FakeState {
   runLogs?: Record<string, string>;
   /** 실행 URL → runLog가 불린 횟수(테스트가 "한 번만 읽는다"를 확인한다) */
   runLogReads?: Record<string, number>;
+  /** rerunFailed가 받은 실행 번호(호출 순서대로) */
+  reruns?: number[];
   /**
    * 병합에 필요한 체크와 출처(선택). 있으면 `ciCommand` 대신 "PR head에 그 출처의 가장 최근 결과가 모두 success인가"로
    * 병합을 정하고(브랜치 보호의 출처 지정 흉내), 초안 PR은 병합하지 않는다
@@ -157,6 +159,7 @@ const MUTATORS = [
   'enableAutoMerge',
   'tryMerge',
   'runLog',
+  'rerunFailed',
 ] as const;
 
 /** 이 프로세스가 상태 파일 잠금을 잡고 있는 깊이(잠금 안에서 다른 메서드를 부른다: enableAutoMerge → tryMerge) */
@@ -224,6 +227,11 @@ export class FakeGitHub implements GitHubPort {
     s.runLogReads[runUrl] = (s.runLogReads[runUrl] ?? 0) + 1;
     this.save(s);
     return s.runLogs?.[runUrl] ?? null;
+  }
+  rerunFailed(runId: number): void {
+    const s = this.load();
+    (s.reruns ??= []).push(runId);
+    this.save(s);
   }
   private load(): FakeState {
     return JSON.parse(readFileSync(this.file, 'utf8')) as FakeState;
