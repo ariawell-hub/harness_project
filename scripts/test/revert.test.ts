@@ -398,7 +398,7 @@ test('actRevert: 충돌하면 브랜치를 올리지 않고 needs-human으로 �
   }
 });
 
-test('actRevert: rerun은 실패한 job 재실행만, escalate는 Issue(없으면 원래 PR)에 알린다. 대상이 main에 없으면 거부한다', () => {
+test('actRevert: rerun은 실패한 job 재실행만, escalate는 Issue(없으면 원래 PR, 둘 다 없으면 새 Issue)에 알린다. 대상이 main에 없으면 거부한다', () => {
   const t = setup();
   try {
     assert.match(act(t, { action: 'rerun', runId: 77 }).done, /다시 실행/);
@@ -410,11 +410,21 @@ test('actRevert: rerun은 실패한 job 재실행만, escalate는 Issue(없으�
     const onPr = t.state().issues.find((i) => i.number === t.pr);
     assert.equal(onPr?.comments.length, 1, 'Issue가 없으면 원래 PR에 단다');
     assert.doesNotMatch(onPr!.comments[0].body, /@x/);
-    assert.throws(
-      () => act(t, { action: 'escalate', reason: 'x', issue: null, pr: null, target: t.target }),
-      RevertError,
-      '알릴 곳이 없으면 실행을 실패로 끝낸다',
+    // 원래 PR을 찾지 못해 알릴 Issue도 PR도 없다: 봇이 새 Issue를 만들어 needs-human으로 넘긴다(같은 대상은 한 번만)
+    const lost = { action: 'escalate', reason: 'PR을 찾지 못했다', issue: null, pr: null } as const;
+    const before = t.state().issues.length;
+    assert.match(act(t, { ...lost, target: t.target }).done, /새 Issue #\d+에 알렸다/);
+    const made = t.state().issues.at(-1)!;
+    assert.equal(t.state().issues.length, before + 1);
+    assert.deepEqual(
+      [made.state, made.author, made.labels],
+      ['open', 'harness-bot', ['needs-human']],
     );
+    assert.match(made.title, new RegExp(`^main check 실패: ${t.target.slice(0, 12)}`));
+    assert.match(made.body, /^@maker /);
+    assert.ok(made.body.includes(t.target) && made.body.includes('PR을 찾지 못했다'));
+    assert.match(act(t, { ...lost, target: t.target }).done, /이미 알렸다/);
+    assert.equal(t.state().issues.length, before + 1, '같은 대상의 Issue를 다시 만들지 않는다');
     assert.throws(() => act(t, revertOf(t, { target: SHA })), /first-parent 이력에 없다/);
     assert.equal(remoteHeads(t).filter((h) => h.includes('revert/')).length, 0);
   } finally {
@@ -533,6 +543,10 @@ test('revert-act CLI: 받은 자료와 실행 URL을 다시 검사한다', () =>
     const url = cli({ action: 'rerun', runId: 77 }, 'https://example.com/o/r/actions/runs/77');
     assert.equal(url.code, 1);
     assert.match(url.stderr, /실행 URL이 아니다/);
+    // 다시 실행할 실행은 실패한 그 실행이어야 한다
+    const other = cli({ action: 'rerun', runId: 78 });
+    assert.equal(other.code, 1);
+    assert.match(other.stderr, /실행 번호가 --run-url의 실행과 다르다/);
     assert.equal(t.state().reruns, undefined);
     const ok = cli({ action: 'rerun', runId: 77 });
     assert.equal(ok.code, 0, ok.stderr);

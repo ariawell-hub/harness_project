@@ -243,6 +243,8 @@ export interface GitHubPort {
   runLog(runUrl: string): string | null;
   /** Actions 실행의 실패한 job만 다시 실행한다(revert 워크플로의 첫 실패, 10.3절) */
   rerunFailed(runId: number): void;
+  /** 지금 계정으로 열린 Issue를 만들고 번호를 돌려준다(revert 워크플로가 알릴 Issue·PR이 없을 때, 10.3절) */
+  createIssue(p: { title: string; body: string }): number;
 }
 
 /**
@@ -436,6 +438,14 @@ export class GhCli implements GitHubPort {
     if (!Number.isInteger(runId) || runId <= 0)
       throw new GitHubError(`실행 번호 형식 오류: ${runId}`);
     gh(['run', 'rerun', String(runId), '--failed'], this.cwd);
+  }
+  createIssue(p: { title: string; body: string }): number {
+    const url = gh(['issue', 'create', '--title', p.title, '--body', p.body], this.cwd).trim();
+    // gh는 만든 Issue의 URL을 출력한다
+    const n = Number(/\/issues\/(\d+)$/.exec(url)?.[1]);
+    if (!Number.isInteger(n) || n <= 0)
+      throw new GitHubError(`만든 Issue의 번호를 읽지 못했다: ${url}`);
+    return n;
   }
   me(): string {
     this.login ??= gh(['api', 'user', '--jq', '.login'], this.cwd).trim();

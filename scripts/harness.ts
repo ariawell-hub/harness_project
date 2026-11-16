@@ -882,10 +882,13 @@ async function main(argv: string[]): Promise<number> {
       const info = repoInfo(cwd);
       const gh = getGitHub(info.root);
       try {
-        // plan job의 출력도 다시 검사한다: 형식, 실행 URL이 이 리포의 것인가(대상이 main 이력에 있는지는 actRevert가 본다)
+        // plan job의 출력도 다시 검사한다: 형식, 실행 URL이 이 리포의 것인가, 다시 실행할 실행이 그 실패한 실행인가
+        // (대상이 main 이력에 있는지는 actRevert가 본다)
         const a = parseRevertAction(JSON.parse(Buffer.from(data, 'base64').toString('utf8')));
-        if (!runIdOf(runUrl, gh.repoSlug()))
-          throw new RevertError('--run-url이 이 리포의 Actions 실행 URL이 아니다');
+        const failedRun = runIdOf(runUrl, gh.repoSlug());
+        if (!failedRun) throw new RevertError('--run-url이 이 리포의 Actions 실행 URL이 아니다');
+        if (a.action === 'rerun' && String(a.runId) !== failedRun)
+          throw new RevertError('다시 실행할 실행 번호가 --run-url의 실행과 다르다');
         const r = actRevert({ root: info.root, gh, cfg: loadConfig(info.root), runUrl }, a);
         log(`revert-act: ${r.done}`);
         return 0;

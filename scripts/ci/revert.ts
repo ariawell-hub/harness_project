@@ -306,30 +306,40 @@ function escalate(
   o: ActOptions,
   e: { reason: string; issue: number | null; pr: number | null; target: string },
 ): { done: string } {
-  const n = e.issue ?? e.pr;
-  // 알릴 곳이 없으면 실행을 실패로 끝내 Actions 알림으로 드러낸다
-  if (n === null)
-    throw new RevertError(`자동으로 되돌리지 않았고 알릴 Issue·PR이 없다: ${e.reason}`);
   const mark = ESCALATE_MARK(e.target);
-  const last = o.gh.comments(n).at(-1);
-  if (last && last.author.toLowerCase() === o.gh.me().toLowerCase() && last.body.includes(mark))
-    return { done: `에스컬레이션: #${n}에 이미 알렸다` };
+  const me = o.gh.me().toLowerCase();
   const owner = o.cfg.github.owner;
-  o.gh.comment(
-    n,
-    [
-      `${owner ? `@${owner} ` : ''}main의 \`check\`가 다시 실행한 뒤에도 실패했다. 자동으로 되돌리지 않았다(설계서 10.3절).`,
-      '',
-      `- 실패한 커밋: \`${e.target}\``,
-      `- 되돌리지 않은 이유: ${cell(e.reason)}`,
-      `- 실패한 실행: ${o.runUrl}`,
-      '',
-      '원인을 확인하고 되돌릴지, 고쳐서 올릴지 정해야 한다.',
-      mark,
-    ].join('\n'),
-  );
-  o.gh.addLabel(n, o.cfg.github.needsHumanLabel);
-  return { done: `에스컬레이션: #${n}에 알렸다 — ${e.reason}` };
+  const body = [
+    `${owner ? `@${owner} ` : ''}main의 \`check\`가 다시 실행한 뒤에도 실패했다. 자동으로 되돌리지 않았다(설계서 10.3절).`,
+    '',
+    `- 실패한 커밋: \`${e.target}\``,
+    `- 되돌리지 않은 이유: ${cell(e.reason)}`,
+    `- 실패한 실행: ${o.runUrl}`,
+    '',
+    '원인을 확인하고 되돌릴지, 고쳐서 올릴지 정해야 한다.',
+    mark,
+  ].join('\n');
+  const where = e.issue ?? e.pr;
+  if (where === null) {
+    // 알릴 Issue도 PR도 없다(대상을 병합한 PR을 찾지 못했다): 봇이 새 Issue를 만들어 알린다.
+    // 같은 대상으로 만든 Issue가 열려 있으면 다시 만들지 않는다
+    const open = o.gh
+      .listOpenIssues()
+      .find((i) => i.author.toLowerCase() === me && i.body.includes(mark));
+    if (open) return { done: `에스컬레이션: #${open.number}에 이미 알렸다` };
+    const n = o.gh.createIssue({
+      title: `main check 실패: ${e.target.slice(0, 12)}을 자동으로 되돌리지 않았다`,
+      body,
+    });
+    o.gh.addLabel(n, o.cfg.github.needsHumanLabel);
+    return { done: `에스컬레이션: 새 Issue #${n}에 알렸다 — ${e.reason}` };
+  }
+  const last = o.gh.comments(where).at(-1);
+  if (last && last.author.toLowerCase() === me && last.body.includes(mark))
+    return { done: `에스컬레이션: #${where}에 이미 알렸다` };
+  o.gh.comment(where, body);
+  o.gh.addLabel(where, o.cfg.github.needsHumanLabel);
+  return { done: `에스컬레이션: #${where}에 알렸다 — ${e.reason}` };
 }
 
 function doRevert(o: ActOptions, a: Extract<RevertAction, { action: 'revert' }>): { done: string } {

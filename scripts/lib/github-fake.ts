@@ -153,6 +153,7 @@ const MUTATORS = [
   'addLabel',
   'removeLabel',
   'reopenIssue',
+  'createIssue',
   'setCheck',
   'createPR',
   'setDraft',
@@ -343,6 +344,22 @@ export class FakeGitHub implements GitHubPort {
     const s = this.load();
     this.issue(s, n).state = 'open';
     this.save(s);
+  }
+  createIssue(p: { title: string; body: string }): number {
+    const s = this.load();
+    const number = s.next++;
+    s.issues.push({
+      number,
+      title: p.title,
+      body: p.body,
+      labels: [],
+      state: 'open',
+      createdAt: stamp(s),
+      author: s.me,
+      comments: [],
+    });
+    this.save(s);
+    return number;
   }
   /** 상태 파일의 PR → 포트의 PR. headSha는 원격 브랜치 끝(브랜치가 없으면 '') */
   private toPR(s: FakeState, { base: _b, ...p }: FakePR): PullRequest {
