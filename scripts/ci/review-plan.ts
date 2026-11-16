@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { harnessGuard } from '../gates/harness-guard.ts';
+import type { RevertCheck } from '../gates/revert-check.ts';
 import { assessRisk, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import { findPlan, parseBranch, parseDoc } from '../lib/plan.ts';
@@ -41,6 +42,8 @@ export function planReview(o: {
   cfg: HarnessConfig;
   base: string;
   branch: string;
+  /** revert-check 결과. 확인된 revert PR은 검증자를 돌리지 않는다(10.3절). 위험도 계산은 그대로 한다 */
+  revert?: RevertCheck;
 }): ReviewPlan {
   const author = planAuthor(o.root, o.branch);
   let risk: Risk = 'high';
@@ -57,5 +60,13 @@ export function planReview(o: {
     const msg = (e instanceof Error ? e.message : String(e)).split('\n')[0].slice(0, 200);
     reasons = [`위험도를 계산하지 못했다: ${msg}`];
   }
+  if (o.revert?.verified)
+    return {
+      risk,
+      reasons: [...reasons, 'revert-check가 확인한 revert PR'],
+      author,
+      claude: false,
+      codex: false,
+    };
   return { risk, reasons, author, ...reviewersFor(risk, author) };
 }

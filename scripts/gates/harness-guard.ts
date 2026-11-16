@@ -160,6 +160,11 @@ export function harnessGuard(o: {
   base: string;
   cfg: HarnessConfig;
   prBody: string | null;
+  /**
+   * 작성자 체크리스트(CHANGELOG 한 줄, PR 본문의 체크 줄)를 보지 않는다. revert-check가 확인한 revert PR에만 쓴다(10.3절).
+   * 신호(위험도 높음)와 워크플로 검사는 그대로 낸다
+   */
+  skipAuthorChecks?: boolean;
 }): HarnessGuardResult {
   const changed = changedFiles(o.root, o.base).map((f) => f.path);
   const prot = changed.filter((f) => matchesAny(f, o.cfg.protectedPaths));
@@ -179,13 +184,14 @@ export function harnessGuard(o: {
   const add = (r: string) => void reasons.push(r);
 
   // ---- 실패: 작성자가 고칠 것 ----
-  if (!changed.includes(CHANGELOG))
+  const author = !o.skipAuthorChecks;
+  if (author && !changed.includes(CHANGELOG))
     failures.push(
       `보호 경로를 바꿨는데 ${CHANGELOG}가 그대로다\n  고치는 법: "다음 버전" 아래에 한 줄을 남겨라\n  근거: ${DOC}`,
     );
   let bodyUnknown = false;
-  if (o.prBody === null) bodyUnknown = true;
-  else if (!/^\s*[-*] \[[xX]\] 보호 경로 변경:/m.test(o.prBody))
+  if (author && o.prBody === null) bodyUnknown = true;
+  else if (author && !/^\s*[-*] \[[xX]\] 보호 경로 변경:/m.test(o.prBody ?? ''))
     failures.push(
       `PR 본문에 체크된 "- [x] 보호 경로 변경: …" 줄이 없다\n  고치는 법: PR 템플릿의 자체 리뷰 항목을 확인하고 체크하라\n  근거: ${DOC}`,
     );

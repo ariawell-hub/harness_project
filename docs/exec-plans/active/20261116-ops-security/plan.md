@@ -86,6 +86,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 - 2026-11-16 step0: 계획 작성. #57 계획(`20261116-ops-transition`)의 step 11개 가운데 보안·권한에 해당하는 6개를 이 계획으로 옮겼다(제작자 결정, 의사결정 로그). 봇이 Issue #102를 등록했다. step0(revert-check)의 구현 초안은 나누기 전에 #57 worktree에서 써 두었고(push하지 않았다), 이 계획의 계획 검증 승인 뒤에 이 브랜치에 올린다.
 - 2026-11-16 step0: 계획 검증 1라운드(PR #103, head `076b8fd`, step 6개)에서 두 검증자가 승인했다(`review/claude` P2 2건). 같은 때 #57 계획(PR #101)의 3라운드에서 `review/codex`가 "실제 GitHub 테스트, 보호 설정·봇 권한 동작 확인, `self-test --live`가 든 계획은 high여야 한다"며 F1을 닫지 않았다. 그 두 step(selftest-live, test-repo)을 이 계획으로 옮겨 step5·step6에 넣고 operation을 step7로 바꿨다(step0~4의 번호와 내용은 그대로다). P2 두 건도 반영했다: step2의 선행 설명(`self-test` 명령은 #57 계획 step1이 만든다), step4 `ops-check` 3번이 보증하는 범위(이 머신의 토큰. `revert` 시크릿 교체는 제작자 확인).
+- 2026-11-16 step0: 계획 검증 2라운드(head `ba644d9`, step 8개)에서 두 검증자가 승인했다(G1). `review/claude`의 P2 4건(원장 F3~F6)은 모두 step6·step7의 내용이라 미뤘고, 그 step을 시작할 때 반영한다: 자기 PR에 자기 결과를 적는 `low-risk-auto-merge` 사례의 순환(F3), 봇 PAT 재발급 시점(F4), `workflow` 권한 회수 뒤 PR 갱신 push 사례(F5), `docs/index.md`(F6).
+- 2026-11-16 step0: 구현. `scripts/gates/revert-check.ts`(`revertTarget`, `revertCheck`)와 `scripts/ci/revert-evidence.ts`(`targetCheckOf`)를 만들고 기계 판정 묶음(`gates`)·검증자 계산(`review-plan`)·`harness-guard`(`skipAuthorChecks`)에 연결했다. `gates`·`judge-*` 워크플로의 해당 job에 `checks: read`를 더했다(대상 커밋의 `check` 결과 조회). 테스트 `scripts/test/revert-check.test.ts`(13개)와 `gates.test.ts` 1개. AC 명령과 이 PC의 전체 `check`가 종료 코드 0이었다(`test` 약 13분). `pull_request_target`으로 도는 변경이라 병합 뒤 다음 PR에서 `revert-check` 상태("해당 없음")가 기록되는지 확인한다.
 
 ## 의사결정 로그
 
