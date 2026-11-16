@@ -667,6 +667,15 @@ const MCP_BLOCK: [string, unknown, string][] = [
   ['mcp__claude-in-chrome__navigate', { url: 'github.com/o/r' }, 'R20'],
   ['mcp__claude-in-chrome__navigate', { url: 'HTTPS://GitHub.COM/login' }, 'R20'],
   ['mcp__claude-in-chrome__navigate', { url: 'https%3A%2F%2Fgithub.com%2Fo%2Fr' }, 'R20'],
+  // 브라우저가 ASCII로 바꿔 여는 표기: 표의 마침표(U+3002), 반각 표의 마침표(U+FF61), 전각 글자와 전각 마침표
+  ['mcp__claude-in-chrome__navigate', { url: 'https://github\u3002com/o/r' }, 'R20'],
+  ['mcp__claude-in-chrome__navigate', { url: 'https://github\uff61com/o/r' }, 'R20'],
+  [
+    'mcp__claude-in-chrome__navigate',
+    { url: 'https://\uff47\uff49\uff54\uff48\uff55\uff42\uff0e\uff43\uff4f\uff4d/o/r' },
+    'R20',
+  ],
+  ['mcp__claude-in-chrome__navigate', { url: 'https%3A%2F%2Fgithub%E3%80%82com%2Fo' }, 'R20'],
   ['mcp__claude-in-chrome__tabs_create_mcp', { url: 'https://gist.github.com/x' }, 'R20'],
   ['mcp__playwright__browser_navigate', { url: 'https://github.com/o/r/pull/7' }, 'R20'],
   // 웹 편집기(github.dev)도 GitHub 로그인 세션으로 커밋한다

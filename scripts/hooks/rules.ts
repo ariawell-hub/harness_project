@@ -1064,10 +1064,12 @@ function mcpStrings(value: unknown): string[] | null {
 
 /** 글에 든 호스트 이름 가운데 금지 호스트. URL 형식이 아니어도(`github.com/o/r`, `https:\/\/…`, %인코딩) 찾는다 */
 function deniedHost(text: string, hosts: string[]): string | null {
-  const forms = [text];
+  // 브라우저는 전각 글자와 전각·표의 마침표(．。｡)를 ASCII로 바꿔 연다. 같은 꼴로 맞춘 뒤 찾는다
+  const fold = (s: string) => s.normalize('NFKC').replace(/[\u3002\uff61]/g, '.');
+  const forms = [fold(text)];
   try {
-    const decoded = decodeURIComponent(text);
-    if (decoded !== text) forms.push(decoded);
+    const decoded = fold(decodeURIComponent(text));
+    if (decoded !== forms[0]) forms.push(decoded);
   } catch {
     // 깨진 % 표기는 원문만 본다
   }

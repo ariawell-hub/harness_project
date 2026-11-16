@@ -1215,7 +1215,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
   - 삭제 계열(R14): 도구 이름(서버 접두어 뒤)을 `_`·`-`와 대소문자·숫자 경계로 나눈 단어에 `denyWords`(`delete`, `trash`, `remove`, `destroy`, `purge`, `erase`, `wipe`, `cancel`)가 있으면 막는다. 단어 단위로 비교하므로 `untrash`(복구)는 통과한다.
   - 외부 발송(R14): `denyTools`(Gmail의 `send_message`·`reply`·`forward`)를 막는다. 초안 작성까지는 통과한다.
   - 위 두 규칙의 예외는 `allowTools`에 적는다. 이름 때문에 막힌 삭제가 아닌 도구를 여기에 더한다.
-  - 브라우저의 GitHub 접근(R20): `browserTools`(Claude in Chrome, Playwright, 데스크톱 앱의 브라우저·컴퓨터 조작)에 맞는 도구는 입력의 모든 문자열(중첩 포함)에서 호스트 이름을 찾아 `denyHosts`(`github.com`·`github.dev`와 그 하위 도메인)면 막는다. `allowTools`로 풀리지 않는다. 브라우저 도구가 아닌 MCP 도구의 입력은 보지 않는다. 문서·메일 본문에 GitHub 링크를 쓰는 것은 정상 작업이다.
+  - 브라우저의 GitHub 접근(R20): `browserTools`(Claude in Chrome, Playwright, 데스크톱 앱의 브라우저·컴퓨터 조작)에 맞는 도구는 입력의 모든 문자열(중첩 포함)에서 호스트 이름을 찾아(%인코딩을 한 번 풀고, 전각 글자와 전각·표의 마침표는 ASCII로 맞춘다) `denyHosts`(`github.com`·`github.dev`와 그 하위 도메인)면 막는다. `allowTools`로 풀리지 않는다. 브라우저 도구가 아닌 MCP 도구의 입력은 보지 않는다. 문서·메일 본문에 GitHub 링크를 쓰는 것은 정상 작업이다.
   - 판단하지 못하면 막는다: 입력이 객체가 아닌 호출, 브라우저 도구의 입력이 상한(깊이 16, 문자열 합계 200만 자)을 넘는 호출, `guard.mcp` 형식이 틀린 설정(MCP 호출만 막는다).
   - runner 세션은 `--strict-mcp-config`로 MCP 서버 없이 뜨므로 대상이 아니다. Codex 세션의 MCP 호출은 실제 세션 검증(TD-8) 전까지 E5로만 지킨다.
   - **남는 위험**: 훅은 도구 이름과 입력만 본다. 브라우저 안에서 링크를 누르거나 이미 열린 탭을 조작해 GitHub에 닿는 경로, 이름이 규칙에 걸리지 않는 MCP 도구의 삭제·발송은 막지 못한다. 그래서 에이전트가 조작하는 브라우저 프로필에는 제작자 GitHub 로그인을 두지 않는다(E5).
