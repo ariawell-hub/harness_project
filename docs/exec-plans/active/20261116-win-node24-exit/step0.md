@@ -14,6 +14,7 @@
 2. `scripts/test/repro.test.ts`의 "테스트 폴더가 리포 밖을 가리키는 심볼릭 링크면 쓰지 않는다": 링크를 `symlinkSync(outside, <경로>, 'junction')`으로 만든다. 단언은 그대로 둔다.
 3. 테스트(`scripts/test/cli.test.ts`에 더한다)
    - `harness.ts`가 성공·사용법 오류·모르는 명령에서 지금과 같은 종료 코드(0, 2, 2)로 끝난다.
+   - 오류 갈래 둘을 자식 프로세스로 확인한다. `TaskError`를 내는 명령(예: 계획 브랜치가 아닌 임시 리포에서 `complete-step`)은 종료 코드 3이고 stderr에 그 메시지가 있다. 그 밖의 예외로 끝나는 명령(예: `harness.config.json`이 없는 임시 리포의 `plan-gate`)은 종료 코드 1이고 stderr가 `오류:`로 시작한다.
    - `harness.ts` 본문에 `main(` 뒤의 처리에서 `process.exit(`가 `setTimeout` 밖에서 불리지 않는다(소스에서 종료 처리 블록을 읽어 확인한다).
 4. 확인: 이 PC(Windows)에서 `node --test scripts/test/record.test.ts`를 3회 실행해 결과를 진행 로그에 적는다. 고치기 전 실패 기록(계획 진행 로그의 3회 실패)이 "먼저 실패한 테스트"다.
 5. 문서: `docs/harness/CHANGELOG.md` 한 줄, 설계서 버전·변경 이력 한 줄, `tech-debt-tracker.md`의 TD-14 비고에 "Windows + Node 24에서 `check` 통과 확인(#99)"을 더한다.
