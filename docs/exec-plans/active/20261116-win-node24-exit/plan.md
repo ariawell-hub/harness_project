@@ -61,6 +61,8 @@ Windows PC(Node v24.12.0, 개발자 모드 꺼짐)의 main에서 `node scripts/h
 - 2026-11-16 step0: 계획 검증 1라운드에서 `review/codex`가 F1(P1, `TaskError` 종료 코드 3을 확인하는 테스트가 없다)을 냈다. step0 작업 3에 오류 갈래 테스트를 더해 2라운드에서 두 검증자가 승인했다(head `6b8a00a`).
 - 2026-11-16 step0: 원인 1·2를 로컬에서 고친 뒤 `check`가 다시 `test` 단계에서 실패했다(803초). `check` 로그는 test 출력의 끝부분만 담아 실패 3개만 보였다. `node --test "scripts/test/*.test.ts"`를 파일로 받아 전체를 확인했다: 443개 중 5개 실패(원인 3의 5개). `record.test.ts`와 `repro.test.ts`는 통과했다. 범위가 늘어 계획을 고치고 계획 검증을 다시 받는다.
 - 2026-11-16 step0: 범위를 넓힌 계획(head `8fbde5d`)에 `review/claude`는 승인, `review/codex`는 F2(P1, 강제 종료 타이머의 `unref`를 확인하는 기준이 없다)를 냈다. step0 작업 3에 동작(`--help`가 5초 안에 끝난다)과 구조(`setTimeout(…).unref()`) 확인을 더하고 AC에 두 줄을 더했다.
+- 2026-11-16 step0: head `8e2ce4e`에서 두 검증자가 계획을 승인했다(G1). `review/claude`의 P2 한 건(AC가 grep하는 상수 이름 `EXIT_GRACE_MS`와 단언 문구가 작업에 적혀 있지 않다)은 차단이 아니다. 구현이 그 이름을 그대로 쓰고, 계획 핵심 섹션을 고치면 승인이 풀리므로 계획은 그대로 둔다.
+- 2026-11-16 step0: 구현. 먼저 실패한 테스트는 고치기 전의 `record.test.ts` 4개(3회 반복)와 원인 2·3의 6개다. 고친 뒤 이 PC(Windows 11, Node v24.12.0)에서 `node --test scripts/test/record.test.ts` 3회 모두 7개 통과, `node scripts/harness.ts check` 종료 코드 0(test 813초).
 
 ## 의사결정 로그
 
@@ -86,6 +88,7 @@ Windows PC(Node v24.12.0, 개발자 모드 꺼짐)의 main에서 `node scripts/h
 
 - step0의 AC 명령과 이 Windows PC의 `node scripts/harness.ts check`, PR의 Linux CI `check`.
 - 이 계획의 계획만 담은 커밋은 로컬 `check`가 통과하지 않은 채 올린다(고치려는 실패 때문이다). CI `check`(Linux)가 그 커밋을 검사한다.
+- 결과(2026-11-16): step0의 AC 명령 통과. 이 Windows PC의 `check` 종료 코드 0(전체 테스트 실패 0개). Linux CI의 `check`는 PR에서 확인한다.
 
 ## 다음 할 일
 

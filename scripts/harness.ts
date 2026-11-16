@@ -997,11 +997,21 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
-  (e: unknown) => {
-    if (e instanceof TaskError) process.stderr.write(`${e.message}\n`);
-    else process.stderr.write(`오류: ${(e as Error).stack ?? String(e)}\n`);
-    process.exit(e instanceof TaskError ? 3 : 1);
-  },
-);
+/** 명령이 핸들을 남겨 자연 종료하지 못할 때 강제로 끝내기까지 기다리는 시간 */
+const EXIT_GRACE_MS = 10_000;
+
+/**
+ * 종료 코드만 정하고 이벤트 루프가 비어 끝나게 한다. fetch를 쓴 뒤 바로 강제 종료하면
+ * Windows의 Node 24가 libuv 단언(src\win\async.c)으로 죽는다(Issue #99).
+ * 타이머는 unref라 프로세스를 붙잡지 않고, 남은 핸들이 있을 때만 강제로 끝낸다.
+ */
+function finish(code: number): void {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), EXIT_GRACE_MS).unref();
+}
+
+main(process.argv.slice(2)).then(finish, (e: unknown) => {
+  if (e instanceof TaskError) process.stderr.write(`${e.message}\n`);
+  else process.stderr.write(`오류: ${(e as Error).stack ?? String(e)}\n`);
+  finish(e instanceof TaskError ? 3 : 1);
+});
