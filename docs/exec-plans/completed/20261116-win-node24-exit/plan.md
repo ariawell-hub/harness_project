@@ -2,7 +2,7 @@
 id: 20261116-win-node24-exit
 issue: 99 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -77,8 +77,8 @@ Windows PC(Node v24.12.0, 개발자 모드 꺼짐)의 main에서 `node scripts/h
 
 ## 발견 사항
 
-- `check`의 로그는 실패한 단계 출력의 끝부분만 담는다. test 단계에서 실패가 여러 파일에 흩어져 있으면 앞쪽 실패가 보이지 않는다(이번에 5개 중 3개만 보였다). 전체 목록은 `node --test "scripts/test/*.test.ts" > <파일>`로 따로 받아야 했다. → 이 계획에서는 고치지 않는다. `tech-debt-tracker.md`의 TD-14 비고에 적는다(step0 작업 5).
-- 훅의 `gitWorkDir`는 `git -C <경로>`를 `path.resolve`로 푼다. Git Bash의 `/c/Users/…` 꼴 경로는 Windows에서 `C:\c\Users\…`가 되어 worktree를 찾지 못하고, "승인 요청 뒤 push" 규칙이 그 명령을 막지 못한다(막지 않는 쪽으로 실패한다). `C:/…` 꼴은 맞게 풀린다. → 이 계획에서는 고치지 않는다(제품 코드 변경, TD-14의 Windows 실기 검증 항목). TD-14 비고에 적는다(step0 작업 5).
+- `check`의 로그는 실패한 단계 출력의 끝부분만 담는다. test 단계에서 실패가 여러 파일에 흩어져 있으면 앞쪽 실패가 보이지 않는다(이번에 5개 중 3개만 보였다). 전체 목록은 `node --test "scripts/test/*.test.ts" > <파일>`로 따로 받아야 했다. 이 계획에서는 고치지 않고 TD-14 비고에 적었다. → 처리: TD-14
+- 훅의 `gitWorkDir`는 `git -C <경로>`를 `path.resolve`로 푼다. Git Bash의 `/c/Users/…` 꼴 경로는 Windows에서 `C:\c\Users\…`가 되어 worktree를 찾지 못하고, "승인 요청 뒤 push" 규칙이 그 명령을 막지 못한다(막지 않는 쪽으로 실패한다). `C:/…` 꼴은 맞게 풀린다. 제품 코드 변경이라 이 계획에서는 고치지 않고 TD-14 비고에 적었다. → 처리: TD-14
 
 ## 열린 질문
 
