@@ -553,7 +553,11 @@ test('revert.yml: 비밀은 act job에만 있고, 쓰기 권한·캐시가 없�
   assert.match(text, /^permissions: \{\}$/m);
   assert.doesNotMatch(text, /:\s*write(-all)?\s*$/m);
   assert.doesNotMatch(text, /actions\/cache|^\s*cache:/m);
-  assert.match(text, /cancel-in-progress: false/);
+  // 동시 실행 그룹은 커밋 단위다: 워크플로 전체 하나면 PR의 check 완료로 생긴 실행이 대기 중인 main 실패 처리를 밀어낸다
+  assert.match(
+    text,
+    /^concurrency:\n {2}group: revert-\$\{\{ github\.event\.workflow_run\.head_sha \}\}\n {2}cancel-in-progress: false$/m,
+  );
   // 액션은 gates.yml과 같은 커밋 SHA로 고정한다
   const pins = (s: string) => [...s.matchAll(/uses: (\S+@[0-9a-f]{40})/g)].map((m) => m[1]);
   const gates = pins(readFileSync(path.join(HARNESS_ROOT, '.github/workflows/gates.yml'), 'utf8'));

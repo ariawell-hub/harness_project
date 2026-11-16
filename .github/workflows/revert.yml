@@ -13,8 +13,11 @@ on:
 
 permissions: {}
 
+# 같은 커밋의 실행(첫 실패, 재실행 뒤 실패)은 차례로 돈다. 그룹을 워크플로 전체 하나로 두면 안 된다:
+# 이 워크플로는 PR의 check가 끝날 때도 실행이 생기고(job은 건너뛴다), 같은 그룹의 대기 실행은 하나뿐이라
+# 뒤에 온 실행이 대기 중인 main 실패 처리를 취소시킨다.
 concurrency:
-  group: revert
+  group: revert-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 jobs:
