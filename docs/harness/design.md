@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.43 · 상태: 초안 · 최종 갱신: 2026-11-16
+> 버전 v0.7.44 · 상태: 초안 · 최종 갱신: 2026-11-16
 
 ---
 
@@ -75,7 +75,8 @@ review_cycle: quarterly
   - v0.7.40 (2026-11-16): runner가 발산을 감지해 되돌린다. 대응을 올린 head의 판정이 끝나면 그 라운드를 한 번 평가하고(새 차단 지적이 해소보다 많음, 대응 head의 `check` 실패, 대응 전 열린 지적과 같은 위치의 새 차단 지적), 수렴하지 않았으면 마지막 대응의 수정 커밋을 `git revert`로 되돌려 일반 push한 뒤 `review-round` 실패로 센다. 수정 세션 뒤 로컬 AC·`check`가 실패하면 그 세션의 변경을 되돌린다(4.5절, 9.2절, 10.2절 (7), Issue #56 step5)
   - v0.7.41 (2026-11-16): runner의 2단계 연결을 마친다. `run`을 `--worker` 없이 실행하면 설정의 작업자 수만큼 작업자 프로세스를 띄운다(이 리포 2개). main 병합 충돌은 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 한도에 닿으면 사람에게 넘긴다. 실행 시간 상한·사용량 한도·연속 오류로 멈출 때 맡은 계획의 Issue에 알린다. 원격 fetch 실패는 환경 장애로 기다린다(4.5절, 10.3절, 19절, ADR-0006, Issue #56 step6, TD-9 해결)
   - v0.7.42 (2026-11-16): 하네스 CLI는 종료 코드를 정한 뒤 자연 종료한다. Windows의 Node 24는 `fetch`를 쓴 뒤 바로 강제 종료하면 libuv 단언으로 죽는다. 명령이 핸들을 남겼을 때만 10초 뒤 강제로 끝낸다. 종료 코드의 뜻은 그대로다(13.1절 ADR-0005 Windows 네이티브, Issue #99)
-  - v0.7.43 (2026-11-16): `revert-check`를 더한다. `revert/<SHA>` PR이 main의 그 커밋을 파일 단위(경로·모드·blob)로 정확히 되돌리고 그 커밋의 main `check`가 실패했을 때만 계획 요구와 `review/*` 판정을 대신한다. 위험도와 `harness-guard` 신호, `deps-guard`는 그대로 판정한다(10.3절, 10.4절, Issue #102 step0)
+  - v0.7.43 (2026-11-16): revert된 계획을 복원해 이어 간다. revert 워크플로가 Issue에 다는 표식 댓글을 근거로 `new-task --issue`가 새 골격 대신 되돌려진 커밋의 계획을 같은 id로 `active/`에 복원하고(계획 해시는 그대로), 닫혔다 다시 열린 Issue의 남은 step은 `new-task --plan`이 다시 선점한다. "다음 할 일"은 내 선점이 남은 revert된 Issue를 고르고, 같은 브랜치 이름의 병합된 옛 PR을 새 작업의 PR로 보지 않는다(4.5절, 8.3절 "되돌리기", Issue #57 step0)
+  - v0.7.44 (2026-11-16): `revert-check`를 더한다. `revert/<SHA>` PR이 main의 그 커밋을 파일 단위(경로·모드·blob)로 정확히 되돌리고 그 커밋의 main `check`가 실패했을 때만 계획 요구와 `review/*` 판정을 대신한다. 위험도와 `harness-guard` 신호, `deps-guard`는 그대로 판정한다(10.3절, 10.4절, Issue #102 step0)
 
 ### 0.1 전제 조건
 
@@ -292,7 +293,7 @@ review_cycle: quarterly
 2. 내 PR 중 조치가 필요한 것: 충돌, `check`·기계 판정 실패, 원장의 P0·P1 지적, 필수 체크가 모두 통과한 뒤의 뒤처짐(`origin/main` 병합으로 갱신, ADR-0006), 제작자 승인 요청. 판단은 필수 체크를 출처로 거른 분류로 한다(아래 "내 PR 다루기")
 3. 내가 맡은 계획의 진행 중인 step(실패 후 재시도 포함)
 4. 앞 step이 병합된 계획의 다음 step(`index.json` 순서)
-5. 선점되지 않은 Issue 중 제작자(`github.owner`)·외주 개발자(`github.collaborators`) 계정이 만든 것(우선순위 라벨 순). `github.botIssues`가 `owner-approved`면 제작자 승인 댓글(`/harness accept`)이 있는 봇 Issue도 고른다. 그 밖의 봇 계정 Issue는 고르지 않는다(14.6절). 작성자 때문에 뺀 Issue는 번호와 이유를 `start`·`next` 출력에 보인다
+5. 선점되지 않은 Issue 중 제작자(`github.owner`)·외주 개발자(`github.collaborators`) 계정이 만든 것(우선순위 라벨 순). `github.botIssues`가 `owner-approved`면 제작자 승인 댓글(`/harness accept`)이 있는 봇 Issue도 고른다. 그 밖의 봇 계정 Issue는 고르지 않는다(14.6절). 작성자 때문에 뺀 Issue는 번호와 이유를 `start`·`next` 출력에 보인다. 내 선점이 남아 있는 Issue도 revert로 계획이 main에서 빠졌으면 고른다(8.3절 "되돌리기")
 6. 할 일이 없으면 tech-debt·정기 정리 항목
 - CI 검증이나 제작자 승인을 기다리는 일은 건너뛴다. 다음 step은 앞 step의 PR이 병합된 뒤에 시작한다. 앞 step의 코드를 읽고 이어 가야 하기 때문이다.
 - 작업자당 열어 둔 PR이 상한(WIP, Q19)에 닿으면 새 Issue를 선점하지 않는다. "main 최신 필수" 때문에 열린 PR이 많을수록 PR 갱신(main 병합)이 늘어나기 때문이다.
@@ -617,6 +618,10 @@ pnpm test src/auth/login-guard.spec.ts
   - **계획 전용 커밋**: 이 PR이 맡은 step을 `index.json`에서 `completed`로 바꾼다. 마지막 step이면 계획 상태도 `completed`로 바꾸고 `completed/`로 옮긴다. 이 커밋은 LLM 재검증 없이 `plan-gate`만 다시 돈다(10.3절 결속 기준). 계획의 목표·수용 기준·범위·관련 파일이나 step 파일의 작업·AC·금지사항을 바꾸면 계획 전용 커밋으로 보지 않는다.
   - **의미**: 계획 파일은 병합으로만 main에 들어간다. 그래서 브랜치의 `completed`는 "이 PR이 병합되면 완료"를 뜻하고, main의 `completed/`에는 실제로 병합된 계획만 있다.
   - **되돌리기**: 완료 커밋 뒤에 코드를 다시 고쳐야 하면(제작자의 수정 요청, main 병합 갱신 후 재검증 실패 등) 그 step을 `in_progress`로 되돌리고(마지막 step이었으면 계획도 `active`로 되돌려 `active/`로 옮긴다) 진행 로그에 이유를 남긴다. 다시 승인되면 완료 커밋을 새로 넣는다. 병합 후 revert되면 계획 파일도 main에서 함께 빠지므로, revert 워크플로가 Issue를 다시 열고 다음 작업이 이전 계획을 `active`로 복원해 이어 간다(10.3절).
+    - 복원의 근거는 revert 워크플로가 Issue에 다는 표식 댓글 `<!-- harness-revert target=<40자 SHA> plan=<계획 id> -->`이다(`scripts/lib/revert-marker.ts`). 댓글은 외부 입력이라(14.6절) 봇 계정이 쓰고 봇만 고친 댓글의 형식이 맞는 표식만 읽는다.
+    - 계획이 main에서 빠진 경우(첫 step의 PR이나 소규모 계획의 PR이 되돌려짐): `new-task --issue <N>`이 새 골격 대신 표식이 가리키는 커밋의 계획을 같은 id로 `active/`에 복원한다(`restorePlan`). 조건은 그 커밋이 main의 조상이고, 그 커밋의 계획에 적힌 Issue가 같고, 지금 main에는 그 계획이 없는 것이다. 그 커밋에서 완료된 step을 `pending`으로 되돌리고 계획을 `active`로 두며 진행 로그에 한 줄을 남긴다. 핵심 섹션과 step 파일은 바꾸지 않으므로 계획 해시가 같고 받은 계획 승인이 유지된다(10.3절). 브랜치 이름은 되돌려진 PR과 같다. 선점이 남아 있으면(닫힌 적 없는 Issue) 같은 작업자만 이어 갈 수 있다.
+    - 계획이 main에 남은 경우(둘째 step부터의 PR이 되돌려짐): main의 계획이 `active/`에 있고 그 step이 끝나지 않은 상태이므로 `new-task --plan <id> --step <N>`으로 이어 간다. 마지막 step이어서 Issue가 닫히며 선점이 풀렸으면 이때 다시 선점한다.
+    - "다음 할 일"은 같은 브랜치 이름의 병합된 옛 PR을 새 작업의 PR로 보지 않는다. 병합된 PR인데 그 step이 worktree에서도 main에서도 끝나 있지 않으면 그 병합은 되돌려진 것이다.
   - **step 진행**: `plan-gate`는 그 PR이 맡은 step의 상태를 확인한다. 앞 step이 병합되기 전에는 다음 step을 시작하지 않는다(4.5절).
   - **발견 사항 처리**: 계획 전용 커밋 전에 "발견 사항"마다 처리를 적는다. 반영한 문서 링크, Issue·tech-debt 번호, "해당 없음" 중 하나다. `plan-gate`가 형식을 확인한다. 작업에서 알게 된 것이 `completed/`에 묻히지 않고 다음 에이전트가 읽는 문서로 옮겨지게 하기 위해서다(B1, S7).
   - `abandoned` 계획도 `completed/`로 옮긴다.

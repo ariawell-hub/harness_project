@@ -2165,8 +2165,15 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
             outcome = await doStep(ctx, t.local);
             break;
           case 'next-step': {
-            const r = await newTask(main.mainRoot, { plan: t.id, step: t.step, github: false });
-            event(ctx, 'next-step', { plan: t.id, step: t.step, worktree: r.worktree });
+            // 선점이 풀려 있으면(마지막 step의 PR이 revert돼 Issue가 다시 열림) new-task가 다시 선점한다(8.3절)
+            try {
+              const r = await newTask(main.mainRoot, { plan: t.id, step: t.step, owner: o.worker });
+              event(ctx, 'next-step', { plan: t.id, step: t.step, worktree: r.worktree });
+            } catch (e) {
+              if (e instanceof ClaimError)
+                event(ctx, 'claim-lost', { issue: t.issue, reason: e.message });
+              else throw e;
+            }
             break;
           }
           case 'new-issue': {
