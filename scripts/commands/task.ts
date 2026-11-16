@@ -1,6 +1,7 @@
 // 작업 시작과 계획 완료 처리 (4.1절 ①②, 8.1절, 8.3절).
 //   new-task       : claim/<issue> 선점 → 브랜치 + worktree + 계획 골격 → setup
 //   new-task --plan: 다음 step의 브랜치·worktree
+//   (계획 복원)    : revert로 main에서 빠진 계획을 new-task --issue가 되살린다(restorePlan)
 //   claim-heartbeat: claim 브랜치에 빈 커밋(생존 확인)
 //   (start ②)      : 닫힌 Issue의 claim/<N> 해제(releaseClosedClaims)
 //   complete-step  : 계획 전용 커밋(step completed, 마지막 step이면 completed/로 이동)
@@ -25,6 +26,7 @@ import {
   writeIndex,
   type PlanRef,
 } from '../lib/plan.ts';
+import { findRevertMarker } from '../lib/revert-marker.ts';
 import { log, nowIso, warn } from '../lib/util.ts';
 import { runStandard } from './standard.ts';
 
@@ -97,6 +99,17 @@ export function claimHeartbeat(
   );
   const r = gitTry(['push', '--quiet', remote, `${sha}:refs/heads/claim/${issue}`], main);
   if (!r.ok) throw new TaskError(`claim/${issue} 생존 확인 push 실패: ${r.stderr.trim()}`);
+}
+
+/**
+ * `claim/<issue>`를 선점한 작업자. 선점이 없으면 null, 커밋 메시지에서 읽지 못하면 ''.
+ * 원격 추적 브랜치를 읽는다: 부르기 전에 `fetchRemote`(prune)를 해 둔다
+ */
+export function claimOwner(main: string, cfg: HarnessConfig, issue: number): string | null {
+  const tip = revParse(`${cfg.github.remote}/claim/${issue}`, main);
+  if (!tip) return null;
+  const subject = git(['log', '-1', '--format=%s', tip], main);
+  return /^(?:claim|heartbeat) #\d+ by (.+) at \S+$/.exec(subject)?.[1] ?? '';
 }
 
 const CLAIM_REF_RE = /^refs\/heads\/claim\/([1-9]\d*)$/;
@@ -303,6 +316,23 @@ export async function newTask(cwd: string, o: NewTaskOptions): Promise<NewTaskRe
     const type = o.type ?? (typeof fm.type === 'string' ? fm.type : 'feat');
     const branch = branchName(type, id, step);
     const wt = worktreePath(main, cfg, branch);
+    // 닫혔다 다시 열린 Issue(마지막 step의 PR이 revert됨)는 선점이 풀려 있다: 다시 선점한다(8.3절)
+    const planIssue = Number(fm.issue ?? 0);
+    if (
+      o.claim !== false &&
+      o.github !== false &&
+      planIssue > 0 &&
+      claimOwner(main, cfg, planIssue) === null
+    ) {
+      let open = false;
+      try {
+        open = safeGitHub(main)?.getIssue(planIssue).state === 'open';
+      } catch (e) {
+        warn(`Issue #${planIssue} 상태 조회 실패(선점하지 않고 진행): ${(e as Error).message}`);
+      }
+      if (open)
+        claimIssue(main, cfg, planIssue, o.owner ?? process.env.HARNESS_WORKER ?? 'session');
+    }
     git(['worktree', 'add', '--quiet', '-b', branch, wt, ref], main);
     linkDevEnv(main, cfg, wt);
     if (o.setup !== false) await setupWorktree(wt);
@@ -312,6 +342,45 @@ export async function newTask(cwd: string, o: NewTaskOptions): Promise<NewTaskRe
   // 첫 step: 선점 → 계획 골격
   if (!o.issue || o.issue <= 0)
     throw new TaskError('--issue <번호>가 필요하다(작업은 GitHub Issue로 접수한다, 14.6절)');
+  const gh = o.github === false ? null : safeGitHub(main);
+  const owner = o.owner ?? process.env.HARNESS_WORKER ?? 'session';
+
+  // revert로 main에서 빠진 계획이면 새 골격 대신 그 계획을 복원한다(8.3절 "되돌리기")
+  const restore = gh ? findRestore(main, cfg, gh, o.issue) : null;
+  if (restore) {
+    const { req, plan } = restore;
+    const branch = branchName(plan.type, req.planId, plan.step);
+    const wt = worktreePath(main, cfg, branch);
+    if (existsSync(wt))
+      throw new TaskError(
+        `worktree 경로가 이미 있다: ${wt}\n고치는 법: revert 전의 병합된 worktree면 main 체크아웃에서 start로 정리한 뒤 다시 실행하라`,
+      );
+    if (o.claim !== false) {
+      // revert된 첫 step의 Issue는 닫힌 적이 없어 내 선점이 남아 있을 수 있다: 내 것이면 그대로 쓴다
+      const cur = claimOwner(main, cfg, o.issue);
+      if (cur === null) claimIssue(main, cfg, o.issue, owner);
+      else if (cur !== owner)
+        throw new ClaimError(
+          `Issue #${o.issue}는 이미 선점되어 있다(claim/${o.issue}, 작업자 ${cur || '불명'})`,
+        );
+    }
+    git(['worktree', 'add', '--quiet', '-b', branch, wt, ref], main);
+    const pref = writeRestored(wt, req, plan, owner);
+    if (o.slug || o.size || o.risk)
+      log('복원한 계획의 id·규모·위험도를 쓴다: --slug·--size·--risk는 무시했다');
+    linkDevEnv(main, cfg, wt);
+    if (o.setup !== false) await setupWorktree(wt);
+    try {
+      gh!.comment(
+        o.issue,
+        `담당: \`${owner}\` — revert된 계획 \`${req.planId}\` 복원(대상 ${req.target.slice(0, 12)}), 브랜치 \`${branch}\` (claim/${o.issue})`,
+      );
+    } catch (e) {
+      warn(`Issue 댓글 실패(무시): ${(e as Error).message}`);
+    }
+    return { id: req.planId, branch, worktree: wt, planFile: pref.file, step: plan.step };
+  }
+
   if (!o.slug) throw new TaskError('--slug <짧은-이름>이 필요하다');
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(o.slug) || /-s\d+$/.test(o.slug)) {
     throw new TaskError(`slug(${o.slug})는 kebab-case여야 하고 -s<숫자>로 끝나면 안 된다`);
@@ -321,14 +390,12 @@ export async function newTask(cwd: string, o: NewTaskOptions): Promise<NewTaskRe
   if (findPlanAt(readBase, id)) throw new TaskError(`계획 ${id}가 이미 있다`);
   const size = o.size ?? 'medium';
   const type = o.type ?? 'feat';
-  const owner = o.owner ?? process.env.HARNESS_WORKER ?? 'session';
   const step = size === 'small' ? null : 0;
   const branch = branchName(type, id, step);
   const wt = worktreePath(main, cfg, branch);
   if (existsSync(wt)) throw new TaskError(`worktree 경로가 이미 있다: ${wt}`);
 
   let title = o.title;
-  const gh = o.github === false ? null : safeGitHub(main);
   if (!title && gh) {
     try {
       title = gh.getIssue(o.issue).title;
@@ -428,6 +495,142 @@ export function writeSkeleton(wt: string, f: SkeletonFields): string {
     );
   }
   return rel;
+}
+
+// ---------- revert된 계획의 복원 (8.3절 "되돌리기") ----------
+
+export interface RestoreRequest {
+  /** revert된 커밋(40자 SHA) */
+  target: string;
+  planId: string;
+  issue: number;
+}
+
+export interface RestorablePlan {
+  /** 대상 커밋에서 계획이 있던 자리 */
+  from: PlanRef;
+  type: string;
+  /** 되돌려진 step(그 커밋에서 완료된 step 가운데 첫 번째). 소규모 계획은 null */
+  step: number | null;
+  /** 그 커밋에서 완료된 step 전부 */
+  reverted: number[];
+}
+
+const SHA_RE = /^[0-9a-f]{40}$/;
+
+/**
+ * 복원할 수 있는 계획인가(읽기만 한다). 아래를 모두 만족해야 하고, 하나라도 아니면 null이다.
+ *  - `m.target`이 40자 SHA이고 `base`(원격 기본 브랜치)의 조상이다. 표식은 외부 입력이라 형식부터 본다(14.6절)
+ *  - `m.target` 트리에 계획 `m.planId`가 있고 frontmatter의 `issue`가 `m.issue`다
+ *  - `base`에는 그 계획이 없다(revert로 빠졌다)
+ * 대상 커밋보다 옛 이력에서는 찾지 않는다: 표식이 가리키는 커밋의 계획만이 되돌려진 계획이다
+ */
+export function restorablePlan(
+  cwd: string,
+  base: string,
+  m: RestoreRequest,
+): RestorablePlan | null {
+  if (!SHA_RE.test(m.target) || !PLAN_ID_RE.test(m.planId)) return null;
+  if (!gitTry(['merge-base', '--is-ancestor', m.target, base], cwd).ok) return null;
+  const at = (rev: string) => (f: string) => showFile(cwd, rev, f);
+  const from = findPlanAt(at(m.target), m.planId);
+  if (!from) return null;
+  const fm = parseDoc(showFile(cwd, m.target, from.file)!).frontmatter ?? {};
+  if (Number(fm.issue) !== m.issue) return null;
+  if (findPlanAt(at(base), m.planId)) return null;
+  const type = typeof fm.type === 'string' ? fm.type : 'feat';
+  if (from.kind === 'small') return { from, type, step: null, reverted: [] };
+  // 그 커밋에서 completed가 된 step: 부모 커밋의 계획과 비교한다(계획이 그 커밋에서 처음 들어왔으면 부모에는 없다)
+  const parent = `${m.target}^`;
+  const before = findPlanAt(at(parent), m.planId);
+  const beforeIdx = before?.dir ? showFile(cwd, parent, `${before.dir}/index.json`) : null;
+  const done = new Set(
+    beforeIdx
+      ? parseIndex(beforeIdx)
+          .steps.filter((s) => s.status === 'completed')
+          .map((s) => s.step)
+      : [],
+  );
+  const idxText = showFile(cwd, m.target, `${from.dir}/index.json`);
+  if (!idxText) return null;
+  const reverted = parseIndex(idxText)
+    .steps.filter((s) => s.status === 'completed' && !done.has(s.step))
+    .map((s) => s.step);
+  if (!reverted.length) return null;
+  return { from, type, step: reverted[0], reverted };
+}
+
+/** 대상 커밋의 계획을 `active/`에 쓰고 되돌려진 step을 `pending`으로 둔다. 핵심 섹션과 step 파일은 그대로다 */
+function writeRestored(wt: string, m: RestoreRequest, p: RestorablePlan, owner: string): PlanRef {
+  const src = p.from.kind === 'multi' ? `${p.from.dir}/` : p.from.file;
+  const files = git(['ls-tree', '-r', '--name-only', '-z', m.target, '--', src], wt)
+    .split('\0')
+    .filter(Boolean);
+  const toActive = (f: string) =>
+    f.replace(`${PLANS_DIR}/${p.from.where}/`, `${PLANS_DIR}/active/`);
+  for (const f of files) {
+    const dst = path.join(wt, toActive(f));
+    mkdirSync(path.dirname(dst), { recursive: true });
+    writeFileSync(dst, showFile(wt, m.target, f)!);
+  }
+  const ref: PlanRef = {
+    ...p.from,
+    where: 'active',
+    file: toActive(p.from.file),
+    ...(p.from.dir ? { dir: toActive(p.from.dir) } : {}),
+  };
+  const planFile = path.join(wt, ref.file);
+  let text = readFileSync(planFile, 'utf8');
+  text = setFrontmatter(text, 'status', 'active');
+  text = setFrontmatter(text, 'owner', owner);
+  writeFileSync(planFile, text);
+  if (ref.kind === 'multi') {
+    const idx = readIndex(wt, ref);
+    for (const s of idx.steps) {
+      if (!p.reverted.includes(s.step)) continue;
+      s.status = 'pending';
+      delete s.completed_at;
+      delete s.summary;
+    }
+    writeIndex(wt, ref, idx);
+  }
+  appendProgress(wt, ref, `revert된 계획 복원: 대상 ${m.target.slice(0, 12)}`);
+  return ref;
+}
+
+/**
+ * revert로 main에서 빠진 계획을 worktree `wt`의 `active/`에 복원한다(8.3절). 복원할 수 없으면 null이고 아무것도 쓰지 않는다.
+ * 계획의 "목표와 수용 기준"·"범위 / 비범위"·"관련 파일·문서"와 step 파일의 "작업"·"Acceptance Criteria"·"금지사항"은
+ * 바꾸지 않는다: 계획 해시가 같아 이미 받은 계획 승인이 유지된다(10.3절)
+ */
+export function restorePlan(
+  wt: string,
+  base: string,
+  m: RestoreRequest,
+  owner: string = process.env.HARNESS_WORKER ?? 'session',
+): PlanRef | null {
+  const p = restorablePlan(wt, base, m);
+  return p ? writeRestored(wt, m, p, owner) : null;
+}
+
+/** Issue 댓글의 revert 표식(봇 계정의 것만)이 가리키는 계획이 복원할 수 있는 상태면 그 요청을 돌려준다 */
+export function findRestore(
+  main: string,
+  cfg: HarnessConfig,
+  gh: GitHubPort,
+  issue: number,
+): { req: RestoreRequest; plan: RestorablePlan } | null {
+  let marker: ReturnType<typeof findRevertMarker>;
+  try {
+    marker = findRevertMarker(gh.comments(issue), cfg.github.bot);
+  } catch (e) {
+    warn(`Issue #${issue}의 revert 표식 조회 실패(새 골격으로 진행): ${(e as Error).message}`);
+    return null;
+  }
+  if (!marker) return null;
+  const req = { ...marker, issue };
+  const plan = restorablePlan(main, baseRef(cfg), req);
+  return plan ? { req, plan } : null;
 }
 
 // ---------- 계획 전용 커밋 (8.3절) ----------

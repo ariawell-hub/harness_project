@@ -160,3 +160,16 @@ export function advanceRemote(
   if (o.fetch ?? true) sh('git', ['fetch', '-q', 'origin'], fx.root);
   return sha;
 }
+
+/** revert PR 병합 흉내: bare 원격의 main에서 `sha`를 되돌리고 fixture 리포에서 fetch한다. revert 커밋 SHA */
+export function revertOnMain(fx: Fixture, sha: string): string {
+  const clone = path.join(mkdtempSync(path.join(fx.dir, 'clone-')), 'c');
+  sh('git', ['clone', '-q', fx.remote, clone], fx.dir);
+  sh('git', ['config', 'user.email', 'test@example.invalid'], clone);
+  sh('git', ['config', 'user.name', 'test'], clone);
+  sh('git', ['config', 'commit.gpgsign', 'false'], clone);
+  sh('git', ['revert', '--no-edit', sha], clone);
+  sh('git', ['push', '-q', 'origin', 'main'], clone);
+  sh('git', ['fetch', '-q', '--prune', 'origin'], fx.root);
+  return sh('git', ['rev-parse', 'HEAD'], clone);
+}

@@ -1,0 +1,21 @@
+{
+  "plan": "20261116-ops-transition",
+  "steps": [
+    {
+      "step": 0,
+      "name": "plan-restore",
+      "status": "completed",
+      "completed_at": "2026-11-16T13:54:48+09:00"
+    },
+    {
+      "step": 1,
+      "name": "selftest-core",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "selftest-runner",
+      "status": "pending"
+    }
+  ]
+}
