@@ -12,6 +12,7 @@ import { HARNESS_ROOT, tmp, write } from './helpers.ts';
 const IDS = [
   'f92-switch-stop',
   'flow-full',
+  'mcp-guard',
   'r1-plan-gate',
   'r13-db',
   'r20-owner-commands',
@@ -78,11 +79,36 @@ test('self-test: 이 리포의 하네스는 모든 시나리오를 통과한다'
     '9.2',
     'R1',
     'R13',
+    'R14',
     'R20',
     'R4',
     'S1',
     '전체 흐름',
   ]);
+});
+
+test('self-test: MCP 규칙을 판정하지 않거나 MCP 도구를 훅에 걸지 않는 하네스에서는 mcp-guard 시나리오가 실패한다', () => {
+  const noRule = copyHarness();
+  weaken(
+    noRule,
+    'scripts/hooks/rules.ts',
+    "if (input.kind === 'mcp') return evaluateMcp(input, ctx);",
+    '',
+    1,
+  );
+  const a = selfTestCli(['--harness', noRule, '--only', 'mcp-guard']);
+  assert.equal(a.code, 1);
+  assert.deepEqual(
+    a.report.results.map((x) => [x.id, x.state]),
+    [['mcp-guard', 'fail']],
+  );
+  assert.match(a.report.results[0].detail, /훅 종료 코드가 2가 아니다\(0\)/);
+
+  const noMatcher = copyHarness();
+  weaken(noMatcher, '.claude/settings.json', '|mcp__.*"', '"', 1);
+  const b = selfTestCli(['--harness', noMatcher, '--only', 'mcp-guard']);
+  assert.equal(b.code, 1);
+  assert.match(b.report.results[0].detail, /mcp__ 도구를 훅에 걸지 않는다/);
 });
 
 test('self-test: 훅이 종료 코드 1로 끝나는(경고만 하는) 하네스에서는 R20 시나리오가 실패하고 CLI가 1로 끝난다', () => {

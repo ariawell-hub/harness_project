@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 import { judge, keyFailures, stepTotals, type Attempt } from '../lib/attempts.ts';
+import { ConfigError, DEFAULT_MCP_GUARD, loadConfig, resolveMcpGuard } from '../lib/config.ts';
 import { run } from '../lib/exec.ts';
 import {
   extractCommands,
@@ -13,6 +16,7 @@ import {
   unhandledFindings,
 } from '../lib/plan.ts';
 import { globToRegExp, matchesAny } from '../lib/util.ts';
+import { HARNESS_ROOT, fixtureConfig, tmp } from './helpers.ts';
 
 test('frontmatter 파싱과 수정(주석 보존)', () => {
   const text =
@@ -160,4 +164,71 @@ test('열린 질문 추출: "### 질문:" 블록만 나누고, 주석·"없음"�
   assert.deepEqual(openQuestions('## 열린 질문\n<!-- ### 질문: 주석 -->\n- 없음\n'), []);
   assert.deepEqual(openQuestions('## 열린 질문\n\n- step2 전: environment 4개\n'), []);
   assert.deepEqual(openQuestions('## 목표\n- x\n'), []);
+});
+
+// ---------- guard.mcp 설정 (계획 20261116-ops-security step2) ----------
+
+test('guard.mcp: 키가 없으면 기본값이고, 형식이 틀리면 ConfigError다', () => {
+  assert.deepEqual(resolveMcpGuard(undefined), DEFAULT_MCP_GUARD);
+  assert.notEqual(
+    resolveMcpGuard(undefined),
+    DEFAULT_MCP_GUARD,
+    '기본값 객체를 그대로 돌려주지 않는다',
+  );
+  assert.deepEqual(resolveMcpGuard({}), DEFAULT_MCP_GUARD);
+  assert.deepEqual(resolveMcpGuard({ denyWords: [], allowTools: ['mcp__x__*'] }), {
+    ...DEFAULT_MCP_GUARD,
+    denyWords: [],
+    allowTools: ['mcp__x__*'],
+  });
+  for (const w of ['delete', 'trash', 'remove', 'destroy', 'purge', 'erase', 'wipe', 'cancel'])
+    assert.ok(DEFAULT_MCP_GUARD.denyWords.includes(w), w);
+  assert.deepEqual(DEFAULT_MCP_GUARD.allowTools, []);
+  for (const h of ['github.com', '*.github.com', 'github.dev', '*.github.dev'])
+    assert.ok(DEFAULT_MCP_GUARD.denyHosts.includes(h), h);
+  const BAD: [unknown, RegExp][] = [
+    [[], /guard\.mcp는 객체/],
+    ['off', /guard\.mcp는 객체/],
+    [null, /guard\.mcp는 객체/],
+    [{ denyWords: 'delete' }, /guard\.mcp\.denyWords는 문자열 배열/],
+    [{ denyHosts: [1] }, /guard\.mcp\.denyHosts는 문자열 배열/],
+    [{ allowTools: [''] }, /guard\.mcp\.allowTools는 문자열 배열/],
+    [{ denyWord: [] }, /guard\.mcp\.denyWord는 모르는 키/],
+  ];
+  for (const [raw, message] of BAD)
+    assert.throws(
+      () => resolveMcpGuard(raw),
+      (e: unknown) => e instanceof ConfigError && message.test(e.message),
+      JSON.stringify(raw),
+    );
+});
+
+test('loadConfig: guard.mcp가 없는 옛 설정은 기본값으로 읽고, 틀리면 ConfigError다', () => {
+  const dir = tmp('harness-lib-cfg-');
+  const put = (guard: unknown) =>
+    writeFileSync(path.join(dir, 'harness.config.json'), JSON.stringify(fixtureConfig({ guard })));
+  put({ dbPatterns: [], dbClients: [] });
+  assert.deepEqual(loadConfig(dir).guard.mcp, DEFAULT_MCP_GUARD);
+  put({ dbPatterns: [], dbClients: [], mcp: { denyTools: [] } });
+  assert.deepEqual(loadConfig(dir).guard.mcp, { ...DEFAULT_MCP_GUARD, denyTools: [] });
+  put({ dbPatterns: [], dbClients: [], mcp: { browserTools: 'mcp__playwright__*' } });
+  assert.throws(
+    () => loadConfig(dir),
+    (e: unknown) =>
+      e instanceof ConfigError &&
+      /harness\.config\.json 검증 실패/.test(e.message) &&
+      /guard\.mcp\.browserTools는 문자열 배열/.test(e.message),
+  );
+});
+
+test('이 리포의 설정과 프로파일: guard.mcp가 기본값으로 적혀 있다', () => {
+  const read = (rel: string) => JSON.parse(readFileSync(path.join(HARNESS_ROOT, rel), 'utf8'));
+  assert.deepEqual(read('harness.config.json').guard.mcp, DEFAULT_MCP_GUARD);
+  assert.deepEqual(loadConfig(HARNESS_ROOT).guard.mcp, DEFAULT_MCP_GUARD);
+  for (const profile of ['core', 'web'])
+    assert.deepEqual(
+      read(`profiles/${profile}/profile.json`).config.guard.mcp,
+      DEFAULT_MCP_GUARD,
+      profile,
+    );
 });

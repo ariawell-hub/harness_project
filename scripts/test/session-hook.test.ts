@@ -192,10 +192,10 @@ test('.claude/settings.json: 세션 훅을 더했고 PreToolUse·permissions는 
     assert.equal(h.type, 'command');
     assert.ok(h.timeout > 0 && h.timeout <= 180);
   }
-  // 불변식: 금지 훅과 권한은 이 step 전과 같다
+  // 불변식: 금지 훅과 권한은 이 step 전과 같다(MCP 도구 matcher는 계획 20261116-ops-security step2가 더했다)
   assert.deepEqual(s.hooks.PreToolUse, [
     {
-      matcher: 'Bash|PowerShell|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob',
+      matcher: 'Bash|PowerShell|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|mcp__.*',
       hooks: [
         {
           type: 'command',

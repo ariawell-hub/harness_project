@@ -74,6 +74,8 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 2026-11-16 step2: 만들면서 어긋난 것은 모두 시나리오·샘플 쪽 원인이었고 대기 시간을 늘려 가린 것은 없다. (1) 샘플 리포에서 `check`의 doc-lint가 실패해(복사한 `AGENTS.md`가 가리키는 문서가 샘플에 없다) 모든 step이 `check:doc-lint`로 멈췄다 → `runnerConfig`가 복사한 문서를 doc-lint에서 뺀다. (2) 계획 frontmatter의 `status: blocked` 뒤에 주석이 붙는다 → 줄 끝까지가 아니라 값만 본다. (3) `flow-full`: step이 하나인 계획의 PR은 `Closes`다, CI 흉내 체크아웃이 새 head를 받아야 한다, main 병합 갱신 뒤의 기준 커밋은 앞서 나간 main과의 merge-base다.
 - 2026-11-16 step2: 흔들림 확인. `node scripts/harness.ts self-test --only f92-switch-stop,r45-runner,flow-full`을 이 Windows PC에서 5번 이어서 실행했다: 5번 모두 종료 코드 0(3개 모두 `pass`), 회당 143·142·140·138·144초. 4·5회차는 다른 worktree의 테스트(`revert.test.ts`)와 겹쳐 돌았다. AC의 테스트 명령(`selftest.test.ts`·`runner.test.ts`·`runner-workers.test.ts`)은 31개 통과, 363초였다(`selftest.test.ts`만 약 270초).
 - 2026-11-16 step2: PR #106. 1라운드(head `8d487ed`)에서 두 검증자가 승인했다(지적 없음). 보안 계획 step1(PR #105, 설계서 v0.7.46)이 제작자 승인으로 병합될 때까지 초안으로 두었고, 병합된 뒤(main `decf237`) `origin/main`을 병합해 받았다. 충돌은 문서 두 곳(설계서 버전 줄·변경 이력, `CHANGELOG`)이었고 main의 v0.7.46 줄 뒤에 이 PR의 v0.7.47 줄을 뒀다. 코드 충돌은 없었고, 병합한 트리에서 전체 `check`를 다시 돌렸다.
+- 2026-11-16 step2: 위 병합 트리의 전체 `check`가 `test` 시간 제한(900초)으로 두 번 실패했다(`test (900.6s)`. 두 번째는 다른 작업 없이 실행). 같은 트리의 전체 테스트를 제한 없이 돌리면 951초에 실패 0건이었다(파일 40개, 파일별 합계 4516초). 같은 방법을 다시 시도하지 않고, 제한을 1800초로 올리는 변경을 보안 계획 step2(PR #107, 위험도 높음)에 넣어 제작자 승인을 받았다(`commands` 변경은 `harness-guard` 신호라 이 PR에 넣으면 제작자 승인이 필요해진다). 병합 커밋은 그동안 push하지 않았다.
+- 2026-11-16 step2: PR #107(설계서 v0.7.48)이 병합된 뒤(main `4c95a36`) `origin/main`을 다시 병합해 받았다. 충돌 네 곳: 설계서 버전 줄(v0.7.48로 둔다. 이 PR의 변경 이력 줄은 v0.7.47 그대로), `CHANGELOG`(v0.7.47 줄 뒤에 v0.7.48 줄), 기술 부채 표(이 PR의 표에 main의 TD-13 행을 넣었다), `selftest.test.ts`(시나리오 9개: 이 PR의 셋과 main의 `mcp-guard`). main에서 변경 이력의 v0.7.48 줄이 v0.7.46 줄 앞에 들어가 있던 것을 v0.7.46 → v0.7.47 → v0.7.48 순서로 바로잡았다. TD-40의 문구를 "제한을 1800초로 올렸고 느린 원인을 줄이는 일이 남았다"로 고쳤다.
 
 ## 의사결정 로그
 
@@ -102,7 +104,7 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 복원 조건 "main에 그 계획이 없다"는 계획 id로만 본다. revert 뒤 같은 Issue에 새 계획(다른 id)이 이미 만들어져 병합됐다면 옛 계획도 복원 대상으로 남는다. 선점이 살아 있는 동안에는 그 작업자만 `new-task --issue`를 다시 실행할 수 있어 드물다. 보안 계획 step6(테스트 리포의 `plan-restore` 사례)에서 실제 흐름으로 본다. → 처리: #102
 - 자체 테스트의 샘플 리포는 `check`의 doc-lint를 통과하지 못한다. 복사한 `AGENTS.md`·절차서가 가리키는 문서(설계서, `docs/index.md`, ADR 등)가 샘플에 없다. runner 시나리오는 복사한 문서를 doc-lint에서 빼고 돈다. 하네스를 적용한 새 리포에서 문서 검사까지 통과하는지는 보안 계획 step6(테스트 리포)에서 본다. → 처리: #102
 - 가짜 GitHub은 체크가 상태 파일에 직접 들어오면 병합 조건을 다시 보지 않는다. 실제 GitHub의 "필수 체크 통과 → 자동 병합"은 자체 테스트가 아니라 보안 계획 step6(테스트 리포)에서 확인된다. → 처리: #102
-- 이 Windows PC에서 전체 `check`의 `test` 단계가 870~900초로, 시간 제한(`commands.test.timeoutSec` 900초)에 닿아 있다(오늘 8번 실행: 805~900초). 이 step으로 `selftest.test.ts`가 약 270초가 됐다(가장 긴 파일은 아니다). GitHub Actions의 `check`는 6분 안팎이라 CI에는 여유가 있다. → 처리: TD-40
+- 이 Windows PC에서 전체 `check`의 `test` 단계가 870~900초로, 시간 제한(`commands.test.timeoutSec` 900초)에 닿아 있다(오늘 8번 실행: 805~900초). 이 step으로 `selftest.test.ts`가 약 270초가 됐다(가장 긴 파일은 아니다). GitHub Actions의 `check`는 6분 안팎이라 CI에는 여유가 있다. main을 받은 트리에서는 951초로 제한을 넘었고, 제한은 보안 계획 step2(PR #107)가 1800초로 올렸다. 느린 원인을 줄이는 일이 남는다. → 처리: TD-40
 
 ## 열린 질문
 

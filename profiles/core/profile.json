@@ -11,7 +11,7 @@
         "timeoutSec": 300
       },
       "lint": { "run": "pnpm exec tsc -p tsconfig.json", "timeoutSec": 300 },
-      "test": { "run": "node --test \"scripts/test/*.test.ts\"", "timeoutSec": 900 },
+      "test": { "run": "node --test \"scripts/test/*.test.ts\"", "timeoutSec": 1800 },
       "build": null,
       "dev": null,
       "verify": null
@@ -21,7 +21,23 @@
       { "glob": "scripts/**", "risk": "normal" },
       { "glob": "pnpm-lock.yaml", "risk": "normal" }
     ],
-    "guard": { "dbPatterns": [], "dbClients": [] },
+    "guard": {
+      "dbPatterns": [],
+      "dbClients": [],
+      "mcp": {
+        "denyWords": ["delete", "trash", "remove", "destroy", "purge", "erase", "wipe", "cancel"],
+        "denyTools": ["mcp__*Gmail__send_message", "mcp__*Gmail__reply", "mcp__*Gmail__forward"],
+        "allowTools": [],
+        "browserTools": [
+          "mcp__claude-in-chrome__*",
+          "mcp__playwright__*",
+          "mcp__*Browser__*",
+          "mcp__computer-use__*",
+          "mcp__remote-devices__*"
+        ],
+        "denyHosts": ["github.com", "*.github.com", "github.dev", "*.github.dev"]
+      }
+    },
     "bypass": { "extraPatterns": [], "excludeExtensions": [".md"] }
   },
   "templates": []
