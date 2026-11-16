@@ -92,29 +92,45 @@ const usesCache = (text: string) =>
     .some((l) => /uses:\s*actions\/cache/.test(l) || /^\s*cache(-dependency-path)?:/.test(l));
 
 /**
+ * 비밀 참조: `secrets.X`, `secrets['X']`, `toJSON(secrets)`, 재사용 워크플로의 `secrets: inherit`.
+ * 꼴을 가리지 않고 `secrets`라는 낱말이 있으면 참조로 본다(주석만 있는 줄은 뺀다)
+ */
+const refsSecret = (lines: string[]) =>
+  lines.some((l) => !/^\s*#/.test(l) && /\bsecrets\b/.test(l));
+
+/**
  * PR 코드를 실행하는 job(10.4절)이 지켜야 할 것: environment·비밀·쓰기 권한이 없다. 어긴 내용을 돌려준다.
  * 대상: 재현 job(id가 `repro`이거나 `harness.ts repro`를 실행)과
- * 자체 테스트 job(id가 `selftest`이거나 `harness.ts self-test`를 실행)
+ * 자체 테스트 job(id가 `selftest`이거나 `harness.ts self-test`를 실행).
+ * job 밖(워크플로 최상위의 `env` 등)의 비밀 참조도 본다. 그 값은 모든 job이 물려받는다
  */
 export function reproJobViolations(text: string): string[] {
-  const i = text.search(/^jobs:\s*$/m);
+  const i = text.search(/^jobs:\s*(#.*)?$/m);
   if (i < 0) return [];
   const blocks = new Map<string, string[]>();
   let cur: string | null = null;
-  for (const line of text.slice(i).split('\n').slice(1)) {
+  const rest = text.slice(i).split('\n').slice(1);
+  // jobs 블록은 다음 최상위 키에서 끝난다. 첫 칸의 주석 줄은 블록을 끝내지 않는다
+  let end = rest.length;
+  for (let k = 0; k < rest.length; k++) {
+    const line = rest[k];
     const m = /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(line);
     if (m) {
       cur = m[1];
       blocks.set(cur, []);
-    } else if (/^\S/.test(line)) break;
-    else if (cur) blocks.get(cur)!.push(line);
+    } else if (/^[^\s#]/.test(line)) {
+      end = k;
+      break;
+    } else if (cur) blocks.get(cur)!.push(line);
   }
+  const inherited = refsSecret([...text.slice(0, i).split('\n'), ...rest.slice(end)]);
   const out: string[] = [];
   for (const [id, lines] of blocks) {
     const body = lines.join('\n');
     if (!PR_CODE_JOBS.some((j) => j.id === id || j.run.test(body))) continue;
     if (environments(body).length) out.push(`${id}: environment를 참조한다`);
-    if (/\bsecrets\./.test(body)) out.push(`${id}: 비밀을 참조한다`);
+    if (refsSecret(lines)) out.push(`${id}: 비밀을 참조한다`);
+    if (inherited) out.push(`${id}: 워크플로 최상위(job 밖)의 비밀 참조를 물려받는다`);
     if (writeLines(body).length) out.push(`${id}: 쓰기 권한이 있다`);
     if (!/^ {4}permissions:/m.test(body)) out.push(`${id}: job 권한을 적지 않았다`);
   }

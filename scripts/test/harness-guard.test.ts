@@ -252,6 +252,61 @@ test('자체 테스트 job(PR 코드 실행)에 environment·비밀·쓰기 권�
   });
   assert.equal(secret.result.state, 'failure');
   assert.match(secret.result.details.join('\n'), /selftest: 비밀/);
+  // `secrets.X`가 아닌 꼴의 참조도 잡는다
+  for (const ref of [
+    "${{ secrets['X'] }}",
+    '${{ toJSON(secrets) }}',
+    "${{ secrets[format('{0}', 'X')] }}",
+  ]) {
+    const g = run({
+      '.github/workflows/w.yml': SELFTEST_JOB('    permissions:\n      contents: read\n').replace(
+        'T: x',
+        `T: ${ref}`,
+      ),
+    });
+    assert.equal(g.result.state, 'failure', ref);
+    assert.match(g.result.details.join('\n'), /selftest: 비밀/);
+  }
+  const inherit = run({
+    '.github/workflows/w.yml':
+      WF +
+      '  selftest:\n    permissions:\n      contents: read\n    uses: ./.github/workflows/x.yml\n    secrets: inherit\n',
+  });
+  assert.match(inherit.result.details.join('\n'), /selftest: 비밀/);
+  // 워크플로 최상위 env의 비밀은 모든 job이 물려받는다(PR #108 F1). jobs 블록 앞에 있든 뒤에 있든 잡는다
+  const clean = SELFTEST_JOB('    permissions:\n      contents: read\n');
+  const top = [
+    clean.replace('jobs:\n', 'env:\n  GH_TOKEN: ${{ secrets.X }}\njobs:\n'),
+    clean + 'env:\n  GH_TOKEN: ${{ secrets.X }}\n',
+  ];
+  for (const wf of top) {
+    const g = run({ '.github/workflows/w.yml': wf });
+    assert.equal(g.result.state, 'failure', wf);
+    assert.match(
+      g.result.details.join('\n'),
+      /selftest: 워크플로 최상위\(job 밖\)의 비밀 참조를 물려받는다/,
+    );
+  }
+  // 최상위 주석의 글이나 비밀이 아닌 env는 잡지 않는다
+  const harmless = run({
+    '.github/workflows/w.yml': clean.replace(
+      'jobs:\n',
+      '# 이 워크플로는 secrets.X를 쓰지 않는다\nenv:\n  CI: true\njobs:\n',
+    ),
+  });
+  assert.equal(harmless.result.state, 'success', harmless.result.details.join('\n'));
+  // `jobs:` 줄 끝의 주석이나 블록 안 첫 칸의 주석 줄로 검사를 벗어나지 못한다
+  const withEnv = SELFTEST_JOB(
+    '    permissions:\n      contents: read\n    environment: recorder\n',
+  );
+  for (const wf of [
+    withEnv.replace('jobs:\n', 'jobs: # 판정\n'),
+    withEnv.replace('  selftest:\n', '# 자체 테스트\n  selftest:\n'),
+  ]) {
+    const g = run({ '.github/workflows/w.yml': wf });
+    assert.equal(g.result.state, 'failure', wf);
+    assert.match(g.result.details.join('\n'), /selftest: environment/);
+  }
   // job id가 달라도 self-test 명령을 실행하면 같은 조건이다
   const renamed = run({
     '.github/workflows/w.yml': SELFTEST_JOB(
