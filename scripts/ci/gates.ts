@@ -6,6 +6,12 @@ import { formatProblem } from '../lib/util.ts';
 import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
 import { planGate, type PlanG1 } from '../gates/plan-gate.ts';
+import {
+  revertCheck,
+  revertTarget,
+  type RevertCheck,
+  type TargetCheck,
+} from '../gates/revert-check.ts';
 import { riskGate, type Review, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
 import { REVIEWERS, type PlanReview } from './ledger.ts';
 import { planHashes } from './plan-hash.ts';
@@ -33,6 +39,11 @@ export interface RunGatesOptions {
    * 주지 않으면(PR 번호를 모른다) 승인이 없는 것으로 본다
    */
   planReview?: () => Promise<PlanReview | null>;
+  /**
+   * revert 대상 커밋의 main `check` 결론(10.3절 revert-check). 브랜치가 `revert/<SHA>` 꼴일 때만 부른다.
+   * 주지 않으면 조회하지 못한 것(null)으로 본다
+   */
+  targetCheck?: () => Promise<TargetCheck>;
 }
 
 function firstLine(e: unknown): string {
@@ -92,9 +103,35 @@ function planGateResult(o: RunGatesOptions, g1: PlanG1 | undefined): Omit<GateRe
 export async function runGates(o: RunGatesOptions): Promise<GateResults> {
   const signals: RiskSignal[] = [];
   let risk: Risk | undefined;
+  // 확인된 revert PR이면 plan-gate는 계획을 요구하지 않고 harness-guard는 작성자 체크리스트를 보지 않는다
+  let revert: RevertCheck | undefined;
   const byContext: Record<(typeof GATE_CONTEXTS)[number], () => GateResult | Promise<GateResult>> =
     {
+      'revert-check': async () => {
+        try {
+          const tc = revertTarget(o.branch) && o.targetCheck ? await o.targetCheck() : null;
+          const r = revertCheck({ root: o.root, base: o.base, branch: o.branch, targetCheck: tc });
+          revert = r;
+          return {
+            context: 'revert-check',
+            state: r.state,
+            description: r.description,
+            details: r.details,
+          };
+        } catch (e) {
+          return guarded('revert-check', () => {
+            throw e;
+          });
+        }
+      },
       'plan-gate': async () => {
+        if (revert?.verified)
+          return {
+            context: 'plan-gate',
+            state: 'success',
+            description: 'revert PR: 계획 불필요',
+            details: [],
+          };
         try {
           const g1 = await planG1(o);
           return guarded('plan-gate', () => planGateResult(o, g1));
@@ -111,6 +148,7 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
             base: o.base,
             cfg: o.cfg,
             prBody: o.prBody ?? null,
+            skipAuthorChecks: revert?.verified === true,
           });
           signals.push(...r.signals);
           return r.result;

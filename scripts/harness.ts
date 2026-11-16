@@ -49,6 +49,7 @@ import {
   reviewLogLines,
 } from './ci/record.ts';
 import { parseReproResults, reproResultsData, runRepro } from './ci/repro.ts';
+import { targetCheckOf } from './ci/revert-evidence.ts';
 import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
@@ -61,6 +62,7 @@ import { prReady } from './commands/pr-ready.ts';
 import { prState } from './commands/pr-state.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
+import { revertCheck, revertTarget, type RevertCheck } from './gates/revert-check.ts';
 import { docLint, printDocLint } from './gates/doc-lint.ts';
 import { planGate, type PlanG1 } from './gates/plan-gate.ts';
 import { secretScan } from './gates/secret-scan.ts';
@@ -103,6 +105,8 @@ CI(gates 워크플로, 10.4절):
         [--reviews <리뷰 API JSON>] [--pr-body <본문 파일>] [--pr-number <N>]
                                            기계 판정 결과 파일(판정 job, 비밀 없음)
                                            PR 번호를 주면 plan-gate가 원장의 계획 승인을 읽는다(G1, 읽기 토큰은 GH_TOKEN)
+                                           브랜치가 revert/<SHA>면 그 커밋의 main check 결론을 읽어 revert-check를 판정한다
+                                           (10.3절. GITHUB_REPOSITORY, GH_TOKEN의 checks: read)
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
 
@@ -116,6 +120,7 @@ CI(gates 워크플로, 10.4절):
   review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N>] [--base-sha <sha>]
               [--reviewer <claude|codex>] [--ledger <base64 JSON>] [--rebuttals <base64 JSON>]
                                            위험도와 필요한 검증자를 $GITHUB_OUTPUT에 쓰고 검증 입력(pr/.harness-review/)을 만든다
+                                           revert-check가 확인한 revert/<SHA> PR은 검증자를 돌리지 않는다(10.3절)
                                            mode(plan: PR이 계획 폴더만 바꿨다 | code)와 plan_hash(계획 핵심 섹션 해시)도 낸다(G1)
                                            PR 번호와 base SHA를 주면 승인 이어받기(patch, carry_claude, carry_codex)도 판정한다(10.3절)
                                            검증자와 PR 번호(원장을 API로 읽고 ledger 출력) 또는 --ledger(받은 원장)를 주면
@@ -486,7 +491,23 @@ async function main(argv: string[]): Promise<number> {
         );
         return 2;
       }
-      const r = planReview({ root, cfg, base, branch });
+      // 확인된 revert PR(10.3절)은 검증자를 돌리지 않는다. 대상의 check를 조회하지 못하면 평소대로 검증한다
+      const target = revertTarget(branch);
+      let revert: RevertCheck | undefined;
+      if (target) {
+        const targetCheck = await targetCheckOf(
+          githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+          process.env.GITHUB_REPOSITORY ?? '',
+          target,
+        );
+        try {
+          revert = revertCheck({ root, base, branch, targetCheck });
+          log(`review-plan: revert-check ${revert.state} — ${revert.description}`);
+        } catch (e) {
+          log(`review-plan: revert-check를 판정하지 못했다 — ${(e as Error).message}`);
+        }
+      }
+      const r = planReview({ root, cfg, base, branch, revert });
       writeReviewInput({ root, base, branch, risk: r.risk, reasons: r.reasons });
       appendFileSync(output, `risk=${r.risk}\nclaude=${r.claude}\ncodex=${r.codex}\n`);
       // 계획 검증(G1): PR이 바꾼 파일이 계획 폴더 안뿐이면 판정 job이 계획 검증 프롬프트를 덧붙이고 기록 job이 승인을 남긴다
@@ -851,7 +872,27 @@ async function main(argv: string[]): Promise<number> {
               return stored.ledger?.planReview ?? null;
             }
           : undefined;
-      const r = await runGates({ root, cfg, base, branch, headSha, reviews, prBody, planReview });
+      // revert-check(10.3절): 대상 커밋의 main check 결론. 브랜치가 revert/<SHA>일 때만 runGates가 부른다
+      const target = revertTarget(branch);
+      const targetCheck = target
+        ? () =>
+            targetCheckOf(
+              githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+              process.env.GITHUB_REPOSITORY ?? '',
+              target,
+            )
+        : undefined;
+      const r = await runGates({
+        root,
+        cfg,
+        base,
+        branch,
+        headSha,
+        reviews,
+        prBody,
+        planReview,
+        targetCheck,
+      });
       writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
       const md = summaryMarkdown(r);
       const summary = str('summary');

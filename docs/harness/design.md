@@ -76,6 +76,7 @@ review_cycle: quarterly
   - v0.7.41 (2026-11-16): runner의 2단계 연결을 마친다. `run`을 `--worker` 없이 실행하면 설정의 작업자 수만큼 작업자 프로세스를 띄운다(이 리포 2개). main 병합 충돌은 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 한도에 닿으면 사람에게 넘긴다. 실행 시간 상한·사용량 한도·연속 오류로 멈출 때 맡은 계획의 Issue에 알린다. 원격 fetch 실패는 환경 장애로 기다린다(4.5절, 10.3절, 19절, ADR-0006, Issue #56 step6, TD-9 해결)
   - v0.7.42 (2026-11-16): 하네스 CLI는 종료 코드를 정한 뒤 자연 종료한다. Windows의 Node 24는 `fetch`를 쓴 뒤 바로 강제 종료하면 libuv 단언으로 죽는다. 명령이 핸들을 남겼을 때만 10초 뒤 강제로 끝낸다. 종료 코드의 뜻은 그대로다(13.1절 ADR-0005 Windows 네이티브, Issue #99)
   - v0.7.43 (2026-11-16): revert된 계획을 복원해 이어 간다. revert 워크플로가 Issue에 다는 표식 댓글을 근거로 `new-task --issue`가 새 골격 대신 되돌려진 커밋의 계획을 같은 id로 `active/`에 복원하고(계획 해시는 그대로), 닫혔다 다시 열린 Issue의 남은 step은 `new-task --plan`이 다시 선점한다. "다음 할 일"은 내 선점이 남은 revert된 Issue를 고르고, 같은 브랜치 이름의 병합된 옛 PR을 새 작업의 PR로 보지 않는다(4.5절, 8.3절 "되돌리기", Issue #57 step0)
+  - v0.7.44 (2026-11-16): `revert-check`를 더한다. `revert/<SHA>` PR이 main의 그 커밋을 파일 단위(경로·모드·blob)로 정확히 되돌리고 그 커밋의 main `check`가 실패했을 때만 계획 요구와 `review/*` 판정을 대신한다. 위험도와 `harness-guard` 신호, `deps-guard`는 그대로 판정한다(10.3절, 10.4절, Issue #102 step0)
   - v0.7.45 (2026-11-16): 하네스 자체 테스트를 두 층으로 둔다(12.4절). LLM 없는 시나리오는 `self-test` 명령이 임시 샘플 리포에 대상 하네스를 적용해 CLI와 L1 훅을 프로세스로 불러 판정하고, 실제 세션 시나리오는 통과율로만 기록한다. 첫 시나리오 다섯(S1, R1, R4, R13, R20)을 더했다. 훅 차단은 종료 코드가 정확히 2인지로 확인한다.
 
 ### 0.1 전제 조건
@@ -920,7 +921,9 @@ pnpm test src/auth/login-guard.spec.ts
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
 | `revert-check` | revert PR 전용. diff가 대상 커밋을 정확히 되돌리는지 확인하고, 통과하면 `review/*`를 대신한다 | 아래 "병합 후 main CI가 실패하면" |
 
-- `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`(Issue #54)와 `review-ledger`(Issue #55)는 판정 워크플로의 기록 job이 같은 방식으로 쓴다. `revert-check`는 Issue #57에서 더한다.
+- `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`(Issue #54)와 `review-ledger`(Issue #55)는 판정 워크플로의 기록 job이 같은 방식으로 쓴다. `revert-check`도 `gates`의 판정 job이 함께 낸다(Issue #102).
+- `revert-check`의 판정(`scripts/gates/revert-check.ts`): 브랜치가 `revert/<40자 SHA>` 꼴일 때만 본다(그 밖의 PR은 "revert PR 아님"으로 통과). 확인 조건은 모두 만족해야 한다. (1) 대상 커밋이 merge-base의 first-parent 이력에 있고 부모가 하나다. (2) `git diff --raw`로 본 PR의 변경(merge-base → head)이 대상의 역(대상 → 대상의 부모)과 경로·모드·blob SHA까지 같다. patch-id나 줄 단위 비교는 공백과 줄 위치를 무시하므로 쓰지 않는다. 대상 뒤에 main이 같은 파일을 다시 바꿨으면 성립하지 않는다. (3) 대상 커밋의 main `check`가 실패했다. 근거는 GitHub Actions App이 만든 이름 `check`의 최신 check run이다(`scripts/ci/revert-evidence.ts`). 커밋 상태는 봇 토큰도 쓸 수 있어 근거로 쓰지 않는다. 조회하지 못하면 `error`다(fail-closed). 조건 (3)이 없으면 봇 토큰을 가진 에이전트가 main의 아무 커밋이나 검증 없이 되돌릴 수 있다.
+- 확인된 revert PR이 면제받는 것은 `plan-gate`의 계획 요구, `review/*` 판정(판정 워크플로의 `plan` job이 같은 함수로 다시 판정해 검증자를 돌리지 않는다), `harness-guard`의 작성자 체크리스트(`CHANGELOG` 한 줄, PR 본문 줄)뿐이다. `risk-gate`·`deps-guard`와 `harness-guard`의 신호·워크플로 검사는 그대로다. 훅이나 권한 제한을 더한 커밋의 revert는 완화 신호가 되어 위험도 높음(제작자 head 승인)으로 간다.
 - `risk-gate`의 제작자 승인은 리뷰가 달리거나 철회될 때 다시 판정한다: `review-trigger` 워크플로(`pull_request_review`, PR 쪽 정의라 비밀·권한 없음)가 끝나면 `gates`가 `workflow_run`(main 정의)으로 돌고, 페이로드 대신 head SHA로 API를 조회해 열린 같은 리포 PR의 현재 head에만 판정한다.
 
 **승인 결속 기준**
@@ -988,9 +991,9 @@ pnpm test src/auth/login-guard.spec.ts
 | 판정 job: Codex (LLM) | `workflow_run`(`check` 완료, main 정의) | 위와 같음 | Codex 인증 파일(`judge-codex` environment)만. 인증 저장용 자격증명, Claude 토큰, 검증 App 키, GitHub 쓰기 권한은 없음 |
 | Codex 인증 저장 job | `workflow_run`(`check` 완료, main 정의). Codex 판정 job 앞(공개키 조회)과 뒤(저장) | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 판정 job이 `judge-codex`의 공개키로 봉인해 넘기고, 이 job은 풀지 않고 그대로 등록한다(13.3절) |
 | 기록 job | `pull_request_target` (main 정의) | 실행하지 않는다 | 검증 App 키(`recorder` environment). LLM 없음 |
-| 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록 |
+| 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
 
-- 기계 판정(`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
+- 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
 
 - **main 정의로 실행하는 것과 main 스크립트를 실행하는 것은 다르다.** 판정 job은 실행할 스크립트·프롬프트를 `base/`(main)에서만 가져오고, `pr/` 아래는 아무것도 실행하지 않는다. 구현할 때 가장 흔히 뚫리는 곳이다.
 - **역할별 environment**: 시크릿은 역할마다 다른 environment에 둔다. `judge-claude`(Claude 구독 토큰), `judge-codex`(Codex 인증 파일), `codex-auth-store`(Codex 인증 저장용 자격증명), `recorder`(검증 App 키), `revert`(revert용 봇 토큰, 10.3절). 이름은 예시다. 각 environment는 main 브랜치에서만 쓰도록 제한하고, 각 job은 자기 environment 하나만 참조한다. 리포 수준 시크릿은 아무 브랜치의 `push` 워크플로가 읽을 수 있으므로 두지 않는다(0.2절).

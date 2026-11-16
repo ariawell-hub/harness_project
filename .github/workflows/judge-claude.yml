@@ -38,6 +38,8 @@ jobs:
       pull-requests: read
       # 승인 이어받기: 앞선 head의 커밋 상태를 읽는다(10.3절)
       statuses: read
+      # revert-check: 대상 커밋의 main check run을 읽는다(10.3절)
+      checks: read
     outputs:
       skip: ${{ steps.pr.outputs.skip }}
       head_sha: ${{ steps.pr.outputs.head_sha }}

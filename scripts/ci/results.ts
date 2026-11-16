@@ -1,8 +1,17 @@
 // 기계 판정 결과 파일 형식과 커밋 상태 변환(10.3·10.4절). 판정 job이 쓰고 기록 job이 검사한다.
 // 기록 job은 이 형식을 통과한 값만 커밋 상태로 쓴다. 결과가 없거나 깨지면 아는 context 모두 error(fail-closed).
 
-/** 기록 job이 쓰는 기계 판정 context(판정 순서). harness-guard의 신호를 risk-gate가 받으므로 앞에 둔다 */
-export const GATE_CONTEXTS = ['plan-gate', 'harness-guard', 'risk-gate', 'deps-guard'] as const;
+/**
+ * 기록 job이 쓰는 기계 판정 context(판정 순서). harness-guard의 신호를 risk-gate가 받으므로 앞에 둔다.
+ * revert-check는 맨 앞이다. 확인된 revert PR이면 plan-gate·harness-guard가 그 결과를 본다(10.3절)
+ */
+export const GATE_CONTEXTS = [
+  'revert-check',
+  'plan-gate',
+  'harness-guard',
+  'risk-gate',
+  'deps-guard',
+] as const;
 
 /** 검증자 판정 context(R12). 판정 워크플로의 기록 job이 쓴다 */
 export const REVIEW_CONTEXTS = ['review/claude', 'review/codex'] as const;

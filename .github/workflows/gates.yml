@@ -30,6 +30,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # revert-check: 대상 커밋의 main check run을 읽는다(10.3절)
+      checks: read
     outputs:
       skip: ${{ steps.pr.outputs.skip }}
       head_sha: ${{ steps.pr.outputs.head_sha }}

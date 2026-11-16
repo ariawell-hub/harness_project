@@ -201,7 +201,7 @@ test('toStatuses: 결과가 없으면 모든 context error, 빠진 context도 er
 
 test('toStatuses: description은 제어 문자를 공백으로, 140자로 자른다', () => {
   const long = '가'.repeat(200);
-  const [s] = toStatuses(
+  const s = toStatuses(
     results({
       results: [
         { context: 'plan-gate', state: 'failure', description: `a\nb\u0007c${long}`, details: [] },
@@ -209,7 +209,7 @@ test('toStatuses: description은 제어 문자를 공백으로, 140자로 자른
     }),
     GATE_CONTEXTS,
     'x',
-  );
+  ).find((x) => x.context === 'plan-gate')!;
   assert.ok(s.description.length <= 140);
   assert.ok(s.description.startsWith('a b c'));
   assert.ok(!/[\u0000-\u001f\u007f]/.test(s.description));
