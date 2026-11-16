@@ -10,7 +10,7 @@ review_cycle: on-change
 
 ## 레이어
 
-의존은 위에서 아래로만 흐른다.
+의존은 위에서 아래로만 흐른다. `scripts/selftest/`(하네스 자체 테스트)는 이 레이어 밖에 있다: 하네스의 내부 모듈을 import하지 않고 CLI와 훅을 프로세스로만 부른다.
 
 ```
 진입점      scripts/harness.ts (CLI)          scripts/hooks/guard.ts (L1 훅), session.ts (세션 훅)
@@ -59,3 +59,5 @@ runner는 세션이 끝날 때마다 `runner.jsonl`에 `session-end`를 남긴�
 ## 테스트
 
 `scripts/test/*.test.ts` (node:test). 임시 git 리포 + 로컬 bare 원격 + 가짜 GitHub(`HARNESS_FAKE_GH`) + 가짜 에이전트(`HARNESS_FAKE_AGENT`)로 runner 전체 흐름까지 검사한다.
+
+`scripts/selftest/` (하네스 자체 테스트, 설계서 12.4절). `run.ts`가 대상 하네스(`--harness`, 기본은 이 리포)를 임시 샘플 리포에 복사하고 `scenarios/*.ts`를 파일 이름순으로 돌린다. 시나리오는 `ctx.cli`(CLI)와 `ctx.hook`(L1 훅)만 부르고, 규칙이 막아야 할 것을 막는지와 대조군이 통과하는지를 종료 코드로 확인한다. 새 시나리오는 파일을 더하면 들어간다(목록 파일 없음). `scripts/test/selftest.test.ts`가 `check`에서 이 리포와 약화된 사본을 시험한다.

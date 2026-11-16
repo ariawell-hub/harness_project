@@ -68,6 +68,7 @@ import { getGitHub } from './lib/github.ts';
 import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
 import { runWorkers, workerNames } from './runner/workers.ts';
+import { formatSelfTest, runSelfTest } from './selftest/run.ts';
 
 const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 
@@ -91,6 +92,9 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 게이트:
   plan-gate [--repo <dir>] [--config-root <dir>] [--base <sha>] [--head-ref <브랜치>] [--mode pr|plan]
   doc-lint | bypass-scan [--ci] [--base <sha>] | secret-scan [--ci] [--base <sha>]
+  self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>]
+                                           하네스 자체 테스트(12.4절): 대상 하네스(기본: 이 리포)를 임시 샘플 리포에 적용해
+                                           시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1
 
 CI(gates 워크플로, 10.4절):
   ci-pr --event <이벤트 JSON> --body-out <파일>
@@ -173,6 +177,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   undo: { type: 'boolean' },
   base: { type: 'string' },
   only: { type: 'string' },
+  harness: { type: 'string' },
   repo: { type: 'string' },
   'config-root': { type: 'string' },
   'head-ref': { type: 'string' },
@@ -985,6 +990,25 @@ async function main(argv: string[]): Promise<number> {
       });
       log(`runner 종료: ${stop}`);
       return stop === 'error' || stop === 'locked' || stop === 'agent-missing' ? 1 : 0;
+    }
+    case 'self-test': {
+      let report;
+      try {
+        report = await runSelfTest({
+          harness: path.resolve(str('harness') ?? repoInfo(cwd).root),
+          only: str('only')?.split(',').filter(Boolean),
+          headSha: str('head-sha'),
+        });
+      } catch (e) {
+        process.stderr.write(`self-test: ${(e as Error).message}\n`);
+        return 2;
+      }
+      for (const line of formatSelfTest(report)) log(line);
+      const out = str('out');
+      if (out) writeFileSync(out, JSON.stringify(report, null, 2) + '\n');
+      const bad = report.results.filter((r) => r.state !== 'pass').length;
+      log(`self-test: ${bad ? `실패 ${bad}건` : '통과'} (시나리오 ${report.results.length}개)`);
+      return bad ? 1 : 0;
     }
     case 'init':
       return init(repoInfo(cwd).root, str('profile') ?? '', {
