@@ -64,6 +64,8 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 - 2026-11-16 step0: 계획 검증 1라운드(PR #101, head `a2b35b7`, step 11개짜리 계획). `review/claude` 승인(P2 2건), `review/codex` 수정 요청(F1, P1: 권한·보안이 든 계획인데 `risk`가 normal이다). F1에 반박했다(위험도 normal은 2026-11-15의 제작자 결정이다. 근거 `docs/exec-plans/completed/20261115-cross-review/plan.md:120`).
 - 2026-11-16 step0: 2라운드(head `b41d13a`). `review/claude` 승인, `review/codex`는 반박을 받아들이지 않았다("제작자 결정 기록은 확인했지만 계획 검증 기준상 보안·권한 작업이 든 계획은 high여야 한다"). 보안·권한 결정이고 앞선 제작자 결정을 바꾸는 일이라 제작자에게 물었다. 답: 계획을 둘로 나눈다. 봇이 Issue #102를 등록하고 보안·권한 step 6개(revert-check, revert-workflow, mcp-guard, selftest-guard, ops-check, operation)를 보안 계획(`20261116-ops-security`)으로 옮겼다. 이 계획에는 5개가 남고 step 번호를 다시 매겼다(plan-restore 2→0, selftest-core 3→1, selftest-runner 4→2, selftest-live 5→3, test-repo 9→4).
 - 2026-11-16 step0: 3라운드(head `53895e2`). `review/claude` 승인(P2 1건: 옮긴 step에 남은 옛 번호 "step9"). `review/codex`는 F1을 닫지 않았다("실제 GitHub 테스트, 보호 설정 및 봇 권한 동작 확인, `self-test --live`를 포함하므로 high 기준과 충돌한다"). 그 두 step(selftest-live, test-repo)도 보안 계획으로 옮겼다(그 계획의 step5·step6). 이 계획에는 실제 자격증명·실제 GitHub·실제 세션을 쓰지 않는 step 3개만 남는다.
+- 2026-11-16 step0: 4라운드(head `6a0e3f5`, step 3개)에서 두 검증자가 승인했다(G1, 지적 없음). 원장 F1은 닫혔다.
+- 2026-11-16 step0: 구현. `scripts/lib/revert-marker.ts`(`revertMarker`, `findRevertMarker`), `scripts/commands/task.ts`(`restorablePlan`, `restorePlan`, `findRestore`, `claimOwner`, `new-task`의 복원과 재선점). "확인할 것"(step0 작업 2번)에서 고칠 곳이 둘 나왔다. (1) 첫 step의 PR이 되돌려진 Issue는 닫힌 적이 없어 내 선점이 남는데, runner는 선점된 Issue를 고르지 않아 아무도 이어 가지 못한다. 내 선점이고 계획을 복원할 수 있으면 후보로 고르게 했다(`scripts/runner/next.ts`). (2) 복원한 작업은 되돌려진 PR과 브랜치 이름이 같아, 병합된 옛 PR이 이 작업의 PR로 잡혀 step을 건너뛰고 worktree 정리 대상이 된다. 병합된 PR인데 그 step이 worktree에서도 main에서도 끝나 있지 않으면 이 작업의 PR로 보지 않게 했다(`readLocalPlans`). runner의 다음 step 시작(`run.ts`)은 `new-task`가 선점을 다시 잡을 수 있게 GitHub 조회를 켰다. 테스트: `task.test.ts` 4개(표식, 첫 step 복원, 소규모 계획 복원, 마지막 step 재선점), `next.test.ts` 2개(후보 선택과 옛 PR, worktree가 뒤처진 병합 PR).
 
 ## 의사결정 로그
 
@@ -76,6 +78,8 @@ claimed_at: 2026-11-16T09:41:21+09:00 # new-task가 채운다
 ## 발견 사항
 
 - 이 Windows PC는 개발자 모드가 꺼져 있어 심볼릭 링크를 만들 수 없고, 파일 이름에 `:`·`*`를 쓸 수 없고, POSIX 권한 비트가 없다(#99). 이 계획에서 새로 쓰는 테스트·시나리오도 같은 제약을 지켜야 로컬 `check`가 통과한다(디렉터리 링크는 `'junction'`, 셸 명령에 넣는 경로는 `/`, 전체 `check`는 약 13분). → 처리: TD-14
+- 두 계획을 병행하면 step PR끼리 문서의 같은 자리(설계서 버전 줄, 변경 이력 끝, `CHANGELOG` 끝)에서 충돌한다. 먼저 병합된 쪽 때문에 나중 PR은 main을 병합해 갱신해야 하고, 그 PR이 제작자 승인을 기다리는 보안 계획의 PR이면 승인 요청이 무효가 된다. 이번에는 이 계획의 step0을 먼저 병합하고 보안 계획의 PR #103을 갱신한 뒤 승인을 요청하는 순서로 피한다. → 처리: TD-39
+- 복원 조건 "main에 그 계획이 없다"는 계획 id로만 본다. revert 뒤 같은 Issue에 새 계획(다른 id)이 이미 만들어져 병합됐다면 옛 계획도 복원 대상으로 남는다. 선점이 살아 있는 동안에는 그 작업자만 `new-task --issue`를 다시 실행할 수 있어 드물다. 보안 계획 step6(테스트 리포의 `plan-restore` 사례)에서 실제 흐름으로 본다. → 처리: #102
 
 ## 열린 질문
 

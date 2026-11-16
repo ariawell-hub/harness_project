@@ -4,6 +4,7 @@
 //   3. 내가 맡은 계획의 진행 중인 step (계획 작성 포함)
 //   4. 앞 step이 병합된 계획의 다음 step
 //   5. 선점되지 않은 Issue 중 제작자·외주 개발자가 만든 것 (우선순위 라벨 순, WIP 상한 안에서).
+//      내 선점이 남은 Issue도 revert로 계획이 main에서 빠졌으면 고른다(new-task가 계획을 복원한다, 8.3절).
 //      `github.botIssues`가 owner-approved면 제작자가 `/harness accept` 댓글을 단 봇 Issue도.
 //      그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절).
 //      만든 뒤 허용 계정이 아닌 계정이 제목·본문을 고쳤으면 그 뒤의 제작자 승인이 있어야 한다(TD-19)
@@ -12,7 +13,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { planHashes } from '../ci/plan-hash.ts';
 import { stepCompletedAt } from '../commands/pr-state.ts';
-import { listRemoteClaims } from '../commands/task.ts';
+import { claimOwner, findRestore, listRemoteClaims } from '../commands/task.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import type {
   Comment,
@@ -270,6 +271,7 @@ function inspectPr(
 
 export function readLocalPlans(env: NextEnv): LocalPlan[] {
   const out: LocalPlan[] = [];
+  const baseSha = revParse(`${env.cfg.github.remote}/${env.cfg.github.defaultBranch}`, env.main);
   for (const wt of listWorktrees(env.main)) {
     if (path.resolve(wt.path) === path.resolve(env.main) || !wt.branch || !existsSync(wt.path))
       continue;
@@ -296,17 +298,21 @@ export function readLocalPlans(env: NextEnv): LocalPlan[] {
     } catch {
       pr = null;
     }
+    const localCompleted =
+      ref.kind === 'multi' ? stepStatus === 'completed' : fm.status === 'completed';
+    // revert 뒤 같은 브랜치 이름으로 다시 시작한 작업(8.3절 "되돌리기"): 병합된 옛 PR은 이 작업의 PR이 아니다.
+    // 병합된 PR인데 이 worktree에서도 main에서도 그 step이 끝나 있지 않으면 그 병합은 되돌려진 것이다
+    if (
+      pr?.state === 'merged' &&
+      !localCompleted &&
+      (baseSha === null || stepCompletedAt(env.main, baseSha, wt.branch) !== true)
+    )
+      pr = null;
     const inspected =
       pr?.state === 'open' &&
       env.cfg.ci.requiredChecks.length > 0 &&
       String(fm.owner ?? '') === env.worker
-        ? inspectPr(
-            env,
-            wt.path,
-            wt.branch,
-            pr,
-            ref.kind === 'multi' ? stepStatus === 'completed' : fm.status === 'completed',
-          )
+        ? inspectPr(env, wt.path, wt.branch, pr, localCompleted)
         : null;
     // 계획 검증(G1) 대상인가. 승인은 CI가 끝난(ready) 계획 검증 중인 PR에서만 원장을 읽어 확인한다
     let planReview: LocalPlan['planReview'];
@@ -803,11 +809,15 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
     } catch {
       // 조회 실패는 선점 없음으로 본다(기존 동작). push 거부가 실제 선점을 지킨다(8.3절)
     }
+    // 내 선점이 남아 있어도 고르는 경우: revert로 main에서 계획이 빠진 Issue(첫 step의 PR이 되돌려짐).
+    // 닫힌 적이 없어 선점이 풀리지 않았고, new-task가 그 계획을 복원한다(8.3절 "되돌리기")
+    const restorableMine = (n: number) =>
+      claimOwner(env.main, cfg, n) === worker && findRestore(env.main, cfg, gh, n) !== null;
     const open = issues.filter(
       (i) =>
         !i.labels.includes(label) &&
-        !claims.has(i.number) &&
-        !locals.some((l) => l.issue === i.number),
+        !locals.some((l) => l.issue === i.number) &&
+        (!claims.has(i.number) || restorableMine(i.number)),
     );
     // 앞 조건으로 먼저 거른 뒤 적용한다(봇 Issue 댓글 조회 횟수를 줄인다)
     const filtered = filterTrustedIssues(

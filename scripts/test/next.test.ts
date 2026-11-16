@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { acceptHint } from '../commands/start.ts';
-import { newTask } from '../commands/task.ts';
+import { completeStep, newTask } from '../commands/task.ts';
 import { ConfigError, loadConfig, type HarnessConfig } from '../lib/config.ts';
 import {
   getGitHub,
@@ -29,11 +29,13 @@ import {
   ownerCommentRejection,
   pickNext,
   readConflictState,
+  readLocalPlans,
   sameLogin,
   writeConflictState,
   type Pick,
 } from '../runner/next.ts';
-import { fixtureConfig, makeFixture, sh, tmp } from './helpers.ts';
+import { revertMarker } from '../lib/revert-marker.ts';
+import { commitAll, fixtureConfig, makeFixture, revertOnMain, sh, tmp, write } from './helpers.ts';
 
 const GITHUB = {
   remote: 'origin',
@@ -1098,4 +1100,116 @@ test('pickNext: 봇이 고친 제작자 Issue는 후보에서 빼고, 제작자�
     new FakeGitHub(s).editIssueAs(n, 'maker', { body: '제작자가 고친 본문' });
   });
   assert.equal(ownerEdited.pick.task.kind, 'new-issue', '제작자 본인이 고친 것은 그대로 후보');
+});
+
+/** 가짜 GitHub을 켠 fixture에서 `fn`을 실행한다 */
+async function withRepo(
+  fn: (x: {
+    fx: ReturnType<typeof makeFixture>;
+    state: string;
+    gh: FakeGitHub;
+    cfg: HarnessConfig;
+  }) => Promise<void>,
+): Promise<void> {
+  const fx = makeFixture({ github: GITHUB });
+  const prev = process.env.HARNESS_FAKE_GH;
+  try {
+    const state = path.join(fx.dir, 'gh.json');
+    initFakeState(state, { remote: fx.remote, owner: 'maker' });
+    process.env.HARNESS_FAKE_GH = state;
+    await fn({ fx, state, gh: new FakeGitHub(state), cfg: loadConfig(fx.root) });
+  } finally {
+    if (prev === undefined) delete process.env.HARNESS_FAKE_GH;
+    else process.env.HARNESS_FAKE_GH = prev;
+    fx.cleanup();
+  }
+}
+
+test('pickNext: 첫 step의 PR이 revert되면 내 선점이 남은 Issue를 다시 고르고, 복원한 작업은 병합된 옛 PR에 가려지지 않는다', async () => {
+  await withRepo(async ({ fx, state, gh, cfg }) => {
+    const n = addFakeIssue(state, 'Demo', '본문');
+    const pick = (worker: string) => pickNext({ main: fx.root, cfg, gh, worker });
+    const t = await newTask(fx.root, {
+      issue: n,
+      slug: 'demo',
+      owner: 'runner-1',
+      date: '20261112',
+    });
+    const id = '20261112-demo';
+    const dir = `docs/exec-plans/active/${id}`;
+    write(
+      t.worktree,
+      `${dir}/index.json`,
+      JSON.stringify({
+        plan: id,
+        steps: [
+          { step: 0, name: 's0', status: 'in_progress' },
+          { step: 1, name: 's1', status: 'pending' },
+        ],
+      }),
+    );
+    for (const s of [0, 1])
+      write(
+        t.worktree,
+        `${dir}/step${s}.md`,
+        `# Step ${s}: s${s}\n\n## 작업\n\n1. 한다.\n\n## Acceptance Criteria\n\n\`\`\`bash\ntest -f AGENTS.md\n\`\`\`\n\n## 금지사항\n\n- 없음\n`,
+      );
+    write(t.worktree, 'src/s0.ts', 'export const s0 = 1;\n');
+    commitAll(t.worktree, 'step0');
+    completeStep(t.worktree);
+    sh('git', ['push', '-q', 'origin', t.branch], t.worktree);
+    const pr = gh.createPR({ head: t.branch, base: 'main', title: 'demo', body: `Refs #${n}` });
+    gh.enableAutoMerge(pr.number); // 가짜 GitHub이 바로 squash 병합하고 브랜치를 지운다
+    assert.equal(gh.getPR(pr.number)!.state, 'merged');
+    sh('git', ['fetch', '-q', '--prune', 'origin'], fx.root);
+    const target = sh('git', ['rev-parse', 'origin/main'], fx.root);
+    // 병합된 worktree 정리(start·runner가 하는 일)
+    sh('git', ['worktree', 'remove', '--force', t.worktree], fx.root);
+    sh('git', ['branch', '-D', t.branch], fx.root);
+    revertOnMain(fx, target);
+
+    // 표식이 없으면 선점된 Issue는 고르지 않는다(기존 동작)
+    assert.equal(pick('runner-1').task.kind, 'idle');
+    gh.comment(n, `main의 check가 실패해 되돌렸다.\n${revertMarker(target, id)}`);
+    assert.equal(pickedNumber(pick('runner-1')), n);
+    assert.equal(pick('runner-2').task.kind, 'idle', '다른 작업자의 선점은 고르지 않는다');
+
+    // 복원한 작업은 옛 PR과 브랜치 이름이 같다. 병합된 그 PR을 이 작업의 PR로 보면 step을 건너뛰고 worktree를 지운다
+    const again = await newTask(fx.root, { issue: n, slug: 'demo', owner: 'runner-1' });
+    assert.equal(again.branch, t.branch);
+    const local = readLocalPlans({ main: fx.root, cfg, gh, worker: 'runner-1' }).find(
+      (l) => l.id === id,
+    )!;
+    assert.equal(local.pr, null);
+    const next = pick('runner-1');
+    assert.equal(next.task.kind, 'step');
+    assert.equal(next.task.kind === 'step' && next.task.local.step, 0);
+  });
+});
+
+test('readLocalPlans: 병합된 PR의 step이 main에서 끝나 있으면 worktree가 뒤처져 있어도 그 PR이다', async () => {
+  await withRepo(async ({ fx, state, gh, cfg }) => {
+    const n = addFakeIssue(state, 'Typo', '본문');
+    const t = await newTask(fx.root, {
+      issue: n,
+      slug: 'typo',
+      size: 'small',
+      owner: 'runner-1',
+      date: '20261112',
+    });
+    write(t.worktree, 'src/t.ts', 'export const t = 1;\n');
+    const before = commitAll(t.worktree, 'fix');
+    completeStep(t.worktree);
+    sh('git', ['push', '-q', 'origin', t.branch], t.worktree);
+    const pr = gh.createPR({ head: t.branch, base: 'main', title: 'typo', body: `Closes #${n}` });
+    gh.enableAutoMerge(pr.number);
+    sh('git', ['fetch', '-q', '--prune', 'origin'], fx.root);
+    // worktree가 완료 커밋 전에 머물러 있다(다른 곳에서 완료 처리해 병합한 경우)
+    sh('git', ['checkout', '-q', '-B', t.branch, before], t.worktree);
+    const local = readLocalPlans({ main: fx.root, cfg, gh, worker: 'runner-1' }).find(
+      (l) => l.id === '20261112-typo',
+    )!;
+    assert.notEqual(local.stepStatus, 'completed');
+    assert.equal(local.pr?.state, 'merged');
+  });
 });

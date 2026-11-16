@@ -3,6 +3,7 @@ import {
   existsSync,
   linkSync,
   lstatSync,
+  mkdtempSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -10,10 +11,25 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ClaimError, claimHeartbeat, completeStep, linkFile, newTask } from '../commands/task.ts';
+import { planHash, planHashAt } from '../ci/plan-hash.ts';
+import {
+  ClaimError,
+  claimHeartbeat,
+  claimOwner,
+  completeStep,
+  findRestore,
+  linkFile,
+  newTask,
+  releaseClaim,
+  restorablePlan,
+  restorePlan,
+} from '../commands/task.ts';
 import { loadConfig } from '../lib/config.ts';
+import { FakeGitHub, addFakeIssue, initFakeState } from '../lib/github-fake.ts';
+import type { Comment } from '../lib/github.ts';
 import { parseDoc } from '../lib/plan.ts';
-import { commitAll, makeFixture, sh, tmp, write } from './helpers.ts';
+import { findRevertMarker, revertMarker } from '../lib/revert-marker.ts';
+import { commitAll, makeFixture, revertOnMain, sh, tmp, write, type Fixture } from './helpers.ts';
 
 test('linkFile: 심볼릭 링크 → 하드 링크 순으로 연결하고 복사하지 않는다(ADR-0005)', () => {
   const d = tmp('harness-link-');
@@ -134,6 +150,287 @@ test('complete-step: 마지막 step이면 계획을 completed/로 옮기는 계�
       files.split('\n').every((f) => f.startsWith('docs/exec-plans/')),
       '계획 전용 커밋은 계획 파일만 바꾼다',
     );
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ---------- revert된 계획의 복원 (8.3절 "되돌리기") ----------
+
+const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
+
+function comment(author: string, body: string, editors: string[] = []): Comment {
+  const at = '2026-11-16T00:00:00Z';
+  return {
+    author,
+    body,
+    createdAt: at,
+    history: { changes: [author, ...editors].map((by) => ({ by, at })), complete: true },
+  };
+}
+
+test('revert 표식: 봇이 쓰고 봇만 고친 댓글의 가장 최근 표식만 읽는다', () => {
+  const line = revertMarker(SHA_A, '20261111-demo');
+  assert.equal(line, `<!-- harness-revert target=${SHA_A} plan=20261111-demo -->`);
+  assert.throws(() => revertMarker('abc', '20261111-demo'), /40자 SHA/);
+  assert.throws(() => revertMarker(SHA_A, '../x'), /계획 id/);
+  const bot = 'harness-bot';
+  assert.deepEqual(findRevertMarker([comment(bot, `되돌렸다\n${line}`)], bot), {
+    target: SHA_A,
+    planId: '20261111-demo',
+  });
+  // 최근 댓글이 이긴다. 계정 이름의 대소문자는 가리지 않는다
+  assert.equal(
+    findRevertMarker(
+      [comment(bot, line), comment('Harness-Bot', revertMarker(SHA_B, '20261112-two'))],
+      bot,
+    )?.target,
+    SHA_B,
+  );
+  // 다른 계정의 댓글, 다른 계정이 고친 봇 댓글, 이력을 확인하지 못한 댓글은 믿지 않는다
+  assert.equal(findRevertMarker([comment('contractor', line)], bot), null);
+  assert.equal(findRevertMarker([comment(bot, line, ['contractor'])], bot), null);
+  assert.equal(findRevertMarker([{ ...comment(bot, line), history: null }], bot), null);
+  assert.equal(findRevertMarker([comment(bot, line)], ''), null);
+  // 형식이 다른 표식은 무시한다
+  for (const bad of [
+    `<!-- harness-revert target=${SHA_A.slice(1)} plan=20261111-demo -->`,
+    `<!-- harness-revert target=${SHA_A.toUpperCase()} plan=20261111-demo -->`,
+    `<!-- harness-revert target=${SHA_A} plan=demo -->`,
+    `<!-- harness-revert plan=20261111-demo target=${SHA_A} -->`,
+  ])
+    assert.equal(findRevertMarker([comment(bot, bad)], bot), null, bad);
+});
+
+/** 가짜 GitHub을 켜고 `fn`을 실행한다. 상태 파일 경로를 넘긴다 */
+async function withFakeGh(fx: Fixture, fn: (state: string) => Promise<void>): Promise<void> {
+  const prev = process.env.HARNESS_FAKE_GH;
+  const state = path.join(fx.dir, 'gh.json');
+  initFakeState(state, { remote: fx.remote, owner: 'maker' });
+  process.env.HARNESS_FAKE_GH = state;
+  try {
+    await fn(state);
+  } finally {
+    if (prev === undefined) delete process.env.HARNESS_FAKE_GH;
+    else process.env.HARNESS_FAKE_GH = prev;
+  }
+}
+
+function remoteClone(fx: Fixture): string {
+  const clone = path.join(mkdtempSync(path.join(fx.dir, 'clone-')), 'c');
+  sh('git', ['clone', '-q', fx.remote, clone], fx.dir);
+  sh('git', ['config', 'user.email', 'test@example.invalid'], clone);
+  sh('git', ['config', 'user.name', 'test'], clone);
+  sh('git', ['config', 'commit.gpgsign', 'false'], clone);
+  return clone;
+}
+
+/** PR 병합 흉내: 브랜치를 push하고 원격 main에 squash 병합한 뒤 브랜치와 worktree를 정리한다. 병합 커밋 SHA */
+function squashMerge(fx: Fixture, worktree: string, branch: string): string {
+  sh('git', ['push', '-q', 'origin', branch], worktree);
+  const clone = remoteClone(fx);
+  sh('git', ['merge', '--squash', '-q', `origin/${branch}`], clone);
+  const sha = commitAll(clone, `squash: ${branch}`);
+  sh('git', ['push', '-q', 'origin', 'main'], clone);
+  sh('git', ['push', '-q', 'origin', '--delete', branch], clone);
+  sh('git', ['worktree', 'remove', '--force', worktree], fx.root);
+  sh('git', ['branch', '-D', branch], fx.root);
+  sh('git', ['fetch', '-q', '--prune', 'origin'], fx.root);
+  return sha;
+}
+
+const STEP_TEXT = (n: number) =>
+  `# Step ${n}: s${n}\n\n## 읽어야 할 파일\n\n- \`AGENTS.md\`\n\n## 작업\n\n1. src/s${n}.ts를 만든다.\n\n` +
+  '## Acceptance Criteria\n\n```bash\ntest -f AGENTS.md\n```\n\n## 금지사항\n\n- 테스트를 지우지 마라. 이유: R4\n';
+
+/** step 2개짜리 계획을 채운다(계획 골격 worktree에서) */
+function fillTwoSteps(worktree: string, id: string): void {
+  const dir = `docs/exec-plans/active/${id}`;
+  write(
+    worktree,
+    `${dir}/index.json`,
+    JSON.stringify(
+      {
+        plan: id,
+        steps: [
+          { step: 0, name: 's0', status: 'in_progress' },
+          { step: 1, name: 's1', status: 'pending' },
+        ],
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  write(worktree, `${dir}/step0.md`, STEP_TEXT(0));
+  write(worktree, `${dir}/step1.md`, STEP_TEXT(1));
+}
+
+const readFm = (root: string, rel: string) =>
+  parseDoc(readFileSync(path.join(root, rel), 'utf8')).frontmatter!;
+
+test('new-task --issue: 첫 step의 PR이 revert된 Issue는 같은 id의 계획을 active/에 복원한다', async () => {
+  const fx = makeFixture();
+  try {
+    await withFakeGh(fx, async (state) => {
+      const issue = addFakeIssue(state, 'Demo', '본문');
+      const gh = new FakeGitHub(state);
+      const cfg = loadConfig(fx.root);
+      // 표식이 없는 평소의 접수: 새 골격
+      const r = await newTask(fx.root, {
+        issue,
+        slug: 'demo',
+        owner: 'runner-1',
+        date: '20261111',
+      });
+      const id = '20261111-demo';
+      const dir = `docs/exec-plans/active/${id}`;
+      assert.equal(readFm(r.worktree, r.planFile).status, 'draft');
+      fillTwoSteps(r.worktree, id);
+      write(r.worktree, 'src/s0.ts', 'export const s0 = 1;\n');
+      const sideCommit = commitAll(r.worktree, 'step0');
+      assert.equal(completeStep(r.worktree).last, false);
+      const target = squashMerge(fx, r.worktree, r.branch);
+      const hashAtTarget = planHashAt(fx.root, target, dir);
+      assert.ok(hashAtTarget);
+      revertOnMain(fx, target);
+      assert.equal(
+        sh('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', dir], fx.root),
+        '',
+      );
+
+      // 표식이 없으면 복원하지 않는다. 봇이 아닌 계정의 표식도 믿지 않는다
+      assert.equal(findRestore(fx.root, cfg, gh, issue), null);
+      gh.commentAs(issue, 'contractor', revertMarker(target, id));
+      assert.equal(findRestore(fx.root, cfg, gh, issue), null);
+      // 봇의 표식이어도: main의 조상이 아닌 커밋, 다른 Issue의 계획, 형식이 다른 SHA는 복원하지 않는다
+      const req = { target, planId: id, issue };
+      assert.equal(restorablePlan(fx.root, 'origin/main', { ...req, target: sideCommit }), null);
+      assert.equal(restorablePlan(fx.root, 'origin/main', { ...req, issue: issue + 1 }), null);
+      assert.equal(restorablePlan(fx.root, 'origin/main', { ...req, target: 'HEAD' }), null);
+      assert.equal(restorePlan(fx.root, 'origin/main', { ...req, target: sideCommit }), null);
+      assert.deepEqual(restorablePlan(fx.root, 'origin/main', req)?.reverted, [0]);
+
+      gh.comment(issue, `main의 check가 실패해 되돌렸다.\n${revertMarker(target, id)}`);
+      // 다른 작업자의 선점이면 거부한다(첫 step의 Issue는 닫힌 적이 없어 선점이 남아 있다)
+      await assert.rejects(
+        newTask(fx.root, { issue, slug: 'other', owner: 'runner-2' }),
+        ClaimError,
+      );
+      const again = await newTask(fx.root, {
+        issue,
+        slug: 'other',
+        size: 'small',
+        owner: 'runner-1',
+      });
+      assert.deepEqual([again.id, again.branch, again.step], [id, r.branch, 0]);
+      assert.equal(again.planFile, `${dir}/plan.md`);
+      const doc = parseDoc(readFileSync(path.join(again.worktree, again.planFile), 'utf8'));
+      assert.deepEqual([doc.frontmatter!.status, doc.frontmatter!.owner], ['active', 'runner-1']);
+      assert.match(doc.body, new RegExp(`revert된 계획 복원: 대상 ${target.slice(0, 12)}`));
+      const idx = JSON.parse(readFileSync(path.join(again.worktree, dir, 'index.json'), 'utf8'));
+      assert.deepEqual(idx.steps[0], { step: 0, name: 's0', status: 'pending' });
+      assert.equal(idx.steps[1].status, 'pending');
+      // 핵심 섹션과 step 파일은 그대로다: 받은 계획 승인이 유지된다
+      assert.equal(planHash(again.worktree, dir), hashAtTarget);
+      assert.equal(existsSync(path.join(again.worktree, 'src/s0.ts')), false);
+      assert.match(gh.comments(issue).at(-1)!.body, /revert된 계획 `20261111-demo` 복원/);
+    });
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('new-task --issue: revert된 소규모 계획을 복원하고, 풀린 선점은 다시 잡는다', async () => {
+  const fx = makeFixture();
+  try {
+    await withFakeGh(fx, async (state) => {
+      const issue = addFakeIssue(state, 'Typo', '본문');
+      const cfg = loadConfig(fx.root);
+      const r = await newTask(fx.root, {
+        issue,
+        slug: 'typo',
+        size: 'small',
+        owner: 'runner-1',
+        date: '20261111',
+      });
+      const id = '20261111-typo';
+      write(r.worktree, 'src/typo.ts', 'export const t = 1;\n');
+      commitAll(r.worktree, 'fix');
+      assert.equal(completeStep(r.worktree).last, true);
+      const target = squashMerge(fx, r.worktree, r.branch);
+      assert.notEqual(showAt(fx, target, `docs/exec-plans/completed/${id}.md`), '');
+      revertOnMain(fx, target);
+      // 병합으로 Issue가 닫혔을 때 선점이 풀렸다
+      assert.equal(releaseClaim(fx.root, cfg, issue), true);
+      new FakeGitHub(state).comment(issue, revertMarker(target, id));
+
+      const again = await newTask(fx.root, { issue, owner: 'runner-2' });
+      assert.deepEqual([again.id, again.branch, again.step], [id, 'feat/20261111-typo', null]);
+      assert.equal(again.planFile, `docs/exec-plans/active/${id}.md`);
+      const fm = readFm(again.worktree, again.planFile);
+      assert.deepEqual([fm.status, fm.owner, fm.issue], ['active', 'runner-2', issue]);
+      assert.equal(
+        existsSync(path.join(again.worktree, `docs/exec-plans/completed/${id}.md`)),
+        false,
+      );
+      sh('git', ['fetch', '-q', '--prune', 'origin'], fx.root);
+      assert.equal(claimOwner(fx.root, cfg, issue), 'runner-2');
+    });
+  } finally {
+    fx.cleanup();
+  }
+});
+
+/** 그 커밋 트리에 있는 경로 이름(없으면 '') */
+function showAt(fx: Fixture, rev: string, file: string): string {
+  return sh('git', ['ls-tree', '--name-only', rev, '--', file], fx.root);
+}
+
+test('new-task --plan: 마지막 step의 PR이 revert되면 복원하지 않고, 풀린 선점을 다시 잡는다', async () => {
+  const fx = makeFixture();
+  try {
+    await withFakeGh(fx, async (state) => {
+      const issue = addFakeIssue(state, 'Two', '본문');
+      const cfg = loadConfig(fx.root);
+      const gh = new FakeGitHub(state);
+      const r0 = await newTask(fx.root, {
+        issue,
+        slug: 'two',
+        owner: 'runner-1',
+        date: '20261111',
+      });
+      const id = '20261111-two';
+      fillTwoSteps(r0.worktree, id);
+      write(r0.worktree, 'src/s0.ts', 'export const s0 = 1;\n');
+      commitAll(r0.worktree, 'step0');
+      completeStep(r0.worktree);
+      squashMerge(fx, r0.worktree, r0.branch);
+      const r1 = await newTask(fx.root, { plan: id, step: 1, owner: 'runner-1' });
+      write(r1.worktree, 'src/s1.ts', 'export const s1 = 1;\n');
+      commitAll(r1.worktree, 'step1');
+      assert.equal(completeStep(r1.worktree).last, true);
+      const target = squashMerge(fx, r1.worktree, r1.branch);
+      revertOnMain(fx, target);
+      gh.comment(issue, revertMarker(target, id));
+      // main의 계획이 active/로 돌아와 있다: 복원할 것이 없다
+      assert.notEqual(showAt(fx, 'origin/main', `docs/exec-plans/active/${id}/plan.md`), '');
+      assert.equal(findRestore(fx.root, cfg, gh, issue), null);
+
+      // 마지막 step 병합으로 Issue가 닫혀 선점이 풀렸고, revert 워크플로가 Issue를 다시 열었다
+      assert.equal(releaseClaim(fx.root, cfg, issue), true);
+      const again = await newTask(fx.root, { plan: id, step: 1, owner: 'runner-2' });
+      assert.equal(again.branch, 'feat/20261111-two-s1');
+      sh('git', ['fetch', '-q', '--prune', 'origin'], fx.root);
+      assert.equal(claimOwner(fx.root, cfg, issue), 'runner-2');
+      const idx = JSON.parse(
+        readFileSync(path.join(again.worktree, `docs/exec-plans/active/${id}/index.json`), 'utf8'),
+      );
+      assert.deepEqual(
+        idx.steps.map((s: { status: string }) => s.status),
+        ['completed', 'pending'],
+      );
+    });
   } finally {
     fx.cleanup();
   }
