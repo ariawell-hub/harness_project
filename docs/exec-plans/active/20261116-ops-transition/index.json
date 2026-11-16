@@ -15,16 +15,6 @@
       "step": 2,
       "name": "selftest-runner",
       "status": "pending"
-    },
-    {
-      "step": 3,
-      "name": "selftest-live",
-      "status": "pending"
-    },
-    {
-      "step": 4,
-      "name": "test-repo",
-      "status": "pending"
     }
   ]
 }
