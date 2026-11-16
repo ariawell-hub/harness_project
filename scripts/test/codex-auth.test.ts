@@ -27,8 +27,11 @@ test('restoreAuth: auth.json을 0600으로, 폴더를 0700으로 쓰고 값 없�
   const home = path.join(tmp('codex-auth-'), 'codex-home');
   const r = restoreAuth(raw(), home);
   const f = path.join(home, 'auth.json');
-  assert.equal(statSync(f).mode & 0o777, 0o600);
-  assert.equal(statSync(home).mode & 0o777, 0o700);
+  // Windows에는 POSIX 권한 비트가 없다(chmod는 읽기 전용 표시만 바꾼다). 이 도구는 Linux 러너에서만 돈다(Issue #99)
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(f).mode & 0o777, 0o600);
+    assert.equal(statSync(home).mode & 0o777, 0o700);
+  }
   assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), AUTH);
   assert.match(r.sha8, /^[0-9a-f]{8}$/);
   assert.deepEqual(r.fields, [

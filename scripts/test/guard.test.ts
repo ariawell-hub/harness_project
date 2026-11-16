@@ -548,12 +548,14 @@ test('검사 순서 규칙은 POSIX 방언에만 적용한다', () => {
 
 test('승인 요청 규칙: gh pr ready 직접 실행, 승인 요청 뒤 push, 위험도 높음의 초안 아닌 PR 생성을 막는다', () => {
   const seen: [string, string | null][] = [];
+  // 훅은 -C 경로를 절대 경로로 바꿔 넘긴다. Windows에서는 드라이브 문자가 붙는다(Issue #99)
+  const asked = path.resolve('/work/asked');
   const c = ctx({
     approvalPending: (dir, branch) => {
       seen.push([dir, branch]);
       if (branch === 'feat/20261115-asked-s0') return 2;
       if (branch === 'feat/20261115-merged-s0') return 0;
-      if (branch === null && dir === '/work/asked') return 1;
+      if (branch === null && dir === asked) return 1;
       return null;
     },
     planRisk: (_dir, branch) => (branch === 'feat/20261115-high-s0' ? 'high' : 'normal'),
@@ -584,7 +586,7 @@ test('승인 요청 규칙: gh pr ready 직접 실행, 승인 요청 뒤 push, �
   assert.match(bash('git push -f origin feat/20261115-asked-s0', c)!.rule, /^R14/);
   assert.match(bash('git push origin main', c)!.rule, /^R2/);
   // -C가 있으면 그 폴더 기준으로 조회한다
-  assert.ok(seen.some(([d, b]) => d === '/work/asked' && b === null));
+  assert.ok(seen.some(([d, b]) => d === asked && b === null));
   // 조회 함수가 없는 문맥(다른 도구·테스트)에서는 push·PR 생성을 막지 않는다
   assert.equal(bash('git push origin feat/20261115-asked-s0'), null);
   assert.equal(bash('gh pr create --head feat/20261115-high-s0 --title x --body y'), null);
@@ -620,9 +622,11 @@ test('승인 요청 규칙: 실제 worktree의 표시와 계획 위험도로 판
   const p = run(`git push origin ${branch}`)!;
   assert.match(p.rule, /^승인 요청/);
   assert.match(p.what, /1개/);
-  assert.match(run(`git -C ${wt} push origin HEAD`)!.rule, /^승인 요청/);
+  // 셸 명령에 넣는 경로는 `/`로 쓴다. Windows 경로의 `\`는 POSIX 셸에서 이스케이프다(Issue #99)
+  const wtArg = wt.replaceAll('\\', '/');
+  assert.match(run(`git -C ${wtArg} push origin HEAD`)!.rule, /^승인 요청/);
   // 인자 없는 push는 지금처럼 세션 위치(main) 기준으로 R2다
-  assert.match(run(`git -C ${wt} push`)!.rule, /^R2/);
+  assert.match(run(`git -C ${wtArg} push`)!.rule, /^R2/);
   // 다른 브랜치의 push는 영향을 받지 않는다
   assert.equal(run('git push origin feat/20261115-other-s0'), null);
 });

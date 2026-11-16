@@ -124,7 +124,8 @@ test('runRepro: 테스트 폴더가 리포 밖을 가리키는 심볼릭 링크�
   const root = tmp();
   const outside = tmp();
   mkdirSync(path.join(root, 'scripts'), { recursive: true });
-  symlinkSync(outside, path.join(root, 'scripts/test'));
+  // 'junction': 개발자 모드가 꺼진 Windows도 디렉터리 정션은 만들 수 있다(다른 OS는 이 인자를 무시한다, Issue #99)
+  symlinkSync(outside, path.join(root, 'scripts/test'), 'junction');
   const r = runRepro({
     root,
     verdict: verdict([finding({ repro: T('link', '  assert.equal(1, 2);') })]),

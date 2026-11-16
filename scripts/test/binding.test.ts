@@ -339,14 +339,35 @@ test('oneLine: 줄바꿈·제어 문자를 공백으로(기록 job 로그에 워
 
 test('samePrContent: 파일 이름을 pathspec으로 해석하지 않는다(`:!a.txt` 같은 이름으로 우회 불가)', () => {
   const { root } = repo();
-  write(root, ':!a.txt', 'x\n');
-  write(root, ':!*', 'x\n');
-  write(root, '[id].txt', 'x\n');
-  const approved = commitAll(root, 'odd names');
+  // Windows는 `:`·`*`가 든 파일을 만들 수 없다. 작업 트리를 거치지 않고 인덱스에 바로 넣어 커밋한다(Issue #99)
+  const blob = sh('git', ['rev-parse', 'HEAD:b.txt'], root);
   const files = ['a.txt', ':!a.txt', ':!*', '[id].txt'];
+  for (const name of files.slice(1))
+    sh(
+      'git',
+      [
+        '-c',
+        'core.protectNTFS=false',
+        'update-index',
+        '--add',
+        '--cacheinfo',
+        `100644,${blob},${name}`,
+      ],
+      root,
+    );
+  sh('git', ['commit', '-q', '-m', 'odd names'], root);
+  const approved = sh('git', ['rev-parse', 'HEAD'], root);
+  assert.deepEqual(
+    sh('git', ['ls-tree', '--name-only', '-z', 'HEAD'], root).split('\0').filter(Boolean).sort(),
+    [...files, 'b.txt'].sort(),
+  );
   assert.equal(samePrContent(root, approved, files), true);
   write(root, 'a.txt', 'a1\na2      changed\na3\n');
-  commitAll(root, 'whitespace only');
+  sh('git', ['add', 'a.txt'], root);
+  sh('git', ['commit', '-q', '-m', 'whitespace only'], root);
+  assert.deepEqual(sh('git', ['diff', '--name-only', approved, 'HEAD'], root).split('\n'), [
+    'a.txt',
+  ]);
   assert.equal(samePrContent(root, approved, files), false);
 });
 

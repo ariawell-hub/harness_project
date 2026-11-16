@@ -118,7 +118,8 @@ test('문자열은 pr/ 안이어도 실제 경로가 밖이면(심볼릭 링크)
   const outside = path.join(path.dirname(pr), 'secret');
   mkdirSync(outside);
   writeFileSync(path.join(outside, 'auth.json'), '{}');
-  symlinkSync(outside, path.join(pr, 'link'));
+  // 'junction': 개발자 모드가 꺼진 Windows도 디렉터리 정션은 만들 수 있다(다른 OS는 이 인자를 무시한다, Issue #99)
+  symlinkSync(outside, path.join(pr, 'link'), 'junction');
   const r = scan(
     [
       init,
