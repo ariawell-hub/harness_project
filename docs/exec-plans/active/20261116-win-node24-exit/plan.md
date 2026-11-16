@@ -60,6 +60,7 @@ Windows PC(Node v24.12.0, 개발자 모드 꺼짐)의 main에서 `node scripts/h
 - 2026-11-16 step0: 계획 작성. #57 계획 커밋 전 로컬 `check`가 `test` 단계에서 실패했다(787초, `record.test.ts` 4개와 `repro.test.ts` 1개). `record.test.ts`만 3회 반복해 3회 모두 같은 4개가 실패했다(흔들림이 아니다). 실험: `NODE_OPTIONS=--import`로 `harness.ts`의 `process.exit`를 "종료 코드만 정하고 자연 종료"로 바꿔 끼우면 `record.test.ts` 7개가 3회 모두 통과했다. `fetch` 한 번 뒤 `process.exit`만 하는 작은 스크립트로는 재현되지 않았다(요청 여러 개와 POST가 있어야 하는 것으로 보인다).
 - 2026-11-16 step0: 계획 검증 1라운드에서 `review/codex`가 F1(P1, `TaskError` 종료 코드 3을 확인하는 테스트가 없다)을 냈다. step0 작업 3에 오류 갈래 테스트를 더해 2라운드에서 두 검증자가 승인했다(head `6b8a00a`).
 - 2026-11-16 step0: 원인 1·2를 로컬에서 고친 뒤 `check`가 다시 `test` 단계에서 실패했다(803초). `check` 로그는 test 출력의 끝부분만 담아 실패 3개만 보였다. `node --test "scripts/test/*.test.ts"`를 파일로 받아 전체를 확인했다: 443개 중 5개 실패(원인 3의 5개). `record.test.ts`와 `repro.test.ts`는 통과했다. 범위가 늘어 계획을 고치고 계획 검증을 다시 받는다.
+- 2026-11-16 step0: 범위를 넓힌 계획(head `8fbde5d`)에 `review/claude`는 승인, `review/codex`는 F2(P1, 강제 종료 타이머의 `unref`를 확인하는 기준이 없다)를 냈다. step0 작업 3에 동작(`--help`가 5초 안에 끝난다)과 구조(`setTimeout(…).unref()`) 확인을 더하고 AC에 두 줄을 더했다.
 
 ## 의사결정 로그
 
