@@ -1,51 +1,59 @@
-# Step 4: selftest-runner
+# Step 4: test-repo
+
+이 step은 대화 세션이 실행한다. 제작자 작업(테스트 리포 준비)과 실제 GitHub이 필요해 runner 세션으로는 끝낼 수 없다.
 
 ## 읽어야 할 파일
 
-- `docs/exec-plans/active/20261116-ops-transition/plan.md` (수용 기준 4)
-- `docs/harness/design.md` 12.4절(9.2절·4.5절·전체 흐름 시나리오), 9.2절(3회·5회), 4.5절(runner), 10.3절(승인 결속 기준)
-- 앞 step에서 만든·바꾼 파일: `scripts/selftest/run.ts`(`Scenario`, `ScenarioContext`, `sample`, `cli`), `scripts/selftest/scenarios/`, `scripts/test/selftest.test.ts`
-- `scripts/test/fake-agent.ts`(가짜 에이전트의 동작 지정 방식), `scripts/lib/github-fake.ts`(`setCheck`, `mergeRequires`, 상태 파일), `scripts/test/runner.test.ts`, `scripts/test/runner-workers.test.ts`(실제 `run` 프로세스를 띄우는 테스트), `scripts/test/runner-pr.test.ts`, `scripts/test/binding.test.ts`
-- `scripts/harness.ts`의 `run`·`review-plan` 명령
+- `docs/exec-plans/active/20261116-ops-transition/plan.md` (수용 기준 4, "다음 할 일"의 제작자 작업)
+- `docs/harness/design.md` 10.4절 운영 전환 체크리스트 5·6, 16절 "새 프로젝트", 12.4절, 0.2절
+- `docs/SECURITY.md`의 "테스트 리포 준비 (제작자, #57 step4)" 절, `docs/decisions/ADR-0004-q20-lab-repo.md`
+- `lab/q20/README.md`, `lab/q20/report.ts`, `lab/q20/test/`(결과 형식과 완결성 검사)
+- `docs/exec-plans/tech-debt-tracker.md`의 TD-38(실제 GitHub에서 보지 못한 경로), TD-1
+- 앞 step과 보안 계획(`20261116-ops-security`, #102)의 step0~4가 만든·바꾼 파일(모두 먼저 병합돼 있어야 한다): `.github/workflows/revert.yml`, `scripts/ci/revert.ts`, `scripts/commands/task.ts`(`restorePlan`), `scripts/selftest/`, `.github/workflows/gates.yml`(`selftest` job), `scripts/commands/ops-check.ts`, `.github/CODEOWNERS`
 
 ## 작업
 
-1. 가짜 에이전트를 자체 테스트가 쓸 수 있게 한다: `scripts/test/fake-agent.ts`를 `scripts/selftest/fake-agent.ts`로 옮기고(기존 테스트의 import·설정 경로를 고친다) `ScenarioContext`에 더한다.
+1. 결과 기록 틀: `lab/ops-transition/`
+   - `README.md`(시험 리포 이름, 날짜, 결과 형식, 실행 방법), `results/<항목>.json`, `report.ts`, `test/report.test.ts`.
+   - 결과 형식은 `lab/q20/README.md`의 것과 같다(`item`, `summary`, `cases[]`: `name`·`expected`·`observed`·`verdict`·`evidence`).
+   - `report.ts --item <항목>` / `--all`: 기록 완결(필드, `n/a`가 아니면 근거 1개 이상)을 검사하고, 아래 "필수 사례"가 모두 있고 `verdict`가 `pass`일 때만 종료 코드 0이다. 필수가 아닌 사례는 `fail`·`partial`이어도 기록이 완결되면 통과다. 자격증명 값은 적지 않는다.
+   - 항목과 필수 사례:
+     - `selftest`: `ci-check`(테스트 리포의 `check`에서 자체 테스트 통과), `live`(`self-test --live` 통과율 기록. 판정은 세 시나리오 모두 1회 이상 통과면 `pass`)
+     - `flow`: `runner-unattended`(제작자가 만든 Issue를 runner가 선점 → 계획 검증 초안 PR → 두 검증자의 계획 승인 → step → PR → 교차 검증 → 계획 완료 커밋 → 자동 병합까지 사람 개입 없이), `carry-over`(승인된 PR을 main 병합으로 갱신하면 판정 없이 `이어받음`), `no-carry`(PR 파일이 바뀐 갱신은 다시 판정)
+     - `revert`: `rerun-first`(main `check` 첫 실패에서 재실행만), `revert-pr`(두 번째 실패에서 `revert/<SHA>` PR, `revert-check` success, `review/*` "해당 없음", 자동 병합), `issue-reopen`(원래 Issue가 다시 열리고 표식 댓글이 있다), `plan-restore`(`new-task --issue`가 계획을 복원), `tampered`(여분 변경을 더한 `revert/` PR은 `revert-check` 실패로 병합되지 않는다)
+     - `guard-selftest`: `protected-pr`(보호 경로 PR에서 `selftest` job이 돌고 `harness-guard` 설명에 반영), `non-protected-pr`(보호 경로 밖 PR에서는 돌지 않는다)
+     - `codeowners`: `owner-required`(코드 오너 리뷰 필수·승인 수 0 설정에서 보호 경로 PR은 제작자 승인 전 병합되지 않는다), `auto-merge`(보호 경로 밖 PR은 사람 승인 없이 자동 병합된다)
+     - `workflow-scope`: `push-rejected`(`workflow` 권한 없는 봇 토큰의 워크플로 파일 push가 거부된다). 필수 아님: `update-after-workflow-change`(main에 워크플로 변경이 들어간 뒤 PR 브랜치를 main 병합으로 갱신하는 push가 되는가), `revert-of-workflow`(워크플로를 바꾼 커밋의 revert push)
+     - `stage`: `operation-pr`(테스트 리포에서 `stage`를 `operation`으로 바꾸는 PR이 제작자 승인으로만 병합된다)
+     - `td38`(필수 아님): TD-38의 "가짜 GitHub으로만 확인한 것" 목록 가운데 이번에 실제로 본 것과 못 본 것
 
-   ```ts
-   /** 샘플 리포의 에이전트 설정을 실행기 쪽 가짜 에이전트로 바꾼다. script는 가짜 에이전트의 동작 지정(기존 형식 그대로) */
-   agent(s: Sample, script: Record<string, unknown>): void;
-   /** 가짜 GitHub 상태 파일을 읽고 고친다(Issue·PR·체크·댓글) */
-   github(s: Sample): { read(): unknown; update(fn: (state: any) => void): void };
-   ```
+2. 테스트 리포 준비와 실행(순서)
+   1. 제작자에게 `docs/SECURITY.md` "테스트 리포 준비" 절의 작업을 요청하고 끝났는지 확인한다(봇 토큰으로 리포 조회, `required-checks`를 테스트 리포 체크아웃에서 실행).
+   2. 하네스 main을 테스트 리포에 올린다(이 리포의 이력 없이 트리만 담은 첫 커밋. `harness.config.json`의 `github.owner`·`bot`·`ci.recorderAppId`는 테스트 리포 값으로, `stage`는 `build`). 테스트 리포의 main 보호 때문에 첫 내용은 제작자가 정한 방법(빈 리포의 첫 push 또는 PR)으로 넣는다.
+   3. 필수 체크는 각 체크가 한 번 보고된 뒤 제작자가 등록한다(부트스트랩, 10.4절). 등록 뒤 `required-checks` 통과를 확인한다.
+   4. 위 사례를 하나씩 실행하고 결과 파일에 근거(PR·실행 URL)를 적는다. main을 일부러 깨는 PR(예: 병합 뒤에만 실패하는 날짜 의존 테스트)은 테스트 리포에서만 만든다.
+   5. `workflow-scope`와 `stage` 사례는 마지막에 한다(제작자가 봇 PAT를 재발급한 뒤). 재발급 뒤 `ops-check`를 테스트 리포에서 실행해 결과를 적는다.
+   6. 끝나면 제작자에게 뒷정리(테스트 리포의 자격증명 교체, 봇 초대 철회, 리포 보관)를 요청하고 ADR-0004의 확인 명령 결과를 진행 로그에 적는다.
 
-   가짜 에이전트는 실행기(main) 쪽 파일을 쓴다. 가짜 GitHub은 대상 하네스의 구현(`HARNESS_FAKE_GH`)이다.
+3. 결함 처리: 시험에서 하네스 결함이 드러나면 진행 로그와 "발견 사항"에 적는다. 이 step의 PR에서 고칠 수 있는 것은 문서와 `lab/ops-transition/`뿐이다. 코드를 고쳐야 하면 계획에 새 step을 더해(계획만 담은 커밋으로 다시 검증받는다) 고친 뒤 사례를 다시 실행한다. 고치지 않기로 한 것은 TD로 등록한다.
 
-2. 시나리오(`scripts/selftest/scenarios/`). runner는 대상 하네스의 `harness.ts run --worker <이름> --no-wait --max-iterations <N>`을 자식 프로세스로 띄운다.
-   - `f92-switch-stop.ts`(9.2절): AC가 계속 실패하는 step. 같은 키로 3회 실패한 뒤의 세션 프롬프트에 방법 전환 지시가 들어 있고(가짜 에이전트가 받은 프롬프트를 파일로 남긴다), 5회에 계획이 `blocked`이고 Issue에 "중단 보고" 댓글과 `needs-human` 라벨이 있다.
-   - `r45-runner.ts`(4.5절): step 2개짜리 계획의 Issue와 다른 Issue 하나를 사람 개입 없이 끝까지 처리한다(가짜 GitHub이 필수 체크 통과 뒤 병합한다). 세션이 "완료"라고 출력했지만 AC가 실패하면 step을 완료로 두지 않는다. 세션 시간 초과와 한 계획의 `blocked` 뒤에 runner 프로세스가 죽지 않고 다른 Issue를 처리한다.
-   - `flow-full.ts`(전체 흐름): 선점(`claim/<N>`이 원격에 있다) → 계획(계획만 담은 커밋의 초안 PR) → 가짜 GitHub에 계획 승인 원장과 체크를 넣으면 step 진행 → PR → 검증 승인 체크 → 계획 완료 커밋(PR head의 step이 `completed`) → 자동 병합 → Issue 닫힘. 승인 이어받기: 승인된 PR을 `origin/main` 병합으로 갱신한 head에서 `review-plan`의 이어받기 출력(`carry_claude`·`carry_codex`)이 채워지고, PR 파일을 공백만 바꾼 커밋을 더한 head에서는 비어 있다(가짜 GitHub이 `review-plan`의 조회를 받지 못하면 이 부분은 `binding`의 CLI 입력으로 확인한다. 방법은 재량이되 대상 하네스의 CLI만 쓴다).
-   - 시나리오마다 runner 실행 횟수와 시간을 제한한다(`--max-iterations`, 시나리오 시간 제한 300초).
-
-3. `scripts/test/selftest.test.ts`: 새 시나리오 셋도 이 리포에 대해 `pass`다. 약화 확인을 하나 더한다: AC 판정을 건너뛰게 바꾼 하네스 사본에서 `r45-runner`가 `fail`이다.
-
-4. 흔들림 확인: 새 시나리오 셋을 로컬에서 5번 반복 실행해 결과를 진행 로그에 적는다. 한 번이라도 실패하면 원인을 고친다(대기 시간을 늘려 가리지 않는다).
-
-5. 문서: 설계서 12.4절 시나리오 표에 세 행, `architecture.md`(가짜 에이전트 위치), `CHANGELOG`, 설계서 버전·변경 이력.
+4. 문서: 설계서 10.4절 체크리스트 5(결과 위치 `lab/ops-transition/results/`), 16절(도입 절차에서 실제로 걸린 곳을 반영), 19절 2단계(무인 시범 실행 결과), `tech-debt-tracker.md`(TD-38·TD-1 갱신), `docs/index.md`에 필요하면 한 줄, `CHANGELOG`, 설계서 버전·변경 이력.
 
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/selftest.test.ts scripts/test/runner.test.ts scripts/test/runner-workers.test.ts
-node scripts/harness.ts self-test --only f92-switch-stop,r45-runner,flow-full
-test -f scripts/selftest/fake-agent.ts
-! test -f scripts/test/fake-agent.ts
-! grep -rnE "from '\.\./\.\./(lib|gates|hooks|commands|runner|ci)/" scripts/selftest/scenarios
+node --test lab/ops-transition/test/report.test.ts
+node lab/ops-transition/report.ts --all
+test -f lab/ops-transition/results/revert.json
+test -f lab/ops-transition/results/flow.json
+node scripts/harness.ts doc-lint
 ```
 
 ## 금지사항
 
-- 시나리오에서 runner 함수(`runRunner`, `pickNext`)를 직접 부르지 마라. 이유: 대상 하네스의 CLI만 불러야 main의 시나리오로 PR의 하네스를 시험할 수 있다.
-- 가짜 에이전트의 동작 지정 형식을 바꾸지 마라. 이유: 기존 runner 테스트 전체가 그 형식에 기댄다. 필요한 동작은 더하기만 한다.
-- 흔들리는 시나리오를 재시도나 긴 `sleep`으로 통과시키지 마라. 이유: step6에서 이 시나리오가 보호 경로 PR의 병합을 막는다. 흔들리면 모든 하네스 PR이 막힌다.
-- step3에서 만든 시나리오 파일을 고치지 마라(import 경로 수정이 꼭 필요한 경우 제외). 이유: 시나리오는 더하기만 하는 구조다.
+- 하네스 리포(`harness_project`)의 main을 일부러 깨거나 시험용 PR을 하네스 리포에 올리지 마라. 이유: revert 시험과 공격·시험 PR은 테스트 리포에서만 한다(ADR-0004).
+- 테스트 리포의 보호 설정·environment·시크릿·App을 봇이 만들거나 바꾸지 마라. 이유: R20. 제작자가 한다.
+- 관찰하지 못한 사례를 `pass`로 적지 마라. 이유: 이 기록이 운영 전환(보안 계획(`20261116-ops-security`, #102) step5)의 근거다. 못 봤으면 `n/a`와 이유를 적고, 필수 사례면 step을 끝내지 않는다.
+- 결과 파일·로그에 자격증명 값이나 그 일부를 적지 마라. 이유: R10. 필요하면 sha256 앞 8자만 쓴다.
+- 이 step의 PR에서 `scripts/`·`.github/`를 고치지 마라. 이유: 시험에서 나온 수정은 새 step으로 계획 검증을 거친다(TD-32).
+- 테스트 리포에서 쓴 진짜 자격증명을 시험 뒤 그대로 두지 마라. 이유: ADR-0004. 교체와 봇 초대 철회를 요청하고 확인한다.
