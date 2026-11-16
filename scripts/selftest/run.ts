@@ -3,7 +3,7 @@
 // 실행기와 시나리오는 대상 하네스의 내부 모듈을 import하지 않는다. 다른 버전의 하네스(PR의 하네스)를
 // 시험할 수 있어야 하기 때문이다. 기대는 것은 CLI·훅의 입출력과 가짜 GitHub 상태 파일 형식뿐이다.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -41,6 +41,8 @@ export interface Sample {
   write(rel: string, content: string, cwd?: string): void;
   /** 가짜 GitHub에 열린 Issue를 더하고 번호를 돌려준다. author 기본값은 제작자 */
   issue(title: string, o?: { author?: string; body?: string; labels?: string[] }): number;
+  /** 가짜 에이전트가 받은 프롬프트(받은 순서). ctx.agent를 부른 뒤에만 쌓인다 */
+  prompts(): { slug: string; step: string; prompt: string }[];
 }
 
 export interface Scenario {
@@ -49,6 +51,8 @@ export interface Scenario {
   /** 12.4절의 어느 항목인가. 예) 'R20' */
   covers: string;
   title: string;
+  /** 이 시나리오가 쓸 수 있는 시간(초). 기본 120, runner를 띄우는 시나리오는 300 */
+  timeoutSec?: number;
   run(ctx: ScenarioContext): Promise<void> | void; // 어긋나면 예외(assert)
 }
 
@@ -61,6 +65,19 @@ export interface ScenarioContext {
   cli(s: Sample, args: string[], o?: { cwd?: string; env?: NodeJS.ProcessEnv }): Ran;
   /** 대상 하네스의 L1 훅(scripts/hooks/guard.ts)에 도구 호출 JSON을 stdin으로 넣는다 */
   hook(s: Sample, payload: Record<string, unknown>, o?: { cwd?: string }): Ran;
+  /** 샘플 리포의 에이전트 설정을 실행기 쪽 가짜 에이전트로 바꾼다. script는 가짜 에이전트의 동작 지정(기존 형식 그대로) */
+  agent(s: Sample, script: Record<string, unknown>): void;
+  /** 가짜 GitHub 상태 파일을 읽고 고친다(Issue·PR·체크·댓글) */
+  github(s: Sample): { read(): unknown; update(fn: (state: any) => void): void };
+  /**
+   * 읽기 전용 GitHub REST 응답을 흉내 내는 로컬 서버를 띄운다(대상 하네스의 CI 명령이 GITHUB_API_URL로 조회한다).
+   * routes는 경로(쿼리 제외, 앞 `/` 없음) → JSON 응답이다. 없는 경로와 GET이 아닌 요청은 404다.
+   * 시나리오가 끝나면 실행기가 끈다
+   */
+  api(
+    s: Sample,
+    routes: Record<string, unknown>,
+  ): Promise<{ url: string; set(routes: Record<string, unknown>): void; hits(): string[] }>;
 }
 
 export interface SelfTestReport {
@@ -70,10 +87,14 @@ export interface SelfTestReport {
   results: { id: string; covers: string; state: 'pass' | 'fail' | 'error'; detail: string }[];
 }
 
-/** 시나리오 하나가 쓸 수 있는 시간. 자식 프로세스의 시간 제한은 남은 시간이다 */
-const SCENARIO_TIMEOUT_MS = 120_000;
+/** 시나리오 하나가 쓸 수 있는 시간의 기본값(초). 자식 프로세스의 시간 제한은 남은 시간이다 */
+const SCENARIO_TIMEOUT_SEC = 120;
 const DETAIL_MAX = 500;
-const SCENARIO_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'scenarios');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SCENARIO_DIR = path.join(HERE, 'scenarios');
+/** 가짜 에이전트와 API 서버는 대상 하네스의 것이 아니라 실행기 쪽 파일을 쓴다 */
+const FAKE_AGENT = path.join(HERE, 'fake-agent.ts');
+const API_STUB = path.join(HERE, 'api-stub.ts');
 
 /** 자식 프로세스에 넘기는 환경 변수. 세션의 자격증명(GH_TOKEN 등)과 홈 폴더는 넘기지 않는다 */
 const ENV_KEEP = new Set([
@@ -114,7 +135,7 @@ function exec(
 ): Ran {
   const left = o.deadline - Date.now();
   const timeout = () =>
-    new Error(`시나리오 시간 제한(${SCENARIO_TIMEOUT_MS / 1000}초)을 넘겼다: ${cmd} ${args[0]}`);
+    new Error(`시나리오 시간 제한을 넘겼다: ${cmd} ${args.slice(0, 2).join(' ')}`);
   if (left <= 0) throw timeout();
   const r = spawnSync(cmd, args, {
     cwd: o.cwd,
@@ -207,18 +228,21 @@ function makeSample(
   git(['push', '-q', '-u', 'origin', 'main']);
 
   // 가짜 GitHub 상태 파일(대상 하네스의 scripts/lib/github-fake.ts가 읽는 형식)
-  const state = {
-    me: bot,
-    owner,
-    remote,
-    mergeMode: 'immediate',
-    next: 1,
-    issues: [] as unknown[],
-  };
-  const saveState = () => writeFileSync(ghState, JSON.stringify({ ...state, prs: [] }, null, 2));
-  saveState();
+  writeFileSync(
+    ghState,
+    JSON.stringify(
+      { me: bot, owner, remote, mergeMode: 'immediate', next: 1, issues: [], prs: [] },
+      null,
+      2,
+    ),
+  );
   const t0 = Date.now() - 3_600_000;
+  // 상태 파일은 대상 하네스의 명령도 고친다(PR, 댓글). 고칠 때마다 파일에서 다시 읽는다
   const issue: Sample['issue'] = (title, o = {}) => {
+    const state = JSON.parse(readFileSync(ghState, 'utf8')) as {
+      next: number;
+      issues: unknown[];
+    };
     const number = state.next++;
     state.issues.push({
       number,
@@ -230,21 +254,124 @@ function makeSample(
       author: o.author ?? owner,
       comments: [],
     });
-    saveState();
+    writeFileSync(ghState, JSON.stringify(state, null, 2));
     return number;
   };
-  return { sample: { root, remote, ghState, owner, bot, git, write, issue }, env };
+  const promptLog = path.join(dir, 'prompts.jsonl');
+  const prompts: Sample['prompts'] = () =>
+    existsSync(promptLog)
+      ? readFileSync(promptLog, 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => JSON.parse(l) as { slug: string; step: string; prompt: string })
+      : [];
+  return { sample: { root, remote, ghState, owner, bot, git, write, issue, prompts }, env };
 }
 
-function context(harness: string, deadline: number): ScenarioContext {
+/**
+ * runner를 띄우는 시나리오의 설정: 대상 하네스의 설정에서 표준 명령을 끄고(샘플 리포에는 의존성이 없다)
+ * 세션·AC 시간 제한과 대기를 줄인다. 대상의 설정에서 만들므로 그 하네스가 더한 항목이 빠지지 않는다.
+ * 샘플 리포에는 대상 하네스의 문서가 일부만 있어, 복사한 문서(AGENTS.md 등)는 doc-lint에서 뺀다
+ * (링크 대상이 없다). runner가 만드는 계획 폴더는 그대로 검사한다
+ */
+export function runnerConfig(
+  harness: string,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const cfg = JSON.parse(readFileSync(path.join(harness, 'harness.config.json'), 'utf8')) as {
+    commands?: Record<string, unknown>;
+    limits?: Record<string, unknown>;
+    docLint?: { exclude?: string[] };
+  };
+  return {
+    commands: Object.fromEntries(Object.keys(cfg.commands ?? {}).map((k) => [k, null])),
+    docLint: {
+      ...cfg.docLint,
+      exclude: [...(cfg.docLint?.exclude ?? []), 'AGENTS.md', 'CLAUDE.md', 'docs/harness/**'],
+    },
+    ...over,
+    limits: {
+      ...cfg.limits,
+      sessionTimeoutMin: 1,
+      acTimeoutSec: 60,
+      workers: 1,
+      pollSec: 0,
+      ...(over.limits as Record<string, unknown> | undefined),
+    },
+  };
+}
+
+/** API 서버가 포트를 알릴 때까지 기다리는 시간 */
+const API_START_MS = 15_000;
+
+function context(harness: string, deadline: number): { ctx: ScenarioContext; close(): void } {
   const envs = new Map<Sample, NodeJS.ProcessEnv>();
   const envOf = (s: Sample): NodeJS.ProcessEnv => {
     const e = envs.get(s);
     if (!e) throw new Error('이 ctx.sample()이 만든 샘플이 아니다');
     return e;
   };
-  return {
+  const servers: ChildProcess[] = [];
+  const ctx: ScenarioContext = {
     harness,
+    agent(s, script) {
+      const dir = path.dirname(s.ghState);
+      const behavior = path.join(dir, 'behavior.json');
+      // 가짜 에이전트는 동작을 하나 쓸 때마다 이 파일을 고쳐 쓴다
+      writeFileSync(behavior, JSON.stringify(script));
+      Object.assign(envOf(s), {
+        HARNESS_FAKE_AGENT: FAKE_AGENT,
+        FAKE_BEHAVIOR: behavior,
+        FAKE_LOG: path.join(dir, 'prompts.jsonl'),
+      });
+    },
+    github(s) {
+      envOf(s);
+      const read = () => JSON.parse(readFileSync(s.ghState, 'utf8')) as unknown;
+      return {
+        read,
+        update(fn) {
+          const state = read();
+          fn(state);
+          writeFileSync(s.ghState, JSON.stringify(state, null, 2));
+        },
+      };
+    },
+    async api(s, routes) {
+      const dir = path.dirname(s.ghState);
+      const n = servers.length;
+      const routesFile = path.join(dir, `api-${n}.json`);
+      const logFile = path.join(dir, `api-${n}.log`);
+      const set = (r: Record<string, unknown>) => writeFileSync(routesFile, JSON.stringify(r));
+      set(routes);
+      writeFileSync(logFile, '');
+      const child = spawn(process.execPath, [API_STUB, routesFile, logFile], {
+        env: envOf(s),
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+      servers.push(child);
+      const port = await new Promise<number>((resolve, reject) => {
+        const wait = Math.min(API_START_MS, Math.max(0, deadline - Date.now()));
+        const timer = setTimeout(() => reject(new Error('API 서버가 뜨지 않았다')), wait);
+        const fail = (why: string) => {
+          clearTimeout(timer);
+          reject(new Error(`API 서버가 뜨지 않았다: ${why}`));
+        };
+        child.once('error', (e) => fail(e.message));
+        child.once('exit', (code) => fail(`종료 코드 ${code}`));
+        child.stdout!.once('data', (d: Buffer) => {
+          clearTimeout(timer);
+          resolve(Number(String(d).trim()));
+        });
+      });
+      if (!Number.isInteger(port) || port <= 0) throw new Error('API 서버의 포트를 읽지 못했다');
+      return {
+        url: `http://127.0.0.1:${port}`,
+        set,
+        hits: () => readFileSync(logFile, 'utf8').split('\n').filter(Boolean),
+      };
+    },
     sample(o = {}) {
       const { sample, env } = makeSample(harness, o.config ?? {}, deadline);
       envs.set(sample, env);
@@ -265,6 +392,12 @@ function context(harness: string, deadline: number): ScenarioContext {
         input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd, ...payload }),
         deadline,
       });
+    },
+  };
+  return {
+    ctx,
+    close() {
+      for (const c of servers) c.kill();
     },
   };
 }
@@ -317,14 +450,19 @@ export async function runSelfTest(o: {
   const results: SelfTestReport['results'] = [];
   for (const id of ids) {
     let covers = '';
+    let close = () => {};
     try {
       const s = await load(path.join(dir, `${id}.ts`));
       covers = s.covers;
-      await s.run(context(harness, Date.now() + SCENARIO_TIMEOUT_MS));
+      const c = context(harness, Date.now() + (s.timeoutSec ?? SCENARIO_TIMEOUT_SEC) * 1000);
+      close = c.close;
+      await s.run(c.ctx);
       results.push({ id, covers, state: 'pass', detail: s.title });
     } catch (e) {
       const state = e instanceof assert.AssertionError ? 'fail' : 'error';
       results.push({ id, covers, state, detail: oneLine((e as Error)?.message ?? String(e)) });
+    } finally {
+      close();
     }
   }
   return { version: 1, headSha: o.headSha ?? '', results };
