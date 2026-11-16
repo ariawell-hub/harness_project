@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
+import { DEFAULT_MCP_GUARD, type McpGuardConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { findPlan } from '../lib/plan.ts';
@@ -637,4 +638,226 @@ test('승인 요청 규칙은 같은 명령 안의 금지 규칙(R…)을 가리
   assert.match(bash('git push origin feat/a; git push -f origin feat/b', c)!.rule, /^R14/);
   assert.match(bash('gh pr ready 1 && rm -rf $X', c)!.rule, /^R14/);
   assert.match(bash('gh pr ready 1', c)!.rule, /^승인 요청/);
+});
+
+// ---------- MCP 도구 규칙 (계획 20261116-ops-security step2, TD-13) ----------
+
+const mcp = (tool: string, input: unknown = {}, c = ctx()) =>
+  evaluate({ kind: 'mcp', tool, input, cwd: '/work/repo' }, c);
+const mcpCfg = (over: Partial<McpGuardConfig>) =>
+  ctx({ mcp: () => ({ ...DEFAULT_MCP_GUARD, ...over }) });
+const GH = 'https://github.com/o/r/settings/branches';
+
+const MCP_BLOCK: [string, unknown, string][] = [
+  ['mcp__claude_ai_Gmail__trash_message', { messageId: 'm1' }, 'R14'],
+  ['mcp__claude_ai_Gmail__delete_draft', { draftId: 'd1' }, 'R14'],
+  ['mcp__claude_ai_Google_Drive__trash_file', { fileId: 'f1' }, 'R14'],
+  ['mcp__claude_ai_Notion__notion-delete-pages', { page_ids: ['p1'] }, 'R14'],
+  ['mcp__claude_ai_Google_Calendar__delete_event', { eventId: 'e1' }, 'R14'],
+  ['mcp__claude_ai_Notion__notion-calendar-cancel-events', {}, 'R14'],
+  ['mcp__claude_ai_Claude_Docs__delete', { id: 'x' }, 'R14'],
+  // 대소문자 경계와 숫자 경계로도 단어를 나눈다
+  ['mcp__files__deleteRecord', {}, 'R14'],
+  ['mcp__files__HTMLPurge2', {}, 'R14'],
+  ['mcp__claude_ai_Gmail__send_message', { to: 'a@example.com', body: 'x' }, 'R14'],
+  ['mcp__claude_ai_Gmail__reply', { threadId: 't1' }, 'R14'],
+  ['mcp__claude_ai_Gmail__forward', { messageId: 'm1' }, 'R14'],
+  ['mcp__gmail__send_message', {}, 'R14'],
+  ['mcp__claude-in-chrome__navigate', { url: GH, tabId: 1 }, 'R20'],
+  ['mcp__claude-in-chrome__navigate', { url: 'github.com/o/r' }, 'R20'],
+  ['mcp__claude-in-chrome__navigate', { url: 'HTTPS://GitHub.COM/login' }, 'R20'],
+  ['mcp__claude-in-chrome__navigate', { url: 'https%3A%2F%2Fgithub.com%2Fo%2Fr' }, 'R20'],
+  ['mcp__claude-in-chrome__tabs_create_mcp', { url: 'https://gist.github.com/x' }, 'R20'],
+  ['mcp__playwright__browser_navigate', { url: 'https://github.com/o/r/pull/7' }, 'R20'],
+  // 웹 편집기(github.dev)도 GitHub 로그인 세션으로 커밋한다
+  ['mcp__playwright__browser_navigate', { url: 'https://github.dev/o/r' }, 'R20'],
+  [
+    'mcp__claude-in-chrome__javascript_tool',
+    {
+      action: 'javascript_exec',
+      text: "fetch('https://api.github.com/repos/o/r/pulls/7/reviews', { method: 'POST' })",
+    },
+    'R20',
+  ],
+  ['mcp__playwright__browser_evaluate', { function: 'location = "https:\\/\\/github.com"' }, 'R20'],
+  // 중첩된 입력
+  [
+    'mcp__claude-in-chrome__browser_batch',
+    { actions: [{ name: 'navigate', input: { url: GH } }] },
+    'R20',
+  ],
+  [
+    'mcp__claude-in-chrome__computer',
+    { action: 'type', text: 'github.com/settings/tokens' },
+    'R20',
+  ],
+  ['mcp__remote-devices__Claude_Browser__navigate', { url: GH }, 'R20'],
+  ['mcp__Claude_Browser__navigate', { url: GH }, 'R20'],
+  ['mcp__computer-use__type', { text: 'https://github.com/settings/tokens' }, 'R20'],
+];
+
+const MCP_ALLOW: [string, unknown][] = [
+  ['mcp__claude_ai_Gmail__search_threads', { query: 'from:someone delete trash' }],
+  ['mcp__claude_ai_Gmail__create_draft', { to: 'a@example.com', body: 'https://github.com/o/r' }],
+  ['mcp__claude_ai_Gmail__get_thread', { threadId: 't1' }],
+  // 복구·해제는 삭제가 아니다: 단어 단위로 비교한다
+  ['mcp__claude_ai_Gmail__untrash_message', { messageId: 'm1' }],
+  ['mcp__claude_ai_Gmail__unlabel_message', { messageId: 'm1' }],
+  ['mcp__claude_ai_Notion__notion-restore-pages', {}],
+  ['mcp__claude_ai_Google_Drive__read_file_content', { fileId: 'f1' }],
+  ['mcp__claude_ai_Google_Drive__create_file', { name: 'removed-items.txt' }],
+  // 브라우저 도구가 아니면 입력의 GitHub 주소를 보지 않는다
+  ['mcp__claude_ai_Notion__notion-create-pages', { pages: [{ content: `PR: ${GH}` }] }],
+  ['mcp__claude_ai_Notion__notion-fetch', { id: 'https://github.com/o/r' }],
+  ['mcp__claude_ai_Google_Calendar__create_event', { summary: 'x' }],
+  // 서버 이름의 단어는 보지 않는다
+  ['mcp__trash-tools__list_items', {}],
+  ['mcp__claude-in-chrome__navigate', { url: 'https://docs.anthropic.com/en/docs', tabId: 1 }],
+  ['mcp__claude-in-chrome__navigate', { url: 'https://notgithub.com/x' }],
+  ['mcp__claude-in-chrome__navigate', { url: 'https://github.com.example.org/x' }],
+  ['mcp__claude-in-chrome__computer', { action: 'screenshot', tabId: 1 }],
+  ['mcp__claude-in-chrome__tabs_context_mcp', {}],
+  ['mcp__claude-in-chrome__read_page', { tabId: 1, filter: 'interactive' }],
+  ['mcp__playwright__browser_take_screenshot', { filename: 'shot.png' }],
+  ['mcp__ide__getDiagnostics', {}],
+];
+
+test('MCP: 삭제 계열 도구·메일 발송은 R14, 브라우저 도구의 GitHub 주소는 R20으로 막는다', () => {
+  for (const [tool, input, rule] of MCP_BLOCK) {
+    const p = mcp(tool, input);
+    assert.ok(p, `차단되어야 한다: ${tool} ${JSON.stringify(input)}`);
+    assert.ok(p.rule.startsWith(`${rule} `), `${tool}: ${p.rule} ${p.what}`);
+    assert.ok(p.how && p.doc, '고치는 법과 근거 문서가 있어야 한다');
+  }
+  assert.match(mcp('mcp__claude_ai_Gmail__send_message')!.how, /초안/);
+  assert.match(mcp('mcp__claude_ai_Gmail__trash_message')!.what, /trash/);
+  const gh = mcp('mcp__claude-in-chrome__navigate', { url: GH })!;
+  assert.match(gh.what, /github\.com/);
+  assert.match(gh.how, /gh/);
+});
+
+test('MCP: 읽기·검색·작성·복구와 GitHub이 아닌 브라우저 조작은 막지 않는다', () => {
+  for (const [tool, input] of MCP_ALLOW) {
+    const p = mcp(tool, input);
+    assert.equal(p, null, `허용되어야 한다: ${tool} → ${p?.rule} ${p?.what}`);
+  }
+});
+
+test('MCP: 해석하지 못한 호출은 막는다(입력이 객체가 아님, 브라우저 입력이 상한을 넘음)', () => {
+  for (const bad of ['text', 3, ['a'], true])
+    assert.ok(mcp('mcp__claude_ai_Gmail__search_threads', bad), `입력 ${JSON.stringify(bad)}`);
+  let deep: unknown = { url: 'https://example.com' };
+  for (let i = 0; i < 40; i++) deep = { next: deep };
+  assert.match(mcp('mcp__claude-in-chrome__browser_batch', deep)!.rule, /^R20 /);
+  const huge = { text: 'a '.repeat(1_100_000) };
+  assert.match(mcp('mcp__claude-in-chrome__javascript_tool', huge)!.rule, /^R20 /);
+  // 브라우저 도구가 아니면 입력을 들여다보지 않으므로 크기와 무관하다
+  assert.equal(mcp('mcp__claude_ai_Notion__notion-create-pages', deep), null);
+  assert.equal(mcp('mcp__claude_ai_Google_Drive__create_file', huge), null);
+  // 긴 영숫자 입력도 바로 끝난다(호스트 찾기가 길이에 비례)
+  const started = Date.now();
+  assert.equal(
+    mcp('mcp__claude-in-chrome__javascript_tool', { text: 'a'.repeat(1_500_000) }),
+    null,
+  );
+  assert.ok(Date.now() - started < 5_000);
+});
+
+test('MCP 설정: allowTools는 삭제·발송 규칙의 예외이고, denyWords를 비우면 삭제 도구가 통과한다', () => {
+  const allow = mcpCfg({ allowTools: ['mcp__*Gmail__delete_draft', 'mcp__claude-in-chrome__*'] });
+  assert.equal(mcp('mcp__claude_ai_Gmail__delete_draft', {}, allow), null);
+  assert.match(mcp('mcp__claude_ai_Gmail__trash_message', {}, allow)!.rule, /^R14 /);
+  // 허용 목록은 브라우저의 GitHub 접근(R20)을 풀지 않는다
+  assert.match(mcp('mcp__claude-in-chrome__navigate', { url: GH }, allow)!.rule, /^R20 /);
+  const sendOk = mcpCfg({ allowTools: ['mcp__claude_ai_Gmail__send_message'] });
+  assert.equal(mcp('mcp__claude_ai_Gmail__send_message', {}, sendOk), null);
+
+  const noWords = mcpCfg({ denyWords: [] });
+  assert.equal(mcp('mcp__claude_ai_Gmail__trash_message', {}, noWords), null);
+  assert.match(mcp('mcp__claude_ai_Gmail__send_message', {}, noWords)!.rule, /^R14 /);
+  const words = mcpCfg({ denyWords: ['Archive'] });
+  assert.match(mcp('mcp__x__archive_thread', {}, words)!.rule, /^R14 /);
+  assert.equal(mcp('mcp__x__trash_thread', {}, words), null);
+
+  const hosts = mcpCfg({ denyHosts: ['example.com'], browserTools: ['mcp__mybrowser__*'] });
+  assert.match(mcp('mcp__mybrowser__open', { url: 'https://example.com/a' }, hosts)!.rule, /^R20 /);
+  assert.equal(mcp('mcp__mybrowser__open', { url: GH }, hosts), null);
+  assert.equal(mcp('mcp__claude-in-chrome__navigate', { url: GH }, hosts), null);
+});
+
+test('normalize: mcp__ 도구는 입력의 command·cwd를 셸 명령으로 읽지 않는다', () => {
+  const input = { command: 'rm -rf /', cwd: '/elsewhere', patch: '*** Begin Patch' };
+  assert.deepEqual(normalize({ tool_name: 'mcp__x__run', tool_input: input, cwd: '/session' }), {
+    kind: 'mcp',
+    tool: 'mcp__x__run',
+    input,
+    cwd: '/session',
+  });
+  assert.deepEqual(normalize({ tool_name: 'mcp__x__list', cwd: '/session' })!.input, {});
+  assert.equal(
+    normalize({ tool_name: 'mcp__x__list', tool_input: 'oops', cwd: '/s' })!.input,
+    'oops',
+  );
+});
+
+test('훅 matcher가 MCP 도구(mcp__…)를 포함한다', () => {
+  const s = JSON.parse(readFileSync(path.join(HARNESS_ROOT, '.claude/settings.json'), 'utf8'));
+  const hooked = (tool: string) =>
+    s.hooks.PreToolUse.some(
+      (h: { matcher: string; hooks: { command: string }[] }) =>
+        new RegExp(`^(?:${h.matcher})$`).test(tool) &&
+        h.hooks.some((x) => x.command.includes('scripts/hooks/guard.ts')),
+    );
+  for (const tool of [
+    'mcp__claude_ai_Gmail__trash_message',
+    'mcp__claude-in-chrome__navigate',
+    'mcp__playwright__browser_navigate',
+    'Bash',
+    'PowerShell',
+    'Edit',
+  ])
+    assert.ok(hooked(tool), `${tool}이 훅을 거치지 않는다`);
+});
+
+test('guard 프로세스: MCP 호출의 차단은 종료 코드 2, 허용은 0', () => {
+  const cwd = tmp();
+  const call = (tool_name: string, tool_input: unknown) =>
+    runGuard({ hook_event_name: 'PreToolUse', tool_name, tool_input, cwd });
+  const trash = call('mcp__claude_ai_Gmail__trash_message', { messageId: 'm1' });
+  assert.equal(trash.code, 2);
+  assert.match(trash.stderr, /R14/);
+  assert.match(trash.stderr, /고치는 법/);
+  const nav = call('mcp__claude-in-chrome__navigate', { url: GH, tabId: 1 });
+  assert.equal(nav.code, 2);
+  assert.match(nav.stderr, /R20/);
+  assert.equal(call('mcp__claude_ai_Gmail__search_threads', 'oops').code, 2);
+  assert.equal(call('mcp__claude_ai_Gmail__search_threads', { query: 'x' }).code, 0);
+});
+
+test('guard 프로세스: MCP 규칙은 메인 체크아웃의 guard.mcp로 판정하고, 틀린 설정이면 MCP 호출만 막는다', () => {
+  const dir = tmp();
+  const main = path.join(dir, 'repo');
+  gitInit(main);
+  const put = (root: string, mcpCfg: unknown) =>
+    write(root, 'harness.config.json', JSON.stringify({ guard: { mcp: mcpCfg } }));
+  put(main, { allowTools: ['mcp__*Gmail__delete_draft'] });
+  commitAll(main);
+  const call = (cwd: string, tool_name: string, tool_input: unknown = {}) =>
+    runGuard({ tool_name, tool_input, cwd });
+  assert.equal(call(main, 'mcp__claude_ai_Gmail__delete_draft').code, 0);
+  assert.equal(call(main, 'mcp__claude_ai_Gmail__trash_message').code, 2);
+
+  // worktree에서 규칙을 풀어도(병합 전) 메인 체크아웃의 설정으로 판정한다
+  const wt = path.join(dir, 'wt');
+  sh('git', ['worktree', 'add', '-q', '-b', 'chore/20261116-relax-s0', wt], main);
+  put(wt, { denyWords: [], denyTools: [] });
+  assert.equal(call(wt, 'mcp__claude_ai_Gmail__trash_message').code, 2);
+  assert.equal(call(wt, 'mcp__claude_ai_Gmail__send_message').code, 2);
+  assert.equal(call(wt, 'mcp__claude_ai_Gmail__delete_draft').code, 0);
+
+  put(main, { denyWords: 'delete' });
+  const bad = call(main, 'mcp__claude_ai_Gmail__search_threads');
+  assert.equal(bad.code, 2);
+  assert.match(bad.stderr, /guard\.mcp\.denyWords/);
+  assert.equal(runGuard({ tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: main }).code, 0);
 });

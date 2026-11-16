@@ -68,7 +68,7 @@ export interface HarnessConfig {
   commands: Record<StandardName, CommandDef | null>;
   docLint: { agentsMdMaxLines: number; exclude: string[] };
   bypass: { extraPatterns: string[]; excludeExtensions: string[] };
-  guard: { dbPatterns: string[]; dbClients: string[] };
+  guard: { dbPatterns: string[]; dbClients: string[]; mcp: McpGuardConfig };
   planReview: { required: boolean };
   riskPaths: { glob: string; risk: 'low' | 'normal' | 'high' }[];
   protectedPaths: string[];
@@ -124,6 +124,58 @@ export const DEFAULT_DEPS: HarnessConfig['deps'] = {
 export const CONFIG_FILE = 'harness.config.json';
 
 export class ConfigError extends Error {}
+
+/** MCP 도구 호출의 L1 규칙(13.1절). 막는 것만 적는다: 그 밖의 MCP 도구는 통과한다 */
+export interface McpGuardConfig {
+  /** 도구 이름(서버 접두어 뒤)을 `_`·`-`와 대소문자·숫자 경계로 나눈 단어에 이 중 하나가 있으면 삭제 계열로 막는다(R14) */
+  denyWords: string[];
+  /** 전체 도구 이름 glob. 외부 발송(R14) */
+  denyTools: string[];
+  /** 위 두 규칙의 예외(전체 도구 이름 glob) */
+  allowTools: string[];
+  /** 브라우저·데스크톱 자동화 도구(전체 도구 이름 glob). 입력에 denyHosts의 주소가 있으면 막는다(R20) */
+  browserTools: string[];
+  denyHosts: string[];
+}
+
+export const DEFAULT_MCP_GUARD: McpGuardConfig = {
+  denyWords: ['delete', 'trash', 'remove', 'destroy', 'purge', 'erase', 'wipe', 'cancel'],
+  denyTools: ['mcp__*Gmail__send_message', 'mcp__*Gmail__reply', 'mcp__*Gmail__forward'],
+  allowTools: [],
+  browserTools: [
+    'mcp__claude-in-chrome__*',
+    'mcp__playwright__*',
+    'mcp__*Browser__*',
+    'mcp__computer-use__*',
+    'mcp__remote-devices__*',
+  ],
+  denyHosts: ['github.com', '*.github.com', 'github.dev', '*.github.dev'],
+};
+
+/** `guard.mcp`를 검증해 기본값을 채운다. 키가 없으면 기본값이다(옛 설정 파일과 호환). L1 훅도 이 함수로 읽는다 */
+export function resolveMcpGuard(raw: unknown): McpGuardConfig {
+  const out: McpGuardConfig = {
+    denyWords: [...DEFAULT_MCP_GUARD.denyWords],
+    denyTools: [...DEFAULT_MCP_GUARD.denyTools],
+    allowTools: [...DEFAULT_MCP_GUARD.allowTools],
+    browserTools: [...DEFAULT_MCP_GUARD.browserTools],
+    denyHosts: [...DEFAULT_MCP_GUARD.denyHosts],
+  };
+  if (raw === undefined) return out;
+  const problems: string[] = [];
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw))
+    problems.push('guard.mcp는 객체여야 한다');
+  else
+    for (const [key, value] of Object.entries(raw)) {
+      if (!Object.hasOwn(out, key)) problems.push(`guard.mcp.${key}는 모르는 키다`);
+      else if (!(Array.isArray(value) && value.every((x) => typeof x === 'string' && x !== '')))
+        problems.push(`guard.mcp.${key}는 문자열 배열이어야 한다(빈 문자열 없이)`);
+      else out[key as keyof McpGuardConfig] = value;
+    }
+  if (problems.length)
+    throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- ${problems.join('\n- ')}`);
+  return out;
+}
 
 export function loadConfig(repoRoot: string): HarnessConfig {
   const file = path.join(repoRoot, CONFIG_FILE);
@@ -187,6 +239,7 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   cfg.riskPaths ??= [];
   cfg.protectedPaths ??= [];
   cfg.planReview ??= { required: false };
+  cfg.guard.mcp = resolveMcpGuard(cfg.guard.mcp);
   const ci: Partial<HarnessConfig['ci']> = cfg.ci ?? {};
   cfg.ci = {
     environments: ci.environments ?? [...DEFAULT_ENVIRONMENTS],
