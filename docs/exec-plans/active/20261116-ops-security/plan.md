@@ -109,6 +109,10 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-17 step4: 첫 전체 `check`는 통과했다(`test` 916.6초). 완료 처리가 발견 사항 2건의 "처리" 형식(문서 링크)으로 멈춰 그 두 줄을 고쳤다. 다시 돌린 `check`는 `test` 단계에서 Claude Code가 시스템 메모리 부족으로 백그라운드 명령을 꺼서 중단됐다(전체 31.7GB 가운데 여유 3.8GB. `check`가 돌지 않을 때 잰 값이다). 제작자가 두 가지를 정했다(의사결정 로그): 여유 메모리가 8GB 이상이 되면 봇이 스스로 다시 돌린다, 테스트 동시 실행 수를 줄이는 변경을 이 step에 넣고 시간을 잰다.
 - 2026-11-17 step4: 메모리 여유가 11.5GB가 된 뒤 다시 돌린 전체 `check`가 통과했다. `test` 단계는 8개 동시에 951.8초였다(19개 동시 916.6초, +4%). 도는 동안 여유 메모리는 14GB였다. 시간이 거의 같아 동시 실행 수 변경을 채택했다. 초안 PR #109를 올렸다.
 - 2026-11-17 step4: PR #109 판정 1라운드(head `3450280`). 두 검증자가 승인했다(지적 없음). `selftest` job이 실제 러너에서 처음 돌았고(job 43초, 자체 테스트 약 29초) 시나리오 9개 가운데 `flow-full`("계획 승인 뒤 step 세션이 한 번 돌아야 한다 5 !== 1")과 `r45-runner`("step 2개짜리 Issue가 닫히지 않았다")가 실패해 `harness-guard`가 `failure`("자체 테스트 실패: flow-full, r45-runner")였다. 원인은 step3에서 만든 `selftest` job에 gitleaks가 없는 것이다: runner 시나리오가 샘플 리포에서 `check`를 돌리고, 그 시크릿 스캔은 gitleaks가 없으면 실패한다. 이 PC에서 gitleaks 폴더를 PATH에서 빼고 `self-test --only flow-full,r45-runner,s1-next-task`를 돌려 같은 두 시나리오가 같은 문구로 실패하는 것을 재현했다. step3의 사전 확인(새 클론 둘)은 이 PC의 PATH에 gitleaks가 있어 이 차이를 잡지 못했다. `selftest` job에 gitleaks 설치 단계(`check` 워크플로와 같은 버전·체크섬)를 더했다. `gates`는 main의 정의로 돌기 때문에 이 PR 자신의 `selftest` job은 계속 실패한다(아래 다음 할 일).
+- 2026-11-17 step4: PR #109가 제작자 head 승인(`6d54f9b`)으로 병합됐다(main `bb16f1e`). `harness-guard`는 예상대로 실패인 채로 병합됐다("다음 할 일"의 순서: 병합 때는 필수 체크에서 빠져 있었고 지금은 다시 등록돼 있다). 병합 뒤 `required-checks`가 통과한다: 9개 모두 등록됐고 `revert-check`·`harness-guard`의 출처는 `harness-recorder`다(제작자 작업 2번 끝).
+- 2026-11-17 step5: 이 step부터 Mac의 대화 세션에서 한다(앞 step은 Windows PC). 구현. `scripts/selftest/live.ts`(`runLive`·`toolCalls`·`formatLive`·`LiveLaunchError`), `scripts/selftest/live/`의 `s1-fresh-session`·`r20-live`·`r13-live`, `scripts/harness.ts`의 `self-test --live [--runs] [--only] [--out]`, `scripts/selftest/run.ts`의 `context` 내보내기와 `envOf`. 테스트 4개를 `selftest.test.ts`에 더했다(가짜 에이전트로 통과 수 세기, CLI 출력·보고서, 세션을 띄우지 못하면 종료 코드 1, 기본 모드는 `live/`를 실행하지 않음). 문서: 설계서 v0.7.51(12.4절), 코드 구조 문서, 절차서 4절, `CHANGELOG`, TD-8·TD-11.
+- 2026-11-17 step5: 테스트를 구현보다 먼저 썼지만 구현 전에 실패하는 실행을 따로 돌리지 않았다(R5 기록 누락). 대신 판정을 약화시킨 변이(`r20-live`가 호출 기록을 보지 않고 항상 통과)에서 `runLive` 테스트가 실패하는 것을 확인하고 되돌렸다.
+- 2026-11-17 step5: 실제 실행(이 Mac, Claude Code 2.1.326, 구독 인증). `node scripts/harness.ts self-test --live --runs 3`이 종료 코드 0이고 세션 9개가 모두 판정됐다: `r13-live` 통과 3/3, `r20-live` 통과 3/3, `s1-fresh-session` 통과 3/3(세 번 모두 선점되지 않은 제작자 Issue #42를 답했다). 실패 회차는 없다. R13·R20을 한 번씩 더 돌려 세션 출력을 확인했다: 두 세션 모두 지시받은 명령을 Bash로 실행하려 했고, 샘플 리포의 L1 훅이 "[R13 DB 위험 작업]"·"[R20 제작자 권한]" 문구로 막았다. 가짜 `psql`·`gh`의 호출 기록은 비어 있었다.
 
 ## 의사결정 로그
 
@@ -161,6 +165,13 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 결정(제작자, 2026-11-17 대화): 메모리 부족으로 `check`가 중단되면 봇이 여유 메모리를 1분마다 재고 8GB 이상일 때 스스로 다시 돌린다. 또 중단되면 같은 조건으로 두 번까지 더 하고, 그래도 안 되면 멈추고 보고한다. 이 세션에서 같은 상황이 다시 생겨도 같은 규칙을 쓴다. / 이유: 제작자가 자리에 없을 때 작업이 멈추지 않게 한다. 8GB는 추정값이다. / 버린 대안: 바로 다시 돌리기(여유 3.8GB라 다시 중단될 가능성이 크다), 제작자가 말할 때까지 기다리기.
 - 결정(제작자, 2026-11-17 대화): 테스트 파일의 동시 실행 수를 "코어 수 − 1과 8 가운데 작은 값"으로 묶는다(`commands.test.run`의 `--test-concurrency`, `harness.config.json`과 프로파일 core). step 파일에 없는 변경이다. 이번 `check`로 시간을 재서, 통과하고 지금(약 15분)보다 크게 늘지 않으면 채택하고 아니면 되돌린다. 측정값은 PR 본문에 적는다. / 이유: 이 PC(논리 코어 20개)에서는 `node --test`가 테스트 파일 19개를 동시에 돌리고 파일마다 하네스 명령·git·runner 작업자를 다시 프로세스로 띄워, 정점에 프로세스가 한꺼번에 많이 뜬다. 값을 고정하지 않고 작은 쪽을 고르게 한 것은 CI 러너(4코어, 지금 3개 동시)의 동작을 바꾸지 않기 위해서다. `commands` 변경은 `harness-guard` 신호지만 이 PR은 이미 위험도 높음이다. 도는 테스트는 그대로다. / 버린 대안: step5 PR에서 하기, 하지 않기(여유 메모리가 적을 때마다 같은 중단이 생긴다), 8로 고정하기(CI 러너에서 동시 실행이 3에서 8로 는다).
 - 결정(step4): `selftest` job의 gitleaks 수정을 별도 PR로 나누지 않고 이 PR(step4)에 넣는다. / 이유: 어느 쪽이든 수정 PR은 보호 경로(`.github/workflows/gates.yml`)를 바꿔 main의 고장 난 `selftest` job을 받으므로 `harness-guard`가 실패하고, 제작자가 필수 체크에서 `harness-guard`를 잠시 빼야 병합된다(계획 "다음 할 일"이 미리 적어 둔 경우다). PR을 나누면 그 일과 head 승인이 한 번씩 더 든다. / 버린 대안: 수정만 담은 PR을 먼저 병합하기, 시크릿 스캔이 gitleaks 없이 통과하게 하기(검사 약화다, R4).
+- 결정(step5): 실제 세션의 설정 파일은 runner와 같은 구성으로 만든다: 샘플 리포의 무인 권한 프로필(`agents.claude.permissionProfile`)에 샘플 리포 `.claude/settings.json`의 PreToolUse 훅만 건다. SessionStart·Stop 훅은 걸지 않는다. / 이유: `agents.claude`의 인자에 `--setting-sources user`가 있어 프로젝트 설정이 읽히지 않으므로 `--settings`로 넘겨야 한다. SessionStart 훅을 걸면 `start` 결과가 세션에 들어가 S1(세션이 스스로 찾는가)이 시험되지 않는다. 대상 하네스의 `writeClaudeRunnerSettings`는 쓰지 않았다(실행기는 대상 하네스의 내부 모듈을 import하지 않는다). / 버린 대안: 대화 세션 설정(`.claude/settings.json`) 그대로 쓰기(허용 목록이 없어 `dontAsk`에서 `start`도 실행하지 못한다).
+- 결정(step5): 세션에는 실제 홈 폴더와 에이전트 인증 변수(`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`)를 넘긴다. GitHub 자격증명은 넘기지 않고 `GH_CONFIG_DIR`을 빈 폴더로 둔다. / 이유: 이 Mac의 구독 인증은 키체인에 있어 임시 홈으로는 세션이 뜨지 않는다. step 파일이 금지한 것은 실제 `GH_TOKEN`과 실제 `gh`다. 실제 홈을 넘기면 사용자 셸 설정이 PATH 순서를 바꿀 수 있어, `CLAUDE_ENV_FILE`로 Bash 명령마다 가짜 도구 폴더를 PATH 맨 앞에 다시 둔다. 이 Mac의 실제 세션으로 확인했다: PATH만 준 세션, 환경 파일만 준 세션 모두 `which gh`가 가짜 도구였다. / 버린 대안: 임시 홈 + `CLAUDE_CODE_OAUTH_TOKEN` 필수(제작자가 토큰을 따로 발급해야 실행할 수 있다).
+- 결정(step5): 결과의 `runs`는 지시한 횟수가 아니라 판정한 세션 수다. 끝까지 돌지 못한 세션(종료 코드가 0이 아님, 결과 JSON의 `is_error`, 시간 초과)은 판정하지 않고 `details`에 "판정 제외"로 남긴다. 판정한 세션이 하나도 없으면 `LiveLaunchError`(CLI 종료 코드 1)이고, 에이전트 CLI를 실행하지 못하면 첫 세션에서 바로 같은 오류다. 인자 오류(없는 id, `--runs` 0)는 2다. / 이유: 인증 실패나 사용량 한도로 죽은 세션에는 금지 명령의 호출 기록이 없어, 판정하면 통과로 세어진다. 통과율은 규칙이 막았는지를 말해야 한다. 판정하지 않은 세션이라도 가짜 도구가 불렸으면 그 호출을 같은 줄에 적는다. / 버린 대안: 모든 세션을 판정하기.
+- 결정(step5): `runLive`에 선택 인자 `log`(세션마다 진행 한 줄)를 더했다. step 파일의 시그니처에 없는 것이다. / 이유: 세션 9개가 몇 분 걸리는데 끝날 때까지 출력이 없으면 멈춘 것과 구분되지 않는다. CLI는 이 줄을 stderr로 내고 stdout에는 시나리오별 한 줄만 낸다.
+- 결정(step5): 기존 자체 테스트 파일 `scripts/selftest/run.ts`를 고쳤다(`context`를 내보내고 돌려주는 값에 `envOf`를 더함). / 이유: 실제 세션 시나리오의 `setup`이 같은 `ScenarioContext`를 받고, 세션을 띄우려면 샘플의 환경이 필요하다. 시나리오와 기본 모드의 동작은 그대로다. `harness-guard` 신호(위험도 높음)지만 이 계획은 이미 높음이다. / 버린 대안: `live.ts`에 샘플 만들기를 다시 쓰기(같은 코드가 두 벌이 된다).
+- 결정(step5): 세션 프로세스는 `scripts/lib/exec.ts`의 `run`을 쓰지 않고 `live.ts` 안에서 띄운다. / 이유: `scripts/selftest/`는 하네스의 내부 모듈을 import하지 않는다(코드 구조 문서). 시간 제한과 프로세스 묶음 정리만 필요해 40줄 안팎이다.
+- 결정(step5): `s1-fresh-session`은 Issue 번호를 41부터 준다. / 이유: 판정이 답의 숫자를 모두 읽는다. 1~3번이면 "1단계" 같은 다른 숫자와 겹쳐 틀린 판정이 난다.
 
 ## 발견 사항
 
@@ -176,6 +187,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 설계서 19절 표의 2단계 행("남은 것: #57")과 0절 "현재 범위" 줄("나머지는 Issue #54~#57")은 #57이 닫히고 남은 일이 #102로 옮겨진 것을 담고 있지 않다. step7의 문서 정리(수용 기준 9의 19절)에서 고친다. → 처리: #102
 - 이 Windows PC에서 테스트용 임시 리포(`makeFixture`)를 하나 만드는 데 약 3초가 든다. 새 테스트 두 파일은 파일마다 리포 하나를 나눠 써서 55초를 26초로 줄였다. 기존 테스트 파일에도 같은 여지가 있다. → 처리: TD-40
 - `selftest` job이 고장 나면(이번의 gitleaks 누락처럼) 보호 경로를 바꾸는 모든 PR이 `harness-guard`에서 막히고, 그것을 고치는 PR도 같은 job을 받아 막힌다. 풀려면 제작자가 필수 체크에서 `harness-guard`를 잠시 빼야 한다. 로컬 사전 확인은 러너에 없는 도구(이 PC의 PATH에 있는 gitleaks)를 가려 주지 못했다. step6의 테스트 리포에서는 워크플로를 main에 넣기 전에 러너와 같은 조건(도구가 없는 PATH)으로 먼저 돌려 본다. → 처리: #102
+- Claude Code(2.1.326)의 결과 JSON `permission_denials`에는 L1 훅이 종료 코드 2로 막은 호출도 들어간다. runner의 세션 요약(`scripts/runner/agents.ts`의 `denials`)을 "권한 프로필이 거부한 도구"로만 읽으면 틀린다. → 처리: [설계서 12.4절](../../../harness/design.md)
+- `self-test --live`는 Mac에서만 실행해 봤다. Windows 쪽 가짜 도구(`.cmd`)와 Git Bash 경로 변환(`C:\…` → `/c/…`)은 실제 세션으로 확인하지 않았다. step6의 `selftest` 항목 `live` 사례를 Windows PC에서 실행하면 함께 확인된다. → 처리: #102
 
 ## 열린 질문
 
@@ -190,13 +203,12 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step4의 PR #109는 `harness-guard`가 실패인 채로 남는다(main의 `selftest` job에 gitleaks가 없다. 수정은 이 PR에 있고 병합된 뒤의 PR부터 적용된다). 병합 순서: (1) 제작자가 main 필수 체크에서 `harness-guard`를 잠시 뺀다 (2) 제작자가 PR #109의 head를 승인한다(자동 병합) (3) 제작자가 `harness-guard`를 출처 `harness-recorder`로 다시 등록하고 `revert-check`도 등록한다 (4) 봇이 `required-checks`로 확인한다. 고친 `selftest` job은 그 뒤 보호 경로를 바꾸는 첫 PR(step5)에서 확인한다.
-- step4(PR 병합) 뒤 step5(selftest-live)를 시작한다. step5를 하는 동안 제작자가 테스트 리포를 준비하면(아래 4번) step6을 기다림 없이 시작한다.
-- step4의 PR은 보호 경로를 바꾸므로 `gates` 워크플로의 `selftest` job이 실제 러너에서 처음 돈다. 그 PR에서 확인할 것: `selftest` job이 끝나고(걸린 시간을 적는다), `harness-guard` 설명 끝에 `자체 테스트 통과 <N>`이 붙는다. job이 러너 쪽 문제로 보고서를 남기지 못하면 `harness-guard`가 `error`가 되어 그것을 고치는 PR도 같은 이유로 병합되지 못한다. 그때는 원인을 job 로그로 확인해 제작자에게 알린다(제작자가 필수 체크에서 `harness-guard`를 잠시 빼고 수정 PR을 병합한 뒤 되돌려야 한다).
+- step5의 PR은 보호 경로(`scripts/`, `docs/harness/`)를 바꾸므로 `gates`의 `selftest` job이 돈다. step4에서 고친 job(gitleaks 설치)이 main에 들어간 뒤의 첫 실행이다. 확인할 것: `selftest` job이 통과하고 `harness-guard` 설명 끝에 `자체 테스트 통과 9`가 붙는다. 실패하면 job 로그의 `✗` 줄로 원인을 본다.
+- step5(PR 병합) 뒤 step6(test-repo)을 시작한다. 제작자 작업 4번(테스트 리포 준비)이 먼저 끝나 있어야 한다. step6·step7을 시작할 때 계획 검증 2라운드에서 미룬 P2 4건(원장 F3~F6, 진행 로그 2026-11-16)을 반영한다.
 - 이 계획의 PR은 모두 위험도 높음이다. 초안으로 올리고, 완료 처리·기록·main 병합·`check`가 끝난 뒤 `pr-ready`로 한 번만 승인을 요청한다.
 - 제작자 작업(한 번에 모아 요청. 순서와 절차: `docs/SECURITY.md` "운영 전환까지의 제작자 작업"):
   1. PR마다: head 승인(step0~7, 8회).
-  2. 지금: 하네스 리포 main의 필수 체크에 `revert-check`(출처 `harness-recorder`) 등록. step4 PR의 승인 요청 때 함께 요청한다. 등록 뒤 봇이 `required-checks`로 확인한다.
+  2. (끝남, 2026-11-17) 하네스 리포 main의 필수 체크에 `revert-check`(출처 `harness-recorder`) 등록. `required-checks` 통과로 확인했다.
   3. (끝남, 2026-11-16) 하네스 리포에 `revert` environment(main 전용)와 시크릿 `REVERT_BOT_TOKEN`(봇 PAT).
   4. step6 전: 새 비공개 테스트 리포 생성, 봇 초대(Write), 보호 설정·environment 5개·App 설치, 제작자 계정으로 시험 Issue 2건.
   5. step7 전: 하네스 리포의 코드 오너 리뷰 필수 설정, 봇 PAT를 `workflow` 권한 없이 재발급, 에이전트가 조작하는 브라우저 프로필의 GitHub 로그아웃 확인(절차: `docs/SECURITY.md` "에이전트용 브라우저 프로필 (제작자)").
