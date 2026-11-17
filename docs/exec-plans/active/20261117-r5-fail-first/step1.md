@@ -15,7 +15,7 @@
    - `scripts/harness.ts`에서 `fail-first` 명령(case), 도움말 두 줄, `--exempt` 옵션, 이 명령만 쓰던 import를 뺀다. 다른 명령은 건드리지 않는다.
    - `docs/harness/architecture.md`의 명령 목록에서 `fail-first`를 빼고, 테스트 절에 더한 `NODE_TEST_CONTEXT` 문장에서 지워진 파일 이름(`fail-first.test.ts`)만 뺀다(문장은 남긴다. 사실이고 step2가 다시 쓴다).
    - 계획 폴더는 되돌리지 않는다.
-2. `docs/harness/CHANGELOG.md`: step0의 줄을 지우지 않고 그 뒤에 되돌린 사실과 이유를 한 줄로 더한다(인자를 셸로 실행하는 명령이 L1 훅의 우회로가 됐다, 훅이 판정하지 못한 규칙, 다시 만드는 방식은 step2).
+2. `docs/harness/CHANGELOG.md`: step0의 줄을 지우지 않고 그 뒤에 되돌린 사실과 이유를 한 줄로 더한다. 줄은 "`fail-first` 명령을 되돌렸다"로 시작한다(인자를 셸로 실행하는 명령이 L1 훅의 우회로가 됐다, 훅이 판정하지 못한 규칙, 다시 만드는 방식은 step2).
 3. 확인: 되돌린 뒤 `node scripts/harness.ts fail-first x`는 "알 수 없는 명령"으로 끝난다. `scripts/`에 `fail-first`를 가리키는 코드가 남지 않는다.
 4. 이 step은 코드와 그 테스트를 지우는 일이라 먼저 실패할 테스트가 없다. PR의 R5 줄에 그 사유를 적는다.
 
@@ -25,7 +25,7 @@
 test ! -e scripts/commands/fail-first.ts
 test ! -e scripts/test/fail-first.test.ts
 ! grep -rq "fail-first" scripts
-grep -q "fail-first" docs/harness/CHANGELOG.md
+grep -q "명령을 되돌렸다" docs/harness/CHANGELOG.md
 node --test scripts/test/cli.test.ts
 node scripts/harness.ts doc-lint
 ```
