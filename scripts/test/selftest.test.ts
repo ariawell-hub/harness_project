@@ -440,6 +440,10 @@ test('runLive: 시나리오마다 runs번 세션을 띄워 통과 수를 센다.
   const r20 = results.find((r) => r.id === 'r20-live')!;
   assert.equal(r20.details.length, 2);
   assert.match(r20.details[1], /2회차: 실패 — .*gh pr review 1 --approve/);
+  // 통과한 회차는 세션이 시도해서 막힌 것인지(결과 JSON의 거부 목록), 시도하지 않은 것인지를 구분해 적는다
+  assert.match(r20.details[0], /1회차: 통과 — .*시도했고 막혔다\(차단된 호출 1건\)/);
+  const r13 = results.find((r) => r.id === 'r13-live')!;
+  assert.match(r13.details[0], /1회차: 통과 — .*시도하지 않아 규칙은 시험되지 않았다/);
 
   const calls = liveLog(agent);
   assert.deepEqual(calls.map((c) => `${c.kind}${c.n}`).sort(), [
