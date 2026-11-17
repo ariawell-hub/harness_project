@@ -101,6 +101,64 @@ export interface HarnessConfig {
     osvApi: string;
   };
   agents: Record<string, AgentDef>;
+  /** 테스트 실효성 검사(R5, test-effect) 설정. null이면 검사하지 않는다 */
+  testEffect: TestEffectConfig | null;
+}
+
+export interface TestEffectConfig {
+  /** 검사할 테스트 파일 glob(리포 루트 기준) */
+  files: string[];
+  /** head 판을 함께 덮어쓸 보조 파일 glob(검사 대상은 아니다) */
+  support: string[];
+  /** 테스트 파일 하나를 실행하는 명령(인자 배열). 끝에 파일 경로가 붙는다 */
+  command: string[];
+  timeoutSec: number;
+  /** head 체크아웃에서 base 체크아웃으로 연결할 경로(예: node_modules) */
+  link: string[];
+}
+
+/** 리포 안 상대 경로(glob 포함)인가: 비어 있지 않고, `/`로 시작하지 않고, `..` 구간과 `\`가 없다 */
+function relPath(x: unknown): boolean {
+  return (
+    typeof x === 'string' &&
+    x !== '' &&
+    !x.startsWith('/') &&
+    !x.includes('\\') &&
+    !/^[A-Za-z]:/.test(x) &&
+    !x.split('/').includes('..')
+  );
+}
+
+function resolveTestEffect(raw: unknown): TestEffectConfig | null {
+  if (raw === undefined || raw === null) return null;
+  const r = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<
+    string,
+    unknown
+  >;
+  const paths = (v: unknown) => Array.isArray(v) && v.every(relPath);
+  const support = r.support ?? [];
+  const link = r.link ?? [];
+  const ok =
+    paths(r.files) &&
+    (r.files as unknown[]).length > 0 &&
+    paths(support) &&
+    paths(link) &&
+    Array.isArray(r.command) &&
+    r.command.length > 0 &&
+    r.command.every((x) => typeof x === 'string' && x !== '') &&
+    Number.isInteger(r.timeoutSec) &&
+    (r.timeoutSec as number) > 0;
+  if (!ok)
+    throw new ConfigError(
+      `${CONFIG_FILE} 검증 실패:\n- testEffect는 null 또는 { files(리포 안 상대 경로 glob 배열, 1개 이상), support·link(리포 안 상대 경로 배열, 생략 가능), command(문자열 배열), timeoutSec(양의 정수) }`,
+    );
+  return {
+    files: r.files as string[],
+    support: support as string[],
+    command: r.command as string[],
+    timeoutSec: r.timeoutSec as number,
+    link: link as string[],
+  };
 }
 
 /** 역할별 environment(10.4절). 이 밖의 이름을 참조하는 워크플로는 harness-guard가 표시한다 */
@@ -278,6 +336,7 @@ export function loadConfig(repoRoot: string): HarnessConfig {
       );
   }
   cfg.deps = { ...DEFAULT_DEPS, ...(cfg.deps ?? {}) };
+  cfg.testEffect = resolveTestEffect(cfg.testEffect);
   return cfg;
 }
 

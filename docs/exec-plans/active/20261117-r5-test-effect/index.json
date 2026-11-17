@@ -1,0 +1,16 @@
+{
+  "plan": "20261117-r5-test-effect",
+  "steps": [
+    {
+      "step": 0,
+      "name": "gate",
+      "status": "completed",
+      "completed_at": "2026-11-17T21:52:39+09:00"
+    },
+    {
+      "step": 1,
+      "name": "check-step",
+      "status": "pending"
+    }
+  ]
+}
