@@ -246,13 +246,21 @@ test('loadConfig: testEffect가 없으면 null이고, 틀리면 ConfigError다',
   assert.equal(loadConfig(dir).testEffect, null);
   const good = { files: ['t/*.test.ts'], command: ['node', '--test'], timeoutSec: 60 };
   put(good);
-  assert.deepEqual(loadConfig(dir).testEffect, { ...good, support: [], link: [] });
-  put({ ...good, support: ['t/helpers.ts'], link: ['node_modules'] });
+  assert.deepEqual(loadConfig(dir).testEffect, {
+    ...good,
+    support: [],
+    link: [],
+    assertPattern: null,
+  });
+  put({ ...good, support: ['t/helpers.ts'], link: ['node_modules'], assertPattern: 'Assert|ERR' });
   assert.deepEqual(loadConfig(dir).testEffect, {
     ...good,
     support: ['t/helpers.ts'],
     link: ['node_modules'],
+    assertPattern: 'Assert|ERR',
   });
+  put({ ...good, assertPattern: null });
+  assert.equal(loadConfig(dir).testEffect?.assertPattern, null);
   for (const bad of [
     'on',
     [],
@@ -271,6 +279,10 @@ test('loadConfig: testEffect가 없으면 null이고, 틀리면 ConfigError다',
     { ...good, link: ['/usr/lib'] },
     { ...good, link: ['a/../..'] },
     { ...good, link: 'node_modules' },
+    { ...good, assertPattern: '' },
+    { ...good, assertPattern: '(' },
+    { ...good, assertPattern: 3 },
+    { ...good, assertPattern: ['AssertionError'] },
   ]) {
     put(bad);
     assert.throws(

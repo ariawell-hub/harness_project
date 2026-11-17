@@ -23,15 +23,24 @@ import { git, gitTry } from '../lib/git.ts';
 import { matchesAny, type Problem } from '../lib/util.ts';
 
 export type TestEffectOutcome = 'effective' | 'ineffective' | 'restored' | 'exempt' | 'invalid';
+/**
+ * base에서 실패한 이유(설정 testEffect.assertPattern이 있을 때만 나눈다).
+ * assertion: 단언 실패, other: 그 밖(모듈 없음, 문법 오류 등. 이 검사로는 단언을 확인하지 못했다), timeout: 시간 초과.
+ * 나누지 않았거나 base에서 실패하지 않은 판정은 null
+ */
+export type TestEffectReason = 'assertion' | 'other' | 'timeout' | null;
 export interface TestEffectItem {
   file: string;
   outcome: TestEffectOutcome;
   detail: string;
+  reason: TestEffectReason;
 }
 export interface TestEffectResult {
   skipped: boolean;
   items: TestEffectItem[];
   problems: Problem[];
+  /** 막지 않는 안내(명령과 check가 `참고:`로 낸다) */
+  notes: string[];
 }
 
 const RULE = 'R5 테스트 실효성';
@@ -136,7 +145,7 @@ function prepareDest(wt: string, rel: string, replace: boolean): 'ok' | 'exists'
   return 'unsafe';
 }
 
-type Decided = { outcome: TestEffectOutcome; detail: string };
+type Decided = { outcome: TestEffectOutcome; detail: string; reason?: TestEffectReason };
 
 /** base 체크아웃에서 파일마다 실행한다. 종료 코드 0이면 통과다 */
 async function runOnBase(o: {
@@ -191,6 +200,8 @@ async function runOnBase(o: {
     // 이 변수가 있으면 중첩된 `node --test`가 테스트를 건너뛰고 0으로 끝난다
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
+    // 출력은 이 정규식을 대 보는 데만 쓴다. 결과·로그에 옮기지 않는다
+    const assertRe = cfg.assertPattern ? new RegExp(cfg.assertPattern) : null;
     const queue = [...tests];
     const worker = async () => {
       for (let f = queue.shift(); f !== undefined; f = queue.shift()) {
@@ -199,11 +210,29 @@ async function runOnBase(o: {
           env,
           timeoutMs: cfg.timeoutSec * 1000,
         });
-        if (r.timedOut) out.set(f, { outcome: 'effective', detail: 'base에서 시간 초과' });
+        if (r.timedOut)
+          out.set(f, {
+            outcome: 'effective',
+            detail: 'base에서 시간 초과',
+            reason: assertRe ? 'timeout' : null,
+          });
         else if (r.code === 127 && r.stderr.includes('[exec] 실행 실패'))
           out.set(f, { outcome: 'invalid', detail: 'testEffect.command를 실행하지 못했다' });
         else if (r.code === 0) out.set(f, { outcome: 'ineffective', detail: 'base에서도 통과' });
-        else out.set(f, { outcome: 'effective', detail: `base에서 실패, 종료 코드 ${r.code}` });
+        else if (!assertRe)
+          out.set(f, { outcome: 'effective', detail: `base에서 실패, 종료 코드 ${r.code}` });
+        else if (assertRe.test(`${r.stdout}\n${r.stderr}`))
+          out.set(f, {
+            outcome: 'effective',
+            detail: `base에서 단언 실패, 종료 코드 ${r.code}`,
+            reason: 'assertion',
+          });
+        else
+          out.set(f, {
+            outcome: 'effective',
+            detail: `base에서 실패(단언 실패 아님: 모듈 없음 등), 종료 코드 ${r.code}`,
+            reason: 'other',
+          });
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tests.length) }, worker));
@@ -223,13 +252,13 @@ export async function testEffect(
   o: { base: string | null; committedOnly: boolean },
 ): Promise<TestEffectResult> {
   const te = cfg.testEffect;
-  if (!te || !o.base) return { skipped: true, items: [], problems: [] };
+  if (!te || !o.base) return { skipped: true, items: [], problems: [], notes: [] };
   // base가 head의 조상이 아니면(뒤처진 브랜치) 공통 조상과 비교한다
   const mb = gitTry(['merge-base', o.base, 'HEAD'], root);
   const base = mb.ok ? mb.stdout.trim() : o.base;
   const all = changed(root, base, o.committedOnly);
   const targets = all.filter((f) => matchesAny(f, te.files)).sort();
-  if (targets.length === 0) return { skipped: false, items: [], problems: [] };
+  if (targets.length === 0) return { skipped: false, items: [], problems: [], notes: [] };
 
   const exemptions = all
     .filter((f) => PLAN_RE.test(f))
@@ -272,7 +301,10 @@ export async function testEffect(
     for (const [f, r] of ran) decided.set(f, r);
   }
 
-  const items = targets.map((file) => ({ file, ...decided.get(file)! }));
+  const items: TestEffectItem[] = targets.map((file) => {
+    const d = decided.get(file)!;
+    return { file, outcome: d.outcome, detail: d.detail, reason: d.reason ?? null };
+  });
   const problems: Problem[] = [];
   for (const i of items) {
     if (i.outcome === 'ineffective')
@@ -290,5 +322,11 @@ export async function testEffect(
         doc: DOC,
       });
   }
-  return { skipped: false, items, problems };
+  const others = items.filter((i) => i.reason === 'other').length;
+  const notes = others
+    ? [
+        `변경 전 코드에서 단언 실패가 아닌 이유(모듈 없음 등)로 실패한 테스트 파일 ${others}개: 이 검사로는 그 파일의 단언을 확인하지 못했다. 테스트가 동작을 단언하는지 직접 확인하라`,
+      ]
+    : [];
+  return { skipped: false, items, problems, notes };
 }

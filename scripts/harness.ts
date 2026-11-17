@@ -377,6 +377,7 @@ async function main(argv: string[]): Promise<number> {
       }
       for (const i of r.items) log(`${i.file}: ${i.outcome}(${i.detail})`);
       for (const p of r.problems) process.stderr.write(formatProblem(p) + '\n');
+      for (const n of r.notes) log(`참고: ${n}`);
       const count = r.problems.length;
       log(count ? `test-effect: ${count}건` : 'test-effect: 통과');
       return count ? 1 : 0;

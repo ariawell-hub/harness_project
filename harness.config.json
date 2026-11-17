@@ -86,7 +86,8 @@
     "support": ["scripts/test/helpers.ts"],
     "command": ["node", "--test"],
     "timeoutSec": 900,
-    "link": ["node_modules"]
+    "link": ["node_modules"],
+    "assertPattern": "AssertionError|ERR_ASSERTION"
   },
   "planReview": {
     "required": true
