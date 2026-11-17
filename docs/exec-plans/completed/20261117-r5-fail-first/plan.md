@@ -2,7 +2,7 @@
 id: 20261117-r5-fail-first
 issue: 111 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: abandoned # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -68,6 +68,7 @@ R5(TDD)의 "먼저 실패한 테스트" 기록이 문장으로 대체되지 않�
 - 2026-11-17 step0: 먼저 실패한 기록(이 step은 명령이 아직 없어 손으로 적는다). 테스트 파일 `scripts/test/fail-first.test.ts`와 값을 돌려주지 않는 골격(`isTestFile`은 항상 false, `readFailFirst`는 빈 배열, CLI 명령 없음)만 둔 상태에서 `node --test scripts/test/fail-first.test.ts`가 종료 코드 1이었다: 7개 모두 `AssertionError [ERR_ASSERTION]`으로 실패했다(예: "알 수 없는 명령: fail-first"로 종료 코드 단언 실패, `assert.ok(before.length > 0)`, `isTestFile('scripts/test/a.test.ts')`가 `false !== true`). 그 뒤에 구현했다.
 - 2026-11-17 step0: 구현 뒤 첫 실행에서 2개가 계속 실패했고 원인은 테스트 쪽이었다. (1) 이 테스트 파일은 `node --test` 안에서 돌아 `NODE_TEST_CONTEXT`가 자식에게 넘어갔고, 명령 안의 `node --test`가 테스트 파일을 실행하지 않고 0으로 끝났다. 테스트가 그 변수를 빼고 CLI를 띄우게 고쳤다. (2) "출력의 끝 20줄에 원인이 보인다"는 단언이 Node 출력 형식과 맞지 않았다(위 20줄 → 40줄 수정).
 - 2026-11-17 step0: 구현. `scripts/commands/fail-first.ts`(`failFirst`·`exemptFailFirst`·`readFailFirst`·`isTestFile`·`failFirstFile`), `scripts/harness.ts`의 `fail-first` 명령·도움말·`--exempt` 옵션, 테스트 `scripts/test/fail-first.test.ts` 7개. 문서: 코드 구조 문서, `CHANGELOG`. `complete-step`·runner·설정은 바꾸지 않았다.
+- 2026-11-17 폐기: step0(PR #112)이 만든 `fail-first "<테스트 명령>"`이 인자를 셸로 실행해 L1 훅의 우회로가 됐다. 제작자 결정으로 계획 `20261117-revert-fail-first`가 그 명령을 되돌린다. 다음 step(step1 완료 처리 검사)의 지시서가 되돌려질 명령에 기대고 있고 실행할 차례인 step의 지시서는 고칠 수 없어, 이 계획은 여기서 끝낸다. step1은 시작하지 않았다. 기록 명령은 같은 Issue #111의 후속 계획에서 다시 설계한다.
 
 ## 의사결정 로그
 
