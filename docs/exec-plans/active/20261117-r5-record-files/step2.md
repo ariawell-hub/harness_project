@@ -3,7 +3,7 @@
 ## 읽어야 할 파일
 
 - `docs/exec-plans/active/20261117-r5-record-files/plan.md` (수용 기준 6~9, 의사결정 로그, 발견 사항)
-- step1이 만든 파일: `scripts/commands/fail-first.ts`(`isTestFile`, `readFailFirst`, `FailFirstRecord`의 `files`), `scripts/test/fail-first.test.ts`
+- step1이 만든 파일: `scripts/commands/fail-first.ts`(`isTestFile`, `readFailFirst`, `FailFirstRecord`의 `file`), `scripts/test/fail-first.test.ts`
 - `scripts/commands/task.ts`(`completeStep`, `appendProgress`, `reopenStep`), `scripts/lib/git.ts`(`changedFiles`, `defaultBase`)
 - `scripts/runner/run.ts`(`publishStep`이 `completeStep`의 예외를 `plan:complete` 실패로 세는 곳), `scripts/runner/prompt.ts`(step 세션 프롬프트의 공통 규칙)
 - `scripts/selftest/run.ts`(`ScenarioContext`), `scripts/selftest/scenarios/r1-plan-gate.ts`(계획을 만들어 완료 처리하는 시나리오), `scripts/test/selftest.test.ts`(시나리오 id 목록, 약화된 사본 테스트)
@@ -12,10 +12,10 @@
 ## 작업
 
 1. `scripts/commands/task.ts`의 `completeStep`
-   - 발견 사항 검사 뒤, 계획을 바꾸기 전에 확인한다: 그 step의 변경(`defaultBase`로 정한 merge-base 대비 `changedFiles`. 커밋하지 않은 변경과 추적하지 않는 파일 포함) 가운데 `isTestFile`인 파일이 하나라도 있으면 `readFailFirst`로 그 계획·step의 기록을 찾는다. `kind: 'fail'` 기록은 `files` 가운데 이 step이 바꾼 테스트 파일이 하나 이상 있을 때만 인정한다(바뀐 테스트와 무관한 파일의 실패는 기록이 아니다).
+   - 발견 사항 검사 뒤, 계획을 바꾸기 전에 확인한다: 그 step의 변경(`defaultBase`로 정한 merge-base 대비 `changedFiles`. 커밋하지 않은 변경과 추적하지 않는 파일 포함) 가운데 `isTestFile`인 파일이 하나라도 있으면 `readFailFirst`로 그 계획·step의 기록을 찾는다. `kind: 'fail'` 기록은 `file`이 이 step이 바꾼 테스트 파일일 때만 인정한다(바뀐 테스트와 무관한 파일의 실패는 기록이 아니다).
    - merge-base 대비 변경이 곧 그 step의 변경이다: step마다 브랜치가 따로이고(`new-task --plan <id> --step <N>`이 `origin/main`에서 그 step의 브랜치를 만든다) 앞 step은 병합돼 main에 있다. 앞 step이 바꾼 테스트 파일은 뒤 step의 검사에 들어오지 않아야 한다(아래 테스트로 확인한다).
    - 기록이 없으면 `TaskError`다. 문구에 바뀐 테스트 파일(5개까지)과 고치는 법 두 가지를 적는다: 구현 전이면 `node scripts/harness.ts fail-first <테스트 파일>`, 이미 구현했거나 R5의 예외(문서·설정·순수 리팩터)면 `node scripts/harness.ts fail-first --exempt "<사유>"`. 계획 파일과 `index.json`은 바꾸지 않는다.
-   - 기록이 있으면 진행 로그에 한 줄을 더한다(`appendProgress`). `kind: 'fail'` 기록이 있으면 가장 최근 것으로 `step<N> 먼저 실패한 기록(R5): \`<파일들>\` → 종료 코드 <N> (기록 <시각>, HEAD <7자>)`, 예외만 있으면 `step<N> R5 예외: <사유> (기록 <시각>)`. 같은 줄이 이미 있으면 다시 더하지 않는다(재작업 뒤 두 번째 완료 처리).
+   - 기록이 있으면 진행 로그에 한 줄을 더한다(`appendProgress`). `kind: 'fail'` 기록이 있으면 가장 최근 것으로 `step<N> 먼저 실패한 기록(R5): \`<파일>\` → 종료 코드 <N> (기록 <시각>, HEAD <7자>)`, 예외만 있으면 `step<N> R5 예외: <사유> (기록 <시각>)`. 같은 줄이 이미 있으면 다시 더하지 않는다(재작업 뒤 두 번째 완료 처리).
    - merge-base를 정하지 못하면(원격·로컬 기본 브랜치가 없다) 검사를 건너뛰지 않고 `TaskError`로 멈춘다.
    - 테스트 파일이 바뀌지 않은 step은 지금과 같이 완료된다.
 
@@ -30,7 +30,7 @@
    - 대조군: 테스트 파일을 바꾸지 않은 계획은 기록 없이 완료된다.
 
 4. 테스트
-   - `scripts/test/task.test.ts`(또는 `fail-first.test.ts`): 테스트 파일을 바꾼 step에서 기록 없이 `completeStep`은 `TaskError`이고 `index.json`의 상태가 그대로다. `fail` 기록 뒤에는 완료되고 진행 로그에 줄이 있다. 이 step이 바꾸지 않은 테스트 파일만 실행한 `fail` 기록은 인정되지 않는다. `exempt`만 있으면 `R5 예외` 줄이다. 재작업(`reopenStep`) 뒤 다시 완료해도 줄이 두 번 생기지 않는다. 테스트 파일을 바꾸지 않은 step은 기록 없이 완료된다.
+   - `scripts/test/task.test.ts`(또는 `fail-first.test.ts`): 테스트 파일을 바꾼 step에서 기록 없이 `completeStep`은 `TaskError`이고 `index.json`의 상태가 그대로다. `fail` 기록 뒤에는 완료되고 진행 로그에 줄이 있다. 이 step이 바꾸지 않은 테스트 파일의 `fail` 기록은 인정되지 않는다(바꾼 테스트 파일이 둘이면 그 가운데 하나의 기록이면 된다). `exempt`만 있으면 `R5 예외` 줄이다. 재작업(`reopenStep`) 뒤 다시 완료해도 줄이 두 번 생기지 않는다. 테스트 파일을 바꾸지 않은 step은 기록 없이 완료된다.
    - step 2개짜리 계획: step0이 테스트 파일을 바꿔 기록을 남기고 완료된 뒤 그 브랜치가 main에 병합된다. `new-task --plan <id> --step 1`로 만든 step1 worktree에서 테스트 파일을 바꾸지 않고 코드만 바꾸면 기록 없이 완료된다(앞 step의 테스트 파일이 검사에 섞이지 않는다). 같은 step1에서 테스트 파일을 바꾸면 step0의 기록으로는 통과하지 못한다.
    - runner: 가짜 에이전트가 만든 step(테스트 파일 없음)이 기존대로 병합되는지는 기존 runner 테스트가 본다. 새로 볼 것은 프롬프트다: step 세션 프롬프트에 `fail-first`가 있고 계획 작성 프롬프트에는 없다.
    - `scripts/test/selftest.test.ts`: 시나리오 id 목록과 항목 목록에 `r5-fail-first`·`R5`를 더하고, `completeStep`의 기록 검사를 뺀 사본에서 이 시나리오가 실패하는 테스트를 더한다.
