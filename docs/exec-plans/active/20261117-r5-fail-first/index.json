@@ -1,0 +1,15 @@
+{
+  "plan": "20261117-r5-fail-first",
+  "steps": [
+    {
+      "step": 0,
+      "name": "record-command",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "complete-check",
+      "status": "pending"
+    }
+  ]
+}
