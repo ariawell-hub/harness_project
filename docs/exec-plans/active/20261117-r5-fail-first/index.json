@@ -9,6 +9,16 @@
     },
     {
       "step": 1,
+      "name": "revert-command",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "record-files",
+      "status": "pending"
+    },
+    {
+      "step": 3,
       "name": "complete-check",
       "status": "pending"
     }
