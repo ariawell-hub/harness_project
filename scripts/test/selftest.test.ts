@@ -20,6 +20,7 @@ const IDS = [
   'r20-owner-commands',
   'r4-bypass',
   'r45-runner',
+  'r5-test-effect',
   's1-next-task',
 ];
 
@@ -84,6 +85,7 @@ test('self-test: 이 리포의 하네스는 모든 시나리오를 통과한다'
     'R14',
     'R20',
     'R4',
+    'R5',
     'S1',
     '전체 흐름',
   ]);
@@ -137,6 +139,24 @@ test('self-test: plan-gate가 항상 통과하는 하네스에서는 R1 시나�
     [['r1-plan-gate', 'fail']],
   );
   assert.match(r.report.results[0].detail, /plan-gate가 통과했다/);
+});
+
+test('self-test: test-effect가 base에서 통과하는 테스트를 막지 않거나 설정이 꺼진 하네스에서는 R5 시나리오가 실패한다', () => {
+  const state = (dir: string) => {
+    const r = selfTestCli(['--harness', dir, '--only', 'r5-test-effect']);
+    assert.equal(r.code, 1, r.stdout);
+    return r.report.results.map((x) => [x.id, x.state]);
+  };
+  const weak = copyHarness();
+  weaken(weak, 'scripts/gates/test-effect.ts', "if (i.outcome === 'ineffective')", 'if (false)', 1);
+  assert.deepEqual(state(weak), [['r5-test-effect', 'fail']]);
+
+  const off = copyHarness();
+  const f = path.join(off, 'harness.config.json');
+  const cfg = JSON.parse(readFileSync(f, 'utf8'));
+  assert.ok(cfg.testEffect, '이 리포의 설정에 testEffect가 없다');
+  writeFileSync(f, JSON.stringify({ ...cfg, testEffect: null }));
+  assert.deepEqual(state(off), [['r5-test-effect', 'fail']]);
 });
 
 test('self-test: runner가 AC 결과를 보지 않는(세션의 "완료"를 믿는) 하네스에서는 4.5절 시나리오가 실패한다', () => {
