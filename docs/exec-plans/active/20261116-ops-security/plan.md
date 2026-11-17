@@ -165,8 +165,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - Codex의 훅 설정(`.codex/hooks.json`)은 matcher가 `.*`라 MCP 호출이 훅에 올 수 있지만, Codex가 넘기는 도구 이름이 `mcp__…` 꼴인지는 확인하지 않았다. 다른 꼴이면 `evaluateMcp`를 타지 않는다. → 처리: TD-8
 - `selftest` job은 main의 시나리오로 PR의 하네스를 시험하므로, main의 시나리오가 요구하는 동작을 되돌리는 revert PR(예: 시나리오와 규칙을 함께 더한 커밋의 revert)은 그 시나리오가 실패해 `harness-guard`에서 막힌다. 자동 revert가 서지 않고, 시나리오를 먼저 고치는 PR 뒤에 일반 PR로 되돌려야 한다. → 처리: TD-41
 - 제작자가 PR을 승인하면 `review-trigger` → `gates`가 다시 돌고, 보호 경로 PR이면 `selftest` job도 다시 돈다. 승인에서 `risk-gate` 통과까지 자체 테스트 시간(이 PC에서 약 3분, 러너에서는 step4 PR에서 잰다)만큼 늦어진다. PR 본문을 고칠 때(`edited`)도 같다. → 처리: #102
-- `.github/CODEOWNERS`가 main에 들어가면 GitHub이 보호 경로를 바꾼 PR(초안 해제 뒤)마다 제작자에게 리뷰 요청 알림을 보낸다. 코드 오너 리뷰 필수를 켜기 전에는 병합을 막지 않는다. → 처리: `docs/SECURITY.md` "코드 오너 리뷰 필수"
-- 관리자가 아닌 봇 토큰으로는 브랜치 보호의 코드 오너 리뷰 설정을 읽을 수 없다(REST 보호 조회는 관리자 전용이고, GraphQL `branchProtectionRule`은 null로 온다). `ops-check` 2번의 설정 부분은 시험 PR이 근거다. → 처리: 설계서 10.4절 체크리스트 2
+- `.github/CODEOWNERS`가 main에 들어가면 GitHub이 보호 경로를 바꾼 PR(초안 해제 뒤)마다 제작자에게 리뷰 요청 알림을 보낸다. 코드 오너 리뷰 필수를 켜기 전에는 병합을 막지 않는다("코드 오너 리뷰 필수" 절에 적었다). → 처리: [docs/SECURITY.md](../../../SECURITY.md)
+- 관리자가 아닌 봇 토큰으로는 브랜치 보호의 코드 오너 리뷰 설정을 읽을 수 없다(REST 보호 조회는 관리자 전용이고, GraphQL `branchProtectionRule`은 null로 온다). `ops-check` 2번의 설정 부분은 시험 PR이 근거다(10.4절 체크리스트 2에 적었다). → 처리: [설계서](../../../harness/design.md)
 - 설계서 19절 표의 2단계 행("남은 것: #57")과 0절 "현재 범위" 줄("나머지는 Issue #54~#57")은 #57이 닫히고 남은 일이 #102로 옮겨진 것을 담고 있지 않다. step7의 문서 정리(수용 기준 9의 19절)에서 고친다. → 처리: #102
 - 이 Windows PC에서 테스트용 임시 리포(`makeFixture`)를 하나 만드는 데 약 3초가 든다. 새 테스트 두 파일은 파일마다 리포 하나를 나눠 써서 55초를 26초로 줄였다. 기존 테스트 파일에도 같은 여지가 있다. → 처리: TD-40
 
