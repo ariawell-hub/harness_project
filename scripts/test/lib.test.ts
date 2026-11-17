@@ -232,3 +232,51 @@ test('이 리포의 설정과 프로파일: guard.mcp가 기본값으로 적혀 
       profile,
     );
 });
+
+test('loadConfig: testEffect가 없으면 null이고, 틀리면 ConfigError다', () => {
+  const dir = tmp('harness-lib-cfg-');
+  const put = (testEffect?: unknown) =>
+    writeFileSync(
+      path.join(dir, 'harness.config.json'),
+      JSON.stringify(fixtureConfig(testEffect === undefined ? {} : { testEffect })),
+    );
+  put();
+  assert.equal(loadConfig(dir).testEffect, null);
+  put(null);
+  assert.equal(loadConfig(dir).testEffect, null);
+  const good = { files: ['t/*.test.ts'], command: ['node', '--test'], timeoutSec: 60 };
+  put(good);
+  assert.deepEqual(loadConfig(dir).testEffect, { ...good, support: [], link: [] });
+  put({ ...good, support: ['t/helpers.ts'], link: ['node_modules'] });
+  assert.deepEqual(loadConfig(dir).testEffect, {
+    ...good,
+    support: ['t/helpers.ts'],
+    link: ['node_modules'],
+  });
+  for (const bad of [
+    'on',
+    [],
+    { ...good, files: [] },
+    { ...good, files: 't/*.test.ts' },
+    { ...good, files: ['/abs/*.test.ts'] },
+    { ...good, files: ['t/../../x.test.ts'] },
+    { ...good, files: ['t\\x.test.ts'] },
+    { ...good, files: [''] },
+    { ...good, command: [] },
+    { ...good, command: ['node', ''] },
+    { ...good, command: 'node --test' },
+    { ...good, timeoutSec: 0 },
+    { ...good, timeoutSec: 1.5 },
+    { ...good, support: ['../helpers.ts'] },
+    { ...good, link: ['/usr/lib'] },
+    { ...good, link: ['a/../..'] },
+    { ...good, link: 'node_modules' },
+  ]) {
+    put(bad);
+    assert.throws(
+      () => loadConfig(dir),
+      (e: unknown) => e instanceof ConfigError && /testEffect는/.test(e.message),
+      JSON.stringify(bad),
+    );
+  }
+});

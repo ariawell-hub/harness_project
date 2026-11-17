@@ -70,6 +70,7 @@ import { revertCheck, revertTarget, type RevertCheck } from './gates/revert-chec
 import { docLint, printDocLint } from './gates/doc-lint.ts';
 import { planGate, type PlanG1 } from './gates/plan-gate.ts';
 import { secretScan } from './gates/secret-scan.ts';
+import { testEffect } from './gates/test-effect.ts';
 import { getGitHub, runIdOf } from './lib/github.ts';
 import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
@@ -98,6 +99,7 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 게이트:
   plan-gate [--repo <dir>] [--config-root <dir>] [--base <sha>] [--head-ref <브랜치>] [--mode pr|plan]
   doc-lint | bypass-scan [--ci] [--base <sha>] | secret-scan [--ci] [--base <sha>]
+  test-effect [--ci] [--base <sha>]         R5: 추가·수정한 테스트 파일이 변경 전 코드에서 실패하는가(설정 testEffect)
   self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>]
                                            하네스 자체 테스트(12.4절): 대상 하네스(기본: 이 리포)를 임시 샘플 리포에 적용해
                                            시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1
@@ -353,6 +355,24 @@ async function main(argv: string[]): Promise<number> {
       for (const p of list) process.stderr.write(formatProblem(p) + '\n');
       log(list.length ? `${cmd}: ${list.length}건` : `${cmd}: 통과`);
       return list.length ? 1 : 0;
+    }
+    case 'test-effect': {
+      const info = repoInfo(cwd);
+      const cfg = loadConfig(info.root);
+      const base =
+        str('base') ?? defaultBase(info.root, cfg.github.remote, cfg.github.defaultBranch);
+      const r = await testEffect(info.root, cfg, { base, committedOnly: flag('ci') });
+      if (r.skipped) {
+        log(
+          `test-effect: 해당 없음(${cfg.testEffect ? '비교 대상(base) 없음' : '설정 testEffect 없음'})`,
+        );
+        return 0;
+      }
+      for (const i of r.items) log(`${i.file}: ${i.outcome}(${i.detail})`);
+      for (const p of r.problems) process.stderr.write(formatProblem(p) + '\n');
+      const count = r.problems.length;
+      log(count ? `test-effect: ${count}건` : 'test-effect: 통과');
+      return count ? 1 : 0;
     }
     case 'plan-gate': {
       const root = path.resolve(str('repo') ?? repoInfo(cwd).root);
