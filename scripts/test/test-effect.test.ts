@@ -418,3 +418,108 @@ test('CLI: 종료 코드와 마지막 줄, 출력에 테스트 출력이 없다'
   assert.equal(none.code, 0);
   assert.match(none.stdout.trimEnd(), /test-effect: 해당 없음\(.+\)$/);
 });
+
+const PATTERN = 'AssertionError|ERR_ASSERTION';
+const reasons = (r: Awaited<ReturnType<typeof check>>) =>
+  Object.fromEntries(r.items.map((i) => [i.file, i.reason]));
+const LIB2 = 'export const add = (a, b) => a + b;\nexport const sub = (a, b) => a - b;\n';
+const ASSERTING = `${HEAD}import * as lib from '../src/lib.mjs';\ntest('sub', () => assert.equal(lib.sub?.(3, 1), 2));\n`;
+const NEW_MODULE = `${HEAD}import { neu } from '../src/neu.mjs';\ntest('neu', () => assert.equal(neu, 1));\n`;
+
+test('실패 이유: 단언 실패는 assertion, 그 밖(모듈 없음)은 other이고 둘 다 통과다', async () => {
+  const { root, base } = repo({ assertPattern: PATTERN });
+  write(root, 'src/lib.mjs', LIB2);
+  write(root, 't/sub.test.mjs', ASSERTING);
+  write(root, 'src/neu.mjs', 'export const neu = 1;\n');
+  write(root, 't/neu.test.mjs', NEW_MODULE);
+  const r = await check(root, base);
+  assert.deepEqual(outcomes(r), { 't/sub.test.mjs': 'effective', 't/neu.test.mjs': 'effective' });
+  assert.deepEqual(reasons(r), { 't/sub.test.mjs': 'assertion', 't/neu.test.mjs': 'other' });
+  assert.deepEqual(r.problems, []);
+  const detail = Object.fromEntries(r.items.map((i) => [i.file, i.detail]));
+  assert.match(detail['t/sub.test.mjs'], /^base에서 단언 실패, 종료 코드 \d+$/);
+  assert.match(
+    detail['t/neu.test.mjs'],
+    /^base에서 실패\(단언 실패 아님: 모듈 없음 등\), 종료 코드 \d+$/,
+  );
+  // 그 밖의 실패가 있으면 안내 한 줄(파일 수)
+  assert.equal(r.notes.length, 1);
+  assert.match(r.notes[0], /1개/);
+  assert.match(r.notes[0], /단언을 확인하지 못했다/);
+});
+
+test('실패 이유: 그 밖의 실패가 없으면 notes는 비어 있다', async () => {
+  const { root, base } = repo({ assertPattern: PATTERN });
+  write(root, 'src/lib.mjs', LIB2);
+  write(root, 't/sub.test.mjs', ASSERTING);
+  const r = await check(root, base);
+  assert.deepEqual(reasons(r), { 't/sub.test.mjs': 'assertion' });
+  assert.deepEqual(r.notes, []);
+});
+
+test('실패 이유: 시간 초과는 timeout, 실행하지 않았거나 통과한 판정은 null이다', async () => {
+  const slow = repo({ assertPattern: PATTERN, timeoutSec: 2 });
+  write(
+    slow.root,
+    't/slow.test.mjs',
+    `${HEAD}test('slow', async () => { await new Promise((r) => setTimeout(r, 60000)); });\n`,
+  );
+  const rs = await check(slow.root, slow.base);
+  assert.deepEqual(reasons(rs), { 't/slow.test.mjs': 'timeout' });
+  assert.deepEqual(rs.notes, []);
+
+  const { root, base } = repo({ assertPattern: PATTERN, files: ['t/*.test.mjs', '*.test.mjs'] });
+  write(root, 't/pass.test.mjs', PASSING); // ineffective
+  write(root, 't/exempt.test.mjs', `${PASSING}// 예외\n`);
+  write(
+    root,
+    PLAN,
+    `# 계획\n\n${exemptLine('t/exempt.test.mjs', blobOf(root, 't/exempt.test.mjs')).replace('<한 줄>', '기존 동작')}\n`,
+  );
+  write(root, '-x.test.mjs', PASSING); // invalid
+  const r = await check(root, base);
+  assert.deepEqual(outcomes(r), {
+    '-x.test.mjs': 'invalid',
+    't/exempt.test.mjs': 'exempt',
+    't/pass.test.mjs': 'ineffective',
+  });
+  assert.deepEqual(reasons(r), {
+    '-x.test.mjs': null,
+    't/exempt.test.mjs': null,
+    't/pass.test.mjs': null,
+  });
+});
+
+test('실패 이유: assertPattern이 없으면 구분하지 않고 판정 줄은 그대로다', async () => {
+  const { root, base } = repo();
+  write(root, 'src/lib.mjs', LIB2);
+  write(root, 't/sub.test.mjs', ASSERTING);
+  write(root, 'src/neu.mjs', 'export const neu = 1;\n');
+  write(root, 't/neu.test.mjs', NEW_MODULE);
+  const r = await check(root, base);
+  assert.deepEqual(reasons(r), { 't/sub.test.mjs': null, 't/neu.test.mjs': null });
+  for (const i of r.items) assert.match(i.detail, /^base에서 실패, 종료 코드 \d+$/);
+  assert.deepEqual(r.notes, []);
+});
+
+test('실패 이유: 단언 메시지와 출력의 표식이 결과와 CLI 출력에 없고, CLI는 참고 줄을 내고 0으로 끝난다', async () => {
+  const { root, base } = repo({ assertPattern: PATTERN });
+  write(
+    root,
+    't/msg.test.mjs',
+    `${HEAD}console.log('${MARK}');\ntest('msg', () => assert.equal(1, 2, '${MARK}'));\n`,
+  );
+  write(root, 'src/neu.mjs', 'export const neu = 1;\n');
+  write(root, 't/neu.test.mjs', `${NEW_MODULE}console.error('${MARK}');\n`);
+  const r = await check(root, base);
+  assert.deepEqual(reasons(r), { 't/msg.test.mjs': 'assertion', 't/neu.test.mjs': 'other' });
+  assert.ok(!JSON.stringify(r).includes(MARK), '결과에 테스트 출력이 들어 있다');
+
+  const out = cli(root, ['--base', base]);
+  assert.equal(out.code, 0, out.stderr);
+  assert.match(out.stdout, /t\/msg\.test\.mjs: effective\(base에서 단언 실패, 종료 코드 \d+\)/);
+  assert.match(out.stdout, /t\/neu\.test\.mjs: effective\(base에서 실패\(단언 실패 아님/);
+  assert.match(out.stdout, /^참고: .*1개/m);
+  assert.match(out.stdout.trimEnd(), /test-effect: 통과$/);
+  assert.ok(!`${out.stdout}${out.stderr}`.includes(MARK));
+});

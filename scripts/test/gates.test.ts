@@ -411,3 +411,17 @@ test('check 캐시 키는 testEffect 설정에 따라 달라진다', () => {
     a,
   );
 });
+
+test('check(test-effect): 단언 실패가 아닌 이유로 실패한 테스트 파일이 있으면 참고 줄을 내고 통과한다', async () => {
+  const { root, base } = effectRepo({ ...EFFECT, assertPattern: 'AssertionError|ERR_ASSERTION' });
+  write(root, 'src/neu.mjs', 'export const neu = 1;\n');
+  write(
+    root,
+    't/neu.test.mjs',
+    `${T_HEAD}import { neu } from '../src/neu.mjs';\ntest('neu', () => assert.equal(neu, 1));\n`,
+  );
+  const r = await effectCheck(root, base);
+  assert.equal(r.ok, true);
+  assert.match(r.results[0].output, /t\/neu\.test\.mjs: effective\(base에서 실패\(단언 실패 아님/);
+  assert.match(r.results[0].output, /^참고: .*1개/m);
+});

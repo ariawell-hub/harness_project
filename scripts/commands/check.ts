@@ -127,6 +127,7 @@ export async function runCheck(
       ok = r.problems.length === 0;
       output = [
         ...r.items.map((i) => `${i.file}: ${i.outcome}(${i.detail})`),
+        ...r.notes.map((n) => `참고: ${n}`),
         problemsText(r.problems),
       ]
         .filter(Boolean)

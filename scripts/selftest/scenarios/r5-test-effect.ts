@@ -10,6 +10,14 @@ export default {
     '변경 전 코드에서도 통과하는 테스트 파일을 더한 커밋은 `test-effect`가 실패하고, 계획 파일의 예외 줄이 있으면 통과한다',
   run(ctx) {
     const s = ctx.sample();
+    // 변경 전 코드(main)에 있는 모듈. 뒤에서 이 모듈의 동작을 바꾼다
+    s.write(
+      'scripts/selftest-sample/calc.ts',
+      'export const add = (a: number, b: number) => a + b;\n',
+    );
+    s.git(['add', '-A']);
+    s.git(['commit', '-q', '-m', 'feat: calc']);
+    s.git(['push', '-q', 'origin', 'main']);
     const wt = path.join(path.dirname(s.root), 'work');
     s.git(['worktree', 'add', '-q', '-b', 'feat/20260101-work', wt, 'origin/main']);
     const commit = (files: Record<string, string>, msg: string) => {
@@ -31,6 +39,30 @@ export default {
     const good = run();
     assertAllowed(good, '변경 전 코드에서 실패하는 테스트를 더한 커밋의 test-effect');
     assert.match(good.stdout, /zz-feature\.test\.ts: effective/, '판정 줄에 effective가 없다');
+    // 새 모듈의 테스트는 변경 전 코드에서 모듈 없음으로 실패한다. 통과지만 단언을 확인하지 못했다고 표시한다
+    assert.match(
+      good.stdout,
+      /zz-feature\.test\.ts: effective\(base에서 실패\(단언 실패 아님/,
+      '새 모듈의 테스트 판정 줄에 "단언 실패 아님"이 없다',
+    );
+    assert.match(good.stdout, /^참고: /m, '단언을 확인하지 못한 파일이 있는데 참고 줄이 없다');
+
+    // 있던 모듈의 동작을 바꾸고 그 동작을 단언하는 테스트는 변경 전 코드에서 단언 실패로 끝난다
+    commit(
+      {
+        'scripts/selftest-sample/calc.ts':
+          'export const add = (a: number, b: number) => a + b;\nexport const sub = (a: number, b: number) => a - b;\n',
+        'scripts/test/zz-calc.test.ts': `${HEAD}import * as calc from '../selftest-sample/calc.ts';\ntest('sub', () => assert.equal((calc as Record<string, any>).sub?.(3, 1), 2));\n`,
+      },
+      'feat: sub',
+    );
+    const asserted = run();
+    assertAllowed(asserted, '변경 전 코드에서 단언 실패로 끝나는 테스트를 더한 커밋의 test-effect');
+    assert.match(
+      asserted.stdout,
+      /zz-calc\.test\.ts: effective\(base에서 단언 실패, /,
+      '단언 실패로 끝난 테스트의 판정 줄에 "단언 실패"가 없다',
+    );
 
     // 변경 전 코드에서도 통과하는 테스트 파일
     commit(
