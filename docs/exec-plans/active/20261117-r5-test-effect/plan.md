@@ -73,6 +73,7 @@ R5의 검출 항목 가운데 "새로 추가·수정된 테스트가 merge-base 
 - 2026-11-17 step0: 지적 F2의 테스트 3개("링크를 따라가지 않는다")를 먼저 쓰고 고치기 전 구현에서 실행했다: 3개 모두 실패(종료 코드 1). 2개에서는 리포 밖 폴더에 `new.test.mjs`·`helper.mjs`가 실제로 써졌다(지적이 맞다). 1개는 링크에서 일반 파일로 바뀐 `support` 파일이 대상에서 빠져 `effective`로 나왔다. 그 뒤 `prepareDest`(상위 경로 `lstat`, 목적지 링크 제거)와 `--diff-filter=AMT`를 넣었다. `test-effect.test.ts` 20개 통과. 계획이 다시 승인되기 전에는 구현을 올리지 않는다.
 - 2026-11-17: 계획 검증 2라운드(head `97f46a7`)에서 두 검증자가 승인했다(G1 해시 `e80fbb145073`. F2는 fixed, F1은 P2라 미룸으로 남았지만 AC에 반영했다). step0 구현을 올린다.
 - 2026-11-17 step0: AC 명령 5개가 종료 코드 0이다(`test-effect.test.ts` 20개, `lib.test.ts` 15개 통과). 이 리포에서 `node scripts/harness.ts test-effect`는 "해당 없음(설정 testEffect 없음)"이다(설정값은 step1). step1에 넣을 설정값으로 게이트를 이 변경에 직접 돌려 봤다: `scripts/test/lib.test.ts`와 `scripts/test/test-effect.test.ts`가 모두 `effective`(base에서 실패, 종료 코드 1), 1.2초, 실행 뒤 임시 worktree 없음, `node_modules` 그대로.
+- 2026-11-17 step0: 구현을 올린 직후(head `2ae0524`) PR #110(#102 step5)이 병합돼(main `84acf52`) `CHANGELOG`가 충돌했다. `origin/main`을 병합해 풀었다: main의 v0.7.51 줄을 앞에, 이 PR의 줄을 뒤에 뒀다. `scripts/harness.ts`와 코드 구조 문서는 자동 병합됐다. 병합한 트리에서 전체 `check`를 다시 돌린다.
 
 ## 의사결정 로그
 

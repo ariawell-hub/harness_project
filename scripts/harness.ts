@@ -75,6 +75,7 @@ import { getGitHub, runIdOf } from './lib/github.ts';
 import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
 import { runWorkers, workerNames } from './runner/workers.ts';
+import { formatLive, LiveLaunchError, runLive } from './selftest/live.ts';
 import { formatSelfTest, runSelfTest } from './selftest/run.ts';
 
 const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
@@ -103,6 +104,10 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>]
                                            하네스 자체 테스트(12.4절): 대상 하네스(기본: 이 리포)를 임시 샘플 리포에 적용해
                                            시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1
+  self-test --live [--harness <폴더>] [--runs <N>] [--only <id,id>] [--out <파일>]
+                                           실제 세션 시나리오(scripts/selftest/live/): 대상 하네스 설정의 agents.claude로
+                                           시나리오마다 N번(기본 3) 세션을 띄워 통과 수를 낸다. 구독 인증이 필요하다.
+                                           통과율로는 실패시키지 않는다. 세션을 한 번도 띄우지 못했을 때만 종료 코드 1
 
 CI(gates 워크플로, 10.4절):
   ci-pr --event <이벤트 JSON> --body-out <파일>
@@ -199,6 +204,8 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'no-cache': { type: 'boolean' },
   undo: { type: 'boolean' },
   write: { type: 'boolean' },
+  live: { type: 'boolean' },
+  runs: { type: 'string' },
   base: { type: 'string' },
   only: { type: 'string' },
   harness: { type: 'string' },
@@ -1132,6 +1139,30 @@ async function main(argv: string[]): Promise<number> {
       return stop === 'error' || stop === 'locked' || stop === 'agent-missing' ? 1 : 0;
     }
     case 'self-test': {
+      if (flag('live')) {
+        // 실제 세션 시나리오(12.4절). 기본 모드와 달리 통과율만 내고 판정에 쓰지 않는다
+        const runs = Number(str('runs') ?? 3);
+        let results;
+        try {
+          results = await runLive({
+            harness: path.resolve(str('harness') ?? repoInfo(cwd).root),
+            runs,
+            only: str('only')?.split(',').filter(Boolean),
+            log: (line) => process.stderr.write(`${line}\n`),
+          });
+        } catch (e) {
+          process.stderr.write(`self-test --live: ${(e as Error).message}\n`);
+          return e instanceof LiveLaunchError ? 1 : 2;
+        }
+        for (const line of formatLive(results)) log(line);
+        const out = str('out');
+        if (out)
+          writeFileSync(
+            out,
+            JSON.stringify({ version: 1, live: true, runs, results }, null, 2) + '\n',
+          );
+        return 0;
+      }
       let report;
       try {
         report = await runSelfTest({
