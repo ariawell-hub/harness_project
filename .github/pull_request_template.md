@@ -11,7 +11,7 @@ Refs #
 
 - AC 명령과 결과:
 - `node scripts/harness.ts check`: 통과
-- 먼저 실패한 테스트 기록(R5):
+- 테스트 실효성(R5, `check`의 test-effect) 예외: 없음 <!-- 예외 줄을 적었으면 파일과 사유 -->
 
 ## 자체 리뷰 (scripts/cross-review/checklist.md)
 

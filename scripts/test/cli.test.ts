@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runSync } from '../lib/exec.ts';
-import { HARNESS_ROOT, gitInit, tmp } from './helpers.ts';
+import { commitAll, fixtureConfig, HARNESS_ROOT, gitInit, tmp, write } from './helpers.ts';
 
 const cli = (args: string[], cwd: string) =>
   runSync(process.execPath, [path.join(HARNESS_ROOT, 'scripts/harness.ts'), ...args], { cwd });
@@ -62,4 +62,22 @@ test('CLI: 오류 갈래의 종료 코드는 그대로다 — TaskError는 3, �
   const other = cli(['plan-gate'], repo);
   assert.equal(other.code, 1, other.stderr);
   assert.match(other.stderr, /^오류: /);
+});
+
+test('CLI: check --only test-effect는 그 하위 검사만 실행한다', () => {
+  const root = path.join(tmp(), 'r');
+  gitInit(root);
+  const testEffect = {
+    files: ['t/*.test.mjs'],
+    command: [process.execPath, '--test'],
+    timeoutSec: 60,
+  };
+  write(root, 'harness.config.json', JSON.stringify(fixtureConfig({ testEffect })));
+  const base = commitAll(root, 'base');
+  write(root, 't/new.test.mjs', "import { test } from 'node:test';\ntest('a', () => {});\n");
+  const r = cli(['check', '--only', 'test-effect', '--no-cache', '--base', base], root);
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^✗ test-effect /m);
+  assert.match(r.stdout, /R5 테스트 실효성/);
+  assert.doesNotMatch(r.stdout, /^[✓✗–] (fmt|lint|test|build|doc-lint|bypass-scan|secret-scan) /m);
 });
