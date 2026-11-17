@@ -305,7 +305,14 @@ export function runnerConfig(
 /** API 서버가 포트를 알릴 때까지 기다리는 시간 */
 const API_START_MS = 15_000;
 
-function context(harness: string, deadline: number): { ctx: ScenarioContext; close(): void } {
+/**
+ * 시나리오 하나가 쓸 도구 묶음. 실제 세션 실행기(live.ts)도 쓴다.
+ * envOf는 샘플 리포의 자식 프로세스 환경이다(그 ctx.sample()이 만든 샘플만)
+ */
+export function context(
+  harness: string,
+  deadline: number,
+): { ctx: ScenarioContext; close(): void; envOf(s: Sample): NodeJS.ProcessEnv } {
   const envs = new Map<Sample, NodeJS.ProcessEnv>();
   const envOf = (s: Sample): NodeJS.ProcessEnv => {
     const e = envs.get(s);
@@ -397,6 +404,7 @@ function context(harness: string, deadline: number): { ctx: ScenarioContext; clo
   };
   return {
     ctx,
+    envOf,
     close() {
       for (const c of servers) c.kill();
     },
