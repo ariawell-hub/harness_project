@@ -28,6 +28,7 @@ test ! -e scripts/commands/fail-first.ts
 test ! -e scripts/test/fail-first.test.ts
 ! grep -rq "fail-first" scripts
 grep -q "명령을 되돌렸다" docs/harness/CHANGELOG.md
+! grep -q "fail-first" docs/harness/architecture.md
 node --test scripts/test/cli.test.ts
 test -f docs/exec-plans/completed/20261117-r5-fail-first/plan.md
 grep -q "^status: abandoned" docs/exec-plans/completed/20261117-r5-fail-first/plan.md
