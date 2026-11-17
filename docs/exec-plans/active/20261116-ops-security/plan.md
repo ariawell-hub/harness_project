@@ -107,6 +107,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-17 step4: 구현. `scripts/gates/codeowners.ts`(`codeownersPattern`·`codeownersText`·`codeownersProblems`)와 `codeowners [--write]` 명령, 생성한 `.github/CODEOWNERS`(보호 경로 27개, 소유자 `@ariawell-hub`), `check`의 doc-lint 단계에서 비교. `scripts/commands/ops-check.ts`(`opsCheck`·`formatOps`)와 `ops-check` 명령, 포트의 `tokenScopes`·`codeOwnerReviewRequired`(`gh` 구현과 가짜 GitHub), `parseScopes`. `harness.config.json`의 `ci.requiredChecks`에 `revert-check`. 자체 테스트 실행기의 복사 목록에 `.github/CODEOWNERS`. `init` 안내 두 줄. 테스트: `codeowners.test.ts` 7개, `ops-check.test.ts` 7개, `protection.test.ts` 1개, `pr-state.test.ts` 1개. 문서: 설계서 v0.7.50(0.2절, 7.2절 구조, 10.4절 체크리스트, 16절), 절차서 5절, 코드 구조 문서, `CHANGELOG`, `docs/SECURITY.md`(제작자 작업 순서 표와 절차 다섯 개).
 - 2026-11-17 step4: 이 리포에서 확인한 것(읽기만). `ops-check`는 종료 코드 1이다: 1번 `✗`(`revert-check`가 필수 체크로 등록되지 않았다. 나머지 8개는 등록·출처가 맞다), 2번 `✓`(CODEOWNERS가 보호 경로 27개와 같다. 코드 오너 리뷰 설정은 `?`), 3번 `✗`(봇 토큰의 권한 범위 `read:org, repo, workflow`). 구축 단계라 예상한 결과다. 봇 토큰의 GraphQL `ref.branchProtectionRule`은 보호 규칙이 있는데도 null이다(관리자가 아니면 보이지 않는다). CI의 `selftest` job과 같은 조건(main `be4d7e1`의 실행기·시나리오로 이 브랜치의 하네스)으로 `self-test`를 돌려 시나리오 9개가 통과했다.
 - 2026-11-17 step4: 첫 전체 `check`는 통과했다(`test` 916.6초). 완료 처리가 발견 사항 2건의 "처리" 형식(문서 링크)으로 멈춰 그 두 줄을 고쳤다. 다시 돌린 `check`는 `test` 단계에서 Claude Code가 시스템 메모리 부족으로 백그라운드 명령을 꺼서 중단됐다(전체 31.7GB 가운데 여유 3.8GB. `check`가 돌지 않을 때 잰 값이다). 제작자가 두 가지를 정했다(의사결정 로그): 여유 메모리가 8GB 이상이 되면 봇이 스스로 다시 돌린다, 테스트 동시 실행 수를 줄이는 변경을 이 step에 넣고 시간을 잰다.
+- 2026-11-17 step4: 메모리 여유가 11.5GB가 된 뒤 다시 돌린 전체 `check`가 통과했다. `test` 단계는 8개 동시에 951.8초였다(19개 동시 916.6초, +4%). 도는 동안 여유 메모리는 14GB였다. 시간이 거의 같아 동시 실행 수 변경을 채택했다. 초안 PR #109를 올렸다.
+- 2026-11-17 step4: PR #109 판정 1라운드(head `3450280`). 두 검증자가 승인했다(지적 없음). `selftest` job이 실제 러너에서 처음 돌았고(job 43초, 자체 테스트 약 29초) 시나리오 9개 가운데 `flow-full`("계획 승인 뒤 step 세션이 한 번 돌아야 한다 5 !== 1")과 `r45-runner`("step 2개짜리 Issue가 닫히지 않았다")가 실패해 `harness-guard`가 `failure`("자체 테스트 실패: flow-full, r45-runner")였다. 원인은 step3에서 만든 `selftest` job에 gitleaks가 없는 것이다: runner 시나리오가 샘플 리포에서 `check`를 돌리고, 그 시크릿 스캔은 gitleaks가 없으면 실패한다. 이 PC에서 gitleaks 폴더를 PATH에서 빼고 `self-test --only flow-full,r45-runner,s1-next-task`를 돌려 같은 두 시나리오가 같은 문구로 실패하는 것을 재현했다. step3의 사전 확인(새 클론 둘)은 이 PC의 PATH에 gitleaks가 있어 이 차이를 잡지 못했다. `selftest` job에 gitleaks 설치 단계(`check` 워크플로와 같은 버전·체크섬)를 더했다. `gates`는 main의 정의로 돌기 때문에 이 PR 자신의 `selftest` job은 계속 실패한다(아래 다음 할 일).
 
 ## 의사결정 로그
 
@@ -158,6 +160,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 결정(step4): 테스트 리포(step6)의 main은 필수 승인 0으로 둔다. ADR-0004는 진짜 자격증명이 있는 기간에 필수 승인을 1로 올리라고 했다. / 이유: 체크리스트 5는 사람 승인 없는 자동 병합과 runner 무인 실행을 확인하는 일이라 1로 두면 시험이 성립하지 않는다. 대신 시험용으로 새로 발급한 자격증명만 넣고 끝나면 폐기한다(`docs/SECURITY.md` "테스트 리포 준비"의 남는 위험과 정리). / 버린 대안: 가짜 토큰으로만 시험하기(교차 검증 판정이 돌지 않아 전체 흐름을 확인하지 못한다).
 - 결정(제작자, 2026-11-17 대화): 메모리 부족으로 `check`가 중단되면 봇이 여유 메모리를 1분마다 재고 8GB 이상일 때 스스로 다시 돌린다. 또 중단되면 같은 조건으로 두 번까지 더 하고, 그래도 안 되면 멈추고 보고한다. 이 세션에서 같은 상황이 다시 생겨도 같은 규칙을 쓴다. / 이유: 제작자가 자리에 없을 때 작업이 멈추지 않게 한다. 8GB는 추정값이다. / 버린 대안: 바로 다시 돌리기(여유 3.8GB라 다시 중단될 가능성이 크다), 제작자가 말할 때까지 기다리기.
 - 결정(제작자, 2026-11-17 대화): 테스트 파일의 동시 실행 수를 "코어 수 − 1과 8 가운데 작은 값"으로 묶는다(`commands.test.run`의 `--test-concurrency`, `harness.config.json`과 프로파일 core). step 파일에 없는 변경이다. 이번 `check`로 시간을 재서, 통과하고 지금(약 15분)보다 크게 늘지 않으면 채택하고 아니면 되돌린다. 측정값은 PR 본문에 적는다. / 이유: 이 PC(논리 코어 20개)에서는 `node --test`가 테스트 파일 19개를 동시에 돌리고 파일마다 하네스 명령·git·runner 작업자를 다시 프로세스로 띄워, 정점에 프로세스가 한꺼번에 많이 뜬다. 값을 고정하지 않고 작은 쪽을 고르게 한 것은 CI 러너(4코어, 지금 3개 동시)의 동작을 바꾸지 않기 위해서다. `commands` 변경은 `harness-guard` 신호지만 이 PR은 이미 위험도 높음이다. 도는 테스트는 그대로다. / 버린 대안: step5 PR에서 하기, 하지 않기(여유 메모리가 적을 때마다 같은 중단이 생긴다), 8로 고정하기(CI 러너에서 동시 실행이 3에서 8로 는다).
+- 결정(step4): `selftest` job의 gitleaks 수정을 별도 PR로 나누지 않고 이 PR(step4)에 넣는다. / 이유: 어느 쪽이든 수정 PR은 보호 경로(`.github/workflows/gates.yml`)를 바꿔 main의 고장 난 `selftest` job을 받으므로 `harness-guard`가 실패하고, 제작자가 필수 체크에서 `harness-guard`를 잠시 빼야 병합된다(계획 "다음 할 일"이 미리 적어 둔 경우다). PR을 나누면 그 일과 head 승인이 한 번씩 더 든다. / 버린 대안: 수정만 담은 PR을 먼저 병합하기, 시크릿 스캔이 gitleaks 없이 통과하게 하기(검사 약화다, R4).
 
 ## 발견 사항
 
@@ -172,6 +175,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 관리자가 아닌 봇 토큰으로는 브랜치 보호의 코드 오너 리뷰 설정을 읽을 수 없다(REST 보호 조회는 관리자 전용이고, GraphQL `branchProtectionRule`은 null로 온다). `ops-check` 2번의 설정 부분은 시험 PR이 근거다(10.4절 체크리스트 2에 적었다). → 처리: [설계서](../../../harness/design.md)
 - 설계서 19절 표의 2단계 행("남은 것: #57")과 0절 "현재 범위" 줄("나머지는 Issue #54~#57")은 #57이 닫히고 남은 일이 #102로 옮겨진 것을 담고 있지 않다. step7의 문서 정리(수용 기준 9의 19절)에서 고친다. → 처리: #102
 - 이 Windows PC에서 테스트용 임시 리포(`makeFixture`)를 하나 만드는 데 약 3초가 든다. 새 테스트 두 파일은 파일마다 리포 하나를 나눠 써서 55초를 26초로 줄였다. 기존 테스트 파일에도 같은 여지가 있다. → 처리: TD-40
+- `selftest` job이 고장 나면(이번의 gitleaks 누락처럼) 보호 경로를 바꾸는 모든 PR이 `harness-guard`에서 막히고, 그것을 고치는 PR도 같은 job을 받아 막힌다. 풀려면 제작자가 필수 체크에서 `harness-guard`를 잠시 빼야 한다. 로컬 사전 확인은 러너에 없는 도구(이 PC의 PATH에 있는 gitleaks)를 가려 주지 못했다. step6의 테스트 리포에서는 워크플로를 main에 넣기 전에 러너와 같은 조건(도구가 없는 PATH)으로 먼저 돌려 본다. → 처리: #102
 
 ## 열린 질문
 
@@ -186,6 +190,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
+- step4의 PR #109는 `harness-guard`가 실패인 채로 남는다(main의 `selftest` job에 gitleaks가 없다. 수정은 이 PR에 있고 병합된 뒤의 PR부터 적용된다). 병합 순서: (1) 제작자가 main 필수 체크에서 `harness-guard`를 잠시 뺀다 (2) 제작자가 PR #109의 head를 승인한다(자동 병합) (3) 제작자가 `harness-guard`를 출처 `harness-recorder`로 다시 등록하고 `revert-check`도 등록한다 (4) 봇이 `required-checks`로 확인한다. 고친 `selftest` job은 그 뒤 보호 경로를 바꾸는 첫 PR(step5)에서 확인한다.
 - step4(PR 병합) 뒤 step5(selftest-live)를 시작한다. step5를 하는 동안 제작자가 테스트 리포를 준비하면(아래 4번) step6을 기다림 없이 시작한다.
 - step4의 PR은 보호 경로를 바꾸므로 `gates` 워크플로의 `selftest` job이 실제 러너에서 처음 돈다. 그 PR에서 확인할 것: `selftest` job이 끝나고(걸린 시간을 적는다), `harness-guard` 설명 끝에 `자체 테스트 통과 <N>`이 붙는다. job이 러너 쪽 문제로 보고서를 남기지 못하면 `harness-guard`가 `error`가 되어 그것을 고치는 PR도 같은 이유로 병합되지 못한다. 그때는 원인을 job 로그로 확인해 제작자에게 알린다(제작자가 필수 체크에서 `harness-guard`를 잠시 빼고 수정 PR을 병합한 뒤 되돌려야 한다).
 - 이 계획의 PR은 모두 위험도 높음이다. 초안으로 올리고, 완료 처리·기록·main 병합·`check`가 끝난 뒤 `pr-ready`로 한 번만 승인을 요청한다.
