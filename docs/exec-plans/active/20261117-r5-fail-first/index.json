@@ -1,0 +1,16 @@
+{
+  "plan": "20261117-r5-fail-first",
+  "steps": [
+    {
+      "step": 0,
+      "name": "record-command",
+      "status": "completed",
+      "completed_at": "2026-11-17T18:12:34+09:00"
+    },
+    {
+      "step": 1,
+      "name": "complete-check",
+      "status": "pending"
+    }
+  ]
+}
