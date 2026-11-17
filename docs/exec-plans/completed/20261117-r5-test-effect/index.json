@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "check-step",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-17T22:36:09+09:00"
     }
   ]
 }
