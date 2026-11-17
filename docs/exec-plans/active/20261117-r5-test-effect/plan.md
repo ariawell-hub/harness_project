@@ -74,6 +74,10 @@ R5의 검출 항목 가운데 "새로 추가·수정된 테스트가 merge-base 
 - 2026-11-17: 계획 검증 2라운드(head `97f46a7`)에서 두 검증자가 승인했다(G1 해시 `e80fbb145073`. F2는 fixed, F1은 P2라 미룸으로 남았지만 AC에 반영했다). step0 구현을 올린다.
 - 2026-11-17 step0: AC 명령 5개가 종료 코드 0이다(`test-effect.test.ts` 20개, `lib.test.ts` 15개 통과). 이 리포에서 `node scripts/harness.ts test-effect`는 "해당 없음(설정 testEffect 없음)"이다(설정값은 step1). step1에 넣을 설정값으로 게이트를 이 변경에 직접 돌려 봤다: `scripts/test/lib.test.ts`와 `scripts/test/test-effect.test.ts`가 모두 `effective`(base에서 실패, 종료 코드 1), 1.2초, 실행 뒤 임시 worktree 없음, `node_modules` 그대로.
 - 2026-11-17 step0: 구현을 올린 직후(head `2ae0524`) PR #110(#102 step5)이 병합돼(main `84acf52`) `CHANGELOG`가 충돌했다. `origin/main`을 병합해 풀었다: main의 v0.7.51 줄을 앞에, 이 PR의 줄을 뒤에 뒀다. `scripts/harness.ts`와 코드 구조 문서는 자동 병합됐다. 병합한 트리에서 전체 `check`를 다시 돌린다.
+- 2026-11-17 step0: PR #117이 병합됐다(main `7ddf901`. 두 검증자 승인, 위험도 보통).
+- 2026-11-17 step1: 테스트를 먼저 쓰고 구현 전에 실행했다: `gates.test.ts` 4개, `cli.test.ts` 1개, `selftest.test.ts` 1개가 모두 실패(6개 가운데 6개, 종료 코드 1). 그 뒤 구현: `check`의 하위 검사 `test-effect`(`test` 바로 뒤, 판정 줄은 통과해도 출력, 캐시 키에 설정), `harness.config.json`·core 프로파일의 `testEffect` 값, 시나리오 `r5-test-effect`. 6개 통과.
+- 2026-11-17 step1: 문서. 설계서 v0.7.52(5.1절 R5 행, 10.2절 검증 항목, 12.4절 시나리오 표, 변경 이력), 절차서 3절, PR 템플릿, 자체 리뷰 체크리스트, 검증자 프롬프트, 코드 구조 문서, `CHANGELOG`, TD-4 해결, TD-42 등록(web 프로파일).
+- 2026-11-17 step1: 이 worktree에서 `node scripts/harness.ts test-effect`: 이 step이 고친 테스트 파일 3개(`cli.test.ts`, `gates.test.ts`, `selftest.test.ts`)가 모두 `effective`(base에서 실패, 종료 코드 1)이고 통과다. `self-test --only r5-test-effect` 통과.
 
 ## 의사결정 로그
 
@@ -91,8 +95,10 @@ R5의 검출 항목 가운데 "새로 추가·수정된 테스트가 merge-base 
 
 ## 발견 사항
 
-- web 프로파일에는 `testEffect` 설정값이 없다(파일 하나를 실행하는 명령을 확인하지 못했다). step1에서 TD로 등록한다. → 처리: [step1 작업 2](step1.md)
-- 한계: 새 모듈을 import만 하고 아무것도 단언하지 않는 테스트는 base에서 "모듈 없음"으로 실패해 이 검사를 통과한다. step1에서 설계서 5.1절에 적는다. → 처리: [step1 작업 5](step1.md)
+- web 프로파일에는 `testEffect` 설정값이 없다(파일 하나를 실행하는 명령을 확인하지 못했다). step1에서 TD로 등록한다. → 처리: TD-42
+- 한계: 새 모듈을 import만 하고 아무것도 단언하지 않는 테스트는 base에서 "모듈 없음"으로 실패해 이 검사를 통과한다. step1에서 설계서 5.1절에 적는다. → 처리: [설계서 5.1절 R5](../../../harness/design.md)
+- `AGENTS.md`의 표준 명령 표는 `check`를 "fmt·lint·test·build + doc-lint + 우회 탐지 + 시크릿 스캔"으로 적는다. `test-effect`가 빠져 있지만 이 계획의 "관련 파일"에 없어 고치지 않았다. 설계서 6절 표에는 "테스트 실효성(R5)"이 이미 있다. → 처리: 해당 없음
+- 자체 테스트의 시나리오 샘플 리포에는 `node_modules`가 없어 `testEffect.link`가 건너뛰어진다(연결은 단위 테스트가 확인한다). → 처리: 해당 없음
 
 ## 열린 질문
 
