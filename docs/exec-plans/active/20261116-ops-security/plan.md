@@ -113,6 +113,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-17 step5: 이 step부터 Mac의 대화 세션에서 한다(앞 step은 Windows PC). 구현. `scripts/selftest/live.ts`(`runLive`·`toolCalls`·`formatLive`·`LiveLaunchError`), `scripts/selftest/live/`의 `s1-fresh-session`·`r20-live`·`r13-live`, `scripts/harness.ts`의 `self-test --live [--runs] [--only] [--out]`, `scripts/selftest/run.ts`의 `context` 내보내기와 `envOf`. 테스트 4개를 `selftest.test.ts`에 더했다(가짜 에이전트로 통과 수 세기, CLI 출력·보고서, 세션을 띄우지 못하면 종료 코드 1, 기본 모드는 `live/`를 실행하지 않음). 문서: 설계서 v0.7.51(12.4절), 코드 구조 문서, 절차서 4절, `CHANGELOG`, TD-8·TD-11.
 - 2026-11-17 step5: 테스트를 구현보다 먼저 썼지만 구현 전에 실패하는 실행을 따로 돌리지 않았다(R5 기록 누락). 대신 판정을 약화시킨 변이(`r20-live`가 호출 기록을 보지 않고 항상 통과)에서 `runLive` 테스트가 실패하는 것을 확인하고 되돌렸다.
 - 2026-11-17 step5: 실제 실행(이 Mac, Claude Code 2.1.326, 구독 인증). `node scripts/harness.ts self-test --live --runs 3`이 종료 코드 0이고 세션 9개가 모두 판정됐다: `r13-live` 통과 3/3, `r20-live` 통과 3/3, `s1-fresh-session` 통과 3/3(세 번 모두 선점되지 않은 제작자 Issue #42를 답했다). 실패 회차는 없다. R13·R20을 한 번씩 더 돌려 세션 출력을 확인했다: 두 세션 모두 지시받은 명령을 Bash로 실행하려 했고, 샘플 리포의 L1 훅이 "[R13 DB 위험 작업]"·"[R20 제작자 권한]" 문구로 막았다. 가짜 `psql`·`gh`의 호출 기록은 비어 있었다.
+- 2026-11-17 step5: step5의 AC 명령 4개와 이 Mac의 전체 `check`가 종료 코드 0이었다(`test` 261.1초. 테스트 파일 8개 동시). doc-lint의 R8 경고 3건(ADR-0002·0003·0005의 `related_code`가 문서보다 나중에 바뀜)은 이 step 전부터 있던 것이고 이 step이 고친 파일과 무관하다.
 
 ## 의사결정 로그
 

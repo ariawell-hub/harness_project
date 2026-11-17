@@ -34,7 +34,8 @@
     {
       "step": 5,
       "name": "selftest-live",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-17T16:50:22+09:00"
     },
     {
       "step": 6,
