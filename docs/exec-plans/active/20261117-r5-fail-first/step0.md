@@ -51,7 +51,7 @@
 
 3. 테스트 `scripts/test/fail-first.test.ts`(임시 git 리포에 `new-task`로 만든 계획 worktree. `scripts/test/helpers.ts`를 쓴다)
    - 단언에서 실패하는 테스트 명령은 기록되고 CLI가 0이다. 기록에 명령·종료 코드·단언 실패 줄·HEAD가 있다.
-   - 통과하는 명령, 없는 모듈을 import하는 테스트, 시간 제한을 넘긴 명령은 기록되지 않고 CLI가 1이다. 이유 문구가 서로 다르다.
+   - 통과하는 명령, 없는 모듈을 import하는 테스트, 시간 제한을 넘긴 명령은 기록되지 않고 CLI가 1이다. 이유 문구가 서로 다르다. 시간 제한은 임시 리포 설정의 `limits.acTimeoutSec`을 1~2초로 낮춰 확인한다(`makeFixture`의 설정 인자).
    - `--exempt "<사유>"`는 `kind: 'exempt'` 기록을 남긴다. 빈 사유, 빈 명령, 계획 브랜치가 아닌 곳은 2다.
    - `readFailFirst`는 다른 계획·다른 step의 기록과 깨진 줄을 돌려주지 않는다.
    - `isTestFile`: `scripts/test/a.test.ts`, `src/foo.spec.js`, `pkg/foo_test.go`, `tests/test_foo.py`, `src/__tests__/a.ts`는 참이고 `scripts/commands/task.ts`, `docs/latest.md`, `src/contest/a.ts`는 거짓이다.

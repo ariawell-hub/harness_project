@@ -13,6 +13,7 @@
 
 1. `scripts/commands/task.ts`의 `completeStep`
    - 발견 사항 검사 뒤, 계획을 바꾸기 전에 확인한다: 그 step의 변경(`defaultBase`로 정한 merge-base 대비 `changedFiles`. 커밋하지 않은 변경과 추적하지 않는 파일 포함) 가운데 `isTestFile`인 파일이 하나라도 있으면 `readFailFirst`로 그 계획·step의 기록을 찾는다.
+   - merge-base 대비 변경이 곧 그 step의 변경이다: step마다 브랜치가 따로이고(`new-task --plan <id> --step <N>`이 `origin/main`에서 그 step의 브랜치를 만든다) 앞 step은 병합돼 main에 있다. 앞 step이 바꾼 테스트 파일은 뒤 step의 검사에 들어오지 않아야 한다(아래 테스트로 확인한다).
    - 기록이 없으면 `TaskError`다. 문구에 바뀐 테스트 파일(5개까지)과 고치는 법 두 가지를 적는다: 구현 전이면 `node scripts/harness.ts fail-first "<테스트 명령>"`, 이미 구현했거나 R5의 예외(문서·설정·순수 리팩터)면 `node scripts/harness.ts fail-first --exempt "<사유>"`. 계획 파일과 `index.json`은 바꾸지 않는다.
    - 기록이 있으면 진행 로그에 한 줄을 더한다(`appendProgress`). `kind: 'fail'` 기록이 있으면 가장 최근 것으로 `step<N> 먼저 실패한 기록(R5): \`<명령>\` → 종료 코드 <N>, <단언 실패 줄> (기록 <시각>, HEAD <7자>)`, 예외만 있으면 `step<N> R5 예외: <사유> (기록 <시각>)`. 같은 줄이 이미 있으면 다시 더하지 않는다(재작업 뒤 두 번째 완료 처리).
    - merge-base를 정하지 못하면(원격·로컬 기본 브랜치가 없다) 검사를 건너뛰지 않고 `TaskError`로 멈춘다.
@@ -29,12 +30,13 @@
 
 4. 테스트
    - `scripts/test/task.test.ts`(또는 `fail-first.test.ts`): 테스트 파일을 바꾼 step에서 기록 없이 `completeStep`은 `TaskError`이고 `index.json`의 상태가 그대로다. `fail` 기록 뒤에는 완료되고 진행 로그에 줄이 있다. `exempt`만 있으면 `R5 예외` 줄이다. 재작업(`reopenStep`) 뒤 다시 완료해도 줄이 두 번 생기지 않는다. 테스트 파일을 바꾸지 않은 step은 기록 없이 완료된다.
+   - step 2개짜리 계획: step0이 테스트 파일을 바꿔 기록을 남기고 완료된 뒤 그 브랜치가 main에 병합된다. `new-task --plan <id> --step 1`로 만든 step1 worktree에서 테스트 파일을 바꾸지 않고 코드만 바꾸면 기록 없이 완료된다(앞 step의 테스트 파일이 검사에 섞이지 않는다). 같은 step1에서 테스트 파일을 바꾸면 step0의 기록으로는 통과하지 못한다.
    - runner: 가짜 에이전트가 만든 step(테스트 파일 없음)이 기존대로 병합되는지는 기존 runner 테스트가 본다. 새로 볼 것은 프롬프트다: step 세션 프롬프트에 `fail-first`가 있고 계획 작성 프롬프트에는 없다.
    - `scripts/test/selftest.test.ts`: 시나리오 id 목록과 항목 목록에 `r5-fail-first`·`R5`를 더하고, `completeStep`의 기록 검사를 뺀 사본에서 이 시나리오가 실패하는 테스트를 더한다.
 
 5. 문서
    - 설계서 5.1절 R5 행의 "절차" 칸: 기록은 `fail-first` 명령이 남기고 `complete-step`이 확인한다. 순서 자체는 여전히 증명하지 못한다는 것과 예외 기록을 적는다. 12.4절 시나리오 표에 `r5-fail-first` 한 줄. 버전·변경 이력.
-   - 절차서 3절: 순서를 "테스트 작성 → `fail-first`로 단언 실패 기록 → 구현 → 통과 확인"으로 적고, 인정되는 기록은 명령이 남긴 것뿐이며 문장("테스트를 먼저 썼다")과 구현 뒤의 변이 확인은 기록이 아니라 예외 사유로 적는다는 것을 적는다. 4절: `complete-step`이 멈췄을 때 고치는 법.
+   - 절차서 3절: 순서를 "테스트 작성 → `fail-first`로 단언 실패 기록 → 구현 → 통과 확인"으로 적고, 인정되는 기록은 명령이 남긴 것뿐이며 문장("테스트를 먼저 썼다")과 구현 뒤의 변이 확인은 기록이 아니라 예외 사유로 적는다는 것을 적는다. 명령은 기록된 테스트 명령이 이번에 바뀐 테스트 파일을 실행한 것인지 보지 않는다는 것과, 진행 로그 줄에 명령이 그대로 남으므로 검증자가 대응 여부를 본다는 것도 적는다. 4절: `complete-step`이 멈췄을 때 고치는 법.
    - `.github/pull_request_template.md`의 `먼저 실패한 테스트 기록(R5):` 줄을 "진행 로그의 `먼저 실패한 기록(R5)` 줄 또는 `R5 예외` 줄을 옮긴다"로 고친다.
    - `AGENTS.md` 작업 루프 3번에 `fail-first`를 넣는다(120줄 제한 안에서).
    - 코드 구조 문서, `CHANGELOG`, TD-4(이 계획이 한 것과 남은 것: CI 실효성 검사).
