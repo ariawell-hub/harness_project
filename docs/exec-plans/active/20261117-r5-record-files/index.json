@@ -1,0 +1,20 @@
+{
+  "plan": "20261117-r5-record-files",
+  "steps": [
+    {
+      "step": 0,
+      "name": "revert-command",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "record-files",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "complete-check",
+      "status": "pending"
+    }
+  ]
+}
