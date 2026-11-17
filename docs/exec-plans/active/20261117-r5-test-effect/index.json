@@ -1,0 +1,7 @@
+{
+  "plan": "20261117-r5-test-effect",
+  "steps": [
+    { "step": 0, "name": "gate", "status": "pending" },
+    { "step": 1, "name": "check-step", "status": "pending" }
+  ]
+}
