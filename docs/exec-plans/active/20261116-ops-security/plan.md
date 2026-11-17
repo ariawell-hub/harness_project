@@ -119,6 +119,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-17 step5: PR #110이 초안인 동안(head `d3fe554`, 두 검증자 승인) Issue #111의 `fail-first` 명령을 되돌리는 PR #115가 제작자 승인으로 먼저 병합됐다(main `05bfb45`. 그 명령이 인자를 셸로 실행해 L1 훅을 지나갔기 때문이다). `CHANGELOG`가 다시 충돌해 `origin/main`을 병합해 풀었다: main의 두 줄(`fail-first` 추가, 되돌림)을 앞에, 이 PR의 v0.7.51 줄을 뒤에 뒀다. `scripts/harness.ts`와 코드 구조 문서는 자동 병합됐다(`fail-first` 흔적 없음, `self-test --live`는 그대로). 병합한 트리에서 전체 `check`를 다시 돌린 뒤 승인을 요청한다.
 - 2026-11-17 step5: PR #110이 제작자 head 승인(`ca2c5fd`)으로 병합됐다(main `84acf52`).
 - 2026-11-17 step6: 시작. 제작자 작업 4번(테스트 리포 준비)이 아직이라, 테스트 리포 없이 할 수 있는 작업 1(결과 기록 틀)을 먼저 했다. `lab/ops-transition/report.ts`(`REQUIRED`·`ITEMS`·`OPTIONAL_ITEMS`·`validateResult`·`checkItems`), `test/report.test.ts` 7개, `README.md`. 테스트를 먼저 쓰고 빈 구현에서 실행했다: 7개 가운데 6개 실패, 1개 통과(빈 구현이 문제 없음을 돌려줘서 통과하는 "완결되면 통과한다" 테스트). 구현 뒤 7개 통과. `report.ts --all`은 결과 파일이 없어 종료 코드 1이다(예상대로). 로컬 커밋만 했고 올리지 않았다. 나머지(작업 2~4)는 제작자가 테스트 리포 이름을 알려 준 뒤에 한다.
+- 2026-11-17 step6: 제작자가 테스트 리포 `ariawell-hub/harness-ops-lab`을 준비했다(1~6번). Q20 때의 `harness-q20-lab`은 쓰지 않는다(끝난 시험의 리포다). 봇 토큰으로 확인한 것: 비공개, 보관 아님, 봇 권한 Write(Admin·Maintain 아님), 자동 병합 허용, 병합 뒤 브랜치 삭제, `main` 보호됨(필수 체크 0개), environment 5개(`recorder`·`codex-auth-store`·`judge-claude`·`judge-codex`·`revert`)가 모두 `main`만 허용. **environment의 시크릿·변수는 5개 모두 0개였다**(같은 조회로 하네스 리포의 `recorder`에서는 이름이 보인다). 제작자에게 6번의 표대로 넣어 달라고 요청했다. 봇 권한으로 볼 수 없는 것: 보호 규칙의 세부(REST 404, GraphQL 빈 목록), Actions 권한, App 설치.
+- 2026-11-17 step6: 테스트 리포에 하네스를 올렸다(작업 2-2). 하네스 main `f439e81`의 트리에서 `docs/exec-plans/active/`의 계획(`20261116-ops-security`)만 빼고, 테스트 리포 main(`df90d61`)을 부모로 하는 커밋 `108e6dc`를 git 객체로만 만들었다(임시 index, 작업 트리는 쓰지 않았다). `harness.config.json`은 그대로다(제작자·봇 계정과 검증 App이 같다). 임시 폴더에 그 커밋을 체크아웃해 `setup`과 전체 `check`(base는 테스트 리포 main)를 돌렸다: 통과. `bypass-scan --ci`·`secret-scan --ci`·`test-effect --ci`도 통과(트리 전체가 추가로 잡혀도 걸리는 것이 없다). 브랜치 `chore/harness-init`로 push하고 테스트 리포 PR #1을 열었다. 이 PR에서는 `check` 워크플로만 돈다.
 
 ## 의사결정 로그
 
@@ -180,6 +182,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 결정(step5): `s1-fresh-session`은 Issue 번호를 41부터 준다. / 이유: 판정이 답의 숫자를 모두 읽는다. 1~3번이면 "1단계" 같은 다른 숫자와 겹쳐 틀린 판정이 난다.
 - 결정(step6): `td38` 항목은 결과 파일이 없어도 `report.ts --all`이 통과한다(있으면 기록은 완결돼야 한다). / 이유: step 지시서가 `td38`을 "필수 아님"으로 적었고 필수 사례가 없다. / 버린 대안: 파일을 요구한다(본 것이 하나도 없을 때 빈 기록을 만들게 된다).
 - 결정(step6): 한 항목 안에서 이름이 같은 사례는 막는다. / 이유: 필수 사례를 이름으로 찾는다. 같은 이름이 둘이면 `fail`인 사례 옆에 `pass`인 사례를 더해 통과시킬 수 있다.
+- 결정(step6): 테스트 리포에 올리는 트리에서 진행 중인 계획 폴더를 뺀다. / 이유: 테스트 리포의 `start`·runner가 하네스 리포의 계획(`20261116-ops-security`)을 "진행 중"으로 보고 이어 가려 한다. / 버린 대안: 그대로 둔다, `completed/`까지 뺀다(문서 링크가 깨질 수 있고 runner는 완료된 계획을 보지 않는다).
 
 ## 발견 사항
 
