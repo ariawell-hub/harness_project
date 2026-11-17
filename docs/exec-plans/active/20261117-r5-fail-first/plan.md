@@ -64,6 +64,10 @@ R5(TDD)의 "먼저 실패한 테스트" 기록이 문장으로 대체되지 않�
 - 2026-11-17 step0: 계획 작성. 제작자가 대화에서 대처를 지시했고 선택지 3개(기록 명령 + 완료 검사 / 문서·검증 기준만 / TD-4 앞당김) 가운데 첫째를 골랐다. 봇이 Issue #111을 등록했다. PR #110(#102 step5)은 제작자 승인 대기 중이라 건드리지 않는다.
 - 2026-11-17 step0: 계획 검증이 시작되기 전에(PR #112, `check` 진행 중) step0 지시서의 한 곳을 고쳤다: 기록하지 못했을 때 보여 주는 출력을 끝 20줄에서 40줄로. 로컬에서 테스트를 먼저 돌려 보니 Node 테스트 출력(37줄)에서 모듈을 찾지 못한 원인 줄이 5번째 줄이라 끝 20줄에 보이지 않았다.
 - 2026-11-17 step0: 계획 검증(PR #112). 1라운드(head `ca4fd70`)에서 `review/claude`가 수정을 요청했다(원장 F1, P1: "그 step의 변경"을 merge-base 대비로 정하면 앞 step의 테스트 파일이 뒤 step의 검사에 섞인다). 근거의 전제는 "계획 하나가 브랜치 하나에서 step을 쌓는다"인데, 이 하네스는 step마다 브랜치를 `origin/main`에서 새로 만든다. 2라운드(head `3b05d2d`)에서는 두 검증자가 승인했고(G1 해시 `cc2530ea133b`) `review/claude`도 같은 이유로 문제없다고 봤지만 F1은 원장에 열린 채다. F1의 제안 가운데 다단계 테스트는 맞는 말이라 step1에 넣었다(step0이 테스트를 바꾼 뒤의 step1은 기록 없이 완료된다, 그 전제를 지시서에 적었다). 2라운드의 P2 두 건도 반영했다: 시간 제한 테스트의 설정 방법(F2), 기록된 명령과 바뀐 테스트의 대응은 검증자가 본다는 문서 항목(F3). 계획 섹션이 바뀌어 다시 검증받는다.
+- 2026-11-17 step0: 계획 검증 3라운드(head `9ac77de`)에서 두 검증자가 승인했다(G1 해시 `5cf0e1e97904`). F1은 반박이 받아들여져 `rejected`로 닫혔고 F2·F3(P2)은 계획에 반영된 채 `deferred`로 남았다.
+- 2026-11-17 step0: 먼저 실패한 기록(이 step은 명령이 아직 없어 손으로 적는다). 테스트 파일 `scripts/test/fail-first.test.ts`와 값을 돌려주지 않는 골격(`isTestFile`은 항상 false, `readFailFirst`는 빈 배열, CLI 명령 없음)만 둔 상태에서 `node --test scripts/test/fail-first.test.ts`가 종료 코드 1이었다: 7개 모두 `AssertionError [ERR_ASSERTION]`으로 실패했다(예: "알 수 없는 명령: fail-first"로 종료 코드 단언 실패, `assert.ok(before.length > 0)`, `isTestFile('scripts/test/a.test.ts')`가 `false !== true`). 그 뒤에 구현했다.
+- 2026-11-17 step0: 구현 뒤 첫 실행에서 2개가 계속 실패했고 원인은 테스트 쪽이었다. (1) 이 테스트 파일은 `node --test` 안에서 돌아 `NODE_TEST_CONTEXT`가 자식에게 넘어갔고, 명령 안의 `node --test`가 테스트 파일을 실행하지 않고 0으로 끝났다. 테스트가 그 변수를 빼고 CLI를 띄우게 고쳤다. (2) "출력의 끝 20줄에 원인이 보인다"는 단언이 Node 출력 형식과 맞지 않았다(위 20줄 → 40줄 수정).
+- 2026-11-17 step0: 구현. `scripts/commands/fail-first.ts`(`failFirst`·`exemptFailFirst`·`readFailFirst`·`isTestFile`·`failFirstFile`), `scripts/harness.ts`의 `fail-first` 명령·도움말·`--exempt` 옵션, 테스트 `scripts/test/fail-first.test.ts` 7개. 문서: 코드 구조 문서, `CHANGELOG`. `complete-step`·runner·설정은 바꾸지 않았다.
 
 ## 의사결정 로그
 
@@ -77,6 +81,8 @@ R5(TDD)의 "먼저 실패한 테스트" 기록이 문장으로 대체되지 않�
 ## 발견 사항
 
 - PR #110에서 `review/claude`는 "먼저 실패한 기록이 없다"를 확인하고도 사후 변이 확인을 받아들여 승인했다. 설계서 5.1절은 절차 항목 누락을 P1 지적으로 정한다. 검증 기준을 고치는 일은 제작자가 고르지 않았으므로 이 계획에서 바꾸지 않는다. → 처리: #111
+- `node --test` 안에서 도는 테스트가 `node --test`를 자식으로 띄우면 `NODE_TEST_CONTEXT`가 넘어가 자식이 테스트 파일을 실행하지 않고 종료 코드 0으로 끝난다("run() is being called recursively" 경고). 통과로 보이는 거짓 결과라 테스트에서 이 변수를 빼야 한다. 에이전트의 셸과 자체 테스트 실행기(환경 변수 허용 목록)에는 이 변수가 없다. → 처리: [코드 구조 문서](../../../harness/architecture.md)
+- 계획 검증 1라운드의 P1(F1)은 "한 브랜치에 step을 쌓는다"는 틀린 전제였고 반박으로 닫혔다. 반박은 새 커밋이 올라와야 판정되므로 계획 검증이 한 라운드(약 12분) 더 걸렸다. → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -90,5 +96,5 @@ R5(TDD)의 "먼저 실패한 테스트" 기록이 문장으로 대체되지 않�
 
 ## 다음 할 일
 
-- 계획만 담은 커밋을 push해 초안 PR을 열고 계획 검증(G1)을 받는다. 승인 뒤 step0을 구현한다.
+- step0의 PR #112가 병합되면 `new-task --plan 20261117-r5-fail-first --step 1`로 step1을 시작한다. step1은 테스트를 쓴 뒤 구현 전에 `node scripts/harness.ts fail-first "<테스트 명령>"`으로 기록을 남긴다(이 계획이 만든 명령의 첫 실제 사용).
 - PR #110(#102 step5)과 같은 파일을 고친다(`scripts/test/selftest.test.ts`, 설계서 버전 줄·변경 이력, `CHANGELOG`). 먼저 병합된 쪽의 뒤에 `origin/main`을 병합해 푼다(TD-39).

@@ -15,7 +15,7 @@ review_cycle: on-change
 ```
 진입점      scripts/harness.ts (CLI)          scripts/hooks/guard.ts (L1 훅), session.ts (세션 훅)
               │                                     │
-명령·runner  commands/  (표준 명령, check, new-task, complete-step, pr-ready, pr-state, ops-check, start, init)
+명령·runner  commands/  (표준 명령, check, new-task, fail-first, complete-step, pr-ready, pr-state, ops-check, start, init)
              runner/    (run: 루프, next: 우선순위·새 Issue 작성자 확인, agents: 세션, prompt)
              ci/        (gates·judge-* 워크플로: 기계 판정 결과 조립, 검증자 계획·입력·유출 검사, 결과 검사·커밋 상태 기록)
               │
@@ -58,6 +58,6 @@ runner는 세션이 끝날 때마다 `runner.jsonl`에 `session-end`를 남긴�
 
 ## 테스트
 
-`scripts/test/*.test.ts` (node:test). 임시 git 리포 + 로컬 bare 원격 + 가짜 GitHub(`HARNESS_FAKE_GH`) + 가짜 에이전트(`HARNESS_FAKE_AGENT`, `scripts/selftest/fake-agent.ts`)로 runner 전체 흐름까지 검사한다.
+`scripts/test/*.test.ts` (node:test). 임시 git 리포 + 로컬 bare 원격 + 가짜 GitHub(`HARNESS_FAKE_GH`) + 가짜 에이전트(`HARNESS_FAKE_AGENT`, `scripts/selftest/fake-agent.ts`)로 runner 전체 흐름까지 검사한다. 테스트 안에서 `node --test`를 자식 프로세스로 띄울 때는 환경 변수 `NODE_TEST_CONTEXT`를 빼고 띄운다. 넘어가면 자식이 테스트 파일을 실행하지 않고 종료 코드 0으로 끝난다(`fail-first.test.ts`).
 
 `scripts/selftest/` (하네스 자체 테스트, 설계서 12.4절). `run.ts`가 대상 하네스(`--harness`, 기본은 이 리포)를 임시 샘플 리포에 복사하고 `scenarios/*.ts`를 파일 이름순으로 돌린다. 시나리오는 `ctx.cli`(CLI)와 `ctx.hook`(L1 훅)만 부르고, 규칙이 막아야 할 것을 막는지와 대조군이 통과하는지를 종료 코드로 확인한다. runner 시나리오는 `ctx.agent`로 가짜 에이전트(`fake-agent.ts`, 실행기 쪽 파일)의 동작을 정하고 CLI로 `run`을 띄운 뒤, `ctx.github`로 가짜 GitHub 상태 파일을 읽고 고친다(CI가 남길 체크·원장 댓글). CI 명령의 REST 조회는 `ctx.api`가 띄우는 읽기 전용 로컬 서버(`api-stub.ts`)가 답한다. 새 시나리오는 파일을 더하면 들어간다(목록 파일 없음). `scripts/test/selftest.test.ts`가 `check`에서 이 리포와 약화된 사본을 시험한다. 보호 경로를 바꾼 PR에서는 `gates` 워크플로의 `selftest` job이 main의 실행기로 PR의 하네스를 시험한다(`--harness pr`).
