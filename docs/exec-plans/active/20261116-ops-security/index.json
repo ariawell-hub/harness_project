@@ -28,7 +28,8 @@
     {
       "step": 4,
       "name": "ops-check",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-17T14:02:43+09:00"
     },
     {
       "step": 5,
