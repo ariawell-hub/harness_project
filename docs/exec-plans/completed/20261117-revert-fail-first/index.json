@@ -1,0 +1,11 @@
+{
+  "plan": "20261117-revert-fail-first",
+  "steps": [
+    {
+      "step": 0,
+      "name": "revert-command",
+      "status": "completed",
+      "completed_at": "2026-11-17T20:37:32+09:00"
+    }
+  ]
+}
