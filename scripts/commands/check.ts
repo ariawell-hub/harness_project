@@ -11,6 +11,7 @@ import { defaultBase, harnessStateDir, worktreeTreeHash, type RepoInfo } from '.
 import { parseBranch } from '../lib/plan.ts';
 import { formatProblem, type Problem } from '../lib/util.ts';
 import { bypassScan } from '../gates/bypass-scan.ts';
+import { codeownersProblems } from '../gates/codeowners.ts';
 import { docLint } from '../gates/doc-lint.ts';
 import { secretScan } from '../gates/secret-scan.ts';
 import { describeFailure, runStandard } from './standard.ts';
@@ -118,9 +119,13 @@ export async function runCheck(
       if (!ok) output = describeFailure(r, cfg.commands[name]?.timeoutSec);
     } else if (name === 'doc-lint') {
       const r = docLint(root, cfg);
-      ok = r.errors.length === 0;
+      // CODEOWNERS는 protectedPaths에서 만든 내용과 같아야 한다(10.4절). 운영 단계에 추가하는 파일이라(0.2절)
+      // 구축 단계에서는 없어도 된다. 단계 이름을 늘리지 않으려고 이 단계 안에서 본다(실패 키·캐시가 이름에 묶여 있다)
+      const owners = codeownersProblems(root, cfg, { missingOk: cfg.stage !== 'operation' });
+      ok = r.errors.length === 0 && owners.length === 0;
       output = problemsText([
         ...r.errors,
+        ...owners,
         ...r.warnings.map((w) => ({ ...w, rule: '경고 ' + w.rule })),
       ]);
     } else if (name === 'bypass-scan') {

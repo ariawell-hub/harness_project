@@ -81,8 +81,9 @@ export function init(
   2. 원격 리포 생성 후 main push, 0.2절 브랜치 보호(PR 필수, force push 금지, 최신 브랜치 필수, stale 승인 무효화)
   3. Actions: 기본 권한 읽기 전용, "Actions가 PR 승인" 끔, 리포 수준 시크릿 없음
   4. 검증 App과 recorder environment(main만)를 만들고, App이 한 번 보고한 뒤 필수 상태 체크를 등록: ${requiredCheckGuide(checks)}. 확인: node scripts/harness.ts required-checks
-  5. ${CONFIG_FILE}의 github.owner(제작자 계정)와 github.bot(봇 계정) 확인
+  5. ${CONFIG_FILE}의 github.owner(제작자 계정)와 github.bot(봇 계정) 확인. 제작자 계정이나 protectedPaths를 바꿨으면 node scripts/harness.ts codeowners --write
   6. 라벨 만들기: needs-human, priority:high|medium|low, size:small|medium|large, risk:low|high, bug
-  7. runner 실행 환경: GH_TOKEN=<봇 토큰> node scripts/harness.ts run --worker runner-1`);
+  7. runner 실행 환경: GH_TOKEN=<봇 토큰> node scripts/harness.ts run --worker runner-1
+  8. 운영 전환 전(10.4절 체크리스트 1~3): node scripts/harness.ts ops-check`);
   return 0;
 }

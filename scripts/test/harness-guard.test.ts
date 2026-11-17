@@ -399,8 +399,19 @@ test('이 리포의 gates.yml: selftest job은 base의 실행기로 PR의 하네
   assert.doesNotMatch(st, /pr\/scripts\/harness\.ts/);
   assert.match(st, /^ {4}permissions:\n {6}contents: read\n {4}outputs:/m);
   assert.doesNotMatch(st, /environment:|secrets\.|vars\.|GH_TOKEN|github\.token|: write|cache/i);
-  // PR 유래 값은 env로만 넘긴다
-  assert.doesNotMatch(st, /run: \|[\s\S]*\$\{\{/);
+  // PR 유래 값은 env로만 넘긴다: 어느 단계의 run 블록에도 표현식이 없다
+  for (const step of st.split('\n      - ')) assert.doesNotMatch(step, /run: \|[\s\S]*\$\{\{/);
+  // 샘플 리포의 check가 시크릿 스캔을 돌리므로 gitleaks를 check 워크플로와 같은 버전·체크섬으로 설치한다.
+  // 없으면 runner 시나리오(flow-full, r45-runner)가 실패한다(PR #109의 첫 실제 실행)
+  const pin = (text: string) => [
+    /GITLEAKS_VERSION: (\S+)/.exec(text)?.[1],
+    /GITLEAKS_SHA256: ([0-9a-f]{64})\b/.exec(text)?.[1],
+  ];
+  const checkWf = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/check.yml'), 'utf8');
+  assert.ok(pin(st)[0] && pin(st)[1]);
+  assert.deepEqual(pin(st), pin(checkWf));
+  assert.match(st, /echo "\$\{GITLEAKS_SHA256\}  \/tmp\/gitleaks\.tgz" \| sha256sum -c -/);
+  assert.ok(st.indexOf('sha256sum -c -') < st.indexOf('harness.ts self-test'));
   for (const m of st.matchAll(/persist-credentials: (\S+)/g)) assert.equal(m[1], 'false');
   assert.equal([...st.matchAll(/uses: actions\/checkout@/g)].length, 2);
   assert.equal([...st.matchAll(/persist-credentials:/g)].length, 2);

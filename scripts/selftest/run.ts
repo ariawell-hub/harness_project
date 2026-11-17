@@ -118,6 +118,7 @@ const ENV_KEEP = new Set([
 const COPY = [
   'scripts',
   '.claude',
+  '.github/CODEOWNERS',
   '.gitattributes',
   'AGENTS.md',
   'CLAUDE.md',

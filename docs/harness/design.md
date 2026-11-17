@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.49 · 상태: 초안 · 최종 갱신: 2026-11-16
+> 버전 v0.7.50 · 상태: 초안 · 최종 갱신: 2026-11-17
 
 ---
 
@@ -82,6 +82,7 @@ review_cycle: quarterly
   - v0.7.47 (2026-11-16): 자체 테스트에 runner 시나리오 셋을 더한다(12.4절): 9.2절(3회 전환·5회 중단), 4.5절(여러 Issue를 끝까지, AC로 판정, 시간 초과·중단 뒤에도 계속), 전체 흐름(선점 → 계획 초안 PR → 계획 승인 → step → 필수 체크 → 병합, 승인 이어받기). 가짜 에이전트를 `scripts/selftest/`로 옮겨 실행기 쪽 파일로 쓰고, CI 명령의 REST 조회에 답하는 읽기 전용 로컬 서버를 둔다. runner를 띄우는 시나리오의 시간 제한은 300초다.
   - v0.7.48 (2026-11-16): 대화 세션의 MCP 도구 호출도 L1 훅을 거친다(13.1절, TD-13). 기본은 통과이고, 삭제 계열 도구·메일 발송(R14)과 브라우저 자동화 도구 입력의 GitHub 주소(R20)만 종료 코드 2로 막는다. 규칙은 `guard.mcp` 설정이다. 브라우저 안의 클릭으로 GitHub에 닿는 경로는 훅이 보지 못하므로 E5를 "에이전트가 조작하는 브라우저 프로필에 제작자 GitHub 로그인을 두지 않는다"로 고치고 운영 전환 체크리스트 3번에 확인을 더했다(0.1절, 5.1절 R14·R20, 10.4절, 12.4절 `mcp-guard`, 13.2절).
   - v0.7.49 (2026-11-16): 자체 테스트를 `harness-guard`에 잇는다(10.3·10.4·12.4절). 보호 경로를 바꾼 PR에서 `gates` 워크플로의 `selftest` job이 main의 실행기·시나리오로 PR의 하네스를 시험하고, 기록 job이 보고서를 검사해 `harness-guard`에 합친다. 통과하지 못한 시나리오가 있으면 `failure`, 보고서가 없거나 깨졌으면 `error`다. `selftest` job은 PR 코드를 실행하므로 재현 job과 같은 조건(environment·비밀·쓰기 권한 없음)이고 `harness-guard`가 이를 검사한다. 기존 자체 테스트 파일(`scripts/selftest/`)을 고치거나 지우는 PR은 위험도 높음이다.
+  - v0.7.50 (2026-11-17): 운영 전환 체크리스트 1~3을 확인하는 수단을 둔다(0.2·10.4·16절). `.github/CODEOWNERS`는 `protectedPaths`에서 만들고(`codeowners --write`) 파일이 그 결과와 다르면 `check`가 실패한다. 구축 단계에는 파일이 없어도 되고 운영 단계에서는 없으면 실패다. `ops-check`가 필수 체크의 등록·출처, CODEOWNERS, 그 머신 봇 토큰의 `workflow` 권한을 읽기만으로 확인한다. 확인하지 못한 항목은 통과가 아니다. `revert-check`를 필수 체크 목록(`ci.requiredChecks`)에 넣었다. 제작자 절차(`revert` environment, 필수 체크 등록, 코드 오너 리뷰 필수, `workflow` 권한 회수, 테스트 리포 준비)는 `docs/SECURITY.md`에 있다(Issue #102 step4).
 
 ### 0.1 전제 조건
 
@@ -104,7 +105,7 @@ review_cycle: quarterly
   - 필수 상태 체크(10.3절). `check`를 뺀 모든 필수 체크(`review/*`, `plan-gate`, `risk-gate` 등 기록 job이 쓰는 체크)는 검증 App이 보낸 상태만 인정하도록 출처를 지정한다. PR에 같은 이름의 job을 가진 워크플로를 넣어 체크를 흉내 내는 것을 막기 위해서다
     - Q20에서 확인: 같은 이름의 job(check run), PR 워크플로가 `permissions: statuses: write`로 쓴 status(리포 기본 권한이 읽기 전용이어도 받는다), 봇 PAT로 쓴 status가 모두 이 지정으로 병합이 막혔다. 막힘은 병합 판정에만 나타난다(10.3절 "체크 요약 API")
     - 등록은 검증 App이 그 체크를 한 번 보고한 뒤에 한다. admin이 아닌 봇도 `GET repos/<리포>/branches/main`의 `protection.required_status_checks.checks[].app_id`로 등록된 출처를 확인할 수 있다
-    - 등록하는 필수 체크는 `check`(GitHub Actions)와 검증 App 출처의 `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review/*`는 두 판정 워크플로가 실제 PR에서 판정을 내는 것을 확인한 뒤 등록한다. 검증자가 고장 난 채 필수가 되면 모든 PR의 병합이 막힌다(Issue #54). `review-ledger`도 기록 job이 실제 PR에서 원장 댓글과 상태를 쓰는 것을 확인한 뒤 등록한다(Issue #55). 기록 job은 `review/*`를 쓸 때마다 `review-ledger`도 쓰므로, `review/*`가 기록되는 PR에는 `review-ledger`도 있다
+    - 등록하는 필수 체크는 `check`(GitHub Actions)와 검증 App 출처의 `revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review/*`는 두 판정 워크플로가 실제 PR에서 판정을 내는 것을 확인한 뒤 등록한다. 검증자가 고장 난 채 필수가 되면 모든 PR의 병합이 막힌다(Issue #54). `review-ledger`도 기록 job이 실제 PR에서 원장 댓글과 상태를 쓰는 것을 확인한 뒤 등록한다(Issue #55). 기록 job은 `review/*`를 쓸 때마다 `review-ledger`도 쓰므로, `review/*`가 기록되는 PR에는 `review-ledger`도 있다
     - 기대하는 등록(`harness.config.json`의 `ci.requiredChecks`, 검증 App ID는 `ci.recorderAppId`)과 실제 등록은 `node scripts/harness.ts required-checks`로 비교한다. 읽기만 하고 바꾸지 않는다. 이미 다른 출처로 등록된 체크(1단계의 `plan-gate`)는 검증 App이 같은 이름을 보고한 뒤 제작자가 출처를 바꾸고, 그다음에 옛 job을 지운다. 순서가 바뀌면 그 체크를 아무도 채우지 못해 모든 PR이 막힌다(Issue #53)
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
@@ -118,6 +119,9 @@ review_cycle: quarterly
 - **GitHub App(2단계, 검증 App·인증 저장 App)**: 역할마다 App을 따로 만든다. webhook 끔, "이 계정에만 설치", 대상 리포에만 설치. 권한은 검증 App이 Commit statuses 쓰기·Pull requests 읽기와 쓰기(지적 원장 댓글, 10.2절 (4))·Contents 읽기(check run을 쓰면 Checks 쓰기), 인증 저장 App이 Environments 읽기·쓰기뿐이다(13.3절). environment에는 Client ID를 변수로, 개인 키를 시크릿으로 넣는다. 개인 키는 App 설정의 Credentials → Key pairs → New key에서 만든다. 옛 Callback URL 칸은 "Redirect URI"로 이름이 바뀌었고, 사용자 로그인을 쓰지 않으므로 필요 없다(2026-11 화면, Q20)
 - **협업자**: 외주 개발자만 초대한다. 외부 테스터는 초대하지 않는다(14.6절)
 - **운영 단계에 추가**: CODEOWNERS와 코드 오너 리뷰 필수, 봇의 `workflows` 쓰기 권한 회수(10.4절 운영 전환 체크리스트)
+  - `.github/CODEOWNERS`는 손으로 쓰지 않는다. `node scripts/harness.ts codeowners --write`가 `harness.config.json`의 `protectedPaths`(보호 경로)와 `github.owner`(제작자 계정)에서 만들고, 파일이 그 결과와 다르면 `check`가 실패한다. 구축 단계에는 파일이 없어도 되고(있으면 같아야 한다) 운영 단계에서는 없으면 실패다. 구축 단계에 파일을 두면 GitHub이 보호 경로를 바꾼 PR마다 제작자에게 리뷰를 요청하지만, 코드 오너 리뷰 필수를 켜기 전에는 병합을 막지 않는다
+  - 코드 오너 리뷰 필수는 main 보호 규칙의 "Require review from Code Owners"를 켜고 필수 승인 수는 0으로 둔다. 제작자 절차는 `docs/SECURITY.md`에 있다
+  - 전환 전 확인은 `node scripts/harness.ts ops-check`로 한다(체크리스트 1~3, 읽기만 한다)
 
 ### 용어
 
@@ -444,7 +448,7 @@ review_cycle: quarterly
 AGENTS.md                      # 지도 (단일 원본)
 CLAUDE.md                      # @AGENTS.md + Claude Code 전용 사항
 ARCHITECTURE.md                # 도메인·레이어 지도
-CODEOWNERS                     # 운영 단계: 보호 경로의 제작자 승인
+.github/CODEOWNERS             # 보호 경로의 코드 오너(생성 파일). 운영 단계: 제작자 승인
 docs/
 ├── index.md                   # 문서 전체 목차
 ├── core-beliefs.md            # 핵심 원칙(3절) + 황금 원칙(12.1절)
@@ -1003,7 +1007,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
 
 - 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
-  - **자체 테스트 합치기**(12.4절): 판정 job은 PR이 보호 경로를 바꿨는지를 job 출력 `selftest`(`true`·`false`. 판단하지 못하면 `true`)로 낸다. `true`면 `selftest` job이 `node base/scripts/harness.ts self-test --harness pr`로 main의 실행기·시나리오를 PR의 하네스에 대해 돌리고, 종료 코드와 무관하게 보고서(시나리오별 결과)를 job 출력으로 넘긴다. 기록 job은 그 보고서를 형식·head SHA·시나리오 id 형식(`[a-z0-9-]{1,40}`)으로 검사해 `harness-guard` 결과에 합친다(`scripts/ci/selftest-result.ts`). 보고서가 없거나 깨졌거나 시나리오가 0개면 `error`, 통과하지 못한 시나리오가 있으면 `failure`, 모두 통과면 설명 끝에 `자체 테스트 통과 <N>`을 붙인다. `harness-guard` 자신의 실패·오류는 그대로 남는다. 판정 job이 `selftest` 값을 남기지 못했으면(빈 값) 필요한 것으로 본다. 보고서는 PR 코드를 실행한 job이 쓴 값이라, 상태 설명에는 형식 검사를 통과한 시나리오 id와 개수만 넣고 보고서의 글은 넣지 않는다.
+  - **자체 테스트 합치기**(12.4절): 판정 job은 PR이 보호 경로를 바꿨는지를 job 출력 `selftest`(`true`·`false`. 판단하지 못하면 `true`)로 낸다. `true`면 `selftest` job이 `node base/scripts/harness.ts self-test --harness pr`로 main의 실행기·시나리오를 PR의 하네스에 대해 돌리고, 종료 코드와 무관하게 보고서(시나리오별 결과)를 job 출력으로 넘긴다. 이 job은 하네스의 의존성을 설치하지 않지만 gitleaks는 `check` 워크플로와 같은 버전·체크섬으로 설치한다. runner 시나리오가 샘플 리포에서 `check`를 돌리고 그 시크릿 스캔에 gitleaks가 필요하기 때문이다(없으면 그 시나리오들이 실패한다). 기록 job은 그 보고서를 형식·head SHA·시나리오 id 형식(`[a-z0-9-]{1,40}`)으로 검사해 `harness-guard` 결과에 합친다(`scripts/ci/selftest-result.ts`). 보고서가 없거나 깨졌거나 시나리오가 0개면 `error`, 통과하지 못한 시나리오가 있으면 `failure`, 모두 통과면 설명 끝에 `자체 테스트 통과 <N>`을 붙인다. `harness-guard` 자신의 실패·오류는 그대로 남는다. 판정 job이 `selftest` 값을 남기지 못했으면(빈 값) 필요한 것으로 본다. 보고서는 PR 코드를 실행한 job이 쓴 값이라, 상태 설명에는 형식 검사를 통과한 시나리오 id와 개수만 넣고 보고서의 글은 넣지 않는다.
 
 - **main 정의로 실행하는 것과 main 스크립트를 실행하는 것은 다르다.** 판정 job은 실행할 스크립트·프롬프트를 `base/`(main)에서만 가져오고, `pr/` 아래는 아무것도 실행하지 않는다. 구현할 때 가장 흔히 뚫리는 곳이다.
 - **역할별 environment**: 시크릿은 역할마다 다른 environment에 둔다. `judge-claude`(Claude 구독 토큰), `judge-codex`(Codex 인증 파일), `codex-auth-store`(Codex 인증 저장용 자격증명), `recorder`(검증 App 키), `revert`(revert용 봇 토큰, 10.3절). 이름은 예시다. 각 environment는 main 브랜치에서만 쓰도록 제한하고, 각 job은 자기 environment 하나만 참조한다. 리포 수준 시크릿은 아무 브랜치의 `push` 워크플로가 읽을 수 있으므로 두지 않는다(0.2절).
@@ -1066,17 +1070,18 @@ pnpm test src/auth/login-guard.spec.ts
   - 보안 제어 파일(워크플로 권한, 샌드박스 설정, 검증 프롬프트)도 자동 병합된다. 검사 약화를 두 검증자와 `harness-guard`가 모두 놓치면 병합될 수 있다.
   - 판정 작업은 PR로 바꿀 수 없지만, 일단 병합되면 다음 PR부터 약화된 내용이 적용된다.
   - 로드맵 1단계는 교차 검증·`harness-guard`·자체 테스트가 아직 없는 부트스트랩 구간이다. 이 구간의 병합은 `check`·`plan-gate`만 거친다. 완성된 하네스의 운영 기준으로 보지 않는다.
-- **운영 단계**: 보호 경로에 CODEOWNERS를 두고 코드 오너 리뷰를 필수로 한다. 보호 경로 변경은 위험도 "높음"이 되어 제작자가 승인해야 병합된다. 봇의 `workflows` 쓰기 권한을 회수한다. 아래 체크리스트를 모두 충족하면 전환한다(Q7).
+- **운영 단계**: 보호 경로에 CODEOWNERS를 두고 코드 오너 리뷰를 필수로 한다(`.github/CODEOWNERS`는 `protectedPaths`에서 만든다, 0.2절). 보호 경로 변경은 위험도 "높음"이 되어 제작자가 승인해야 병합된다. 봇의 `workflows` 쓰기 권한을 회수한다. 아래 체크리스트를 모두 충족하면 전환한다(Q7).
 - **단계 표시**: 현재 단계는 하네스 설정(보호 경로)의 `stage: build | operation` 값으로 기록한다. `risk-gate`는 이 값으로 보호 경로 변경의 위험도(보통·높음)를 정하고, `harness-guard`는 이 값에 맞는 검사를 한다. 이 값은 보호 경로에 있으므로 운영 단계에서는 제작자 승인 없이 바꿀 수 없다.
 - **운영 전환 체크리스트**: 파일럿(19절 3단계)을 시작하거나 하네스를 실제 제품 리포에 복사하기 전에 모두 충족한다. 개발 중 매 PR을 수동 승인하라는 뜻은 아니다.
-  1. 10.3절의 필수 상태 체크가 모두 등록되어 있고, `check`를 뺀 모든 필수 체크의 출처가 검증 App으로 지정되어 있다(0.2절).
-  2. CODEOWNERS와 코드 오너 리뷰 필수가 켜져 있다.
-  3. 봇 토큰의 `workflows` 쓰기 권한을 회수했다.
+  1. 10.3절의 필수 상태 체크가 모두 등록되어 있고, `check`를 뺀 모든 필수 체크의 출처가 검증 App으로 지정되어 있다(0.2절). 확인: `ops-check` 1번. `required-checks`와 같은 비교에 더해, 10.3절의 체크(`check`, 기계 판정, `review/*`, `review-ledger`)가 설정에 모두 있고 `check`가 아닌 체크의 설정 출처가 검증 App인지 본다.
+  2. CODEOWNERS와 코드 오너 리뷰 필수가 켜져 있다. 확인: `ops-check` 2번은 `.github/CODEOWNERS`가 `protectedPaths`에서 만든 내용과 같은지를 본다. 코드 오너 리뷰 필수 설정은 관리자가 아닌 봇 토큰으로 읽을 수 없어(읽히면 판정하고, 아니면 `?` 줄로 남긴다) 6번의 시험 PR이 근거다.
+  3. 봇 토큰의 `workflows` 쓰기 권한을 회수했다. 확인: `ops-check` 3번. 그 명령을 실행한 머신의 `gh` 계정이 봇이고 토큰의 권한 범위에 `workflow`가 없는지를 API 응답 머리말(`x-oauth-scopes`)로 본다(토큰 값은 읽지 않는다). 머리말이 없는 토큰은 확인하지 못한 것으로 둔다. `revert` environment의 시크릿을 같은 새 토큰으로 바꿨는지는 봇이 읽을 수 없어 제작자가 확인한다.
      - 에이전트가 조작하는 브라우저 프로필(Claude 확장을 설치한 Chrome 프로필 등)에 제작자 GitHub 로그인이 없다(E5, 확인 방법은 `docs/SECURITY.md`). 훅은 브라우저 안의 클릭으로 GitHub에 닿는 경로를 보지 못한다(13.1절).
   4. Q20 시험을 통과했다(2단계 착수 조건).
   5. 빈 테스트 리포에서 하네스 자체 테스트(12.4절)와 전체 흐름이 통과한다: 선점 → 계획 → PR → 교차 검증 → 계획 완료 커밋 → 자동 병합 → 병합 후 실패 시 revert. main 병합 갱신 뒤 승인 이어받기(10.3절 결속 기준)도 확인한다.
   6. 대상 리포에서 시험 PR로 설정을 확인한다. 보호 경로를 바꾸는 PR은 제작자 승인 없이 병합되지 않고, 봇이 워크플로 파일을 push하면 거부되며, 보호 경로 밖의 위험도 낮음 PR은 사람 승인 없이 자동 병합된다(0.2절 승인 설정).
   7. `stage`를 `operation`으로 바꾸는 PR을 병합한다. PR에는 1~6의 확인 결과를 남긴다.
+  - `node scripts/harness.ts ops-check`는 1~3을 읽기만으로 확인한다. 세 항목이 모두 맞을 때만 종료 코드 0이다. 확인하지 못한 항목(`?`)은 통과가 아니고, 이를 넘기는 옵션은 없다. 7번의 PR은 이 명령의 출력을 본문에 남긴다.
 
 ---
 
@@ -1410,7 +1415,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 
 1. 전제 조건(0.1절 E1~E5)과 리포 설정(0.2절)을 갖춘다.
 2. 하네스 템플릿을 복사한다.
-3. 초기화: 프로파일 선택, 표준 명령 연결, `AGENTS.md` 생성, 필수 체크 등록, 봇 계정·검증 App 권한 설정, 훅·샌드박스 설정. 운영 전환 체크리스트(10.4절)의 리포 항목(1~3, 6)을 새 리포에서 확인한다.
+3. 초기화: 프로파일 선택, 표준 명령 연결, `AGENTS.md` 생성, 필수 체크 등록, 봇 계정·검증 App 권한 설정, 훅·샌드박스 설정. 운영 전환 체크리스트(10.4절)의 리포 항목(1~3, 6)을 새 리포에서 확인한다. 설정에 제작자 계정을 적은 뒤 `node scripts/harness.ts codeowners --write`로 `.github/CODEOWNERS`를 다시 만들고, 1~3은 `node scripts/harness.ts ops-check`로 본다.
 4. 첫 실행 계획으로 프로젝트 스캐폴드를 만든다. (원문: 빈 git 리포지터리로 시작함)
 
 ### 기존 프로젝트
@@ -1421,7 +1426,7 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
 2. 문서: `AGENTS.md`, `docs/` 구조
 3. 금지 훅(R4, R13, R14, R20)
 4. CI `check`와 `plan-gate`
-5. CI 교차 검증과 나머지 필수 체크. 운영 전환 체크리스트(10.4절)의 리포 항목을 확인한 뒤 제품 코드 작업의 자동 병합을 시작한다
+5. CI 교차 검증과 나머지 필수 체크. 운영 전환 체크리스트(10.4절)의 리포 항목을 확인한 뒤(`ops-check`) 제품 코드 작업의 자동 병합을 시작한다
 6. L0 샌드박스, git hooks
 
 ---

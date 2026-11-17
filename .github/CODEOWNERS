@@ -1,0 +1,29 @@
+# 생성 파일: `node scripts/harness.ts codeowners --write`. 손으로 고치지 않는다.
+# 원본: harness.config.json의 protectedPaths(보호 경로)와 github.owner(제작자 계정). 설계서 10.4절
+/scripts/ @ariawell-hub
+/.github/ @ariawell-hub
+/.claude/ @ariawell-hub
+/.codex/ @ariawell-hub
+/CODEOWNERS @ariawell-hub
+/.gitignore @ariawell-hub
+/.gitattributes @ariawell-hub
+/docs/harness/ @ariawell-hub
+/.mcp.json @ariawell-hub
+/.githooks/ @ariawell-hub
+/.devcontainer/ @ariawell-hub
+/.vscode/ @ariawell-hub
+/Makefile @ariawell-hub
+/justfile @ariawell-hub
+/package.json @ariawell-hub
+/pnpm-workspace.yaml @ariawell-hub
+/.npmrc @ariawell-hub
+/tsconfig.json @ariawell-hub
+/.prettierrc @ariawell-hub
+/harness.config.json @ariawell-hub
+/profiles/ @ariawell-hub
+/AGENTS.md @ariawell-hub
+/CLAUDE.md @ariawell-hub
+/ARCHITECTURE.md @ariawell-hub
+/docs/core-beliefs.md @ariawell-hub
+/docs/SECURITY.md @ariawell-hub
+/docs/exec-plans/TEMPLATE*.md @ariawell-hub

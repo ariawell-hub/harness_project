@@ -1,6 +1,6 @@
 // 하네스 CLI 진입점. 정규 호출: node scripts/harness.ts <명령> [옵션]
 // 모든 명령은 비대화식이고, 종료 코드로 성공·실패를 알린다(6절).
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -58,12 +58,14 @@ import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
+import { formatOps, opsCheck } from './commands/ops-check.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
 import { describeExcluded, describeTask, start } from './commands/start.ts';
 import { prReady } from './commands/pr-ready.ts';
 import { prState } from './commands/pr-state.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
+import { CODEOWNERS_FILE, codeownersProblems, codeownersText } from './gates/codeowners.ts';
 import { revertCheck, revertTarget, type RevertCheck } from './gates/revert-check.ts';
 import { docLint, printDocLint } from './gates/doc-lint.ts';
 import { planGate, type PlanG1 } from './gates/plan-gate.ts';
@@ -152,6 +154,10 @@ CI(gates 워크플로, 10.4절):
   codex-scan --events <jsonl> --last <파일> --stderr <파일> --pr <pr 폴더> --auth <auth.json> --out <verdict.json>
                                            Codex 실행 기록 유출 검사(실행 전 시크릿은 SCAN_AUTH_JSON)
   required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
+  codeowners [--write]                     .github/CODEOWNERS를 protectedPaths에서 만든 내용과 비교(다르면 종료 코드 1).
+                                           --write는 파일을 다시 만든다(손으로 고치지 않는다, 10.4절)
+  ops-check                                운영 전환 체크리스트 1~3(10.4절)을 읽기만으로 확인한다: 필수 체크 등록·출처,
+                                           CODEOWNERS, 이 머신 봇 토큰의 workflow 권한. 모두 맞을 때만 종료 코드 0
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
@@ -190,6 +196,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   ci: { type: 'boolean' },
   'no-cache': { type: 'boolean' },
   undo: { type: 'boolean' },
+  write: { type: 'boolean' },
   base: { type: 'string' },
   only: { type: 'string' },
   harness: { type: 'string' },
@@ -1122,6 +1129,36 @@ async function main(argv: string[]): Promise<number> {
       const bad = report.results.filter((r) => r.state !== 'pass').length;
       log(`self-test: ${bad ? `실패 ${bad}건` : '통과'} (시나리오 ${report.results.length}개)`);
       return bad ? 1 : 0;
+    }
+    case 'codeowners': {
+      const info = repoInfo(cwd);
+      const cfg = loadConfig(info.root);
+      if (flag('write')) {
+        const file = path.join(info.root, CODEOWNERS_FILE);
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, codeownersText(cfg));
+      }
+      const problems = codeownersProblems(info.root, cfg);
+      for (const p of problems) log(formatProblem(p));
+      log(
+        problems.length
+          ? `codeowners: 문제 ${problems.length}건`
+          : `codeowners: 통과 (${CODEOWNERS_FILE}, 보호 경로 ${cfg.protectedPaths.length}개)`,
+      );
+      return problems.length ? 1 : 0;
+    }
+    case 'ops-check': {
+      const info = repoInfo(cwd);
+      const cfg = loadConfig(info.root);
+      const items = opsCheck({ root: info.root, cfg, gh: getGitHub(info.root) });
+      for (const line of formatOps(items)) log(line);
+      const ok = items.every((i) => i.state === 'ok');
+      log(
+        ok
+          ? 'ops-check: 통과 (체크리스트 1~3. 4~7은 설계서 10.4절)'
+          : 'ops-check: 실패 — 세 항목이 모두 ✓여야 통과다. 설정은 제작자가 바꾼다(docs/SECURITY.md). 봇은 읽기만 한다(R20)',
+      );
+      return ok ? 0 : 1;
     }
     case 'init':
       return init(repoInfo(cwd).root, str('profile') ?? '', {

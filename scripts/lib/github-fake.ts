@@ -79,6 +79,10 @@ export interface FakeState {
   prs: FakePR[];
   /** branchInfo가 돌려줄 필수 체크(선택) */
   requiredChecks?: { context: string; app_id: number | null }[];
+  /** tokenScopes가 돌려줄 권한 범위(선택). 없거나 null이면 머리말이 없는 것이다 */
+  tokenScopes?: string[] | null;
+  /** codeOwnerReviewRequired가 돌려줄 값(선택). 없거나 null이면 읽지 못한 것이다 */
+  codeOwnerReview?: boolean | null;
   /** 커밋 SHA → 그 커밋의 커밋 상태·check run 기록(setCheck가 쓴다) */
   checks?: Record<string, CommitCheck[]>;
   /** repoSlug가 돌려줄 저장소 이름(선택). 없으면 `fake/repo` */
@@ -218,6 +222,12 @@ export class FakeGitHub implements GitHubPort {
   }
   branchInfo(): unknown {
     return { protection: { required_status_checks: { checks: this.load().requiredChecks ?? [] } } };
+  }
+  codeOwnerReviewRequired(): boolean | null {
+    return this.load().codeOwnerReview ?? null;
+  }
+  tokenScopes(): string[] | null {
+    return this.load().tokenScopes ?? null;
   }
   repoSlug(): string {
     return this.load().repo ?? 'fake/repo';
