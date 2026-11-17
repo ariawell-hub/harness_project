@@ -523,3 +523,15 @@ test('실패 이유: 단언 메시지와 출력의 표식이 결과와 CLI 출�
   assert.match(out.stdout.trimEnd(), /test-effect: 통과$/);
   assert.ok(!`${out.stdout}${out.stderr}`.includes(MARK));
 });
+
+test('실패 이유: 단언 실패로 끝난 테스트 파일이 여러 개여도 모두 assertion이다(정규식에 상태가 없다)', async () => {
+  const { root, base } = repo({ assertPattern: PATTERN });
+  write(root, 'src/lib.mjs', LIB2);
+  const files = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => `t/sub-${n}.test.mjs`);
+  for (const f of files) write(root, f, ASSERTING);
+  const r = await check(root, base);
+  assert.deepEqual(reasons(r), Object.fromEntries(files.map((f) => [f, 'assertion'])));
+  assert.deepEqual(r.notes, []);
+  // 설정은 정규식의 원문만 받는다. 플래그(g·y)를 줄 방법이 없어 lastIndex를 쓰지 않는다
+  assert.equal(new RegExp(PATTERN).flags, '');
+});

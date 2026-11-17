@@ -65,6 +65,8 @@ claimed_at: 2026-11-17T22:31:02+09:00 # new-task가 채운다
 - 2026-11-17 step0: 테스트를 먼저 쓰고 구현 전에 실행했다: `test-effect.test.ts` 5개, `lib.test.ts` 1개(기존 설정 검증 테스트에 `assertPattern` 기대를 더했다), `gates.test.ts` 1개가 모두 실패(7개 가운데 7개, 종료 코드 1). 그 뒤 구현: 설정 `testEffect.assertPattern`, 결과 항목의 `reason`과 판정 줄, 결과의 `notes`, 명령·`check`의 `참고:` 줄, 설정값. 세 파일의 57개 통과.
 - 2026-11-17 step0: 시나리오 `r5-test-effect`에 두 판정 줄 확인을 더했다(새 모듈의 테스트는 "단언 실패 아님"과 `참고:` 줄, main에 있던 모듈의 동작을 바꾼 테스트는 "단언 실패"). 문서: 검증자 프롬프트, 자체 리뷰 체크리스트, 설계서 v0.7.53(5.1절 R5, 변경 이력), 절차서 3절, 코드 구조 문서, `CHANGELOG`, TD-43.
 - 2026-11-17 step0: AC 명령이 모두 종료 코드 0이다. 이 worktree의 `node scripts/harness.ts test-effect`: 이 step이 고친 테스트 파일 3개(`gates.test.ts`, `lib.test.ts`, `test-effect.test.ts`)가 모두 `effective(base에서 단언 실패, 종료 코드 1)`이고 `참고:` 줄은 없다.
+- 2026-11-17 step0: PR #120 구현 판정 1라운드(head `bdc911e`). `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 1건, 원장 F1: `assertPattern`이 전역·sticky 정규식이면 `lastIndex` 때문에 둘째 파일부터 잘못 분류된다). F1 반박: 설정은 정규식의 원문 문자열만 받고 `new RegExp(원문)`으로 만든다. JavaScript 정규식은 원문 안에 `g`·`y` 플래그를 적을 수 없어(`(?g)`는 문법 오류) 플래그가 항상 비어 있고, 그런 정규식의 `.test()`는 `lastIndex`를 쓰지도 바꾸지도 않는다. 같은 단언 실패 출력의 테스트 파일 6개가 모두 `assertion`으로 분류되는 테스트를 더했다(고친 코드는 없다). 실제 CI의 `check`에서 새 판정 줄을 확인했다: `✓ test-effect (8.4s)`, 이 step이 고친 테스트 파일 3개 모두 `effective(base에서 단언 실패, 종료 코드 1)`.
+- 2026-11-17 step0: 이 PR은 위험도 높음으로 판정됐다(`risk-gate`: 자체 테스트 파일 수정 `scripts/selftest/scenarios/r5-test-effect.ts`. 계획의 위험도는 normal이지만 main에 있는 시나리오 파일을 고치면 `harness-guard`가 신호를 낸다). 초안으로 두고, 판정이 끝난 뒤 `pr-ready`로 한 번만 제작자 head 승인을 요청한다.
 
 ## 의사결정 로그
 
