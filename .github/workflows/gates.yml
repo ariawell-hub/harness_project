@@ -3,8 +3,11 @@
 #           plan-gate의 G1은 지적 원장(검증 App 봇의 PR 댓글)의 계획 승인을 읽기 권한(pull-requests: read)으로 읽는다.
 # record: 판정 결과를 base 스크립트로 검사한 뒤 검증 App 토큰(recorder environment)으로 PR head에 커밋 상태를 쓴다.
 #         PR 트리를 받지 않고 LLM·PR 코드를 실행하지 않는다. 결과가 없거나 깨지면 모든 기계 판정을 error로 쓴다.
+# selftest: 보호 경로를 바꾼 PR에서만 돈다(12.4절). base/의 실행기와 시나리오로 pr/의 하네스를 시험한다. PR 코드를 실행하므로
+#           비밀·쓰기 권한이 없고 보호 환경을 참조하지 않는다. 보고서는 PR 코드가 조작할 수 있는 값이라 record가 형식을 검사한다.
+#           record는 보고서를 harness-guard에 합친다. 필요한데 보고서가 없거나 실패한 시나리오가 있으면 success가 아니다.
 # PR 유래 값(브랜치 이름, job 출력)은 run 스크립트에 직접 넣지 않고 env로만 넘긴다.
-# 두 job 모두 Actions 캐시를 복원하지 않는다(10.4절 캐시 규칙). 액션은 커밋 SHA로 고정한다. 포크 PR은 판정하지 않는다.
+# 어느 job도 Actions 캐시를 복원하지 않는다(10.4절 캐시 규칙). 액션은 커밋 SHA로 고정한다. 포크 PR은 판정하지 않는다.
 name: gates
 
 on:
@@ -36,6 +39,7 @@ jobs:
       skip: ${{ steps.pr.outputs.skip }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
       results: ${{ steps.gates.outputs.results }}
+      selftest: ${{ steps.gates.outputs.selftest }}
     steps:
       - name: main 정의 체크아웃 (실행할 스크립트, github.sha)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,9 +91,53 @@ jobs:
             --out "$OUT" --summary "$GITHUB_STEP_SUMMARY"
           echo "results=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
 
+  selftest:
+    name: selftest
+    needs: evaluate
+    if: needs.evaluate.outputs.skip == 'false' && needs.evaluate.outputs.selftest == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # PR 코드를 실행한다: 비밀·쓰기 권한이 없고 보호 환경을 참조하지 않는다(10.4절). 결과는 조작될 수 있는 값으로 다룬다
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.run.outputs.report }}
+    steps:
+      - name: main 정의 체크아웃 (실행기와 시나리오, github.sha)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: base
+          persist-credentials: false
+
+      - name: PR 트리의 심볼릭 링크를 일반 파일로 받는다
+        run: git config --global core.symlinks false
+
+      - name: PR head 체크아웃 (시험할 하네스)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.evaluate.outputs.head_sha }}
+          path: pr
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.20'
+
+      - name: self-test (base의 시나리오를 PR의 하네스에 대해 실행, 의존성 설치 없음)
+        id: run
+        env:
+          HEAD_SHA: ${{ needs.evaluate.outputs.head_sha }}
+        run: |
+          OUT="$RUNNER_TEMP/selftest.json"
+          CODE=0
+          node base/scripts/harness.ts self-test --harness pr --head-sha "$HEAD_SHA" --out "$OUT" || CODE=$?
+          # 종료 코드와 무관하게 보고서를 넘긴다. 보고서가 없으면 record가 harness-guard를 error로 쓴다
+          if [ -f "$OUT" ]; then echo "report=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"; fi
+          exit "$CODE"
+
   record:
     name: record
-    needs: evaluate
+    needs: [evaluate, selftest]
     if: ${{ !cancelled() && needs.evaluate.result != 'skipped' && needs.evaluate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -120,6 +168,9 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           RESULTS_B64: ${{ needs.evaluate.outputs.results }}
+          # 자체 테스트: 판정 job이 정한 필요 여부와 selftest job의 보고서(없으면 빈 값)
+          SELFTEST_NEEDED: ${{ needs.evaluate.outputs.selftest }}
+          SELFTEST_B64: ${{ needs.selftest.outputs.report }}
           # 판정 job이 PR을 정하기 전에 죽었으면 이벤트의 head에 error를 남긴다
           HEAD_SHA: ${{ needs.evaluate.outputs.head_sha || github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
@@ -128,4 +179,4 @@ jobs:
           F="$RUNNER_TEMP/gates.json"
           printf '%s' "$RESULTS_B64" | base64 -d > "$F" 2>/dev/null || : > "$F"
           node base/scripts/harness.ts record-status --results "$F" --head-sha "$HEAD_SHA" \
-            --repo-slug "$REPO" --target-url "$RUN_URL"
+            --repo-slug "$REPO" --target-url "$RUN_URL" --selftest-needed "$SELFTEST_NEEDED"

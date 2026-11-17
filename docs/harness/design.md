@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.48 · 상태: 초안 · 최종 갱신: 2026-11-16
+> 버전 v0.7.49 · 상태: 초안 · 최종 갱신: 2026-11-16
 
 ---
 
@@ -81,6 +81,7 @@ review_cycle: quarterly
   - v0.7.46 (2026-11-16): revert 워크플로를 더한다(10.3절 "병합 후 main CI가 실패하면", 10.4절). main의 `check`가 실패로 끝나면 한 번 다시 실행하고, 다시 실패하면 `revert` environment의 봇 토큰으로 `revert/<SHA>` PR을 만들어 자동 병합을 켜고 원래 Issue를 다시 열어 복원용 표식과 함께 알린다. 자동으로 되돌리지 않고 `needs-human`으로 넘기는 경우(원래 PR 없음, revert의 revert, 계획 `risk: high`·높음 경로, 충돌, push 거부)를 정했다.
   - v0.7.47 (2026-11-16): 자체 테스트에 runner 시나리오 셋을 더한다(12.4절): 9.2절(3회 전환·5회 중단), 4.5절(여러 Issue를 끝까지, AC로 판정, 시간 초과·중단 뒤에도 계속), 전체 흐름(선점 → 계획 초안 PR → 계획 승인 → step → 필수 체크 → 병합, 승인 이어받기). 가짜 에이전트를 `scripts/selftest/`로 옮겨 실행기 쪽 파일로 쓰고, CI 명령의 REST 조회에 답하는 읽기 전용 로컬 서버를 둔다. runner를 띄우는 시나리오의 시간 제한은 300초다.
   - v0.7.48 (2026-11-16): 대화 세션의 MCP 도구 호출도 L1 훅을 거친다(13.1절, TD-13). 기본은 통과이고, 삭제 계열 도구·메일 발송(R14)과 브라우저 자동화 도구 입력의 GitHub 주소(R20)만 종료 코드 2로 막는다. 규칙은 `guard.mcp` 설정이다. 브라우저 안의 클릭으로 GitHub에 닿는 경로는 훅이 보지 못하므로 E5를 "에이전트가 조작하는 브라우저 프로필에 제작자 GitHub 로그인을 두지 않는다"로 고치고 운영 전환 체크리스트 3번에 확인을 더했다(0.1절, 5.1절 R14·R20, 10.4절, 12.4절 `mcp-guard`, 13.2절).
+  - v0.7.49 (2026-11-16): 자체 테스트를 `harness-guard`에 잇는다(10.3·10.4·12.4절). 보호 경로를 바꾼 PR에서 `gates` 워크플로의 `selftest` job이 main의 실행기·시나리오로 PR의 하네스를 시험하고, 기록 job이 보고서를 검사해 `harness-guard`에 합친다. 통과하지 못한 시나리오가 있으면 `failure`, 보고서가 없거나 깨졌으면 `error`다. `selftest` job은 PR 코드를 실행하므로 재현 job과 같은 조건(environment·비밀·쓰기 권한 없음)이고 `harness-guard`가 이를 검사한다. 기존 자체 테스트 파일(`scripts/selftest/`)을 고치거나 지우는 PR은 위험도 높음이다.
 
 ### 0.1 전제 조건
 
@@ -920,13 +921,13 @@ pnpm test src/auth/login-guard.spec.ts
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
 | `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
 | `deps-guard` | lockfile 전체 변경 검사 | R17 |
-| `harness-guard` | 보호 경로 변경 시 체크리스트·`CHANGELOG`·하네스 자체 테스트(로드맵 2단계부터), 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
+| `harness-guard` | 보호 경로 변경 시 체크리스트·`CHANGELOG`·하네스 자체 테스트(`gates` 워크플로의 `selftest` job 결과를 기록 job이 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 success가 아니다. 10.4절), PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한 탐지, 기존 자체 테스트 파일의 수정·삭제 표시, 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
 | `revert-check` | revert PR 전용. diff가 대상 커밋을 정확히 되돌리는지 확인하고, 통과하면 `review/*`를 대신한다 | 아래 "병합 후 main CI가 실패하면" |
 
 - `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`(Issue #54)와 `review-ledger`(Issue #55)는 판정 워크플로의 기록 job이 같은 방식으로 쓴다. `revert-check`도 `gates`의 판정 job이 함께 낸다(Issue #102).
 - `revert-check`의 판정(`scripts/gates/revert-check.ts`): 브랜치가 `revert/<40자 SHA>` 꼴일 때만 본다(그 밖의 PR은 "revert PR 아님"으로 통과). 확인 조건은 모두 만족해야 한다. (1) 대상 커밋이 merge-base의 first-parent 이력에 있고 부모가 하나다. (2) `git diff --raw`로 본 PR의 변경(merge-base → head)이 대상의 역(대상 → 대상의 부모)과 경로·모드·blob SHA까지 같다. patch-id나 줄 단위 비교는 공백과 줄 위치를 무시하므로 쓰지 않는다. 대상 뒤에 main이 같은 파일을 다시 바꿨으면 성립하지 않는다. (3) 대상 커밋의 main `check`가 실패했다. 근거는 GitHub Actions App이 만든 이름 `check`의 최신 check run이다(`scripts/ci/revert-evidence.ts`). 커밋 상태는 봇 토큰도 쓸 수 있어 근거로 쓰지 않는다. 조회하지 못하면 `error`다(fail-closed). 조건 (3)이 없으면 봇 토큰을 가진 에이전트가 main의 아무 커밋이나 검증 없이 되돌릴 수 있다.
-- 확인된 revert PR이 면제받는 것은 `plan-gate`의 계획 요구, `review/*` 판정(판정 워크플로의 `plan` job이 같은 함수로 다시 판정해 검증자를 돌리지 않는다), `harness-guard`의 작성자 체크리스트(`CHANGELOG` 한 줄, PR 본문 줄)뿐이다. `risk-gate`·`deps-guard`와 `harness-guard`의 신호·워크플로 검사는 그대로다. 훅이나 권한 제한을 더한 커밋의 revert는 완화 신호가 되어 위험도 높음(제작자 head 승인)으로 간다.
+- 확인된 revert PR이 면제받는 것은 `plan-gate`의 계획 요구, `review/*` 판정(판정 워크플로의 `plan` job이 같은 함수로 다시 판정해 검증자를 돌리지 않는다), `harness-guard`의 작성자 체크리스트(`CHANGELOG` 한 줄, PR 본문 줄)뿐이다. `risk-gate`·`deps-guard`와 `harness-guard`의 신호·워크플로 검사·자체 테스트는 그대로다. main의 시나리오가 요구하는 동작을 되돌리는 revert PR은 자체 테스트에서 막힌다(TD-41). 훅이나 권한 제한을 더한 커밋의 revert는 완화 신호가 되어 위험도 높음(제작자 head 승인)으로 간다.
 - `risk-gate`의 제작자 승인은 리뷰가 달리거나 철회될 때 다시 판정한다: `review-trigger` 워크플로(`pull_request_review`, PR 쪽 정의라 비밀·권한 없음)가 끝나면 `gates`가 `workflow_run`(main 정의)으로 돌고, 페이로드 대신 head SHA로 API를 조회해 열린 같은 리포 PR의 현재 head에만 판정한다.
 
 **승인 결속 기준**
@@ -992,6 +993,7 @@ pnpm test src/auth/login-guard.spec.ts
 |---|---|---|---|
 | `check` (빌드·테스트) | `pull_request` (PR 쪽 정의) | 실행한다 | 비밀 없음. 토큰은 `contents: read` |
 | 재현 job | `workflow_run`(`check` 완료, main 정의). 판정 워크플로 안의 job이고 판정 job 뒤에 돈다 | 실행한다(재현 테스트만) | 비밀 없음, 쓰기 권한 없음. 캐시에 쓰는 것은 막을 수 없다고 가정한다(아래 캐시 규칙) |
+| 자체 테스트 job(`selftest`) | `pull_request_target` (main 정의, `gates` 워크플로). 보호 경로를 바꾼 PR에서만, 판정 job(`evaluate`) 뒤에 돈다 | 실행한다(`base/`의 실행기와 시나리오가 `pr/`의 하네스를 프로세스로 부른다) | 비밀·environment·쓰기 권한 없음(`contents: read`만), job 환경에 토큰을 주지 않는다. 의존성을 설치하지 않고 캐시를 복원하지 않는다 |
 | 판정 job: Claude (LLM) | `workflow_run`(`check` 완료, main 정의) | 실행하지 않는다. `base/`(main의 스크립트·프롬프트)만 실행하고 `pr/`는 데이터로 읽기만 | Claude 구독 토큰(`judge-claude` environment)만. 검증 App 키, Codex 인증, GitHub 쓰기 권한은 없음 |
 | 판정 job: Codex (LLM) | `workflow_run`(`check` 완료, main 정의) | 위와 같음 | Codex 인증 파일(`judge-codex` environment)만. 인증 저장용 자격증명, Claude 토큰, 검증 App 키, GitHub 쓰기 권한은 없음 |
 | Codex 인증 저장 job | `workflow_run`(`check` 완료, main 정의). Codex 판정 job 앞(공개키 조회)과 뒤(저장) | 실행하지 않는다 | 인증 저장용 자격증명(`codex-auth-store` environment). LLM 없음. 갱신된 인증 파일은 판정 job이 `judge-codex`의 공개키로 봉인해 넘기고, 이 job은 풀지 않고 그대로 등록한다(13.3절) |
@@ -1001,6 +1003,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
 
 - 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
+  - **자체 테스트 합치기**(12.4절): 판정 job은 PR이 보호 경로를 바꿨는지를 job 출력 `selftest`(`true`·`false`. 판단하지 못하면 `true`)로 낸다. `true`면 `selftest` job이 `node base/scripts/harness.ts self-test --harness pr`로 main의 실행기·시나리오를 PR의 하네스에 대해 돌리고, 종료 코드와 무관하게 보고서(시나리오별 결과)를 job 출력으로 넘긴다. 기록 job은 그 보고서를 형식·head SHA·시나리오 id 형식(`[a-z0-9-]{1,40}`)으로 검사해 `harness-guard` 결과에 합친다(`scripts/ci/selftest-result.ts`). 보고서가 없거나 깨졌거나 시나리오가 0개면 `error`, 통과하지 못한 시나리오가 있으면 `failure`, 모두 통과면 설명 끝에 `자체 테스트 통과 <N>`을 붙인다. `harness-guard` 자신의 실패·오류는 그대로 남는다. 판정 job이 `selftest` 값을 남기지 못했으면(빈 값) 필요한 것으로 본다. 보고서는 PR 코드를 실행한 job이 쓴 값이라, 상태 설명에는 형식 검사를 통과한 시나리오 id와 개수만 넣고 보고서의 글은 넣지 않는다.
 
 - **main 정의로 실행하는 것과 main 스크립트를 실행하는 것은 다르다.** 판정 job은 실행할 스크립트·프롬프트를 `base/`(main)에서만 가져오고, `pr/` 아래는 아무것도 실행하지 않는다. 구현할 때 가장 흔히 뚫리는 곳이다.
 - **역할별 environment**: 시크릿은 역할마다 다른 environment에 둔다. `judge-claude`(Claude 구독 토큰), `judge-codex`(Codex 인증 파일), `codex-auth-store`(Codex 인증 저장용 자격증명), `recorder`(검증 App 키), `revert`(revert용 봇 토큰, 10.3절). 이름은 예시다. 각 environment는 main 브랜치에서만 쓰도록 제한하고, 각 job은 자기 environment 하나만 참조한다. 리포 수준 시크릿은 아무 브랜치의 `push` 워크플로가 읽을 수 있으므로 두지 않는다(0.2절).
@@ -1032,10 +1035,10 @@ pnpm test src/auth/login-guard.spec.ts
   - Codex는 셸을 뺄 수 없어 `pr/` 밖을 가리킨 명령을 문자열로만 알 수 있다(검색 패턴의 `/`도 걸린다). 그래서 Codex의 밖 가리킴은 세어 보고만 하고, 읽기 범위는 샌드박스와 사전 측정이 막는다. 셸·메시지 밖의 항목 종류(MCP 호출, 웹 검색, 파일 변경)가 실행 기록에 있으면 실패한다.
   - 인증 실패·사용량 한도 같은 실행 오류는 판정 없이 실패로 끝난다(fail closed). 다른 검증자로 대신하지 않는다(10.1절 검증자 장애 규칙).
 - **기록 job의 검사**: `verdict.json`을 스키마(정해진 값, 길이 제한)로 검사하고, 시크릿 스캔을 통과해야만 기록한다. 스캔은 CI에 있는 토큰 값과의 정확 일치뿐 아니라 흔한 인코딩(base64·hex·URL 인코딩)과 고엔트로피 문자열도 찾는다. 다만 쪼개거나 바꿔 쓴 토큰까지 모두 잡을 수는 없으므로 이 검사는 보조 수단이다. 1차 방어는 판정 job 규칙대로 LLM이 인증 정보를 읽지 못하게 하는 것이다.
-- **재현 job의 조건**: environment·비밀·쓰기 권한을 두지 않는다(`contents: read`만, 체크아웃은 자격증명을 남기지 않음). `harness-guard`가 재현 job(id가 `repro`이거나 재현 명령을 실행하는 job)에 environment·비밀·쓰기 권한이 있으면 실패로 판정한다. 스크립트와 설정은 `base/`에서만 읽고, 의존성 설치는 하지 않는다.
+- **재현 job의 조건**: environment·비밀·쓰기 권한을 두지 않는다(`contents: read`만, 체크아웃은 자격증명을 남기지 않음). `harness-guard`가 재현 job(id가 `repro`이거나 재현 명령을 실행하는 job)에 environment·비밀·쓰기 권한이 있으면 실패로 판정한다. 스크립트와 설정은 `base/`에서만 읽고, 의존성 설치는 하지 않는다. 자체 테스트 job(id가 `selftest`이거나 `self-test` 명령을 실행하는 job)도 PR 코드를 실행하므로 같은 조건이고 `harness-guard`가 같은 검사를 한다. 두 job이 든 워크플로는 job 밖(최상위 `env` 등)에서도 비밀을 참조할 수 없다. 그 값은 모든 job이 물려받기 때문이다. 실행기와 시나리오는 `base/`의 것만 쓴다(`pr/`의 실행기를 실행하면 PR이 자기 시나리오를 약화시켜 통과할 수 있다).
 - **재현 job의 한계**: PR 코드를 실행하므로 결과를 조작할 수 있다. 그래서 "재현됨"은 차단 근거로 쓰고, "재현 안 됨"으로 P1을 내릴 때는 검증자가 재현 테스트와 실행 로그를 다시 확인한다.
 - **self-hosted 러너는 쓰지 않는다.** 개인 계정 리포에서는 아무 브랜치의 `push` 워크플로가 self-hosted 러너를 지정해 바로 실행할 수 있기 때문이다. 모든 작업은 GitHub 호스팅(일회용) 러너에서 돈다.
-- **캐시 규칙**: 비밀을 가진 job(판정·기록·Codex 인증 저장·revert)과 main 브랜치에서 도는 워크플로는 Actions 캐시를 복원하지 않는다(`actions/cache`, `setup-*` 액션의 캐시 옵션 포함). 재현 job은 main 정의로 도는 워크플로(`workflow_run`)에서 PR 코드를 실행하므로, 그 코드가 러너에서 캐시 토큰을 꺼내 main 범위 캐시를 오염시킬 수 있다고 가정한다. 비밀을 가진 job이 그 캐시를 복원하면 공격 코드가 그 job 안에서 실행되어 검증 App 키 같은 비밀이 탈취되고, `review/*`를 위조할 수 있다. `harness-guard`가 이 job들의 캐시 사용을 탐지한다.
+- **캐시 규칙**: 비밀을 가진 job(판정·기록·Codex 인증 저장·revert)과 main 브랜치에서 도는 워크플로는 Actions 캐시를 복원하지 않는다(`actions/cache`, `setup-*` 액션의 캐시 옵션 포함). 재현 job과 자체 테스트 job은 main 정의로 도는 워크플로(`workflow_run`, `pull_request_target`)에서 PR 코드를 실행하므로, 그 코드가 러너에서 캐시 토큰을 꺼내 main 범위 캐시를 오염시킬 수 있다고 가정한다. 비밀을 가진 job이 그 캐시를 복원하면 공격 코드가 그 job 안에서 실행되어 검증 App 키 같은 비밀이 탈취되고, `review/*`를 위조할 수 있다. `harness-guard`가 이 job들의 캐시 사용을 탐지한다.
 - 액션은 커밋 SHA로 고정하고, 워크플로마다 `permissions:`를 명시한다.
 - 판정 작업은 같은 리포 브랜치에서 온 PR에만 실행한다. 포크에서 온 PR은 자동 검증하지 않는다(14.6절).
 - 위 구성의 세부 동작은 로드맵 2단계 착수 전에 빈 테스트 리포에서 확인했다(Q20, 2026-11-11~14, 결과 `lab/q20/results/`). environment마다 가짜 토큰을 두고, 판정 job은 실제 구독 인증으로, 주입 문구를 담은 시험 PR이 판정 job에서 인증을 읽거나 출력하지 못하는지 봤다.
@@ -1048,7 +1051,9 @@ pnpm test src/auth/login-guard.spec.ts
 - **샌드박스·권한 완화 탐지**: `harness-guard`가 LLM 판단 없이 규칙으로 탐지한다. 대상은 Codex `sandbox_mode = "danger-full-access"`·`approval_policy` 완화, Claude Code `defaultMode: "bypassPermissions"`·`--dangerously-skip-permissions`·`enableAllProjectMcpServers`, 무인 권한 프로필(4.5절)보다 넓히는 `permissions.allow` 추가, 훅 삭제·비활성화, `.gitignore`의 `.env` 항목 삭제다. 탐지되면 PR에 표시한다. 표시된 PR은 `risk-gate`가 위험도를 "높음"으로 올려 제작자의 head 승인이 있어야 병합된다(제작자 결정 2026-11-14, Issue #53). 검사 약화 흔적(워크플로·job 삭제, `harness.config.json`의 표준 명령·보호 경로·위험도 표·`stage` 등 판정 관련 키 변경, 워크플로의 새 `write` 권한)과 정해 둔 environment 밖 참조도 같은 방식으로 처리한다. `CHANGELOG`·PR 본문 체크리스트 누락과 워크플로 캐시 사용은 작성자가 고칠 수 있으므로 `harness-guard` 실패다.
 - **구축 단계(현재)**: 하네스를 만드는 동안 매번 승인하지 않도록 **보호 경로도 자동 병합한다**(사용자 결정). 대신 아래로 보완한다.
   - `harness-guard`를 main의 정의로 실행한다. 체크리스트, `CHANGELOG`, 필수 체크 이름·단계 삭제 같은 검사 약화 흔적, 위 완화 설정을 확인한다.
-  - 하네스 자체 테스트(12.4절)를 통과해야 한다. 이 요구는 자체 테스트가 생기는 로드맵 2단계부터 켠다.
+  - 하네스 자체 테스트(12.4절)를 통과해야 한다. `gates` 워크플로의 `selftest` job이 main의 실행기·시나리오로 PR의 하네스를 시험하고, 기록 job이 결과를 `harness-guard`에 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 `harness-guard`는 success가 아니다.
+    - 기존 실행기·시나리오 파일(`scripts/selftest/` 아래, base에 있던 파일)을 고치거나 지우는 PR은 위험도 높음이다(제작자 head 승인). 새 시나리오 파일 추가는 해당하지 않는다.
+    - 한계: `selftest` job은 PR 코드를 실행하고 보고서도 그 job이 쓰므로, PR 코드가 결과를 조작할 수 있다. 실수로 생긴 회귀를 잡는 용도다. 의도적인 약화는 두 검증자와 제작자 승인이 맡는다.
   - 위험도 "보통" 이상(A + B)으로 검증한다.
   - 병합되면 변경 요약(완화 설정 탐지 여부 포함)을 제작자에게 사후 알림으로 보낸다(9.1절 알림 경로).
   - 월 1회 하네스 감사를 한다(12.2절).
@@ -1198,7 +1203,8 @@ Tier 1의 웹 검증은 별도 시스템으로 만들지 않고 **스킬 하나*
   - 9.2절: 같은 키로 3회 실패하면 방법 전환이, 5회면 중단 보고가 나오는가
   - 4.5절: runner가 step 여러 개로 나눈 계획과 여러 Issue를 몇 시간 동안 사람 개입 없이 처리하는가. 세션 시간 초과·사용량 한도·한 계획의 `blocked`에서 runner가 죽지 않고 다음 할 일로 넘어가는가. 세션이 "완료"라고 적었지만 AC가 실패하면 runner가 완료로 보지 않는가
   - 전체 흐름: 선점 → 계획 → PR → 교차 검증 → 계획 완료 커밋 → 자동 병합이 이어지는가. main 병합 갱신 뒤 결속 기준(10.3절)에 맞는 PR만 승인을 이어받는가
-- **실행 시점**: 보호 경로를 바꾸는 PR(`harness-guard`의 일부, 로드맵 2단계부터), 운영 전환 직전(10.4절 체크리스트), 주 1회 정기 작업(4단계부터).
+- **실행 시점**: 보호 경로를 바꾸는 PR(`gates` 워크플로의 `selftest` job. 결과는 `harness-guard`에 합쳐진다, 10.4절), 운영 전환 직전(10.4절 체크리스트), 주 1회 정기 작업(4단계부터). 로컬 `check`와 CI `check`에서는 `selftest.test.ts`가 그 브랜치의 시나리오로 그 브랜치의 하네스를 시험한다.
+  - `selftest` job은 main의 시나리오로 PR의 하네스를 시험한다. 그래서 시나리오가 요구하는 동작을 바꾸는 PR은 한 번에 통과하지 못한다. 시나리오를 먼저 고치는 PR(위험도 높음)을 병합한 뒤 동작을 바꾼다. 같은 이유로 그런 동작을 되돌리는 revert PR도 막힌다(TD-41).
 
 ---
 

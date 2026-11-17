@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
-import { runGates, summaryMarkdown } from './ci/gates.ts';
+import { runGates, selfTestNeeded, summaryMarkdown } from './ci/gates.ts';
 import { planCarry } from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
@@ -51,6 +51,7 @@ import {
 } from './ci/record.ts';
 import { parseReproResults, reproResultsData, runRepro } from './ci/repro.ts';
 import { targetCheckOf } from './ci/revert-evidence.ts';
+import { decodeSelfTest } from './ci/selftest-result.ts';
 import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
@@ -108,8 +109,12 @@ CI(gates 워크플로, 10.4절):
                                            PR 번호를 주면 plan-gate가 원장의 계획 승인을 읽는다(G1, 읽기 토큰은 GH_TOKEN)
                                            브랜치가 revert/<SHA>면 그 커밋의 main check 결론을 읽어 revert-check를 판정한다
                                            (10.3절. GITHUB_REPOSITORY, GH_TOKEN의 checks: read)
+                                           GITHUB_OUTPUT이 있으면 selftest=<true|false>를 쓴다(보호 경로를 바꿨는가)
   record-status --results <파일> --head-sha <sha> --repo-slug <owner/name> --target-url <url>
+        [--selftest-needed <true|false>]
                                            결과 검사 뒤 커밋 상태 기록(기록 job, 토큰은 GH_TOKEN)
+                                           --selftest-needed가 false가 아니면 자체 테스트 보고서(환경 변수
+                                           SELFTEST_B64, base64)를 harness-guard에 합친다. 없거나 깨졌으면 error
 
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
                 --head-sha <sha> --repo-slug <owner/name> --target-url <url> [--patch <id>] [--carried-from <sha>]
@@ -197,6 +202,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   results: { type: 'string' },
   context: { type: 'string' },
   needed: { type: 'string' },
+  'selftest-needed': { type: 'string' },
   verdict: { type: 'string' },
   reviews: { type: 'string' },
   'pr-body': { type: 'string' },
@@ -908,6 +914,12 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const headSha = git(['rev-parse', 'HEAD'], root);
+      // selftest job을 돌릴지(12.4절). 판정보다 먼저 써서 판정이 죽어도 값이 남게 한다
+      if (process.env.GITHUB_OUTPUT)
+        appendFileSync(
+          process.env.GITHUB_OUTPUT,
+          `selftest=${selfTestNeeded({ root, base, cfg })}\n`,
+        );
       const rf = str('reviews');
       const reviews = rf && existsSync(rf) ? parseReviews(readFileSync(rf, 'utf8')) : null;
       const bf = str('pr-body');
@@ -965,11 +977,17 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const raw = file && existsSync(file) ? readFileSync(file, 'utf8') : null;
+      // 자체 테스트(12.4절): 값이 정확히 false일 때만 필요 없다고 본다(판정 job이 값을 남기지 못했으면 필요한 것으로 본다)
+      const needed = str('selftest-needed');
       const r = await recordStatuses({
         raw,
         headSha,
         repo,
         targetUrl,
+        selfTest:
+          needed === undefined
+            ? undefined
+            : { needed: needed !== 'false', report: decodeSelfTest(process.env.SELFTEST_B64) },
         post: githubStatusPoster({
           token,
           repo,

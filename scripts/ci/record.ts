@@ -1,6 +1,7 @@
 // 기록 job(gates 워크플로 record): 판정 결과를 검사한 뒤 검증 App 토큰으로 PR head에 커밋 상태를 쓴다(10.4절).
 // LLM을 실행하지 않고 PR 코드를 실행하지 않는다. 토큰 값은 어떤 출력에도 넣지 않는다.
 import { patchOf, withPatch } from './binding.ts';
+import { mergeSelfTest } from './selftest-result.ts';
 import {
   highEntropy,
   secretNeedles,
@@ -30,6 +31,11 @@ export interface RecordOptions {
   targetUrl: string;
   post: (p: StatusPayload) => Promise<void>;
   contexts?: readonly string[];
+  /**
+   * 자체 테스트(selftest job, 12.4절). 주면 harness-guard 결과에 합친다: 필요한데 보고서가 없거나 깨졌으면 error,
+   * 실패한 시나리오가 있으면 failure다. `report`는 PR 코드를 실행한 job이 쓴 값이다
+   */
+  selfTest?: { needed: boolean; report: unknown | null };
 }
 
 export async function recordStatuses(
@@ -54,6 +60,14 @@ export async function recordStatuses(
       else reason = `판정 결과 형식 오류: ${v.reason}`;
     }
   }
+  const st = o.selfTest;
+  if (value && st)
+    value = {
+      ...value,
+      results: value.results.map((g) =>
+        g.context === 'harness-guard' ? mergeSelfTest(g, { ...st, headSha: o.headSha }) : g,
+      ),
+    };
   for (const s of toStatuses(value, contexts, reason ?? '')) await o.post(s);
   return { ok: value !== null, reason };
 }

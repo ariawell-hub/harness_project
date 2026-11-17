@@ -139,7 +139,9 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
   - 넣을 값의 형식: 예) "`auth.json` 파일 내용 전체. `{`로 시작한다. 로그인 URL이 아니다."
   - 확인 방법: 등록 뒤 봇이 무엇으로 확인하는지(이름 조회, `required-checks` 등). 봇은 시크릿 값을 볼 수 없다.
   - 절차 문서 링크([SECURITY.md](../SECURITY.md) 등).
-- **보호 경로를 바꾼 PR**(`harness-guard`): `docs/harness/CHANGELOG.md`에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
+- **보호 경로를 바꾼 PR**(`harness-guard`): `docs/harness/CHANGELOG.md`에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조, 기존 자체 테스트 파일 `scripts/selftest/`의 수정·삭제)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
+  - **자체 테스트**: 보호 경로를 바꾼 PR에서는 `gates` 워크플로의 `selftest` job이 main의 시나리오로 PR의 하네스를 시험하고, 결과가 `harness-guard`에 합쳐진다. 설명이 `자체 테스트 실패: <id 목록>`이면 `selftest` job 로그에서 그 시나리오의 `✗` 줄을 보고 하네스를 고친다. 로컬에서는 `node scripts/harness.ts self-test --only <id>`로 다시 본다. `자체 테스트 결과가 없다`(`error`)는 job이 보고서를 남기지 못한 것이다(시간 초과, 실행기 오류). job 로그를 본다.
+  - 시나리오가 요구하는 동작을 바꾸려면 시나리오를 먼저 고친다. `selftest` job은 PR의 시나리오가 아니라 main의 시나리오를 쓰므로, 동작과 시나리오를 한 PR에서 함께 바꾸면 통과하지 못한다. 먼저 시나리오가 옛 동작과 새 동작을 모두 받도록 고치는 PR(위험도 높음)을 병합하고, 다음 PR에서 동작을 바꾼다.
 - **교차 검증**(`review/claude`, `review/codex`): `check`가 통과하면 판정 워크플로(`judge-claude`, `judge-codex`)가 main의 정의로 돈다. 위험도 낮음은 작성 도구와 다른 검증자 1명, 보통·높음은 둘 다 판정하고, 돌지 않은 쪽은 "해당 없음(통과)"으로 기록된다. 승인이고 P0·P1 지적이 없어야 success다.
   - 지적 본문(근거·제안)은 판정 실행의 `record` job 로그(`record-review:` 줄)에서 본다. runner도 같은 줄을 읽어 지적 대응 세션에 데이터로 넘긴다. 실행은 PR head 커밋 상태의 링크로 찾는다(`workflow_run` 실행은 브랜치가 `main`으로 표시된다). P0·P1을 고쳐 push하면 `check` 통과 뒤 다시 판정한다.
   - `error`(판정 없음)는 검증자 장애다. 판정 job 로그의 오류 문구를 보고, 인증·한도 문제면 제작자에게 알린다. 다른 검증자로 대신하지 않는다.

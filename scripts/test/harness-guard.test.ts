@@ -1,11 +1,12 @@
 // harness-guard(10.3·10.4절, R9). 계획 20261114-ci-gates step2.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { runGates } from '../ci/gates.ts';
-import { harnessGuard } from '../gates/harness-guard.ts';
+import { runSync } from '../lib/exec.ts';
+import { runGates, selfTestNeeded } from '../ci/gates.ts';
+import { harnessGuard, reproJobViolations } from '../gates/harness-guard.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const BODY = '## 자체 리뷰\n- [x] 보호 경로 변경: CHANGELOG 갱신, 검사를 약화하지 않음\n';
@@ -64,6 +65,8 @@ function repo(): { root: string; base: string; cfg: HarnessConfig } {
   write(root, '.codex/hooks.json', '{"hooks":{}}\n');
   write(root, '.gitignore', '.env\n.env.*\nnode_modules/\n');
   write(root, 'scripts/x.ts', 'export {}\n');
+  write(root, 'scripts/selftest/run.ts', 'export {}\n');
+  write(root, 'scripts/selftest/scenarios/r1-plan-gate.ts', 'export default {}\n');
   write(root, 'src/a.ts', 'export {}\n');
   const base = commitAll(root, 'init');
   sh('git', ['checkout', '-q', '-b', 'feat/20261114-demo-s0'], root);
@@ -214,6 +217,203 @@ test('신호: Codex 설정·훅, 위험 플래그, .gitignore의 .env', () => {
   const flag = '--dangerously-' + 'skip-permissions';
   assert.match(reasons(run({ 'scripts/x.ts': `export const a = '${flag}'\n` })), /위험 플래그/);
   assert.match(reasons(run({ '.gitignore': '.env.*\nnode_modules/\n' })), /\.gitignore.*\.env/);
+});
+
+// ---------- 자체 테스트 연결 (12.4절, 계획 20261116-ops-security step3) ----------
+
+const SELFTEST_JOB = (extra: string, run = 'node base/scripts/harness.ts self-test --harness pr') =>
+  WF +
+  `  selftest:\n    runs-on: ubuntu-latest\n${extra}    steps:\n      - run: ${run}\n        env:\n          T: x\n`;
+
+test('자체 테스트 job(PR 코드 실행)에 environment·비밀·쓰기 권한이 있으면 실패', () => {
+  const ok = run({
+    '.github/workflows/w.yml': SELFTEST_JOB('    permissions:\n      contents: read\n'),
+  });
+  assert.equal(ok.result.state, 'success', ok.result.details.join('\n'));
+  const bad: [string, RegExp][] = [
+    [
+      '    permissions:\n      contents: read\n    environment: recorder\n',
+      /selftest: environment/,
+    ],
+    ['    permissions:\n      contents: write\n', /selftest: 쓰기 권한/],
+    ['', /selftest: job 권한을 적지 않았다/],
+  ];
+  for (const [extra, want] of bad) {
+    const g = run({ '.github/workflows/w.yml': SELFTEST_JOB(extra) });
+    assert.equal(g.result.state, 'failure', extra);
+    assert.match(g.result.details.join('\n'), want);
+    assert.match(g.result.details.join('\n'), /PR 코드를 실행하는 job/);
+  }
+  const secret = run({
+    '.github/workflows/w.yml': SELFTEST_JOB('    permissions:\n      contents: read\n').replace(
+      'T: x',
+      'T: ${{ secrets.X }}',
+    ),
+  });
+  assert.equal(secret.result.state, 'failure');
+  assert.match(secret.result.details.join('\n'), /selftest: 비밀/);
+  // `secrets.X`가 아닌 꼴의 참조도 잡는다
+  for (const ref of [
+    "${{ secrets['X'] }}",
+    '${{ toJSON(secrets) }}',
+    "${{ secrets[format('{0}', 'X')] }}",
+  ]) {
+    const g = run({
+      '.github/workflows/w.yml': SELFTEST_JOB('    permissions:\n      contents: read\n').replace(
+        'T: x',
+        `T: ${ref}`,
+      ),
+    });
+    assert.equal(g.result.state, 'failure', ref);
+    assert.match(g.result.details.join('\n'), /selftest: 비밀/);
+  }
+  const inherit = run({
+    '.github/workflows/w.yml':
+      WF +
+      '  selftest:\n    permissions:\n      contents: read\n    uses: ./.github/workflows/x.yml\n    secrets: inherit\n',
+  });
+  assert.match(inherit.result.details.join('\n'), /selftest: 비밀/);
+  // 워크플로 최상위 env의 비밀은 모든 job이 물려받는다(PR #108 F1). jobs 블록 앞에 있든 뒤에 있든 잡는다
+  const clean = SELFTEST_JOB('    permissions:\n      contents: read\n');
+  const top = [
+    clean.replace('jobs:\n', 'env:\n  GH_TOKEN: ${{ secrets.X }}\njobs:\n'),
+    clean + 'env:\n  GH_TOKEN: ${{ secrets.X }}\n',
+  ];
+  for (const wf of top) {
+    const g = run({ '.github/workflows/w.yml': wf });
+    assert.equal(g.result.state, 'failure', wf);
+    assert.match(
+      g.result.details.join('\n'),
+      /selftest: 워크플로 최상위\(job 밖\)의 비밀 참조를 물려받는다/,
+    );
+  }
+  // 최상위 주석의 글이나 비밀이 아닌 env는 잡지 않는다
+  const harmless = run({
+    '.github/workflows/w.yml': clean.replace(
+      'jobs:\n',
+      '# 이 워크플로는 secrets.X를 쓰지 않는다\nenv:\n  CI: true\njobs:\n',
+    ),
+  });
+  assert.equal(harmless.result.state, 'success', harmless.result.details.join('\n'));
+  // `jobs:` 줄 끝의 주석이나 블록 안 첫 칸의 주석 줄로 검사를 벗어나지 못한다
+  const withEnv = SELFTEST_JOB(
+    '    permissions:\n      contents: read\n    environment: recorder\n',
+  );
+  for (const wf of [
+    withEnv.replace('jobs:\n', 'jobs: # 판정\n'),
+    withEnv.replace('  selftest:\n', '# 자체 테스트\n  selftest:\n'),
+  ]) {
+    const g = run({ '.github/workflows/w.yml': wf });
+    assert.equal(g.result.state, 'failure', wf);
+    assert.match(g.result.details.join('\n'), /selftest: environment/);
+  }
+  // job id가 달라도 self-test 명령을 실행하면 같은 조건이다
+  const renamed = run({
+    '.github/workflows/w.yml': SELFTEST_JOB(
+      '    permissions:\n      contents: read\n    environment: recorder\n',
+    ).replace('  selftest:', '  scenarios:'),
+  });
+  assert.match(renamed.result.details.join('\n'), /scenarios: environment/);
+  // self-test를 실행하지 않는 다른 job의 environment는 그대로 둔다(job b)
+  assert.doesNotMatch(ok.result.details.join('\n'), /b: environment/);
+});
+
+test('신호: base에 있던 자체 테스트 파일의 수정·삭제. 새 시나리오 추가는 신호가 아니다', () => {
+  const edited = run({ 'scripts/selftest/scenarios/r1-plan-gate.ts': 'export default { a: 1 }\n' });
+  assert.equal(edited.result.state, 'success', edited.result.details.join('\n'));
+  assert.match(
+    reasons(edited),
+    /자체 테스트 파일 수정: scripts\/selftest\/scenarios\/r1-plan-gate\.ts/,
+  );
+  assert.match(
+    reasons(run({ 'scripts/selftest/scenarios/r1-plan-gate.ts': null })),
+    /자체 테스트 파일 삭제: scripts\/selftest\/scenarios\/r1-plan-gate\.ts/,
+  );
+  assert.match(
+    reasons(run({ 'scripts/selftest/run.ts': 'export const weak = true\n' })),
+    /자체 테스트 파일 수정: scripts\/selftest\/run\.ts/,
+  );
+  const added = run({ 'scripts/selftest/scenarios/new-one.ts': 'export default {}\n' });
+  assert.equal(added.result.state, 'success');
+  assert.deepEqual(added.signals, []);
+});
+
+test('selfTestNeeded: 보호 경로를 바꾼 PR만 true. 판단하지 못하면 true', () => {
+  const r = repo();
+  write(r.root, 'src/a.ts', 'export const a = 1\n');
+  commitAll(r.root, 'src');
+  assert.equal(selfTestNeeded(r), false);
+  write(r.root, 'scripts/x.ts', 'export const x = 1\n');
+  commitAll(r.root, 'scripts');
+  assert.equal(selfTestNeeded(r), true);
+  assert.equal(selfTestNeeded({ ...r, base: 'f'.repeat(40) }), true);
+});
+
+test('gates 명령: GITHUB_OUTPUT에 selftest=<true|false>를 쓴다', () => {
+  const cli = (r: { root: string; base: string }) => {
+    const dir = tmp();
+    const output = path.join(dir, 'output');
+    writeFileSync(output, '');
+    const res = runSync(
+      process.execPath,
+      [
+        path.join(HARNESS_ROOT, 'scripts/harness.ts'),
+        'gates',
+        '--repo',
+        r.root,
+        '--config-root',
+        r.root,
+        '--base',
+        r.base,
+        '--head-ref',
+        'feat/20261114-demo-s0',
+        '--out',
+        path.join(dir, 'gates.json'),
+      ],
+      { cwd: r.root, env: { ...process.env, GITHUB_OUTPUT: output, GH_TOKEN: '' } },
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return readFileSync(output, 'utf8');
+  };
+  const src = repo();
+  write(src.root, 'src/a.ts', 'export const a = 1\n');
+  commitAll(src.root, 'src');
+  assert.equal(cli(src), 'selftest=false\n');
+  const prot = repo();
+  write(prot.root, 'scripts/x.ts', 'export const x = 1\n');
+  commitAll(prot.root, 'scripts');
+  assert.equal(cli(prot), 'selftest=true\n');
+});
+
+test('이 리포의 gates.yml: selftest job은 base의 실행기로 PR의 하네스를 시험하고 environment·비밀·쓰기 권한·캐시가 없다', () => {
+  const wf = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/gates.yml'), 'utf8');
+  assert.deepEqual(reproJobViolations(wf), []);
+  const job = (id: string) => {
+    const m = new RegExp(`\\n  ${id}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|$)`).exec(wf);
+    assert.ok(m, `${id} job이 없다`);
+    return m[1];
+  };
+  const st = job('selftest');
+  assert.match(st, /needs\.evaluate\.outputs\.selftest == 'true'/);
+  assert.match(st, /node base\/scripts\/harness\.ts self-test --harness pr /);
+  assert.doesNotMatch(st, /pr\/scripts\/harness\.ts/);
+  assert.match(st, /^ {4}permissions:\n {6}contents: read\n {4}outputs:/m);
+  assert.doesNotMatch(st, /environment:|secrets\.|vars\.|GH_TOKEN|github\.token|: write|cache/i);
+  // PR 유래 값은 env로만 넘긴다
+  assert.doesNotMatch(st, /run: \|[\s\S]*\$\{\{/);
+  for (const m of st.matchAll(/persist-credentials: (\S+)/g)) assert.equal(m[1], 'false');
+  assert.equal([...st.matchAll(/uses: actions\/checkout@/g)].length, 2);
+  assert.equal([...st.matchAll(/persist-credentials:/g)].length, 2);
+  // environment는 record job 하나에만 있고, record는 selftest의 결과와 무관하게 실행된다
+  assert.equal([...wf.matchAll(/^\s*environment:/gm)].length, 1);
+  const rec = job('record');
+  assert.match(rec, /environment: recorder/);
+  assert.match(rec, /needs: \[evaluate, selftest\]/);
+  assert.match(rec, /if: \$\{\{ !cancelled\(\) && /);
+  assert.match(rec, /SELFTEST_B64: \$\{\{ needs\.selftest\.outputs\.report \}\}/);
+  assert.match(rec, /SELFTEST_NEEDED: \$\{\{ needs\.evaluate\.outputs\.selftest \}\}/);
+  assert.match(rec, /--selftest-needed "\$SELFTEST_NEEDED"/);
+  assert.doesNotMatch(rec, /path: pr\b/);
 });
 
 test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승인이 있어야 통과', async () => {
