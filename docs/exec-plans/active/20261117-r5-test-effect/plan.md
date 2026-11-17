@@ -78,6 +78,7 @@ R5의 검출 항목 가운데 "새로 추가·수정된 테스트가 merge-base 
 - 2026-11-17 step1: 테스트를 먼저 쓰고 구현 전에 실행했다: `gates.test.ts` 4개, `cli.test.ts` 1개, `selftest.test.ts` 1개가 모두 실패(6개 가운데 6개, 종료 코드 1). 그 뒤 구현: `check`의 하위 검사 `test-effect`(`test` 바로 뒤, 판정 줄은 통과해도 출력, 캐시 키에 설정), `harness.config.json`·core 프로파일의 `testEffect` 값, 시나리오 `r5-test-effect`. 6개 통과.
 - 2026-11-17 step1: 문서. 설계서 v0.7.52(5.1절 R5 행, 10.2절 검증 항목, 12.4절 시나리오 표, 변경 이력), 절차서 3절, PR 템플릿, 자체 리뷰 체크리스트, 검증자 프롬프트, 코드 구조 문서, `CHANGELOG`, TD-4 해결, TD-42 등록(web 프로파일).
 - 2026-11-17 step1: 이 worktree에서 `node scripts/harness.ts test-effect`: 이 step이 고친 테스트 파일 3개(`cli.test.ts`, `gates.test.ts`, `selftest.test.ts`)가 모두 `effective`(base에서 실패, 종료 코드 1)이고 통과다. `self-test --only r5-test-effect` 통과.
+- 2026-11-17 step1: 로컬 `check`가 `test`에서 실패했다(553개 가운데 1개). "이 리포의 하네스는 모든 시나리오를 통과한다" 테스트가 시나리오의 항목 목록을 적어 두는데 `R5`를 더하지 않았다(시나리오 자체는 통과했다). 목록에 `R5`를 더했다. 같은 실행에서 `check`의 `test-effect`는 통과했다(98.6초. `selftest.test.ts`를 변경 전 코드에서 한 번 더 돌리는 시간이다).
 
 ## 의사결정 로그
 
