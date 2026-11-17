@@ -1,0 +1,10 @@
+{
+  "plan": "20261117-revert-fail-first",
+  "steps": [
+    {
+      "step": 0,
+      "name": "revert-command",
+      "status": "pending"
+    }
+  ]
+}
