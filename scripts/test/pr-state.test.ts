@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { ACTIONS_APP_ID } from '../ci/protection.ts';
 import { newTask } from '../commands/task.ts';
+import { loadConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { isBehind } from '../lib/git.ts';
 import { FakeGitHub, initFakeState } from '../lib/github-fake.ts';
@@ -397,4 +398,18 @@ test('pr-state 명령: ci.requiredChecks가 빈 리포에서는 그 사실을 �
   } finally {
     fx.cleanup();
   }
+});
+
+// 계획 20261116-ops-security step4
+test('이 리포의 설정: revert-check가 필수 체크 목록에 나오고 검증 App이 쓴 결과만 인정한다', () => {
+  const ci = loadConfig(HARNESS_ROOT).ci;
+  const of = (checks: CommitCheck[]) =>
+    requiredStates(checks, ci).find((r) => r.context === 'revert-check');
+  assert.equal(of([])?.state, 'missing');
+  assert.equal(of([])?.source, 'recorder');
+  // 봇 계정이 쓴 같은 이름의 상태는 없는 것으로 본다
+  assert.equal(of([status('revert-check', 'success', 'harness-bot')])?.state, 'missing');
+  const mine = of([status('revert-check', 'success', ci.recorderBot ?? '', 'revert PR 아님')]);
+  assert.equal(mine?.state, 'success');
+  assert.equal(mine?.description, 'revert PR 아님');
 });

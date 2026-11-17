@@ -73,6 +73,21 @@ GitHub → Settings → Environments → `judge-codex` → `CODEX_AUTH_JSON`에 
 
 권한이 없어도 `review/claude`·`review/codex`는 그대로 기록된다. `review-ledger`만 `error`로 남는다. `review-ledger`는 필수 체크라 `error`인 동안 PR이 병합되지 않는다.
 
+## 운영 전환까지의 제작자 작업 (순서)
+
+구축 단계에서 운영 단계로 넘어갈 때(설계서 10.4절 운영 전환 체크리스트) 제작자만 할 수 있는 일을 순서대로 모았다. 절차는 아래 각 절에 있다. 에이전트는 이 가운데 어느 것도 하지 않고(R20), 끝났다고 알려 주면 읽기 전용 명령으로 확인한다.
+
+| 순서 | 할 일                                        | 때                                           | 봇의 확인                                                |
+| ---- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------------------- |
+| 1    | "필수 체크 등록"에서 `revert-check`를 더한다 | 지금(설정에 넣은 PR의 병합 전후 어느 때든)   | `required-checks`, `ops-check` 1번                       |
+| 2    | "테스트 리포 준비"                           | 테스트 리포 확인(체크리스트 5)을 시작하기 전 | 테스트 리포에서 `required-checks`, environment 이름 조회 |
+| 3    | "코드 오너 리뷰 필수"                        | 하네스를 고치는 PR이 모두 병합된 뒤          | 시험 PR(체크리스트 6)                                    |
+| 4    | "봇 토큰의 `workflow` 권한 회수"             | 워크플로를 바꾸는 PR이 모두 병합된 뒤        | `ops-check` 3번, 시험 PR                                 |
+| 5    | "에이전트용 브라우저 프로필"의 로그아웃 확인 | 운영 전환 PR 전                              | 제작자가 알려 준다(봇은 볼 수 없다)                      |
+| 6    | 운영 전환 PR(`stage: operation`)의 head 승인 | 1~5와 시험 PR이 끝난 뒤                      | 병합 뒤 `ops-check`                                      |
+
+`revert` environment는 revert 워크플로를 들일 때 이미 만들었다(아래 "`revert` environment"). 4번에서 봇 토큰을 다시 발급할 때 그 시크릿도 바꾼다.
+
 ## 필수 체크 등록 (제작자)
 
 main의 필수 상태 체크는 제작자가 리포 설정에서 등록한다(설계서 0.2절). 에이전트는 보호 설정을 바꾸지 않고 읽어서 비교만 한다(R20). 검증 App이 그 체크를 실제 PR에서 한 번 이상 기록한 뒤에 등록한다. 아무도 채우지 못하는 필수 체크는 모든 PR을 막는다.
@@ -83,6 +98,15 @@ main의 필수 상태 체크는 제작자가 리포 설정에서 등록한다(�
 4. Save changes.
 
 확인: 봇이 `node scripts/harness.ts required-checks`를 실행한다. 등록된 체크와 출처가 `harness.config.json`의 `ci.requiredChecks`와 같으면 `required-checks: 통과`다. 출처가 다르면 `출처가 다르다(등록 아무 출처, …)`로 알려 준다.
+
+등록할 체크는 설정(`ci.requiredChecks`)의 목록이다.
+
+| 체크                                                                                                                      | 출처               |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `check`                                                                                                                   | GitHub Actions     |
+| `revert-check`, `plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `review/claude`, `review/codex`, `review-ledger` | `harness-recorder` |
+
+`revert-check` 등록(#102 step4): 검증 App이 이미 모든 PR에 `revert-check`를 기록하고 있어(revert PR이 아니면 "revert PR 아님"으로 통과한다) 언제 등록해도 막히는 PR이 없다. 설정에 이 체크를 넣은 PR이 병합된 뒤에는 등록하기 전까지 `required-checks`와 `ops-check` 1번이 `revert-check: 필수 체크로 등록되지 않았다`로 알린다. 위 1~4의 절차에서 검색 칸에 `revert-check`를 넣고 출처를 `harness-recorder`로 고른다.
 
 ## 에이전트용 브라우저 프로필 (제작자)
 
@@ -95,6 +119,92 @@ main의 필수 상태 체크는 제작자가 리포 설정에서 등록한다(�
 확인: 에이전트가 조종하는 프로필에서 `https://github.com/settings/profile`을 열면 로그인 화면이 나온다. 운영 전환 체크리스트(설계서 10.4절) 3번에서 함께 확인한다.
 
 에이전트의 GitHub 작업은 봇 토큰의 `gh` 명령으로 한다. 훅이 막는 MCP 도구와 예외를 두는 법(`guard.mcp.allowTools`, 보호 경로)은 설계서 13.1절에 있다.
+
+## `revert` environment (제작자)
+
+revert 워크플로(`.github/workflows/revert.yml`)의 `act` job이 쓰는 봇 토큰을 둔다(설계서 10.3절). 에이전트는 environment와 시크릿을 만들거나 바꾸지 않는다(R20).
+
+순서: revert 워크플로가 main에 들어가기 전에 만든다. 없으면 main `check`가 실패했을 때 `act` job이 토큰 없이 실패한다. 봇 PAT를 다시 발급하면 이 시크릿도 함께 바꾼다.
+
+1. GitHub → 리포 → Settings → Environments → New environment → 이름 `revert`.
+2. "Deployment branches and tags"를 "Selected branches and tags"로 바꾸고 `main`만 더한다.
+3. "Environment secrets" → Add secret → 이름 `REVERT_BOT_TOKEN`. 값은 봇 계정의 PAT 한 줄이다(`ghp_`로 시작한다. 앞뒤에 공백이나 줄바꿈을 넣지 않는다).
+
+확인: 봇이 `gh api repos/<owner>/<repo>/environments/revert/secrets`로 시크릿의 이름과 갱신 시각을 본다(값은 볼 수 없다). 토큰이 실제로 통하는지는 main `check`가 실패했을 때 `revert` 워크플로의 `act` job 로그로 확인한다.
+
+## 코드 오너 리뷰 필수 (제작자, 운영 전환)
+
+운영 단계에서는 보호 경로를 바꾸는 PR이 제작자(코드 오너)의 승인 없이 병합되지 않는다(설계서 10.4절 운영 전환 체크리스트 2). 코드 오너는 `.github/CODEOWNERS`가 정한다. 이 파일은 `harness.config.json`의 `protectedPaths`와 `github.owner`에서 만들고 손으로 고치지 않는다(`node scripts/harness.ts codeowners --write`. 어긋나면 `check`가 실패한다).
+
+순서: `.github/CODEOWNERS`가 main에 있은 뒤, 운영 전환 PR(`stage: operation`)보다 앞에 한다. 켠 때부터 보호 경로를 바꾸는 모든 PR에 제작자 승인이 필요하므로, 하네스를 고치는 PR이 남아 있으면 그 PR들이 병합된 뒤에 켠다.
+
+1. GitHub → 리포 → Settings → Branches → `main` 보호 규칙 → Edit.
+2. "Require a pull request before merging" 아래 "Require review from Code Owners"를 켠다.
+3. 같은 자리의 "Require approvals"는 켜지 않는다(필수 승인 수 0). 1 이상이면 보호 경로 밖의 PR도 사람 승인을 기다려 자동 병합이 멈춘다.
+4. "Require approval of the most recent reviewable push"는 끈 채로 둔다(설계서 0.2절).
+5. Save changes.
+
+확인: 관리자가 아닌 봇 토큰으로는 이 설정을 읽을 수 없다. `node scripts/harness.ts ops-check`의 2번은 CODEOWNERS 파일만 확인하고 설정은 `?` 줄로 남긴다. 설정은 시험 PR로 확인한다(체크리스트 6). 보호 경로를 바꾼 PR은 필수 체크가 모두 통과해도 제작자 승인 전에는 병합되지 않고, 보호 경로 밖만 바꾼 위험도 낮음 PR은 승인 없이 자동 병합된다.
+
+구축 단계에도 CODEOWNERS 파일이 있으면 GitHub이 보호 경로를 바꾼 PR(초안 해제 뒤)마다 제작자에게 리뷰를 요청한다. 이 설정을 켜기 전에는 알림일 뿐이고 병합을 막지 않는다.
+
+## 봇 토큰의 `workflow` 권한 회수 (제작자, 운영 전환)
+
+구축 단계의 봇 PAT에는 워크플로 파일을 push하기 위한 `workflow` 권한이 있다([ADR-0003](decisions/ADR-0003-bot-token-classic-pat.md)). 운영 단계에서는 뺀다(설계서 10.4절 운영 전환 체크리스트 3). 옛 토큰의 권한을 줄여 저장하지 않고, 새 토큰을 발급한 뒤 옛 토큰을 지운다.
+
+순서: 워크플로 파일(`.github/workflows/`)을 바꾸는 PR이 모두 병합된 뒤, 운영 전환 PR보다 앞에 한다. 회수한 뒤에는 봇이 워크플로 파일을 바꾼 브랜치를 push할 수 없다. 그런 변경은 제작자가 직접 올린다.
+
+1. 봇 계정으로 GitHub에 로그인한다(제작자 계정을 쓰는 브라우저 프로필과 다른 프로필에서). Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic).
+2. 권한은 `repo`와 `read:org`만 고른다. `workflow`는 고르지 않는다. 만료는 90일 이하로 둔다.
+3. 에이전트가 도는 머신마다 `GH_TOKEN` 값을 새 토큰으로 바꾼다(환경 변수를 넣어 둔 곳). 바꾼 뒤 터미널과 에이전트 세션을 새로 연다.
+4. `revert` environment의 시크릿 `REVERT_BOT_TOKEN`을 같은 새 토큰으로 바꾼다(위 "`revert` environment").
+5. 옛 토큰을 지운다(Tokens (classic) 목록 → Delete).
+
+확인:
+
+- 봇이 머신마다 `node scripts/harness.ts ops-check`를 실행한다. 3번이 `✓ 봇 토큰에 workflow 권한이 없다(범위: read:org, repo)`면 그 머신의 토큰은 바뀌었다. 이 명령은 토큰 값을 읽지 않고 API 응답 머리말(`x-oauth-scopes`)만 본다.
+- `revert` 시크릿은 봇이 값을 볼 수 없다. 제작자가 4번을 했다고 알려 주면 봇은 시크릿의 갱신 시각이 재발급 뒤인지만 확인한다.
+- 실제 거부는 시험 PR로 본다(체크리스트 6). 워크플로 파일을 바꾼 브랜치를 push하면 GitHub이 `workflow` 권한이 없다는 오류로 거부한다.
+
+## 테스트 리포 준비 (제작자, #102 step6)
+
+운영 전환 체크리스트 5(빈 테스트 리포에서 자체 테스트와 전체 흐름)를 확인할 리포다. 하네스 리포와 같은 구성을 새 리포에 만든다. 에이전트는 리포·보호 설정·environment·App 설치를 하지 않는다(R20). 하네스 파일은 봇이 PR로 올린다.
+
+순서: 아래 1~6을 끝내고 리포 이름을 알려 주면 봇이 하네스 파일을 PR로 올린다. 7(필수 체크 등록)은 그 뒤의 PR에서 체크가 한 번씩 보고된 다음에 한다. 8은 봇이 요청할 때 한다.
+
+1. 리포: 제작자 계정에 새 **비공개** 리포를 만든다. "Add a README file"을 켜서 `main` 브랜치가 생기게 한다. 이름 예: `harness-ops-lab`.
+2. 봇 초대: Settings → Collaborators → 봇 계정을 **Write**로 초대하고, 봇 계정으로 로그인해 초대를 수락한다. Admin·Maintain은 주지 않는다. 시험 기간에만 둔다([ADR-0004](decisions/ADR-0004-q20-lab-repo.md)).
+3. 일반 설정(Settings → General): "Allow auto-merge" 켬, "Automatically delete head branches" 켬.
+4. Actions 설정(Settings → Actions → General): Workflow permissions는 "Read repository contents and packages permissions", "Allow GitHub Actions to create and approve pull requests"는 끔. 리포 수준 시크릿은 만들지 않는다.
+5. main 보호 규칙(Settings → Branches → Add classic branch protection rule, 패턴 `main`). 설계서 0.2절과 같게 둔다.
+   - "Require a pull request before merging" 켬. 그 아래 "Require approvals"는 끔(필수 승인 0), "Dismiss stale pull request approvals when new commits are pushed" 켬, "Require review from Code Owners"는 지금은 끔(봇이 시험 순서에 맞춰 요청한다), "Require approval of the most recent reviewable push" 끔.
+   - "Require status checks to pass before merging" 켬, "Require branches to be up to date before merging" 켬. 체크는 아직 고르지 않는다(7번).
+   - "Do not allow bypassing the above settings" 켬. "Allow force pushes"와 "Allow deletions"는 끔.
+6. App 두 개와 environment 다섯 개.
+   - 검증 App(`harness-recorder`)과 인증 저장 App을 테스트 리포에도 설치한다: 각 App의 설정 → Install App → 계정 옆 톱니바퀴 → Repository access에 테스트 리포를 더한다.
+   - environment는 Settings → Environments에서 만들고, 다섯 개 모두 "Deployment branches and tags"를 "Selected branches and tags"의 `main`만으로 제한한다.
+
+   | environment        | 넣을 것                                                  | 값의 형식                                                                                                  |
+   | ------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+   | `recorder`         | 변수 `RECORDER_APP_CLIENT_ID`, 시크릿 `RECORDER_APP_KEY` | 검증 App의 Client ID(`Iv`로 시작하는 한 줄)와 개인 키(`.pem` 파일 내용 전체. 이 시험용으로 새 키를 만든다) |
+   | `codex-auth-store` | 변수 `STORE_APP_CLIENT_ID`, 시크릿 `STORE_APP_KEY`       | 인증 저장 App의 Client ID와 개인 키(위와 같은 형식. 새 키)                                                 |
+   | `judge-claude`     | 시크릿 `CLAUDE_CODE_OAUTH_TOKEN`                         | `claude setup-token`으로 새로 발급한 토큰 한 줄                                                            |
+   | `judge-codex`      | 시크릿 `CODEX_AUTH_JSON`                                 | CI 전용으로 새로 로그인한 `auth.json` 파일의 내용(위 "Codex CI 인증 등록"의 절차를 한 번 더 한다)          |
+   | `revert`           | 시크릿 `REVERT_BOT_TOKEN`                                | 봇 계정의 PAT 한 줄(`ghp_`로 시작한다)                                                                     |
+
+7. 필수 체크 등록: 봇이 올린 PR에서 체크가 한 번씩 보고된 뒤, 위 "필수 체크 등록"의 절차로 `check`(GitHub Actions)와 `harness-recorder` 출처의 나머지를 등록한다. 봇이 등록할 때를 알려 준다.
+8. 시험 Issue 두 건: 봇이 문안을 주면 **제작자 계정으로** 그대로 등록한다(runner는 제작자가 만든 Issue만 작업 대상으로 본다).
+
+확인: 봇이 테스트 리포에서 `node scripts/harness.ts required-checks`와 `ops-check`를 실행하고, environment와 시크릿 이름은 `gh api repos/<owner>/<repo>/environments`로 본다(값은 볼 수 없다). 값이 틀리면 첫 PR의 판정 job 로그에 드러난다(예: 위 "Codex CI 인증 등록"의 흔한 실수 표).
+
+남는 위험: 시험 기간에는 진짜 구독 인증과 App 키가 테스트 리포의 environment에 있고, 봇이 병합한 워크플로가 그 값을 받을 수 있다. ADR-0004는 이런 기간에 필수 승인을 1로 올리라고 했지만, 이 시험은 사람 승인 없는 자동 병합 자체를 확인해야 해서 0으로 둔다. 대신 시험용으로 새로 발급한 값만 넣고, 기간을 짧게 하고, 끝나면 바로 아래 정리를 한다.
+
+시험 뒤 정리(제작자):
+
+1. 테스트 리포에 넣은 자격증명을 폐기한다: Claude 토큰과 Codex 로그인을 다시 발급하거나 해제하고, 두 App에서 시험용으로 만든 개인 키를 지운다.
+2. 두 App의 Repository access에서 테스트 리포를 뺀다.
+3. 봇 초대를 철회한다. 확인: 봇이 `gh api 'user/repos?affiliation=owner,collaborator,organization_member&per_page=100' --jq '.[].full_name'`을 실행하면 하네스 리포 하나만 나온다(ADR-0003).
+4. 리포를 보관한다(Settings → General → Archive this repository).
 
 ## 유출 대응
 

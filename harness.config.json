@@ -131,6 +131,7 @@
     "environments": ["judge-claude", "judge-codex", "codex-auth-store", "recorder", "revert"],
     "requiredChecks": [
       { "context": "check", "source": "actions" },
+      { "context": "revert-check", "source": "recorder" },
       { "context": "plan-gate", "source": "recorder" },
       { "context": "risk-gate", "source": "recorder" },
       { "context": "deps-guard", "source": "recorder" },

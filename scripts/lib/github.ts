@@ -234,6 +234,16 @@ export interface GitHubPort {
   setDraft(n: number, draft: boolean): void;
   /** `GET repos/{repo}/branches/{branch}` 원본(필수 체크 등록 확인용, 봇 토큰으로 읽을 수 있다) */
   branchInfo(branch: string): unknown;
+  /**
+   * 브랜치 보호의 "코드 오너 리뷰 필수"(운영 전환 체크리스트 2). 읽지 못하면 null이다.
+   * 관리자가 아닌 봇 토큰에는 보호 규칙이 보이지 않아 null이 온다(규칙이 없는 것과 구분되지 않는다)
+   */
+  codeOwnerReviewRequired(branch: string): boolean | null;
+  /**
+   * 지금 토큰의 권한 범위(응답 머리말 `x-oauth-scopes`). 머리말이 없으면 null이다(세분화 토큰).
+   * 토큰 값은 읽지 않는다(R20)
+   */
+  tokenScopes(): string[] | null;
   /** 이 저장소의 이름(`owner/name`) */
   repoSlug(): string;
   /**
@@ -258,6 +268,23 @@ export function runIdOf(runUrl: string, repo: string): string | null {
   const m = /^(\d{1,20})(?:\/(?:job|attempts)\/\d{1,20})?\/?$/.exec(runUrl.slice(prefix.length));
   return m ? m[1] : null;
 }
+
+/**
+ * `gh api -i` 출력(응답 머리말 + 빈 줄 + 본문)에서 `x-oauth-scopes` 값을 읽는다.
+ * 머리말이 없으면 null, 값이 비었으면 빈 배열이다. 본문은 보지 않는다
+ */
+export function parseScopes(output: string): string[] | null {
+  const head = output.split(/\r?\n\r?\n/)[0];
+  const m = /^x-oauth-scopes:(.*)$/im.exec(head);
+  if (!m) return null;
+  return m[1]
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const CODE_OWNER_QUERY =
+  'query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){branchProtectionRule{requiresCodeOwnerReviews}}}}';
 
 export class GitHubError extends Error {}
 
@@ -433,6 +460,42 @@ export class GhCli implements GitHubPort {
     return JSON.parse(
       gh(['api', `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}`], this.cwd),
     );
+  }
+  codeOwnerReviewRequired(branch: string): boolean | null {
+    const r = runSync(
+      'gh',
+      [
+        'api',
+        'graphql',
+        '-F',
+        'owner={owner}',
+        '-F',
+        'name={repo}',
+        '-f',
+        `ref=refs/heads/${branch}`,
+        '-f',
+        `query=${CODE_OWNER_QUERY}`,
+      ],
+      { cwd: this.cwd, timeoutMs: 120_000 },
+    );
+    if (r.code !== 0) return null;
+    try {
+      const v = (
+        JSON.parse(r.stdout) as {
+          data?: {
+            repository?: {
+              ref?: { branchProtectionRule?: { requiresCodeOwnerReviews?: unknown } | null } | null;
+            } | null;
+          } | null;
+        }
+      ).data?.repository?.ref?.branchProtectionRule?.requiresCodeOwnerReviews;
+      return typeof v === 'boolean' ? v : null;
+    } catch {
+      return null;
+    }
+  }
+  tokenScopes(): string[] | null {
+    return parseScopes(gh(['api', '-i', 'user'], this.cwd));
   }
   rerunFailed(runId: number): void {
     if (!Number.isInteger(runId) || runId <= 0)

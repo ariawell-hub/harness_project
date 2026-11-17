@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import path from 'node:path';
-import { LEDGER_CONTEXT } from '../ci/results.ts';
+import { GATE_CONTEXTS, LEDGER_CONTEXT, REVIEW_CONTEXTS } from '../ci/results.ts';
 import { ACTIONS_APP_ID, compareRequiredChecks, toRequiredChecks } from '../ci/protection.ts';
 import { requiredCheckGuide } from '../commands/init.ts';
 import { loadConfig } from '../lib/config.ts';
@@ -113,4 +113,36 @@ test('init 안내: 등록할 필수 체크 목록은 설정(ci.requiredChecks)�
   for (const c of loadConfig(REPO_ROOT).ci.requiredChecks) assert.ok(guide.includes(c.context));
   // 설정에 필수 체크가 없으면 목록 대신 설정을 채우라고 안내한다
   assert.match(requiredCheckGuide([]), /ci\.requiredChecks/);
+});
+
+// 계획 20261116-ops-security step4
+test('이 리포의 설정: 10.3절의 필수 체크가 모두 있고 revert-check의 출처는 검증 App이다', () => {
+  const cfg = loadConfig(REPO_ROOT);
+  assert.deepEqual(
+    cfg.ci.requiredChecks.find((c) => c.context === 'revert-check'),
+    { context: 'revert-check', source: 'recorder' },
+  );
+  // 기록 job이 쓰는 context는 모두 검증 App 출처의 필수 체크다. check만 GitHub Actions다
+  for (const c of [...GATE_CONTEXTS, ...REVIEW_CONTEXTS, LEDGER_CONTEXT])
+    assert.ok(
+      cfg.ci.requiredChecks.some((x) => x.context === c && x.source === 'recorder'),
+      c,
+    );
+  assert.deepEqual(
+    cfg.ci.requiredChecks.filter((c) => c.source === 'actions').map((c) => c.context),
+    ['check'],
+  );
+  // 등록에 revert-check가 빠져 있으면 required-checks가 알려 준다
+  const registered = cfg.ci.requiredChecks.map((c) => ({
+    context: c.context,
+    appId: c.source === 'actions' ? ACTIONS_APP_ID : cfg.ci.recorderAppId,
+  }));
+  const missing = compareRequiredChecks(
+    registered.filter((c) => c.context !== 'revert-check'),
+    cfg.ci,
+  );
+  assert.equal(missing.ok, false);
+  assert.match(missing.lines.join('\n'), /revert-check.*등록되지 않았다/);
+  // 제작자에게 주는 등록 목록(init 안내)에도 나온다
+  assert.match(requiredCheckGuide(cfg.ci.requiredChecks), /revert-check/);
 });
