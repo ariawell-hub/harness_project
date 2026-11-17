@@ -70,6 +70,13 @@ node scripts/harness.ts test-effect
 grep -q "'test-effect'" scripts/commands/check.ts
 grep -q '"testEffect"' harness.config.json
 ! grep -q "먼저 실패한 테스트 기록" .github/pull_request_template.md
+! grep -q "먼저 실패한" docs/harness/workflow.md scripts/cross-review/checklist.md scripts/cross-review/prompt.md
+! grep -q "먼저 실패한 기록이 있는가" docs/harness/design.md
+grep -q "test-effect" docs/harness/design.md
+grep -q "test-effect" docs/harness/workflow.md
+grep -q "test-effect" scripts/cross-review/checklist.md
+grep -q "test-effect" scripts/cross-review/prompt.md
+grep -q "r5-test-effect" docs/harness/design.md
 ```
 
 ## 금지사항
