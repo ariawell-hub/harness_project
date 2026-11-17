@@ -79,6 +79,7 @@ R5의 검출 항목 가운데 "새로 추가·수정된 테스트가 merge-base 
 - 2026-11-17 step1: 문서. 설계서 v0.7.52(5.1절 R5 행, 10.2절 검증 항목, 12.4절 시나리오 표, 변경 이력), 절차서 3절, PR 템플릿, 자체 리뷰 체크리스트, 검증자 프롬프트, 코드 구조 문서, `CHANGELOG`, TD-4 해결, TD-42 등록(web 프로파일).
 - 2026-11-17 step1: 이 worktree에서 `node scripts/harness.ts test-effect`: 이 step이 고친 테스트 파일 3개(`cli.test.ts`, `gates.test.ts`, `selftest.test.ts`)가 모두 `effective`(base에서 실패, 종료 코드 1)이고 통과다. `self-test --only r5-test-effect` 통과.
 - 2026-11-17 step1: 로컬 `check`가 `test`에서 실패했다(553개 가운데 1개). "이 리포의 하네스는 모든 시나리오를 통과한다" 테스트가 시나리오의 항목 목록을 적어 두는데 `R5`를 더하지 않았다(시나리오 자체는 통과했다). 목록에 `R5`를 더했다. 같은 실행에서 `check`의 `test-effect`는 통과했다(98.6초. `selftest.test.ts`를 변경 전 코드에서 한 번 더 돌리는 시간이다).
+- 2026-11-17 step1: 초안 PR #119 판정 1라운드(head `c84c825`)에서 두 검증자가 승인했다(지적 없음). 실제 CI의 `check`에서 `test-effect`가 처음 돌았다(step 작업 6): `✓ test-effect (72.9s)`, `scripts/test/cli.test.ts`·`scripts/test/gates.test.ts`·`scripts/test/selftest.test.ts` 모두 `effective(base에서 실패, 종료 코드 1)`. 로컬 결과와 같다. `harness-guard`의 자체 테스트는 "통과 9"다(main의 시나리오로 이 PR의 하네스를 시험한다. `r5-test-effect`는 이 PR이 병합된 뒤의 PR부터 들어간다).
 
 ## 의사결정 로그
 
