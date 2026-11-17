@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { tail } from './lib/exec.ts';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
@@ -63,6 +64,12 @@ import { describeFailure, runStandard } from './commands/standard.ts';
 import { describeExcluded, describeTask, start } from './commands/start.ts';
 import { prReady } from './commands/pr-ready.ts';
 import { prState } from './commands/pr-state.ts';
+import {
+  FailFirstError,
+  FailFirstUsageError,
+  exemptFailFirst,
+  failFirst,
+} from './commands/fail-first.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
 import { CODEOWNERS_FILE, codeownersProblems, codeownersText } from './gates/codeowners.ts';
@@ -87,6 +94,9 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   new-task --issue <N> --slug <이름> [--type feat] [--size small|medium|large] [--risk low|normal|high]
            [--owner <이름>] [--title <제목>] [--no-claim] [--no-setup] [--no-github]
   new-task --plan <계획 id> --step <N>     다음 step의 브랜치·worktree
+  fail-first "<테스트 명령>"                먼저 실패한 테스트 기록(R5): 명령을 실행해 단언 실패로 끝났을 때만 기록한다.
+                                           통과·시간 초과·단언 실패가 아닌 실패는 기록하지 않고 종료 코드 1
+  fail-first --exempt "<사유>"             실행 없이 R5 예외를 기록한다(문서·설정·순수 리팩터 등)
   complete-step                            계획 전용 커밋(현재 worktree의 step 완료 처리)
   pr-ready [--undo]                        승인 요청 전 조건 확인 뒤 PR 초안 해제(--undo: 초안으로 되돌림)
   pr-state [--pr <번호>]                   PR의 필수 체크를 출처와 함께 보이고 분류한다(읽기만. 번호가 없으면 현재 브랜치의 PR)
@@ -196,6 +206,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   ci: { type: 'boolean' },
   'no-cache': { type: 'boolean' },
   undo: { type: 'boolean' },
+  exempt: { type: 'string' },
   write: { type: 'boolean' },
   base: { type: 'string' },
   only: { type: 'string' },
@@ -1030,6 +1041,39 @@ async function main(argv: string[]): Promise<number> {
       log(JSON.stringify(r, null, 2));
       log(`\n다음: cd ${r.worktree} 에서 ${r.planFile}을 채워라(docs/harness/workflow.md).`);
       return 0;
+    }
+    case 'fail-first': {
+      const exempt = typeof values.exempt === 'string' ? values.exempt : undefined;
+      try {
+        if (exempt !== undefined && positionals.length)
+          throw new FailFirstUsageError('테스트 명령과 --exempt를 함께 줄 수 없다');
+        if (positionals.length > 1)
+          throw new FailFirstUsageError('테스트 명령은 따옴표로 묶어 인자 하나로 준다');
+        const rec =
+          exempt !== undefined
+            ? exemptFailFirst(cwd, exempt)
+            : await failFirst(cwd, positionals[0] ?? '');
+        log(
+          rec.kind === 'exempt'
+            ? `fail-first: 예외를 기록했다 — ${rec.reason}`
+            : `fail-first: 기록했다 — ${rec.command} → 종료 코드 ${rec.code}, ${rec.matched}`,
+        );
+        return 0;
+      } catch (e) {
+        if (e instanceof FailFirstUsageError) {
+          process.stderr.write(
+            `fail-first: ${e.message}\n사용법: fail-first "<테스트 명령>" | fail-first --exempt "<사유>"\n`,
+          );
+          return 2;
+        }
+        if (e instanceof FailFirstError) {
+          process.stderr.write(
+            `fail-first: ${e.message}\n${e.output.trim() ? `--- 실행 출력(끝 40줄) ---\n${tail(e.output, 40)}\n` : ''}`,
+          );
+          return 1;
+        }
+        throw e;
+      }
     }
     case 'complete-step': {
       const r = completeStep(cwd);
