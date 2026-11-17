@@ -121,6 +121,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-17 step6: 시작. 제작자 작업 4번(테스트 리포 준비)이 아직이라, 테스트 리포 없이 할 수 있는 작업 1(결과 기록 틀)을 먼저 했다. `lab/ops-transition/report.ts`(`REQUIRED`·`ITEMS`·`OPTIONAL_ITEMS`·`validateResult`·`checkItems`), `test/report.test.ts` 7개, `README.md`. 테스트를 먼저 쓰고 빈 구현에서 실행했다: 7개 가운데 6개 실패, 1개 통과(빈 구현이 문제 없음을 돌려줘서 통과하는 "완결되면 통과한다" 테스트). 구현 뒤 7개 통과. `report.ts --all`은 결과 파일이 없어 종료 코드 1이다(예상대로). 로컬 커밋만 했고 올리지 않았다. 나머지(작업 2~4)는 제작자가 테스트 리포 이름을 알려 준 뒤에 한다.
 - 2026-11-17 step6: 제작자가 테스트 리포 `ariawell-hub/harness-ops-lab`을 준비했다(1~6번). Q20 때의 `harness-q20-lab`은 쓰지 않는다(끝난 시험의 리포다). 봇 토큰으로 확인한 것: 비공개, 보관 아님, 봇 권한 Write(Admin·Maintain 아님), 자동 병합 허용, 병합 뒤 브랜치 삭제, `main` 보호됨(필수 체크 0개), environment 5개(`recorder`·`codex-auth-store`·`judge-claude`·`judge-codex`·`revert`)가 모두 `main`만 허용. **environment의 시크릿·변수는 5개 모두 0개였다**(같은 조회로 하네스 리포의 `recorder`에서는 이름이 보인다). 제작자에게 6번의 표대로 넣어 달라고 요청했다. 봇 권한으로 볼 수 없는 것: 보호 규칙의 세부(REST 404, GraphQL 빈 목록), Actions 권한, App 설치.
 - 2026-11-17 step6: 테스트 리포에 하네스를 올렸다(작업 2-2). 하네스 main `f439e81`의 트리에서 `docs/exec-plans/active/`의 계획(`20261116-ops-security`)만 빼고, 테스트 리포 main(`df90d61`)을 부모로 하는 커밋 `108e6dc`를 git 객체로만 만들었다(임시 index, 작업 트리는 쓰지 않았다). `harness.config.json`은 그대로다(제작자·봇 계정과 검증 App이 같다). 임시 폴더에 그 커밋을 체크아웃해 `setup`과 전체 `check`(base는 테스트 리포 main)를 돌렸다: 통과. `bypass-scan --ci`·`secret-scan --ci`·`test-effect --ci`도 통과(트리 전체가 추가로 잡혀도 걸리는 것이 없다). 브랜치 `chore/harness-init`로 push하고 테스트 리포 PR #1을 열었다. 이 PR에서는 `check` 워크플로만 돈다.
+- 2026-11-17 step6: 테스트 리포 PR #1의 `check`가 통과해(7분 3초, https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44106489404) squash 병합했다(테스트 리포 main `9995e83`). 테스트 리포를 `/Users/sol/Desktop/harness-ops-lab`에 clone해 `setup` 뒤 확인 명령을 돌렸다: `required-checks`는 9개 모두 "등록되지 않았다"(예상대로. 체크가 한 번씩 보고된 뒤 제작자가 등록한다), `ops-check`는 CODEOWNERS가 보호 경로 27개와 같고 봇 토큰에 `workflow` 권한이 있다(시험 마지막에 회수한다). environment의 시크릿·변수는 아직 0개다. 다음 PR부터 판정 워크플로가 돌므로 그 값이 들어간 뒤에 이어 간다.
 
 ## 의사결정 로그
 
@@ -214,6 +215,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
+- step6 진행 상태(2026-11-17): 테스트 리포 `ariawell-hub/harness-ops-lab`에 하네스가 들어갔다(main `9995e83`, 로컬 clone `/Users/sol/Desktop/harness-ops-lab`). 기다리는 것: (1) 제작자가 environment 5개에 시크릿·변수를 넣는다. (2) 그 뒤 봇이 테스트 리포에 PR 하나를 올려 체크 9개가 한 번씩 보고되게 한다. (3) 제작자가 필수 체크를 등록한다(`required-checks`로 확인). (4) 제작자 계정으로 시험 Issue 2건(문안은 봇이 준다). 그 뒤 사례를 실행한다. step6의 브랜치 `chore/20261116-ops-security-s6`은 로컬 커밋만 있고 올리지 않았다.
 - step5의 PR은 보호 경로(`scripts/`, `docs/harness/`)를 바꾸므로 `gates`의 `selftest` job이 돈다. step4에서 고친 job(gitleaks 설치)이 main에 들어간 뒤의 첫 실행이다. 확인할 것: `selftest` job이 통과하고 `harness-guard` 설명 끝에 `자체 테스트 통과 9`가 붙는다. 실패하면 job 로그의 `✗` 줄로 원인을 본다.
 - step5(PR 병합) 뒤 step6(test-repo)을 시작한다. 제작자 작업 4번(테스트 리포 준비)이 먼저 끝나 있어야 한다. step6·step7을 시작할 때 계획 검증 2라운드에서 미룬 P2 4건(원장 F3~F6, 진행 로그 2026-11-16)을 반영한다.
 - 이 계획의 PR은 모두 위험도 높음이다. 초안으로 올리고, 완료 처리·기록·main 병합·`check`가 끝난 뒤 `pr-ready`로 한 번만 승인을 요청한다.
