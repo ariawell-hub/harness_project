@@ -28,7 +28,13 @@ claimed_at: 2026-11-18T16:02:53+09:00
 
 ## 진행 로그
 
+- 2026-11-18: 제작자 대화 지시("A로 진행")로 봇이 Issue #121을 등록하고 시작했다. 원인은 #102 step6의 세션이 임시 사본 두 개로 먼저 재현했다(`stage: operation` + runner 약화. CODEOWNERS를 함께 복사하면 기대한 문구, 빼면 다른 문구).
+- 2026-11-18: 테스트를 먼저 바꿨다(runner 약화 테스트를 사본의 `stage`별로 두 번). `copyHarness()`를 고치기 전에 `node --test --test-name-pattern="runner가 AC 결과를 보지 않는" scripts/test/selftest.test.ts`를 돌렸다: `stage: build`는 통과, `stage: operation`은 실패했다(`AssertionError`, 받은 문구 `step 2개짜리 Issue가 닫히지 않았다 'open' !== 'closed'`, 약 18초). 목록에 `.github/CODEOWNERS`를 더한 뒤 둘 다 통과했다.
+- 2026-11-18: 첫 `check`는 `test-effect`에서 실패했다(`scripts/test/selftest.test.ts: ineffective(base에서도 통과)`). 결함과 수정이 모두 그 테스트 파일 안에 있어, 수정된 테스트 파일을 변경 전 코드(테스트 밖)에서 돌리면 통과하는 것이 맞다. 의사결정 로그에 예외 줄을 적었다.
+
 ## 의사결정 로그
+
+- test-effect 예외: `scripts/test/selftest.test.ts` @ `3000e19b569462532f712ecd13d46466c77f6ac9` — 사유: 결함(사본 목록에 CODEOWNERS 없음)과 수정이 모두 이 테스트 파일 안에 있어 변경 전 코드(테스트 밖)에서는 차이가 나지 않는다. 수정 전 목록에서는 `stage: operation` 쪽이 실패한 것을 진행 로그에 적었다.
 
 - 결정: 새 테스트를 따로 더하지 않고 기존 runner 약화 테스트를 단계별로 두 번 돌린다(`build`, `operation`). / 이유: 이 리포가 운영 단계로 바뀐 뒤에도 구축 단계 설정의 확인이 남는다. 이 리포의 `stage`에 기대는 테스트가 이번 결함의 원인이었다. / 버린 대안: `operation`만 고정(구축 단계 확인이 사라진다), 리포의 값 그대로 한 번 + `operation` 한 번(전환 뒤 같은 것을 두 번 돈다).
 - 결정: 실행기의 복사 목록을 내보내 테스트가 같이 쓰게 하지 않는다. / 이유: `scripts/selftest/`의 기존 파일을 고치면 위험도 높음(제작자 승인)이고, 두 목록은 뜻이 다르다(테스트 쪽은 설정 파일을 더 담고 `.claude`는 일부만 담는다). / 버린 대안: `COPY`를 export해 재사용.
