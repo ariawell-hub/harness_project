@@ -1,0 +1,29 @@
+{
+  "item": "guard-selftest",
+  "summary": "gates 워크플로의 selftest job은 보호 경로를 바꾼 PR에서만 돌았고, 결과가 harness-guard 설명에 '자체 테스트 통과 10'으로 붙었다. 보호 경로 밖 PR에서는 job이 건너뜀(skipped)으로 끝났고 harness-guard는 '보호 경로 변경 없음'이었다.",
+  "cases": [
+    {
+      "name": "protected-pr",
+      "expected": "보호 경로를 바꾼 PR에서 selftest job이 돌고 그 결과가 harness-guard 설명에 반영된다",
+      "observed": "PR #9(scripts/lib/util.ts, scripts/test/, docs/harness/CHANGELOG.md 변경, head 44ff28c)에서 gates 실행 44233624951의 selftest job이 success로 끝났고 harness-guard가 success '보호 경로 변경 3개: 통과 · 자체 테스트 통과 10'을 보고했다. runner가 만든 PR #7(head fd2f6ff, 실행 44229968655)에서도 selftest job이 success였고 harness-guard 설명 끝에 '자체 테스트 통과 10'이 붙었다(이 PR의 harness-guard는 PR 본문의 보호 경로 확인 줄이 없어 failure였다. flow 항목의 runner-protected-path 사례).",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/9",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44233624951/job/134564502686",
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/7",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44229968655/job/134552434111"
+      ]
+    },
+    {
+      "name": "non-protected-pr",
+      "expected": "보호 경로 밖만 바꾼 PR에서는 selftest job이 돌지 않는다",
+      "observed": "PR #6(docs/lab-notes.md, docs/index.md, 계획 파일만 변경, head b85988f)의 gates 실행 44228295965에서 selftest job이 skipped였고 harness-guard는 success '보호 경로 변경 없음'이었다. PR #3(README.md와 계획 파일)에서도 selftest job은 skipped였다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/6",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44228295965/job/134546945514",
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/3"
+      ]
+    }
+  ]
+}
