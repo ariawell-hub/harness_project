@@ -250,6 +250,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - (step7) `gates`의 기록 job은 커밋 상태를 쓰다 GitHub API가 HTTP 500을 내면 다시 시도하지 않고 끝난다. PR #125에서 `plan-gate` 기록이 실패해 `revert-check`만 남았고 필수 체크가 비어 병합이 막혔다(같은 때 `gh run rerun`도 500이었다). 실패한 job을 다시 실행해 풀었다. fail-closed라 틀린 통과는 없지만 runner 무인 실행에서는 PR이 조용히 멈출 수 있다. → 처리: TD-48
 - (step7) zsh에서 큰따옴표 안의 `$commit:refs/heads/…`는 `:r` 수식어로 읽혀 변수 값 뒤에 `efs/heads/…`가 붙는다. git refspec처럼 변수 바로 뒤에 `:`이 오는 문자열은 `${변수}:…`로 적는다. 이번에는 깨진 refspec이 로컬에서 거부돼 원격에 닿지 않았다. → 처리: 해당 없음
 - (step7) TD 표(`tech-debt-tracker.md`)에는 한 칸이 2천 자를 넘는 행이 있어, 가장 긴 칸의 길이가 바뀌면 prettier가 모든 행의 채움을 바꾼다. 문서 한 줄 수정이 수백 KB의 diff가 되고 다른 PR과 충돌하기 쉽다(TD-39와 같은 종류다). 긴 이력은 표 밖으로 빼는 편이 낫다. → 처리: TD-39
+- (step7) GitHub Actions의 포함 사용량(Pro, $18 = 3,000분)이 2026-11-18에 바닥나 모든 job이 시작되지 않았다. 이 리포의 11-11~18 실행 893개를 job 소요 시간으로 세면 청구 약 2,399분, 실제 약 1,245분이다. 1분이 안 되는 job 1,428개가 1,428분으로 청구됐다(실제 439분). 판정 워크플로의 잘게 나눈 job이 크다. 사용량이 바닥난 것은 job이 실패한 뒤에야 알 수 있었다. → 처리: TD-49
 
 ## 열린 질문
 
@@ -261,7 +262,6 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - revert는 임시 git 리포, 가짜 GitHub(`HARNESS_FAKE_GH`)으로 끝까지 돌린다. `--live`는 이 머신에서 한 번 실행해 통과율을 진행 로그에 적는다.
 - `pull_request_target`·`workflow_run`으로 도는 변경(step0·1·3)은 병합된 뒤에야 실제로 돈다. 병합 뒤 다음 PR에서 처음 동작을 확인해 진행 로그에 남기고, 전체는 step6의 테스트 리포에서 확인한다.
 - step6·step7은 실제 GitHub 결과를 `lab/ops-transition/results/`에 남기고 `node lab/ops-transition/report.ts --all`과 `node scripts/harness.ts ops-check`로 확인한다.
-- (step7) GitHub Actions의 포함 사용량(Pro, $18 = 3,000분)이 2026-11-18에 바닥나 모든 job이 시작되지 않았다. 이 리포의 11-11~18 실행 893개를 job 소요 시간으로 세면 청구 약 2,399분, 실제 약 1,245분이다. 1분이 안 되는 job 1,428개가 1,428분으로 청구됐다(실제 439분). 판정 워크플로의 잘게 나눈 job이 크다. 사용량이 바닥난 것은 job이 실패한 뒤에야 알 수 있었다. → 처리: TD-49
 
 ## 다음 할 일
 
