@@ -2,7 +2,7 @@
 id: 20261118-selftest-copy-codeowners
 issue: 121 # GitHub Issue 번호
 type: feat # 브랜치 접두어
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: normal # low | normal | high
 author: claude-code
