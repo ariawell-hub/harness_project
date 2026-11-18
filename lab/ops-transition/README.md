@@ -2,8 +2,8 @@
 
 운영 전환 체크리스트 5·6(설계서 10.4절)을 실제 GitHub의 테스트 리포에서 확인한 결과다. 계획은 `20261116-ops-security`의 step6(`docs/exec-plans/`), 테스트 리포의 운영 방식은 [ADR-0004](../../docs/decisions/ADR-0004-q20-lab-repo.md), 제작자 준비 절차는 [docs/SECURITY.md](../../docs/SECURITY.md)의 "테스트 리포 준비" 절이다.
 
-- 테스트 리포: (제작자가 준비한 뒤 적는다)
-- 시험 날짜: (시험을 시작할 때 적는다)
+- 테스트 리포: `ariawell-hub/harness-ops-lab` (비공개. 하네스 main `f439e81`의 트리를 올렸다)
+- 시험 날짜: 2026-11-17(도입) ~ 2026-11-18(사례 실행)
 
 ## 구조
 
