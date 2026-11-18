@@ -1,4 +1,5 @@
-// 운영 전환 시험 결과 기록 검사(계획 20261116-ops-security step6, 설계서 10.4절 체크리스트 5).
+// 운영 전환 시험 결과 기록 검사(계획 20261116-ops-security step6·step7, 설계서 10.4절 체크리스트 5·6).
+// target-repo만 하네스 리포 자신에서 한 시험(체크리스트 6)이고 나머지는 테스트 리포의 결과(체크리스트 5)다.
 // 기록이 완결되고(필드, n/a가 아니면 근거 1개 이상) 항목의 필수 사례가 모두 있고 pass일 때만 통과다.
 // 필수가 아닌 사례는 fail·partial·n/a여도 기록이 완결되면 통과다.
 //
@@ -16,6 +17,8 @@ export const REQUIRED: Record<string, readonly string[]> = {
   codeowners: ['owner-required', 'auto-merge'],
   'workflow-scope': ['push-rejected'],
   stage: ['operation-pr'],
+  // 나머지 두 사례(low-risk-auto-merge, protected-needs-owner)는 운영 전환 PR이 관찰한 뒤 더한다
+  'target-repo': ['workflow-push-rejected'],
   td38: [],
 };
 export const ITEMS: readonly string[] = Object.keys(REQUIRED);
