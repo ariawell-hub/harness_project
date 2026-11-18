@@ -31,7 +31,7 @@
 | `target-repo`    | `workflow-push-rejected`, `low-risk-auto-merge`, `protected-needs-owner`(하네스 리포 자신에서 한 시험, 체크리스트 6) |                                                      |
 | `td38`           | 없음(결과 파일이 없어도 된다)                                                                                        | TD-38 목록 가운데 실제로 본 것과 못 본 것            |
 
-각 사례가 확인하는 것은 계획의 step6 지시서에 있다. `target-repo`의 세 사례는 step7 지시서 2번에 있다. `protected-needs-owner`는 승인 전 상태(필수 체크가 모두 통과하고 자동 병합이 켜져 있어도 병합되지 않는다)를 적은 것이다. 승인 뒤 병합되는 것은 그 PR과 Issue #102의 댓글에 남는다.
+각 사례가 확인하는 것은 계획의 step6 지시서에 있다. `target-repo`의 세 사례는 step7 지시서 2번에 있다. `protected-needs-owner`는 승인 전 상태(필수 체크가 모두 통과하고 자동 병합이 켜져 있어도 병합되지 않는다)와 제작자 승인 뒤의 병합을 함께 적은 것이다.
 
 ## 결과 형식
 

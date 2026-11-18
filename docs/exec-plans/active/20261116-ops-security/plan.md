@@ -157,6 +157,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-19 step7: 초안 PR #128을 올렸다(head `bceb9d9`). 1라운드: `risk-gate`는 "위험도 높음: 제작자 head 승인 필요 — 계획 risk: high 외 1건", `harness-guard`는 "보호 경로 변경 5개: 신호 1건 · 자체 테스트 통과 10", `review/claude`는 승인(P2 1건, 원장 F1: 10.4절 6번에 `TODO(step7)` 표식이 남았다), `review/codex`는 수정 요청이다(원장 F2, P1: "제작자 승인 전 차단 증거가 없어도 운영 전환 보고서가 통과함", `report.ts`의 필수 사례에 `protected-needs-owner`가 없다). 둘 다 2라운드에 하려던 일이라 받아들인다. CI `check`의 `test` 단계는 505초였다(`stage: operation`, 동시 1개).
 - 2026-11-19 step7: **`protected-needs-owner` 확인(PR #127).** 절감 작업 PR #127(Issue #126)이 동시 실행 수 변경을 되돌린 뒤 보호 경로 `docs/harness/`의 문서만 바꾸는 위험도 보통 PR이 됐다. 초안을 해제하고 자동 병합을 켰는데, 필수 체크 9개가 15:38:18Z에 모두 success가 된 뒤 7분 50초가 지나도 병합되지 않았다(`mergeStateStatus` BLOCKED, 리뷰 0건, 코드 오너인 제작자 계정이 리뷰어로 자동 지정). 같은 설정에서 보호 경로 밖만 바꾼 PR #125는 55초 만에 병합됐다. 코드 오너 리뷰 필수 설정이 실제로 걸려 있다. 이 관찰을 `target-repo.json`에 적고 `report.ts`의 필수 사례에 더했다(테스트 먼저: 구현 전 8개 가운데 2개 실패). 설계서 10.4절 6번의 `TODO`를 지웠다(F1). 계획 폴더를 `active/`로 되돌려 step7을 다시 연다.
 - 2026-11-19 step7: 제작자가 다른 세션(Codex)의 사용량 분석을 주며 PR 비용을 줄일 방안을 내라고 지시했다. 방안과 예상 수치를 TD-49에 적었다(근거는 계획 `20261118-actions-usage`의 진행 로그). 2라운드 변경은 로컬 커밋으로 두고 PR #127이 병합된 뒤 `origin/main` 병합과 함께 한 번에 올린다("push 한 번이 판정 한 라운드다", 두 PR이 `CHANGELOG`의 같은 자리를 고친다. TD-39).
+- 2026-11-19 step7: 제작자가 PR #127을 승인했다(2026-11-18T23:50:32Z, head `c41c39f`). 2초 뒤 병합됐다(23:50:34Z, 병합 커밋 `77e53c0`). 승인 전에는 8시간 넘게 막혀 있었다. 이 관찰을 `target-repo.json`의 `protected-needs-owner`에 더했다(승인 전 차단과 승인 뒤 병합이 한 사례에 있다). 설계서 10.4절 6번, `CHANGELOG`, `lab/ops-transition/README.md`를 맞췄다. `origin/main`(`77e53c0`)을 병합했고 `CHANGELOG`의 충돌은 두 줄을 모두 남겨 풀었다(#126 줄이 먼저).
 
 ## 의사결정 로그
 
@@ -274,7 +275,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **지금은 제작자의 PR #127 승인을 기다린다**(2026-11-19 갱신. 4번과 5번은 끝났다: 초안 PR #128, `protected-needs-owner`는 PR #127로 확인. 5번의 2라운드 변경은 이 worktree에 로컬 커밋으로 있고 올리지 않았다). PR #127이 병합되면: `origin/main` 병합(`CHANGELOG` 충돌을 풀고 두 줄을 모두 남긴다) → `check` → `complete-step` → PR #128 본문 갱신(체크리스트 6번 결과) → push → 판정 통과 뒤 6번. PR #127(Issue #126, Actions 사용량 절감)도 제작자 승인이 필요하므로, 그 PR이 먼저 병합되면 `origin/main`을 병합한 뒤에 이 PR의 승인을 요청한다(TD-39).
+- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **지금 할 일은 6번이다**(2026-11-19 두 번째 갱신. 4번과 5번은 끝났다: 초안 PR #128, `protected-needs-owner`는 PR #127로 확인. PR #127은 제작자 승인으로 병합됐고 `origin/main`을 병합해 2라운드를 올렸다). 2라운드 판정이 통과하면 6번, 지적이 나오면 계획 폴더를 `active/`로 되돌려 고친 뒤 한 번에 올린다.
   1. (끝남, 2026-11-19: PR #125는 15:04:49Z에 병합됐다) 그때 적어 둔 내용: `gh run rerun 44324118053 --failed`(`judge-codex`). `review/codex`가 F1을 닫고 사람 승인 없이 자동 병합되는지 본다(자동 병합은 켜 두었다). 병합 시각·병합 커밋·리뷰 0건을 적어 둔다.
   2. (끝남, 2026-11-19) 이 worktree(`chore/20261116-ops-security-s7`)에 `origin/main`을 병합한다(`target-repo.json`과 `report.ts`의 `target-repo` 항목이 들어온다). `lab/ops-transition/results/target-repo.json`에 `low-risk-auto-merge` 사례를 더하고, `report.ts`의 필수 사례에 `low-risk-auto-merge`를 더한다(테스트 먼저). `lab/ops-transition/README.md`의 항목 표와 머리말도 맞춘다.
   3. (끝남, 2026-11-19. 승인 전 상태 부분만 남았다) 설계서 10.4절 "이 리포의 확인 결과" 6번의 `TODO(step7)` 줄을 채운다. 진행 로그를 갱신한다.
