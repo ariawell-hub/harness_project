@@ -129,7 +129,12 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 ## 5. PR
 
 - 제목: `<type>(<계획 id>): step<N> <이름>`. 본문 첫 줄은 마지막 step만 `Closes #<issue>`, 나머지는 `Refs #<issue>`.
-- **본문은 올릴 때 맞추고, 고칠 일이 생기면 모아서 한 번에 고친다.** `gates`는 PR 본문·제목을 고칠 때마다 다시 돈다(본문을 읽는 게이트가 있어서다). 한 번에 job 둘이 돌고 job마다 1분으로 올려 청구된다(Actions 사용량, Issue #126). `gh pr edit`를 여러 번 나눠 실행하지 않는다. 커밋을 올릴 예정이면 본문도 그 push 직전에 고친다.
+- **본문은 올릴 때 맞추고, 고칠 일이 생기면 모아서 한 번에 고친다.** `gates`는 PR 본문·제목을 고칠 때마다 다시 돈다(본문을 읽는 게이트가 있어서다). 한 번에 job이 둘(`evaluate`, `record`) 돌고, 보호 경로를 바꾼 PR은 자체 테스트(`selftest`)까지 셋이 돈다. job마다 분 단위로 올려 청구된다(Actions 사용량, Issue #126). `gh pr edit`를 여러 번 나눠 실행하지 않는다. 커밋을 올릴 예정이면 본문도 그 push 직전에 고친다.
+- **push 한 번이 판정 한 라운드다.** PR에 push할 때마다 `check`, `gates`, 두 판정 워크플로가 다시 돌고(Actions 약 20분 청구, 검증자의 구독 사용량도 쓴다), 병합되면 main의 `check`가 한 번 더 돈다. 2026-11-11~18에는 PR 86개가 `check`를 160회 돌렸다(Issue #126). 라운드를 줄인다.
+  - 로컬 `check`와 자체 리뷰가 끝난 변경을 묶어 한 번에 올린다. 기록만 바꾸는 커밋(진행 로그, 문서 보완)은 따로 올리지 않고 다음에 올릴 push에 묶는다.
+  - 지적 대응, 뒤처짐 갱신(`origin/main` 병합), 본문 수정이 겹치면 한 push로 끝낸다.
+  - 올리기 전에 위험도를 확인한다. `harness.config.json`의 판정 관련 키(`commands` 포함)를 바꾸면 구축 단계에서도 위험도 높음이라 초안으로 올려야 한다. 잘못 올리면 되돌리고 다시 판정받는 라운드가 생긴다.
+  - Actions나 검증자가 멈춘 것을 알면(사용량 소진, 사용 한도) 풀릴 때까지 올리지 않는다. 판정 없는 실행이 돌고 나중에 다시 실행해야 한다.
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약과 `gh pr checks`는 출처를 보지 않는다. 필수 체크별 상태(기대 출처가 쓴 결과만)와 지금 무엇을 기다리는지는 worktree에서 `node scripts/harness.ts pr-state`로 본다(`--pr <번호>`로 다른 PR. 읽기만 한다). 병합 가능 여부는 `mergeStateStatus`로 본다.
 - `harness.config.json`의 `protectedPaths`나 `github.owner`를 바꾸면 같은 PR에서 `node scripts/harness.ts codeowners --write`로 `.github/CODEOWNERS`를 다시 만든다. 이 파일은 손으로 고치지 않는다. 어긋나면 `check`의 doc-lint 단계가 실패한다.

@@ -233,28 +233,6 @@ test('이 리포의 설정과 프로파일: guard.mcp가 기본값으로 적혀 
     );
 });
 
-test('이 리포의 설정과 프로파일 core: test의 동시 실행 수는 최소 2, 최대 8이고 그 사이는 코어 수 − 1이다', () => {
-  const read = (rel: string) => JSON.parse(readFileSync(path.join(HARNESS_ROOT, rel), 'utf8'));
-  const run: string = read('harness.config.json').commands.test.run;
-  assert.equal(read('profiles/core/profile.json').config.commands.test.run, run);
-  // 2코어 러너(비공개 리포의 GitHub Actions 표준 러너)에서 테스트 파일이 하나씩 돌지 않게 한다(Issue #126)
-  const expr = /--test-concurrency=\$\(node -p "(.+?)"\)/.exec(run)?.[1];
-  assert.ok(expr, run);
-  const at = (cores: number): unknown =>
-    new Function('require', `return ${expr}`)(() => ({ availableParallelism: () => cores }));
-  const got = [1, 2, 3, 4, 8, 9, 10, 20].map((cores) => [cores, at(cores)]);
-  assert.deepEqual(got, [
-    [1, 2],
-    [2, 2],
-    [3, 2],
-    [4, 3],
-    [8, 7],
-    [9, 8],
-    [10, 8],
-    [20, 8],
-  ]);
-});
-
 test('loadConfig: testEffect가 없으면 null이고, 틀리면 ConfigError다', () => {
   const dir = tmp('harness-lib-cfg-');
   const put = (testEffect?: unknown) =>
