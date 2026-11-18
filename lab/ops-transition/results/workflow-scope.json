@@ -1,0 +1,30 @@
+{
+  "item": "workflow-scope",
+  "summary": "workflow 권한 없이 재발급한 봇 PAT(범위 read:org, repo)로 워크플로 파일을 바꾼 커밋을 push하자 GitHub이 거부했고 원격에 브랜치가 생기지 않았다. main에 워크플로 변경이 들어간 뒤의 PR 갱신 push와 워크플로를 바꾼 커밋의 revert push는 이번에 만들지 못했다.",
+  "cases": [
+    {
+      "name": "push-rejected",
+      "expected": "workflow 권한 없는 봇 토큰의 워크플로 파일 push가 거부된다",
+      "observed": "제작자가 봇 PAT를 workflow 없이 재발급한 뒤(테스트 리포 ops-check 3번: '봇 토큰에 workflow 권한이 없다(범위: read:org, repo)'. 두 리포의 revert environment 시크릿 REVERT_BOT_TOKEN 갱신 시각 2026-11-18T05:36:54Z·05:37:47Z), 테스트 리포 브랜치 feat/20261118-workflow-scope-trial에 계획 커밋 6d50067과 .github/workflows/check.yml 맨 위에 주석 한 줄을 더한 커밋 8cacbe1을 만들었다(로컬 check 통과). 2026-11-18T06:18:37Z에 git push origin feat/20261118-workflow-scope-trial이 종료 코드 1로 끝났고 GitHub의 답은 \"! [remote rejected] … (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/check.yml` without `workflow` scope)\"였다. git ls-remote로 원격에 그 브랜치가 없음을 확인했다. PR은 없다. 워크플로를 바꾸지 않은 계획 커밋도 같은 push에 있어 함께 거부됐다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/issues/16",
+        "https://github.com/ariawell-hub/harness-ops-lab/issues/16#issuecomment-6970834240"
+      ]
+    },
+    {
+      "name": "update-after-workflow-change",
+      "expected": "main에 워크플로 변경이 들어간 뒤 PR 브랜치를 main 병합으로 갱신하는 push가 workflow 권한 없는 토큰으로도 된다",
+      "observed": "관찰하지 못했다. 권한 회수 뒤 테스트 리포의 main에 워크플로 변경이 들어간 적이 없다(회수 뒤의 main 병합은 PR #11뿐이고 워크플로를 바꾸지 않았다). 워크플로를 바꾸는 PR은 이제 제작자만 올릴 수 있어 봇이 이 상황을 만들 수 없다. 권한 회수 뒤에 한 PR 갱신 push 두 건(PR #11, PR #15)은 워크플로 변경이 없는 main을 병합한 것이라 이 사례의 근거가 아니다. 운영 단계에서 제작자가 워크플로 변경을 처음 병합한 뒤, 열려 있는 PR의 갱신 push에서 확인한다(TD-38).",
+      "verdict": "n/a",
+      "evidence": []
+    },
+    {
+      "name": "revert-of-workflow",
+      "expected": "워크플로를 바꾼 커밋을 되돌리는 revert 브랜치의 push가 어떻게 되는지 안다(revert 워크플로는 REVERT_BOT_TOKEN으로 push한다)",
+      "observed": "관찰하지 못했다. 위와 같은 이유로 워크플로를 바꾼 커밋이 main에 없다. revert 워크플로가 쓰는 REVERT_BOT_TOKEN도 workflow 권한이 없는 같은 PAT이므로, 워크플로를 바꾼 커밋의 main check가 실패하면 revert/<SHA> 브랜치 push가 push-rejected와 같은 이유로 거부될 것으로 예상한다(확인하지 않은 추정이다). 그 경우 제작자가 손으로 되돌려야 한다(TD-38).",
+      "verdict": "n/a",
+      "evidence": []
+    }
+  ]
+}

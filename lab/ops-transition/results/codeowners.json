@@ -1,0 +1,30 @@
+{
+  "item": "codeowners",
+  "summary": "코드 오너 리뷰 필수(필수 승인 수 0)를 켠 테스트 리포에서, 보호 경로를 바꾼 PR #15는 필수 체크 9개가 모두 통과하고 자동 병합이 켜져 있어도 제작자(코드 오너) 승인 전에는 병합되지 않았다. 보호 경로 밖만 바꾼 PR #11은 같은 설정에서 사람 리뷰 없이 자동 병합됐다.",
+  "cases": [
+    {
+      "name": "owner-required",
+      "expected": "코드 오너 리뷰 필수·승인 수 0 설정에서 보호 경로 PR은 제작자 승인 전 병합되지 않는다",
+      "observed": "PR #15(docs/harness/CHANGELOG.md 한 줄과 계획 파일, Issue #14)에 2026-11-18T05:56:47Z에 자동 병합(squash)을 켰다. 그때 head cdc60bb는 main과 같은 줄에 있었고(뒤처짐 0) 필수 체크 9개(check, revert-check, plan-gate, risk-gate, deps-guard, harness-guard, review/claude, review/codex, review-ledger)가 모두 success였다. 60초 뒤에도 state=OPEN, mergeable=MERGEABLE, mergeStateStatus=BLOCKED였고 코드 오너(ariawell-hub)에게 간 리뷰 요청이 남아 있었다(리뷰 0건). PR #11이 병합돼 main이 앞서간 뒤 origin/main을 병합해 갱신했고(head 6237503, review/* 두 개는 '이어받음 cdc60bb62e7d'), 06:44:52Z에 필수 체크가 다시 모두 success인데도 같은 상태(OPEN, BLOCKED, 자동 병합 켜짐)였다. pr-state의 분류는 'ready (조치할 것 없음)'이다. 봇 토큰으로는 보호 규칙을 읽을 수 없어(REST 404) 막힌 이유를 API로 직접 읽지는 못했다. gh가 돌려준 reviewDecision은 REVIEW_REQUIRED가 아니라 빈 문자열이었다(필수 승인 수가 0이라서로 보인다). 판정 근거는 '필수 체크 전부 통과 + 최신 + 충돌 없음 + 자동 병합 켜짐인데 병합되지 않음'과, 같은 설정에서 보호 경로 밖 PR #11이 병합된 것의 대조다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/15",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44239893804",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44252602283",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44252604681"
+      ]
+    },
+    {
+      "name": "auto-merge",
+      "expected": "보호 경로 밖 PR은 사람 승인 없이 자동 병합된다",
+      "observed": "코드 오너 리뷰 필수를 켠 뒤, PR #11(docs/lab-notes.md 한 줄과 계획 파일, Issue #10)을 origin/main 병합으로 갱신해(로컬 check 통과 뒤 push, head 7465cdc) 자동 병합을 켰다. 새 head에서 check와 gates가 통과했고(harness-guard '보호 경로 변경 없음', risk-gate '위험도 낮음', review/codex '이어받음 bf185a5fabb1') 2026-11-18T06:10:56Z에 squash 병합됐다(main 35794cc). 리뷰는 0건이고 코드 오너 리뷰 요청도 생기지 않았다. 병합 뒤 main의 check도 success였다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/11",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44248418657",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44248420689",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44249451272"
+      ]
+    }
+  ]
+}
