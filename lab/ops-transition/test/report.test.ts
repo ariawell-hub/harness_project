@@ -22,7 +22,7 @@ const full = (item: string) =>
     REQUIRED[item].map((n) => kase(n)),
   );
 
-test('항목과 필수 사례는 step6 지시서의 목록이다', () => {
+test('항목과 필수 사례는 step6 지시서의 목록과 하네스 리포 시험(target-repo)이다', () => {
   assert.deepEqual(ITEMS, [
     'selftest',
     'flow',
@@ -31,6 +31,7 @@ test('항목과 필수 사례는 step6 지시서의 목록이다', () => {
     'codeowners',
     'workflow-scope',
     'stage',
+    'target-repo',
     'td38',
   ]);
   assert.deepEqual(REQUIRED, {
@@ -41,6 +42,7 @@ test('항목과 필수 사례는 step6 지시서의 목록이다', () => {
     codeowners: ['owner-required', 'auto-merge'],
     'workflow-scope': ['push-rejected'],
     stage: ['operation-pr'],
+    'target-repo': ['workflow-push-rejected'],
     td38: [],
   });
   assert.deepEqual(OPTIONAL_ITEMS, ['td38']);
@@ -67,6 +69,22 @@ test('필수 사례가 빠졌거나 pass가 아니면 막는다', () => {
     const p = validateResult('flow', r).join('\n');
     assert.match(p, /필수 사례 carry-over의 판정이 pass가 아니다/, verdict);
   }
+});
+
+test('target-repo(하네스 리포 시험): 결과 파일이 없거나 workflow-push-rejected가 pass가 아니면 막는다', () => {
+  assert.deepEqual(validateResult('target-repo', full('target-repo')), []);
+  const failed = result('target-repo', [kase('workflow-push-rejected', { verdict: 'fail' })]);
+  assert.match(
+    validateResult('target-repo', failed).join('\n'),
+    /필수 사례 workflow-push-rejected의 판정이 pass가 아니다/,
+  );
+  const other = result('target-repo', [kase('low-risk-auto-merge')]);
+  assert.match(
+    validateResult('target-repo', other).join('\n'),
+    /필수 사례 workflow-push-rejected가 없다/,
+  );
+  const dir = mkdtempSync(path.join(tmpdir(), 'ops-report-'));
+  assert.match(checkItems(dir, ['target-repo']).join('\n'), /target-repo: 결과 파일이 없다/);
 });
 
 test('필수가 아닌 사례는 fail·partial·n/a여도 기록이 완결되면 통과한다', () => {
