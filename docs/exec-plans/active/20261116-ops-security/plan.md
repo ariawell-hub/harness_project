@@ -2,7 +2,7 @@
 id: 20261116-ops-security
 issue: 102 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -154,6 +154,9 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-18 step7: 제작자가 절감 작업을 먼저 하라고 지시해 Issue #126·PR #127을 따로 올렸다(소규모 계획 `20261118-actions-usage`: `test` 동시 실행 수의 최소값 2, PR 본문 수정 규칙). 그 PR을 올리자 Actions가 다시 돌았다(14:17Z. 이유는 봇이 확인하지 못했다). CI `check`의 `test` 단계는 477초에서 332초가 됐다. PR #125의 멈춘 `check`와 `gates`도 다시 실행해 통과했다. **다음에 걸린 것은 Codex 사용 한도다.** PR #125·#127의 `judge-codex` 판정 job이 "You’ve hit your usage limit … try again at Nov 21st, 2026 8:36 AM"으로 끝나 `review/codex`가 판정 없음이다(실행 44324118053, 44323689797). 모든 PR이 멈춘다. 비용 결정이라 Issue #102에 요청 댓글을 남겼다. PR #127은 `commands` 변경이라 `risk-gate`가 위험도 높음으로 판정해 제작자 승인도 필요하다(초안으로 되돌렸다). 같은 때 `judge-codex`의 기록 job이 `review-ledger` 상태를 쓰다 HTTP 500으로 실패했다(TD-48이 다시 나왔다).
 - 2026-11-19 step7: 제작자가 Codex 요금제를 올렸다(대화). PR #125의 `judge-codex`를 다시 실행하자 `review/codex`가 승인(지적 없음, 원장 F1 닫힘)으로 기록됐고, 필수 체크 9개가 모두 success가 되자 GitHub이 2026-11-18T15:04:49Z에 병합했다(병합 커밋 `3f8b6eb`, 리뷰 0건, 요청된 리뷰어 없음). **`low-risk-auto-merge` 확인.** Issue #124도 닫혔다. 이 worktree에 `origin/main`을 병합했다.
 - 2026-11-19 step7: `target-repo.json`에 `low-risk-auto-merge` 사례를 적고 `report.ts`의 필수 사례에 더했다. 테스트를 먼저 바꿨다(필수 목록, 사례 하나만 있으면 "필수 사례 low-risk-auto-merge가 없다", `partial`이면 막힘). 구현 전 실행에서 8개 가운데 2개가 실패했고 구현 뒤 모두 통과했다. `node lab/ops-transition/report.ts --all` 통과. 설계서 10.4절 "이 리포의 확인 결과" 6번을 채웠다(`protected-needs-owner`는 이 PR의 승인 전 상태를 본 뒤 적는다).
+- 2026-11-19 step7: 초안 PR #128을 올렸다(head `bceb9d9`). 1라운드: `risk-gate`는 "위험도 높음: 제작자 head 승인 필요 — 계획 risk: high 외 1건", `harness-guard`는 "보호 경로 변경 5개: 신호 1건 · 자체 테스트 통과 10", `review/claude`는 승인(P2 1건, 원장 F1: 10.4절 6번에 `TODO(step7)` 표식이 남았다), `review/codex`는 수정 요청이다(원장 F2, P1: "제작자 승인 전 차단 증거가 없어도 운영 전환 보고서가 통과함", `report.ts`의 필수 사례에 `protected-needs-owner`가 없다). 둘 다 2라운드에 하려던 일이라 받아들인다. CI `check`의 `test` 단계는 505초였다(`stage: operation`, 동시 1개).
+- 2026-11-19 step7: **`protected-needs-owner` 확인(PR #127).** 절감 작업 PR #127(Issue #126)이 동시 실행 수 변경을 되돌린 뒤 보호 경로 `docs/harness/`의 문서만 바꾸는 위험도 보통 PR이 됐다. 초안을 해제하고 자동 병합을 켰는데, 필수 체크 9개가 15:38:18Z에 모두 success가 된 뒤 7분 50초가 지나도 병합되지 않았다(`mergeStateStatus` BLOCKED, 리뷰 0건, 코드 오너인 제작자 계정이 리뷰어로 자동 지정). 같은 설정에서 보호 경로 밖만 바꾼 PR #125는 55초 만에 병합됐다. 코드 오너 리뷰 필수 설정이 실제로 걸려 있다. 이 관찰을 `target-repo.json`에 적고 `report.ts`의 필수 사례에 더했다(테스트 먼저: 구현 전 8개 가운데 2개 실패). 설계서 10.4절 6번의 `TODO`를 지웠다(F1). 계획 폴더를 `active/`로 되돌려 step7을 다시 연다.
+- 2026-11-19 step7: 제작자가 다른 세션(Codex)의 사용량 분석을 주며 PR 비용을 줄일 방안을 내라고 지시했다. 방안과 예상 수치를 TD-49에 적었다(근거는 계획 `20261118-actions-usage`의 진행 로그). 2라운드 변경은 로컬 커밋으로 두고 PR #127이 병합된 뒤 `origin/main` 병합과 함께 한 번에 올린다("push 한 번이 판정 한 라운드다", 두 PR이 `CHANGELOG`의 같은 자리를 고친다. TD-39).
 
 ## 의사결정 로그
 
@@ -222,6 +225,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 결정(step7): `protected-needs-owner`는 이 PR이 초안인 동안 본 승인 전 상태(`risk-gate` 실패, `pr-state`의 분류)로 적는다. 초안을 해제하고 자동 병합을 켠 뒤에도 승인 전에는 병합되지 않는 것과 승인 뒤의 병합은 Issue #102 댓글에 적는다. / 이유: 지시서 3번("승인 전 상태로 기록한다. 승인 뒤에는 커밋을 더하지 않는다")과 금지사항("승인을 요청한 뒤 이 PR에 커밋을 더 올리지 마라"). 초안 해제 뒤의 관찰을 결과 파일에 넣으려면 승인 요청 뒤에 커밋을 올려야 한다. / 버린 대안: `pr-ready` 뒤의 관찰을 커밋하고 다시 승인 요청하기(승인이 head에 묶여 있어 순서가 한 번 더 돈다).
 - 결정(step7): `AGENTS.md`와 `CLAUDE.md`는 고치지 않았다. / 이유: 지시서는 "단계가 적힌 곳이 있으면 맞춘다"이고 두 파일에는 현재 단계를 적은 곳이 없다. 운영 단계의 보호 경로 PR 절차는 절차서 5절에 적었고 `AGENTS.md`의 PR 항목이 그 절을 가리킨다.
 - 결정(step7): TD 표는 칸 폭이 바뀌지 않게 고쳤다(TD-1 상태 칸의 문구 길이를 그대로 맞추고, TD-38의 추가 내용은 내용 칸이 아니라 상태 칸에 적었다). / 이유: 표에서 가장 긴 칸이 TD-38의 내용과 TD-1의 상태라, 길이가 바뀌면 prettier가 47행 전체의 채움을 바꿔 diff가 약 400KB가 된다. 검증 입력의 diff 상한(400KB)을 넘으면 그 뒤 파일(`harness.config.json`의 `stage` 변경 포함)의 diff가 잘린다. / 버린 대안: 그대로 고치고 표 전체가 바뀌게 두기(step6의 PR이 그랬다).
+- 결정(step7, 2026-11-19): `protected-needs-owner`는 전환 PR이 아니라 PR #127의 승인 전 상태로 적는다(위 "초안 상태로 기록" 결정을 바꾼다). / 이유: 전환 PR은 초안인 동안 코드 오너가 리뷰어로 지정되지 않고, 판정 지적이 열려 있어 "승인만 없어서 막힌 상태"를 볼 수 없다. 초안을 해제한 뒤에는 커밋을 올릴 수 없어 그 관찰을 기록에 넣을 수 없다. PR #127은 필수 체크 9개가 모두 통과하고 자동 병합이 켜진 채 승인만 없는 상태라 근거가 더 분명하다. 운영 단계의 `risk-gate` 판정(높음)은 전환 PR의 1라운드 결과로 함께 적었다. / 버린 대안: 전환 PR의 초안 상태(`risk-gate` 실패)만 적기(`review/codex`가 P1로 막았다. 승인 전 차단의 근거가 약하다), 전환 PR을 잠시 초안 해제했다가 되돌리기(제작자에게 승인 요청이 두 번 간다).
+- 결정(step7, 2026-11-19): PR #127의 승인·병합을 먼저 받고, 전환 PR은 그 뒤에 `origin/main` 병합과 2라운드 변경을 한 push로 올려 승인을 요청한다. / 이유: 두 PR이 `CHANGELOG`의 같은 자리에 줄을 더해 나중 것이 반드시 갱신돼야 한다(TD-39). 전환 PR을 먼저 올리면 판정 라운드가 한 번 더 들고, 승인 요청 뒤에 갱신하면 승인이 무효가 된다. / 버린 대안: 전환 PR을 지금 올리고 PR #127 병합 뒤 다시 갱신하기.
 
 ## 발견 사항
 
@@ -269,7 +274,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **지금 할 일은 4번부터다**(2026-11-19 갱신. Actions와 Codex 판정은 다시 돈다). PR #127(Issue #126, Actions 사용량 절감)도 제작자 승인이 필요하므로, 그 PR이 먼저 병합되면 `origin/main`을 병합한 뒤에 이 PR의 승인을 요청한다(TD-39).
+- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **지금은 제작자의 PR #127 승인을 기다린다**(2026-11-19 갱신. 4번과 5번은 끝났다: 초안 PR #128, `protected-needs-owner`는 PR #127로 확인. 5번의 2라운드 변경은 이 worktree에 로컬 커밋으로 있고 올리지 않았다). PR #127이 병합되면: `origin/main` 병합(`CHANGELOG` 충돌을 풀고 두 줄을 모두 남긴다) → `check` → `complete-step` → PR #128 본문 갱신(체크리스트 6번 결과) → push → 판정 통과 뒤 6번. PR #127(Issue #126, Actions 사용량 절감)도 제작자 승인이 필요하므로, 그 PR이 먼저 병합되면 `origin/main`을 병합한 뒤에 이 PR의 승인을 요청한다(TD-39).
   1. (끝남, 2026-11-19: PR #125는 15:04:49Z에 병합됐다) 그때 적어 둔 내용: `gh run rerun 44324118053 --failed`(`judge-codex`). `review/codex`가 F1을 닫고 사람 승인 없이 자동 병합되는지 본다(자동 병합은 켜 두었다). 병합 시각·병합 커밋·리뷰 0건을 적어 둔다.
   2. (끝남, 2026-11-19) 이 worktree(`chore/20261116-ops-security-s7`)에 `origin/main`을 병합한다(`target-repo.json`과 `report.ts`의 `target-repo` 항목이 들어온다). `lab/ops-transition/results/target-repo.json`에 `low-risk-auto-merge` 사례를 더하고, `report.ts`의 필수 사례에 `low-risk-auto-merge`를 더한다(테스트 먼저). `lab/ops-transition/README.md`의 항목 표와 머리말도 맞춘다.
   3. (끝남, 2026-11-19. 승인 전 상태 부분만 남았다) 설계서 10.4절 "이 리포의 확인 결과" 6번의 `TODO(step7)` 줄을 채운다. 진행 로그를 갱신한다.

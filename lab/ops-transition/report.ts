@@ -17,8 +17,8 @@ export const REQUIRED: Record<string, readonly string[]> = {
   codeowners: ['owner-required', 'auto-merge'],
   'workflow-scope': ['push-rejected'],
   stage: ['operation-pr'],
-  // protected-needs-owner는 운영 전환 PR의 승인 전 상태를 관찰한 뒤 더한다
-  'target-repo': ['workflow-push-rejected', 'low-risk-auto-merge'],
+  // 하네스 리포 자신에서 한 시험(체크리스트 6). 세 사례가 모두 있어야 운영 전환의 근거가 완결된다
+  'target-repo': ['workflow-push-rejected', 'low-risk-auto-merge', 'protected-needs-owner'],
   td38: [],
 };
 export const ITEMS: readonly string[] = Object.keys(REQUIRED);
