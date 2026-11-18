@@ -1,0 +1,13 @@
+{
+  "item": "target-repo",
+  "summary": "하네스 리포(ariawell-hub/harness_project)에서 한 운영 전환 체크리스트 6의 시험 결과다. workflow 권한 없이 재발급한 봇 PAT로 워크플로 파일을 바꾼 커밋을 push하자 GitHub이 거부했고 원격에 브랜치가 생기지 않았다.",
+  "cases": [
+    {
+      "name": "workflow-push-rejected",
+      "expected": "하네스 리포에서 봇 토큰(workflow 권한 없음)이 워크플로 파일을 바꾼 커밋을 push하면 GitHub이 거부한다",
+      "observed": "ops-check 3번이 '봇 토큰에 workflow 권한이 없다(범위: read:org, repo)'인 상태에서(2026-11-18, 이 Mac의 봇 토큰), main ba141ce 위에 .github/workflows/check.yml 맨 위에 주석 한 줄만 더한 커밋 1155bcf762731d7c70a0c0a413c8e032281899ca를 만들었다(git 객체로만 만들었고 작업 트리와 다른 브랜치는 건드리지 않았다. 변경은 1개 파일 1줄 추가). 2026-11-18T09:57:42Z에 git push origin 1155bcf…:refs/heads/trial/workflow-push-rejected-20261118이 종료 코드 1로 끝났고 GitHub의 답은 \"! [remote rejected] 1155bcf762731d7c70a0c0a413c8e032281899ca -> trial/workflow-push-rejected-20261118 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/check.yml` without `workflow` scope)\"였다. 바로 뒤의 git ls-remote origin 'refs/heads/trial/*' 출력이 비어 있어 원격에 브랜치가 생기지 않았음을 확인했다. 지울 브랜치와 PR은 없다. 버릴 브랜치 이름으로만 push했고 실제 변경이 든 브랜치나 열린 PR의 브랜치는 쓰지 않았다.",
+      "verdict": "pass",
+      "evidence": ["https://github.com/ariawell-hub/harness_project/issues/124"]
+    }
+  ]
+}
