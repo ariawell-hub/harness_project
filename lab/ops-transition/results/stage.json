@@ -1,0 +1,32 @@
+{
+  "item": "stage",
+  "summary": "테스트 리포에서 stage를 operation으로 바꾸는 PR #18은 두 검증자 승인과 자동 병합 켜짐에도 risk-gate 실패와 코드 오너 리뷰 요청으로 막혀 있다가, 제작자 승인 뒤 risk-gate가 다시 판정돼 2분 만에 자동 병합됐다. 처음에는 stage: operation에서 check의 테스트 1건이 실패했고(하네스 테스트 도구 결함), 하네스 리포 PR #122로 고친 뒤 같은 수정을 함께 넣어 통과했다.",
+  "cases": [
+    {
+      "name": "operation-pr",
+      "expected": "테스트 리포에서 stage를 operation으로 바꾸는 PR이 제작자 승인으로만 병합된다",
+      "observed": "PR #18(Issue #17, 계획 risk: high, harness.config.json의 stage와 scripts/test/selftest.test.ts, CHANGELOG 한 줄)을 초안으로 올렸다. head cc8c8b0에서 check와 두 검증자(review/claude, review/codex '승인 (지적 없음)')가 통과했고 harness-guard는 success '보호 경로 변경 3개: 신호 1건(위험도 높음, 제작자 승인 필요) · 자체 테스트 통과 10', risk-gate는 failure '위험도 높음: 제작자 head 승인 필요 — 계획 risk: high 외 1건'이었다. pr-ready로 초안을 해제하고 2026-11-18T07:40:17Z에 자동 병합(squash)을 켰다. 07:42:39Z에 state=OPEN, mergeable=MERGEABLE, mergeStateStatus=BLOCKED였고 코드 오너(ariawell-hub)에게 간 리뷰 요청이 남아 있었다(pr-state 분류 'approval (제작자의 head 승인 대기)'). 제작자 계정(ariawell-hub)이 07:48:42Z에 head cc8c8b0을 승인하자 review-trigger 워크플로가 gates를 다시 돌렸고, risk-gate가 07:50:32Z에 success '위험도 높음, 제작자 head 승인: 계획 risk: high 외 1건'으로 바뀐 뒤 07:50:43Z에 자동 병합됐다(main 6a31257, Issue #17 닫힘). 승인 전 8분 26초 동안은 병합되지 않았다. 병합 뒤 main의 harness.config.json은 \"stage\": \"operation\"이고 main의 check(실행 44262053992)도 success였다. 승인한 계정은 제작자이고 봇(ariawell247)은 승인하지 않았다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/18",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44259524616",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44260695609",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44261792420",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44261811294",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44262053992",
+        "https://github.com/ariawell-hub/harness-ops-lab/issues/17"
+      ]
+    },
+    {
+      "name": "check-at-operation",
+      "expected": "stage를 operation으로 바꾼 트리에서 check(자체 테스트 포함)가 통과한다",
+      "observed": "처음에는 통과하지 못했다. stage만 바꾼 상태의 로컬 check에서 test 553개 가운데 1개(scripts/test/selftest.test.ts의 runner 약화 테스트)가 'step 2개짜리 Issue가 닫히지 않았다'로 실패했다. 원인은 그 테스트의 copyHarness()가 하네스 사본에 .github/CODEOWNERS를 넣지 않은 것이다(운영 단계의 check는 CODEOWNERS가 없으면 실패한다). 하네스 리포 Issue #121·PR #122(main 43b5149)로 고쳤고, 같은 수정(파일 blob 3000e19b가 하네스 main과 같다)을 PR #18에 함께 넣은 뒤 로컬 check와 CI의 check(실행 44259524490)가 통과했다. 수정 전의 실패는 push 전 로컬에서만 났다(CI 실행 근거는 없다). 하네스 동작이 아니라 테스트 도구의 결함이었지만, 고치기 전에는 하네스 리포의 전환 PR(step7)도 같은 테스트에서 막혔을 것이다.",
+      "verdict": "partial",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/issues/121",
+        "https://github.com/ariawell-hub/harness_project/pull/122",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44259524490"
+      ]
+    }
+  ]
+}

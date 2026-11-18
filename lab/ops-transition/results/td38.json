@@ -1,0 +1,78 @@
+{
+  "item": "td38",
+  "summary": "TD-38의 '가짜 GitHub과 로컬 원격으로만 확인한 것' 가운데 runner 무인 실행(테스트 리포, 2026-11-18)에서 실제로 본 것과 보지 못한 것이다. 본 것: runner의 계획 검증 초안 PR과 초안 해제, 지적 대응 세션과 push, 반박 댓글, 작업자 2개의 선점 경쟁, 정지 알림, check 실행의 다시 실행. 나중에 다시 띄운 실행에서 충돌 자동 해결(세션과 main 병합 push까지)도 봤다. 보지 못한 것: 교착 보고, 발산 되돌리기, 승인 요청·오래된 CI 대기 알림, runner가 하는 이어받기용 갱신.",
+  "cases": [
+    {
+      "name": "runner-plan-review-draft",
+      "expected": "runner가 계획만 담은 초안 PR을 열고, 두 검증자가 계획을 승인하면 구현을 올린 뒤 초안을 해제한다",
+      "observed": "PR #6: 02:25:02Z 초안으로 생성(계획 커밋만) → 원장에 '계획 검증(G1) … 승인: claude, codex' → step0 구현·완료 커밋 → 03:08:32Z ready_for_review와 자동 병합 켬(타임라인). PR #7도 같은 순서로 초안 해제까지 갔다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/6",
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/7"
+      ]
+    },
+    {
+      "name": "runner-finding-response",
+      "expected": "검증자의 차단 지적이 나오면 runner가 지적 대응 세션을 띄우고 고친 커밋을 한 번 push한다",
+      "observed": "PR #6에서 review/codex의 F1(P1) 뒤 runner 로그에 'pick: PR #6에 검증자의 수정 요청 또는 열린 차단 지적이 있다 → session-start → review-pushed: 대응: F1'이 남았고 커밋 ebb54f3 'fix(F1): …'이 올라갔다. 다음 판정에서 F1이 fixed가 됐다. PR #7도 같았다(커밋 ca15dd4).",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/6",
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/6/commits/ebb54f37ce5b4db18c2a54c4d6d8839475e9019f"
+      ]
+    },
+    {
+      "name": "runner-rebuttal",
+      "expected": "고친 지적이 원장에 open으로 남으면 runner가 반박 댓글(지적/근거/요지)을 달고, 새 커밋 뒤 검증자가 답한다",
+      "observed": "PR #7에서 F1을 고친 뒤에도 원장에 open으로 남자 runner가 03:02:41Z에 반박 댓글(지적 F1, 근거 ca15dd4, 요지)을 달고 계획 커밋 1188e0a를 올렸다(로그 'rebuttal-posted: F1', 'review-pushed: 대응: F1(반박)'). 다음 판정에서 원장의 F1이 fixed가 되고 계획이 승인됐다.",
+      "verdict": "pass",
+      "evidence": ["https://github.com/ariawell-hub/harness-ops-lab/pull/7"]
+    },
+    {
+      "name": "two-workers-claim-race",
+      "expected": "작업자 2개가 같은 Issue를 동시에 고르면 한쪽만 선점하고 진 쪽은 다른 Issue로 넘어간다",
+      "observed": "runner-1과 runner-2가 둘 다 Issue #4를 골랐고, runner-1의 claim/4 push가 거부돼 'claim-lost: Issue #4는 이미 선점되어 있다'를 남기고 Issue #5를 선점했다. 두 작업자는 같은 clone에서 따로 worktree를 써서 끝까지 서로 막지 않았다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/issues/4",
+        "https://github.com/ariawell-hub/harness-ops-lab/issues/5"
+      ]
+    },
+    {
+      "name": "stop-notice",
+      "expected": "runner가 사람을 기다리며 멈출 때 Issue에 제작자 멘션 댓글과 needs-human 라벨을 남긴다",
+      "observed": "Issue #4에 03:43:57Z needs-human 라벨, 03:43:58Z 제작자 멘션 댓글(질문 1건, 선택지 A·B·C와 추천)이 달렸고 runner-2가 'stop: 사람 대기 1건'으로 끝났다. 테스트 리포의 start가 이 항목을 ① needs-human으로 맨 먼저 보였다.",
+      "verdict": "pass",
+      "evidence": ["https://github.com/ariawell-hub/harness-ops-lab/issues/4"]
+    },
+    {
+      "name": "check-rerun",
+      "expected": "실패한 check 실행을 다시 실행하면 같은 실행의 2회차가 돌고 그 결과를 revert 워크플로가 읽는다",
+      "observed": "main check 실행 44234754755의 1회차 실패 뒤 revert 워크플로가 실패한 job을 다시 실행했고, 2회차(run_attempt 2)의 실패를 읽어 revert로 정했다. pr-state가 PR의 다시 실행한 check를 읽는 경로는 보지 않았다.",
+      "verdict": "partial",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44234754755",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44236492141"
+      ]
+    },
+    {
+      "name": "conflict-auto-resolve",
+      "expected": "main과 충돌한 PR을 runner가 충돌 해결 세션으로 풀어 main 병합 커밋을 올린다",
+      "observed": "다시 띄운 runner-2가 'pick: PR #7가 main과 충돌한다(DIRTY)'로 충돌 해결 세션을 띄웠고(08:40:37Z~08:46:46Z, 10턴, 권한 거부 0건), 'conflict-resolved'(files: docs/harness/CHANGELOG.md)를 남기고 main 병합 커밋 9d72367을 일반 push로 올렸다. PR의 mergeStateStatus가 DIRTY에서 벗어났고 그 head의 check는 success였다. 그 뒤의 판정과 병합은 보지 못했다(제작자의 뒷정리로 검증 App이 빠져 gates의 기록 job이 실패했다). 제작자 답을 받은 뒤 이어 가기(needs-human 라벨 떼기, 계획 active 복귀)도 이 실행에서 봤다.",
+      "verdict": "partial",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness-ops-lab/pull/7",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44269941563",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44269937831"
+      ]
+    },
+    {
+      "name": "not-observed",
+      "expected": "교착 보고, 발산 되돌리기 push와 그 뒤 판정, 승인 요청·오래된 CI 대기 알림과 라벨 떼기, runner가 하는 승인 이어받기용 갱신, 흉내 상태가 섞인 커밋, error 상태, 100개를 넘는 상태·댓글, 2라운드 동결",
+      "observed": "runner 실행(Issue 2건과 PR #7의 이어 가기)에서는 이 경로들이 생기지 않았다. 승인 이어받기는 대화 세션이 올린 PR #11에서만 확인했다(flow 항목의 carry-over).",
+      "verdict": "n/a",
+      "evidence": []
+    }
+  ]
+}

@@ -148,6 +148,8 @@ revert 워크플로(`.github/workflows/revert.yml`)의 `act` job이 쓰는 봇 �
 
 구축 단계에도 CODEOWNERS 파일이 있으면 GitHub이 보호 경로를 바꾼 PR(초안 해제 뒤)마다 제작자에게 리뷰를 요청한다. 이 설정을 켜기 전에는 알림일 뿐이고 병합을 막지 않는다.
 
+revert PR도 예외가 아니다. 이 설정을 켠 리포에서 main을 깬 커밋이 보호 경로를 바꿨다면, 그것을 되돌리는 `revert/<SHA>` PR도 보호 경로를 바꾸므로 제작자 승인 전에는 병합되지 않는다(봇이 PR을 만들 때 제작자에게 리뷰 요청이 간다). 보호 경로 밖만 바꾼 커밋의 revert는 그대로 자동 병합된다. 하네스 리포 자신은 대부분의 변경이 보호 경로라, 운영 단계에서는 revert가 제작자 승인으로 끝난다.
+
 ## 봇 토큰의 `workflow` 권한 회수 (제작자, 운영 전환)
 
 구축 단계의 봇 PAT에는 워크플로 파일을 push하기 위한 `workflow` 권한이 있다([ADR-0003](decisions/ADR-0003-bot-token-classic-pat.md)). 운영 단계에서는 뺀다(설계서 10.4절 운영 전환 체크리스트 3). 옛 토큰의 권한을 줄여 저장하지 않고, 새 토큰을 발급한 뒤 옛 토큰을 지운다.
@@ -156,7 +158,7 @@ revert 워크플로(`.github/workflows/revert.yml`)의 `act` job이 쓰는 봇 �
 
 1. 봇 계정으로 GitHub에 로그인한다(제작자 계정을 쓰는 브라우저 프로필과 다른 프로필에서). Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic).
 2. 권한은 `repo`와 `read:org`만 고른다. `workflow`는 고르지 않는다. 만료는 90일 이하로 둔다.
-3. 에이전트가 도는 머신마다 `GH_TOKEN` 값을 새 토큰으로 바꾼다(환경 변수를 넣어 둔 곳). 바꾼 뒤 터미널과 에이전트 세션을 새로 연다.
+3. 에이전트가 도는 머신마다 `GH_TOKEN` 값을 새 토큰으로 바꾼다(환경 변수를 넣어 둔 곳). 바꾼 뒤 터미널과 에이전트 세션을 새로 연다. 이어 쓰던 세션은 시작할 때 받은 옛 토큰을 그대로 들고 있어, 옛 토큰을 지운 뒤에는 `gh`가 401(`Bad credentials`)로 실패한다. 세션은 토큰을 스스로 바꿔 끼우지 않는다(R20). 그 세션에 "끝났다"고 알려도 GitHub 작업은 새 세션에서만 이어진다.
 4. `revert` environment의 시크릿 `REVERT_BOT_TOKEN`을 같은 새 토큰으로 바꾼다(위 "`revert` environment").
 5. 옛 토큰을 지운다(Tokens (classic) 목록 → Delete).
 
@@ -197,11 +199,13 @@ revert 워크플로(`.github/workflows/revert.yml`)의 `act` job이 쓰는 봇 �
 
 확인: 봇이 테스트 리포에서 `node scripts/harness.ts required-checks`와 `ops-check`를 실행하고, environment와 시크릿 이름은 `gh api repos/<owner>/<repo>/environments`로 본다(값은 볼 수 없다). 값이 틀리면 첫 PR의 판정 job 로그에 드러난다(예: 위 "Codex CI 인증 등록"의 흔한 실수 표).
 
+봇이 테스트 리포에서 일하는 방식: 테스트 리포는 하네스 리포 옆에 따로 clone한다. 하네스 리포에서 연 대화 세션의 훅은 리포 밖 파일 쓰기를 R3으로 막으므로(Bash로 돌려 쓰지 않는다), 테스트 리포의 파일 내용은 그 리포의 worktree에서 띄운 세션이 쓴다. 지시서 파일을 표준 입력으로 주고 `claude -p --permission-mode dontAsk --settings .claude/runner-settings.json`으로 실행하면 테스트 리포의 훅과 무인 권한 프로필이 적용된다. 그 세션은 파일 수정·`check`·커밋까지 하고, `new-task`·push·PR 생성·자동 병합 켜기는 부른 세션이 테스트 리포 폴더에서 Bash로 한다. `git worktree add`로 직접 만든 worktree는 `setup`을 먼저 돌린다. 훅에 테스트 리포용 예외를 둘지는 정하지 않았다(TD-46).
+
 남는 위험: 시험 기간에는 진짜 구독 인증과 App 키가 테스트 리포의 environment에 있고, 봇이 병합한 워크플로가 그 값을 받을 수 있다. ADR-0004는 이런 기간에 필수 승인을 1로 올리라고 했지만, 이 시험은 사람 승인 없는 자동 병합 자체를 확인해야 해서 0으로 둔다. 대신 시험용으로 새로 발급한 값만 넣고, 기간을 짧게 하고, 끝나면 바로 아래 정리를 한다.
 
 시험 뒤 정리(제작자):
 
-1. 테스트 리포에 넣은 자격증명을 폐기한다: Claude 토큰과 Codex 로그인을 다시 발급하거나 해제하고, 두 App에서 시험용으로 만든 개인 키를 지운다.
+1. 테스트 리포에 넣은 자격증명을 폐기한다: Claude 토큰과 Codex 로그인을 다시 발급하거나 해제하고, 두 App에서 시험용으로 만든 개인 키를 지운다. `revert` environment의 `REVERT_BOT_TOKEN`은 하네스 리포에서 계속 쓰는 봇 PAT라 폐기하지 않고, 테스트 리포의 시크릿만 지운다(Settings → Environments → `revert`).
 2. 두 App의 Repository access에서 테스트 리포를 뺀다.
 3. 봇 초대를 철회한다. 확인: 봇이 `gh api 'user/repos?affiliation=owner,collaborator,organization_member&per_page=100' --jq '.[].full_name'`을 실행하면 하네스 리포 하나만 나온다(ADR-0003).
 4. 리포를 보관한다(Settings → General → Archive this repository).

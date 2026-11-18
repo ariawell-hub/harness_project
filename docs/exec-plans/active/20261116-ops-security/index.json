@@ -40,7 +40,8 @@
     {
       "step": 6,
       "name": "test-repo",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-18T17:10:56+09:00"
     },
     {
       "step": 7,
