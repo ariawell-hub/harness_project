@@ -86,6 +86,7 @@ review_cycle: on-change
 - 설계서 v0.7.53 · `test-effect`가 변경 전 코드에서 실패한 이유를 표시한다(Issue #118): 설정 `testEffect.assertPattern`(이 리포와 core 프로파일은 `AssertionError|ERR_ASSERTION`)이 있으면 판정 줄이 "단언 실패"와 "단언 실패 아님: 모듈 없음 등"으로 나뉘고, 결과 항목에 `reason`이, 결과에 `notes`가 생긴다. 뒤쪽이 있으면 명령과 `check`가 `참고:` 한 줄을 낸다. **통과·실패 판정은 바뀌지 않는다.** 검증자 프롬프트와 자체 리뷰 체크리스트에 "새로 만든 모듈을 import하는 테스트 파일은 단언을 직접 확인한다"를 더했다(항목 추가, 기존 항목은 그대로). 자체 테스트 시나리오 `r5-test-effect`가 두 판정 줄을 확인한다. CI 결과를 검증자 입력으로 넘기는 일은 TD-43.
 - 자체 테스트의 테스트 도구 수정(Issue #121): `scripts/test/selftest.test.ts`의 하네스 사본(`copyHarness()`)에 `.github/CODEOWNERS`를 넣는다. 빠져 있어서 `stage: operation`에서는 사본으로 만든 샘플 리포의 `check`가 실패했고 runner 약화 테스트가 다른 단언에서 걸렸다(테스트 리포의 운영 전환 시험에서 발견). 그 테스트를 사본의 `stage`를 `build`·`operation`으로 고정해 두 번 돌린다. **하네스 동작과 검사는 바뀌지 않았다**(테스트 파일만).
 - 설계서 v0.7.54 · 운영 전환 체크리스트 5의 테스트 리포 시험 기록(Issue #102 step6): 결과 기록 틀 `lab/ops-transition/`(`report.ts`, `results/`, 테스트)과 실제 GitHub 테스트 리포에서 확인한 사례별 결과. 설계서 10.4절 체크리스트 5(결과 위치와 확인 명령), 16절(도입하며 걸린 곳), 19절 2단계(runner 무인 시범 실행 결과), `docs/SECURITY.md`(재발급 뒤 이어 쓰던 세션, 코드 오너 설정과 revert PR, 테스트 리포 작업 방식), TD-37·38·41·46 갱신과 TD-44·45·47 등록. **규칙과 검사는 바뀌지 않았다**(문서와 `lab/`만).
+- GitHub Actions 사용량 절감(Issue #126, 제작자 지시): 표준 명령 `test`의 동시 실행 수의 최소값을 1에서 2로 올렸다(`commands.test.run`의 `--test-concurrency`, `harness.config.json`과 프로파일 core). 비공개 리포의 표준 러너는 2코어라 "코어 수 − 1"이면 테스트 파일이 하나씩 돌았다(CI `check`의 `test` 단계 477초). 코어가 4개 이상인 머신의 동작은 그대로다(코어 수 − 1, 최대 8). 절차서 5절에 "PR 본문은 모아서 한 번에 고친다"를 더했다(`gates`가 본문 수정마다 다시 돈다). **도는 테스트와 검사는 바뀌지 않았다.**
 
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 

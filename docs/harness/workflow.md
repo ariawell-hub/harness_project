@@ -129,6 +129,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 ## 5. PR
 
 - 제목: `<type>(<계획 id>): step<N> <이름>`. 본문 첫 줄은 마지막 step만 `Closes #<issue>`, 나머지는 `Refs #<issue>`.
+- **본문은 올릴 때 맞추고, 고칠 일이 생기면 모아서 한 번에 고친다.** `gates`는 PR 본문·제목을 고칠 때마다 다시 돈다(본문을 읽는 게이트가 있어서다). 한 번에 job 둘이 돌고 job마다 1분으로 올려 청구된다(Actions 사용량, Issue #126). `gh pr edit`를 여러 번 나눠 실행하지 않는다. 커밋을 올릴 예정이면 본문도 그 push 직전에 고친다.
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약과 `gh pr checks`는 출처를 보지 않는다. 필수 체크별 상태(기대 출처가 쓴 결과만)와 지금 무엇을 기다리는지는 worktree에서 `node scripts/harness.ts pr-state`로 본다(`--pr <번호>`로 다른 PR. 읽기만 한다). 병합 가능 여부는 `mergeStateStatus`로 본다.
 - `harness.config.json`의 `protectedPaths`나 `github.owner`를 바꾸면 같은 PR에서 `node scripts/harness.ts codeowners --write`로 `.github/CODEOWNERS`를 다시 만든다. 이 파일은 손으로 고치지 않는다. 어긋나면 `check`의 doc-lint 단계가 실패한다.
