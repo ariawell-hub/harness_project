@@ -205,7 +205,7 @@ revert PR도 예외가 아니다. 이 설정을 켠 리포에서 main을 깬 커
 
 시험 뒤 정리(제작자):
 
-1. 테스트 리포에 넣은 자격증명을 폐기한다: Claude 토큰과 Codex 로그인을 다시 발급하거나 해제하고, 두 App에서 시험용으로 만든 개인 키를 지운다.
+1. 테스트 리포에 넣은 자격증명을 폐기한다: Claude 토큰과 Codex 로그인을 다시 발급하거나 해제하고, 두 App에서 시험용으로 만든 개인 키를 지운다. `revert` environment의 `REVERT_BOT_TOKEN`은 하네스 리포에서 계속 쓰는 봇 PAT라 폐기하지 않고, 테스트 리포의 시크릿만 지운다(Settings → Environments → `revert`).
 2. 두 App의 Repository access에서 테스트 리포를 뺀다.
 3. 봇 초대를 철회한다. 확인: 봇이 `gh api 'user/repos?affiliation=owner,collaborator,organization_member&per_page=100' --jq '.[].full_name'`을 실행하면 하네스 리포 하나만 나온다(ADR-0003).
 4. 리포를 보관한다(Settings → General → Archive this repository).
