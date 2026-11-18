@@ -151,6 +151,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-18 step7: **CI가 멈췄다(제작자 차례).** PR #125의 F1 수정 커밋 `2c32caa`를 10:47Z에 올리자 `check`와 `gates`의 job이 러너를 받지 못하고 1초 만에 실패했다. job 주석은 "The job was not started because recent account payments have failed or your spending limit needs to be increased"다. 10:59Z에 `check`를 한 번 다시 실행해도 같았다(실행 44288730106, `gates` 44288784262). 그 전(10:03Z의 `check`, 10:11Z의 `judge-codex`)에는 정상이었다. 결제·지출 한도는 제작자만 볼 수 있고 비용 결정이라 Issue #102에 `needs-human`과 요청 댓글을 남겼다. 풀릴 때까지 PR #125는 병합되지 않고, 이 전환 PR은 PR #125가 병합된 뒤에 올린다. 그동안 CI 없이 되는 일(문서, `stage: operation`에서의 로컬 `check`)을 했다.
 - 2026-11-18 step7: `harness.config.json`의 `stage`를 `operation`으로 바꾼 트리에서 이 Mac의 전체 `check`가 통과했다(`test` 134.7초. #121의 수정이 들어간 뒤라 테스트 리포에서 본 `selftest.test.ts` 실패는 없다). `ops-check`·`doc-lint`·`codeowners`도 종료 코드 0이다. 여기까지를 로컬 커밋으로 남겼고 올리지 않았다(PR #125 병합과 `origin/main` 병합이 먼저다. 순서는 "다음 할 일").
 - 2026-11-18 step7: 제작자가 대화로 원인을 확인해 주었다: 결제 실패가 아니라 Actions 포함 사용량 소진이다(컴퓨트 $18.00 / $18.00, Pro 요금제). 봇이 이 리포의 11월 실행을 집계했다(발견 사항, TD-49). 남은 step7 작업의 예상 사용량은 100~150분이다(PR #125 재판정과 병합 약 25분, 전환 PR 판정 2라운드와 병합 약 60분, 재판정 여유 1~2라운드). 지출 한도를 올릴지 다음 달 포함량을 기다릴지는 제작자가 정한다(비용). 정해질 때까지 push하지 않는다(올려도 job이 돌지 않는다).
+- 2026-11-18 step7: 제작자가 절감 작업을 먼저 하라고 지시해 Issue #126·PR #127을 따로 올렸다(소규모 계획 `20261118-actions-usage`: `test` 동시 실행 수의 최소값 2, PR 본문 수정 규칙). 그 PR을 올리자 Actions가 다시 돌았다(14:17Z. 이유는 봇이 확인하지 못했다). CI `check`의 `test` 단계는 477초에서 332초가 됐다. PR #125의 멈춘 `check`와 `gates`도 다시 실행해 통과했다. **다음에 걸린 것은 Codex 사용 한도다.** PR #125·#127의 `judge-codex` 판정 job이 "You’ve hit your usage limit … try again at Nov 21st, 2026 8:36 AM"으로 끝나 `review/codex`가 판정 없음이다(실행 44324118053, 44323689797). 모든 PR이 멈춘다. 비용 결정이라 Issue #102에 요청 댓글을 남겼다. PR #127은 `commands` 변경이라 `risk-gate`가 위험도 높음으로 판정해 제작자 승인도 필요하다(초안으로 되돌렸다). 같은 때 `judge-codex`의 기록 job이 `review-ledger` 상태를 쓰다 HTTP 500으로 실패했다(TD-48이 다시 나왔다).
 
 ## 의사결정 로그
 
@@ -251,6 +252,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - (step7) zsh에서 큰따옴표 안의 `$commit:refs/heads/…`는 `:r` 수식어로 읽혀 변수 값 뒤에 `efs/heads/…`가 붙는다. git refspec처럼 변수 바로 뒤에 `:`이 오는 문자열은 `${변수}:…`로 적는다. 이번에는 깨진 refspec이 로컬에서 거부돼 원격에 닿지 않았다. → 처리: 해당 없음
 - (step7) TD 표(`tech-debt-tracker.md`)에는 한 칸이 2천 자를 넘는 행이 있어, 가장 긴 칸의 길이가 바뀌면 prettier가 모든 행의 채움을 바꾼다. 문서 한 줄 수정이 수백 KB의 diff가 되고 다른 PR과 충돌하기 쉽다(TD-39와 같은 종류다). 긴 이력은 표 밖으로 빼는 편이 낫다. → 처리: TD-39
 - (step7) GitHub Actions의 포함 사용량(Pro, $18 = 3,000분)이 2026-11-18에 바닥나 모든 job이 시작되지 않았다. 이 리포의 11-11~18 실행 893개를 job 소요 시간으로 세면 청구 약 2,399분, 실제 약 1,245분이다. 1분이 안 되는 job 1,428개가 1,428분으로 청구됐다(실제 439분). 판정 워크플로의 잘게 나눈 job이 크다. 사용량이 바닥난 것은 job이 실패한 뒤에야 알 수 있었다. → 처리: TD-49
+- (step7) Codex 계정이 사용 한도에 걸리면 `review/codex`가 판정 없음으로 남아 모든 PR이 멈춘다(2026-11-18, PR #125·#127). 한도에 가까워졌는지 미리 알 수 없고 이유는 판정 job 로그를 열어야 보인다. → 처리: TD-50
 
 ## 열린 질문
 
@@ -265,8 +267,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **기다리는 것(제작자 차례)**: GitHub Actions의 결제·지출 한도(Issue #102의 `needs-human` 댓글). 풀리면 아래 순서로 잇는다.
-  1. PR #125(Issue #124, 브랜치 `chore/20261118-target-repo-trial`, head `2c32caa`)의 실패한 실행을 다시 실행한다: `gh run rerun 44288730106 --failed`(`check`)와 그 head의 `gates` 실행(44288784262, 44288726775 가운데 최근 것). `review/codex`가 F1을 닫고 사람 승인 없이 자동 병합되는지 본다(자동 병합은 켜 두었다). 병합 시각·병합 커밋·리뷰 0건을 적어 둔다.
+- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **기다리는 것(제작자 차례)**: Codex 계정의 사용 한도(Issue #102의 두 번째 `needs-human` 댓글. 요금제를 올리거나 2026-11-21까지 기다린다). Actions는 2026-11-18T14:17Z부터 다시 돈다. 풀리면 아래 순서로 잇는다.
+  1. PR #125(Issue #124, 브랜치 `chore/20261118-target-repo-trial`, head `2c32caa`)의 `check`와 기계 판정은 통과했다(다시 실행했다). 남은 것은 Codex 판정이다: `gh run rerun 44324118053 --failed`(`judge-codex`). `review/codex`가 F1을 닫고 사람 승인 없이 자동 병합되는지 본다(자동 병합은 켜 두었다). 병합 시각·병합 커밋·리뷰 0건을 적어 둔다.
   2. 이 worktree(`chore/20261116-ops-security-s7`)에 `origin/main`을 병합한다(`target-repo.json`과 `report.ts`의 `target-repo` 항목이 들어온다). `lab/ops-transition/results/target-repo.json`에 `low-risk-auto-merge` 사례를 더하고, `report.ts`의 필수 사례에 `low-risk-auto-merge`를 더한다(테스트 먼저). `lab/ops-transition/README.md`의 항목 표와 머리말도 맞춘다.
   3. 설계서 10.4절 "이 리포의 확인 결과" 6번의 `TODO(step7)` 줄을 채운다. 진행 로그를 갱신한다.
   4. AC 명령과 `check`가 통과하면 `complete-step` → push → 초안 PR(`Closes #102`, 본문에 체크리스트 1~6의 표와 `ops-check` 출력, 보호 경로 확인 줄). 이때는 `protected-needs-owner`를 아직 필수 사례로 등록하지 않는다(관찰 전이다).
