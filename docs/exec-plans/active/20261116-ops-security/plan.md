@@ -152,6 +152,8 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-18 step7: `harness.config.json`의 `stage`를 `operation`으로 바꾼 트리에서 이 Mac의 전체 `check`가 통과했다(`test` 134.7초. #121의 수정이 들어간 뒤라 테스트 리포에서 본 `selftest.test.ts` 실패는 없다). `ops-check`·`doc-lint`·`codeowners`도 종료 코드 0이다. 여기까지를 로컬 커밋으로 남겼고 올리지 않았다(PR #125 병합과 `origin/main` 병합이 먼저다. 순서는 "다음 할 일").
 - 2026-11-18 step7: 제작자가 대화로 원인을 확인해 주었다: 결제 실패가 아니라 Actions 포함 사용량 소진이다(컴퓨트 $18.00 / $18.00, Pro 요금제). 봇이 이 리포의 11월 실행을 집계했다(발견 사항, TD-49). 남은 step7 작업의 예상 사용량은 100~150분이다(PR #125 재판정과 병합 약 25분, 전환 PR 판정 2라운드와 병합 약 60분, 재판정 여유 1~2라운드). 지출 한도를 올릴지 다음 달 포함량을 기다릴지는 제작자가 정한다(비용). 정해질 때까지 push하지 않는다(올려도 job이 돌지 않는다).
 - 2026-11-18 step7: 제작자가 절감 작업을 먼저 하라고 지시해 Issue #126·PR #127을 따로 올렸다(소규모 계획 `20261118-actions-usage`: `test` 동시 실행 수의 최소값 2, PR 본문 수정 규칙). 그 PR을 올리자 Actions가 다시 돌았다(14:17Z. 이유는 봇이 확인하지 못했다). CI `check`의 `test` 단계는 477초에서 332초가 됐다. PR #125의 멈춘 `check`와 `gates`도 다시 실행해 통과했다. **다음에 걸린 것은 Codex 사용 한도다.** PR #125·#127의 `judge-codex` 판정 job이 "You’ve hit your usage limit … try again at Nov 21st, 2026 8:36 AM"으로 끝나 `review/codex`가 판정 없음이다(실행 44324118053, 44323689797). 모든 PR이 멈춘다. 비용 결정이라 Issue #102에 요청 댓글을 남겼다. PR #127은 `commands` 변경이라 `risk-gate`가 위험도 높음으로 판정해 제작자 승인도 필요하다(초안으로 되돌렸다). 같은 때 `judge-codex`의 기록 job이 `review-ledger` 상태를 쓰다 HTTP 500으로 실패했다(TD-48이 다시 나왔다).
+- 2026-11-19 step7: 제작자가 Codex 요금제를 올렸다(대화). PR #125의 `judge-codex`를 다시 실행하자 `review/codex`가 승인(지적 없음, 원장 F1 닫힘)으로 기록됐고, 필수 체크 9개가 모두 success가 되자 GitHub이 2026-11-18T15:04:49Z에 병합했다(병합 커밋 `3f8b6eb`, 리뷰 0건, 요청된 리뷰어 없음). **`low-risk-auto-merge` 확인.** Issue #124도 닫혔다. 이 worktree에 `origin/main`을 병합했다.
+- 2026-11-19 step7: `target-repo.json`에 `low-risk-auto-merge` 사례를 적고 `report.ts`의 필수 사례에 더했다. 테스트를 먼저 바꿨다(필수 목록, 사례 하나만 있으면 "필수 사례 low-risk-auto-merge가 없다", `partial`이면 막힘). 구현 전 실행에서 8개 가운데 2개가 실패했고 구현 뒤 모두 통과했다. `node lab/ops-transition/report.ts --all` 통과. 설계서 10.4절 "이 리포의 확인 결과" 6번을 채웠다(`protected-needs-owner`는 이 PR의 승인 전 상태를 본 뒤 적는다).
 
 ## 의사결정 로그
 
@@ -267,10 +269,10 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **기다리는 것(제작자 차례)**: Codex 계정의 사용 한도(Issue #102의 두 번째 `needs-human` 댓글. 요금제를 올리거나 2026-11-21까지 기다린다). Actions는 2026-11-18T14:17Z부터 다시 돈다. 풀리면 아래 순서로 잇는다.
-  1. PR #125(Issue #124, 브랜치 `chore/20261118-target-repo-trial`, head `2c32caa`)의 `check`와 기계 판정은 통과했다(다시 실행했다). 남은 것은 Codex 판정이다: `gh run rerun 44324118053 --failed`(`judge-codex`). `review/codex`가 F1을 닫고 사람 승인 없이 자동 병합되는지 본다(자동 병합은 켜 두었다). 병합 시각·병합 커밋·리뷰 0건을 적어 둔다.
-  2. 이 worktree(`chore/20261116-ops-security-s7`)에 `origin/main`을 병합한다(`target-repo.json`과 `report.ts`의 `target-repo` 항목이 들어온다). `lab/ops-transition/results/target-repo.json`에 `low-risk-auto-merge` 사례를 더하고, `report.ts`의 필수 사례에 `low-risk-auto-merge`를 더한다(테스트 먼저). `lab/ops-transition/README.md`의 항목 표와 머리말도 맞춘다.
-  3. 설계서 10.4절 "이 리포의 확인 결과" 6번의 `TODO(step7)` 줄을 채운다. 진행 로그를 갱신한다.
+- step7 진행 상태(2026-11-18, 아래 step6 항목들은 지난 기록이다). **지금 할 일은 4번부터다**(2026-11-19 갱신. Actions와 Codex 판정은 다시 돈다). PR #127(Issue #126, Actions 사용량 절감)도 제작자 승인이 필요하므로, 그 PR이 먼저 병합되면 `origin/main`을 병합한 뒤에 이 PR의 승인을 요청한다(TD-39).
+  1. (끝남, 2026-11-19: PR #125는 15:04:49Z에 병합됐다) 그때 적어 둔 내용: `gh run rerun 44324118053 --failed`(`judge-codex`). `review/codex`가 F1을 닫고 사람 승인 없이 자동 병합되는지 본다(자동 병합은 켜 두었다). 병합 시각·병합 커밋·리뷰 0건을 적어 둔다.
+  2. (끝남, 2026-11-19) 이 worktree(`chore/20261116-ops-security-s7`)에 `origin/main`을 병합한다(`target-repo.json`과 `report.ts`의 `target-repo` 항목이 들어온다). `lab/ops-transition/results/target-repo.json`에 `low-risk-auto-merge` 사례를 더하고, `report.ts`의 필수 사례에 `low-risk-auto-merge`를 더한다(테스트 먼저). `lab/ops-transition/README.md`의 항목 표와 머리말도 맞춘다.
+  3. (끝남, 2026-11-19. 승인 전 상태 부분만 남았다) 설계서 10.4절 "이 리포의 확인 결과" 6번의 `TODO(step7)` 줄을 채운다. 진행 로그를 갱신한다.
   4. AC 명령과 `check`가 통과하면 `complete-step` → push → 초안 PR(`Closes #102`, 본문에 체크리스트 1~6의 표와 `ops-check` 출력, 보호 경로 확인 줄). 이때는 `protected-needs-owner`를 아직 필수 사례로 등록하지 않는다(관찰 전이다).
   5. 판정 1라운드가 끝나면 승인 전 상태(`risk-gate` 실패, `pr-state` 출력, `mergeStateStatus`)를 보고 `protected-needs-owner` 사례를 적는다. step을 `in_progress`로 되돌리고(계획 폴더를 `active/`로) 필수 사례에 `protected-needs-owner`를 더한 뒤(테스트 먼저) 지적 대응과 함께 한 번에 올린다. `check` → `complete-step` → push.
   6. 판정 2라운드가 통과하면 `pr-ready`로 승인을 요청하고 자동 병합을 켠다. 승인 전에 병합되지 않는 것을 확인해 Issue #102에 댓글로 남긴다. 승인을 요청한 뒤에는 커밋을 올리지 않는다.

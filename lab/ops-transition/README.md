@@ -19,17 +19,17 @@
 
 필수 사례가 모두 있고 `verdict`가 `pass`여야 `report.ts`가 통과한다. 필수가 아닌 사례는 `fail`·`partial`·`n/a`여도 기록이 완결되면 통과다.
 
-| 항목             | 필수 사례                                                              | 필수가 아닌 사례                                     |
-| ---------------- | ---------------------------------------------------------------------- | ---------------------------------------------------- |
-| `selftest`       | `ci-check`, `live`                                                     |                                                      |
-| `flow`           | `runner-unattended`, `carry-over`, `no-carry`                          |                                                      |
-| `revert`         | `rerun-first`, `revert-pr`, `issue-reopen`, `plan-restore`, `tampered` |                                                      |
-| `guard-selftest` | `protected-pr`, `non-protected-pr`                                     |                                                      |
-| `codeowners`     | `owner-required`, `auto-merge`                                         |                                                      |
-| `workflow-scope` | `push-rejected`                                                        | `update-after-workflow-change`, `revert-of-workflow` |
-| `stage`          | `operation-pr`                                                         |                                                      |
-| `target-repo`    | `workflow-push-rejected`(하네스 리포 자신에서 한 시험, 체크리스트 6)   | 운영 전환 PR이 두 사례를 더한다                      |
-| `td38`           | 없음(결과 파일이 없어도 된다)                                          | TD-38 목록 가운데 실제로 본 것과 못 본 것            |
+| 항목             | 필수 사례                                                                                   | 필수가 아닌 사례                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `selftest`       | `ci-check`, `live`                                                                          |                                                                             |
+| `flow`           | `runner-unattended`, `carry-over`, `no-carry`                                               |                                                                             |
+| `revert`         | `rerun-first`, `revert-pr`, `issue-reopen`, `plan-restore`, `tampered`                      |                                                                             |
+| `guard-selftest` | `protected-pr`, `non-protected-pr`                                                          |                                                                             |
+| `codeowners`     | `owner-required`, `auto-merge`                                                              |                                                                             |
+| `workflow-scope` | `push-rejected`                                                                             | `update-after-workflow-change`, `revert-of-workflow`                        |
+| `stage`          | `operation-pr`                                                                              |                                                                             |
+| `target-repo`    | `workflow-push-rejected`, `low-risk-auto-merge`(하네스 리포 자신에서 한 시험, 체크리스트 6) | `protected-needs-owner`는 운영 전환 PR의 승인 전 상태를 본 뒤 필수로 더한다 |
+| `td38`           | 없음(결과 파일이 없어도 된다)                                                               | TD-38 목록 가운데 실제로 본 것과 못 본 것                                   |
 
 각 사례가 확인하는 것은 계획의 step6 지시서에 있다.
 

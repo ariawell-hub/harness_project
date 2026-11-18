@@ -1096,7 +1096,7 @@ pnpm test src/auth/login-guard.spec.ts
     3. 충족. `ops-check` 3번: 봇 토큰의 권한 범위가 `read:org, repo`다(Mac. Windows PC는 그 머신에서 다음에 작업할 때 확인한다. 옛 토큰은 지워져 쓸 수 없다). `revert` environment의 시크릿은 재발급 뒤에 갱신됐다(갱신 시각 2026-11-18T05:37:47Z, 이름과 시각만 조회). 에이전트용 브라우저 프로필의 GitHub 로그아웃은 제작자가 확인했다(2026-11-18).
     4. 충족. Q20 시험 조건부 통과(2026-11-14, 18절 Q20).
     5. 충족. 테스트 리포에서 2026-11-17~18에 확인했고 `node lab/ops-transition/report.ts --all`이 통과한다. 필수가 아닌 사례 가운데 끝까지 보지 못한 것은 TD-37·TD-38에 있다.
-    6. TODO(step7): 세 사례의 관찰 결과를 적는다(`lab/ops-transition/results/target-repo.json`). 워크플로 push 거부는 2026-11-18T09:57:42Z에 확인했다.
+    6. 충족(결과 `lab/ops-transition/results/target-repo.json`, `report.ts`의 항목 `target-repo`). 봇이 워크플로 파일을 바꾼 커밋을 push하자 GitHub이 `workflow` 권한이 없다며 거부했다(2026-11-18T09:57:42Z, 원격에 브랜치가 생기지 않았다). 보호 경로 밖 파일만 바꾼 위험도 낮음 PR #125는 코드 오너 리뷰 필수 설정이 켜진 상태에서 리뷰 0건으로 자동 병합됐다(2026-11-18T15:04:49Z). 보호 경로를 바꾸는 PR이 제작자 승인 없이 병합되지 않는 것은 전환 PR 자신에서 확인한다(TODO(step7): 승인 전 상태를 본 뒤 적는다).
     7. 전환 PR의 병합. 병합 뒤 확인(main의 `stage`, 다음 세션의 `start`)은 Issue #102의 댓글에 남긴다.
 
 ---
