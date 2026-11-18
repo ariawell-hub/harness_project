@@ -24,13 +24,18 @@ const IDS = [
   's1-next-task',
 ];
 
-/** 대상 하네스로 쓸 사본(실행기가 샘플 리포에 복사하는 파일들) */
+/**
+ * 대상 하네스로 쓸 사본(실행기가 샘플 리포에 복사하는 파일들).
+ * `.github/CODEOWNERS`가 빠지면 운영 단계 설정의 샘플 리포에서 check가 실패한다(Issue #121).
+ * 구축 단계의 리포에는 그 파일이 없을 수 있어, 실행기처럼 없으면 건너뛴다
+ */
 function copyHarness(): string {
   const dir = tmp('harness-selftest-copy-');
   for (const rel of [
     'scripts',
     '.claude/settings.json',
     '.claude/runner-settings.json',
+    '.github/CODEOWNERS',
     '.gitattributes',
     'harness.config.json',
     'AGENTS.md',
@@ -40,8 +45,11 @@ function copyHarness(): string {
     'docs/exec-plans/TEMPLATE-step.md',
     'docs/exec-plans/tech-debt-tracker.md',
     'docs/harness/workflow.md',
-  ])
-    cpSync(path.join(HARNESS_ROOT, rel), path.join(dir, rel), { recursive: true });
+  ]) {
+    const from = path.join(HARNESS_ROOT, rel);
+    if (rel === '.github/CODEOWNERS' && !existsSync(from)) continue;
+    cpSync(from, path.join(dir, rel), { recursive: true });
+  }
   return dir;
 }
 
@@ -159,18 +167,23 @@ test('self-test: test-effect가 base에서 통과하는 테스트를 막지 않�
   assert.deepEqual(state(off), [['r5-test-effect', 'fail']]);
 });
 
-test('self-test: runner가 AC 결과를 보지 않는(세션의 "완료"를 믿는) 하네스에서는 4.5절 시나리오가 실패한다', () => {
-  const copy = copyHarness();
-  weaken(copy, 'scripts/runner/run.ts', 'const pass = r.code === 0;', 'const pass = true;', 1);
-  const r = selfTestCli(['--harness', copy, '--only', 'r45-runner']);
-  assert.equal(r.code, 1);
-  assert.deepEqual(
-    r.report.results.map((x) => [x.id, x.state]),
-    [['r45-runner', 'fail']],
-    r.report.results[0].detail,
-  );
-  assert.match(r.report.results[0].detail, /AC 실패를 보지 않고 step을 넘겼다/);
-});
+// 사본의 stage를 고정해 두 단계를 모두 본다. 샘플 리포는 대상 하네스의 설정을 물려받고, 운영 단계의 check는
+// CODEOWNERS가 없으면 실패한다. 이 리포의 stage 값에 기대면 한쪽 단계에서만 통과하는 테스트가 된다(Issue #121)
+for (const stage of ['build', 'operation'])
+  test(`self-test: runner가 AC 결과를 보지 않는(세션의 "완료"를 믿는) 하네스에서는 4.5절 시나리오가 실패한다 (stage: ${stage})`, () => {
+    const copy = copyHarness();
+    const f = path.join(copy, 'harness.config.json');
+    writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), stage }));
+    weaken(copy, 'scripts/runner/run.ts', 'const pass = r.code === 0;', 'const pass = true;', 1);
+    const r = selfTestCli(['--harness', copy, '--only', 'r45-runner']);
+    assert.equal(r.code, 1);
+    assert.deepEqual(
+      r.report.results.map((x) => [x.id, x.state]),
+      [['r45-runner', 'fail']],
+      r.report.results[0].detail,
+    );
+    assert.match(r.report.results[0].detail, /AC 실패를 보지 않고 step을 넘겼다/);
+  });
 
 test('self-test CLI: --only로 고른 시나리오만 돌리고, 통과하면 0이다. 없는 id는 2다', () => {
   const r = selfTestCli(['--only', 'r20-owner-commands', '--head-sha', 'b'.repeat(40)]);
