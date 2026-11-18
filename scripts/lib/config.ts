@@ -115,6 +115,8 @@ export interface TestEffectConfig {
   timeoutSec: number;
   /** head 체크아웃에서 base 체크아웃으로 연결할 경로(예: node_modules) */
   link: string[];
+  /** 단언 실패일 때 테스트 출력에 보이는 정규식. 있으면 base에서 실패한 이유를 나눠 표시한다. null이면 나누지 않는다 */
+  assertPattern: string | null;
 }
 
 /** 리포 안 상대 경로(glob 포함)인가: 비어 있지 않고, `/`로 시작하지 않고, `..` 구간과 `\`가 없다 */
@@ -138,11 +140,20 @@ function resolveTestEffect(raw: unknown): TestEffectConfig | null {
   const paths = (v: unknown) => Array.isArray(v) && v.every(relPath);
   const support = r.support ?? [];
   const link = r.link ?? [];
+  const assertPattern = r.assertPattern ?? null;
+  let okPattern =
+    assertPattern === null || (typeof assertPattern === 'string' && assertPattern !== '');
+  try {
+    if (typeof assertPattern === 'string') new RegExp(assertPattern);
+  } catch {
+    okPattern = false;
+  }
   const ok =
     paths(r.files) &&
     (r.files as unknown[]).length > 0 &&
     paths(support) &&
     paths(link) &&
+    okPattern &&
     Array.isArray(r.command) &&
     r.command.length > 0 &&
     r.command.every((x) => typeof x === 'string' && x !== '') &&
@@ -150,7 +161,7 @@ function resolveTestEffect(raw: unknown): TestEffectConfig | null {
     (r.timeoutSec as number) > 0;
   if (!ok)
     throw new ConfigError(
-      `${CONFIG_FILE} 검증 실패:\n- testEffect는 null 또는 { files(리포 안 상대 경로 glob 배열, 1개 이상), support·link(리포 안 상대 경로 배열, 생략 가능), command(문자열 배열), timeoutSec(양의 정수) }`,
+      `${CONFIG_FILE} 검증 실패:\n- testEffect는 null 또는 { files(리포 안 상대 경로 glob 배열, 1개 이상), support·link(리포 안 상대 경로 배열, 생략 가능), command(문자열 배열), timeoutSec(양의 정수), assertPattern(정규식 문자열, 생략 가능) }`,
     );
   return {
     files: r.files as string[],
@@ -158,6 +169,7 @@ function resolveTestEffect(raw: unknown): TestEffectConfig | null {
     command: r.command as string[],
     timeoutSec: r.timeoutSec as number,
     link: link as string[],
+    assertPattern: assertPattern as string | null,
   };
 }
 

@@ -1,4 +1,4 @@
-// check (6절, R7): fmt --check + lint + test + build + doc-lint + bypass-scan + secret-scan.
+// check (6절, R7): fmt --check + lint + test + test-effect + build + doc-lint + bypass-scan + secret-scan.
 // 결과는 캐시한다. 키 = 작업 트리 해시 + 프로파일 버전 + 런타임·도구 버전 + 플랫폼 + 명령 정의 해시 (+ base).
 // CI(--ci)는 항상 새로 실행한다. 하위 검사별 결과를 실패 기록(attempts)에 남긴다.
 import { createHash } from 'node:crypto';
@@ -14,12 +14,14 @@ import { bypassScan } from '../gates/bypass-scan.ts';
 import { codeownersProblems } from '../gates/codeowners.ts';
 import { docLint } from '../gates/doc-lint.ts';
 import { secretScan } from '../gates/secret-scan.ts';
+import { testEffect } from '../gates/test-effect.ts';
 import { describeFailure, runStandard } from './standard.ts';
 
 export const CHECK_STEPS = [
   'fmt',
   'lint',
   'test',
+  'test-effect',
   'build',
   'doc-lint',
   'bypass-scan',
@@ -69,6 +71,7 @@ export function cacheKey(
     tools: toolVersions(),
     platform: `${process.platform}-${process.arch}`,
     commands: createHash('sha256').update(JSON.stringify(cfg.commands)).digest('hex'),
+    testEffect: cfg.testEffect,
     base,
     only: only ?? null,
   };
@@ -117,6 +120,18 @@ export async function runCheck(
       skipped = r.notApplicable;
       ok = r.ok;
       if (!ok) output = describeFailure(r, cfg.commands[name]?.timeoutSec);
+    } else if (name === 'test-effect') {
+      // R5: 추가·수정한 테스트 파일이 변경 전 코드에서 실패하는가(5.1절). 판정 줄은 통과해도 남긴다
+      const r = await testEffect(root, cfg, { base, committedOnly: !!opts.ci });
+      skipped = r.skipped;
+      ok = r.problems.length === 0;
+      output = [
+        ...r.items.map((i) => `${i.file}: ${i.outcome}(${i.detail})`),
+        ...r.notes.map((n) => `참고: ${n}`),
+        problemsText(r.problems),
+      ]
+        .filter(Boolean)
+        .join('\n');
     } else if (name === 'doc-lint') {
       const r = docLint(root, cfg);
       // CODEOWNERS는 protectedPaths에서 만든 내용과 같아야 한다(10.4절). 운영 단계에 추가하는 파일이라(0.2절)
@@ -143,7 +158,7 @@ export async function runCheck(
       const mark = skipped ? '–' : ok ? '✓' : '✗';
       const note = skipped ? ' (해당 없음)' : '';
       process.stdout.write(`${mark} ${name}${note} (${(sub.durationMs / 1000).toFixed(1)}s)\n`);
-      if (output && (!ok || name === 'doc-lint'))
+      if (output && (!ok || name === 'doc-lint' || name === 'test-effect'))
         process.stdout.write(tail(output, 80).replace(/^/gm, '    ') + '\n');
     }
   }

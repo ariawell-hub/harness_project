@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
+import { cacheKey, CHECK_STEPS, runCheck } from '../commands/check.ts';
 import { loadConfig } from '../lib/config.ts';
+import { repoInfo } from '../lib/git.ts';
 import { bypassScan, QUARANTINE } from '../gates/bypass-scan.ts';
 import { docLint } from '../gates/doc-lint.ts';
 import { planGate } from '../gates/plan-gate.ts';
@@ -317,4 +319,109 @@ test('revert-check: 계획 브랜치는 해당 없음. revert/<SHA> 브랜치는
   assert.deepEqual([r.applies, r.verified, r.state], [true, false, 'failure']);
   assert.match(r.details.join('\n'), /first-parent 이력에 없다/);
   assert.match(r.details.join('\n'), /고치는 법: /);
+});
+
+/** test-effect 설정이 있는 리포(base 커밋). src/lib.mjs(add)와 통과하는 테스트 하나 */
+function effectRepo(testEffect: unknown): { root: string; base: string } {
+  const root = path.join(tmp(), 'r');
+  gitInit(root);
+  write(root, 'harness.config.json', JSON.stringify(fixtureConfig({ testEffect })));
+  write(root, 'src/lib.mjs', 'export const add = (a, b) => a + b;\n');
+  return { root, base: commitAll(root, 'base') };
+}
+const EFFECT = {
+  files: ['t/*.test.mjs'],
+  command: [process.execPath, '--test'],
+  timeoutSec: 60,
+};
+const T_HEAD = "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n";
+const T_PASSING = `${T_HEAD}import { add } from '../src/lib.mjs';\ntest('add', () => assert.equal(add(1, 2), 3));\n`;
+const T_FAILING = `${T_HEAD}import * as lib from '../src/lib.mjs';\ntest('sub', () => assert.equal(lib.sub?.(3, 1), 2));\n`;
+const effectCheck = (root: string, base: string) =>
+  runCheck(repoInfo(root), loadConfig(root), {
+    base,
+    only: ['test-effect'],
+    noCache: true,
+    noRecord: true,
+    quiet: true,
+  });
+
+test('check: test-effect는 test 바로 뒤의 하위 검사다', () => {
+  assert.equal(CHECK_STEPS.indexOf('test-effect'), CHECK_STEPS.indexOf('test') + 1);
+});
+
+test('check(test-effect): base에서도 통과하는 테스트를 더하면 실패하고, base에서 실패하는 테스트는 통과한다', async () => {
+  const { root, base } = effectRepo(EFFECT);
+  write(root, 't/new.test.mjs', T_PASSING);
+  const bad = await effectCheck(root, base);
+  assert.equal(bad.ok, false);
+  assert.deepEqual(
+    bad.results.map((r) => [r.name, r.ok, r.skipped]),
+    [['test-effect', false, false]],
+  );
+  assert.match(bad.results[0].output, /\[R5 테스트 실효성\]/);
+  assert.match(bad.results[0].output, /t\/new\.test\.mjs: ineffective/);
+
+  write(
+    root,
+    'src/lib.mjs',
+    'export const add = (a, b) => a + b;\nexport const sub = (a, b) => a - b;\n',
+  );
+  write(root, 't/new.test.mjs', T_FAILING);
+  const good = await effectCheck(root, base);
+  assert.equal(good.ok, true);
+  assert.deepEqual(
+    good.results.map((r) => [r.name, r.ok, r.skipped]),
+    [['test-effect', true, false]],
+  );
+  // 통과해도 판정 줄은 남는다(예외와 복원이 CI 로그에 보여야 한다)
+  assert.match(good.results[0].output, /t\/new\.test\.mjs: effective/);
+});
+
+test('check(test-effect): 설정이 없거나 base가 없으면 해당 없음이다', async () => {
+  const off = effectRepo(null);
+  write(off.root, 't/new.test.mjs', T_PASSING);
+  const r = await effectCheck(off.root, off.base);
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.results.map((x) => [x.name, x.ok, x.skipped]),
+    [['test-effect', true, true]],
+  );
+  const on = effectRepo(EFFECT);
+  write(on.root, 't/new.test.mjs', T_PASSING);
+  const noBase = await runCheck(repoInfo(on.root), loadConfig(on.root), {
+    base: null,
+    only: ['test-effect'],
+    noCache: true,
+    noRecord: true,
+    quiet: true,
+  });
+  assert.equal(noBase.results[0].skipped, true);
+});
+
+test('check 캐시 키는 testEffect 설정에 따라 달라진다', () => {
+  const { root, base } = effectRepo(EFFECT);
+  const info = repoInfo(root);
+  const cfg = loadConfig(root);
+  const a = cacheKey(info, cfg, base);
+  assert.equal(cacheKey(info, cfg, base), a);
+  assert.notEqual(cacheKey(info, { ...cfg, testEffect: null }, base), a);
+  assert.notEqual(
+    cacheKey(info, { ...cfg, testEffect: { ...cfg.testEffect!, timeoutSec: 61 } }, base),
+    a,
+  );
+});
+
+test('check(test-effect): 단언 실패가 아닌 이유로 실패한 테스트 파일이 있으면 참고 줄을 내고 통과한다', async () => {
+  const { root, base } = effectRepo({ ...EFFECT, assertPattern: 'AssertionError|ERR_ASSERTION' });
+  write(root, 'src/neu.mjs', 'export const neu = 1;\n');
+  write(
+    root,
+    't/neu.test.mjs',
+    `${T_HEAD}import { neu } from '../src/neu.mjs';\ntest('neu', () => assert.equal(neu, 1));\n`,
+  );
+  const r = await effectCheck(root, base);
+  assert.equal(r.ok, true);
+  assert.match(r.results[0].output, /t\/neu\.test\.mjs: effective\(base에서 실패\(단언 실패 아님/);
+  assert.match(r.results[0].output, /^참고: .*1개/m);
 });
