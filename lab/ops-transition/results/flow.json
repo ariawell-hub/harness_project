@@ -41,12 +41,14 @@
     {
       "name": "runner-protected-path",
       "expected": "보호 경로를 바꾸는 작업도 runner가 자동 병합까지 사람 개입 없이 끝낸다(TD-37이 알려진 한계다)",
-      "observed": "runner-2가 제작자의 Issue #4를 선점하고 계획(step 2개) 초안 PR #7을 열었다. 계획 검증에서 review/codex의 F1을 고친 뒤 원장에 open으로 남은 F1에 반박 댓글(지적/근거/요지)을 달았고, 두 검증자가 계획을 승인했다(head 1188e0a). step0 구현 뒤 head fd2f6ff에서 check·plan-gate·risk-gate·두 검증자 승인이 모두 success였지만 harness-guard가 'PR 본문에 체크된 \"- [x] 보호 경로 변경: …\" 줄이 없다'로 failure였다. runner는 그 줄을 적지 않는다(TD-37). harness-guard 수정 세션은 한도까지 되풀이하지 않고 첫 세션에서 질문을 남겼고, runner가 Issue #4에 제작자 멘션 댓글과 needs-human 라벨을 달고 '사람 대기'로 끝났다(03:43:58Z). 사람 개입 없이 병합까지 가지 못했다.",
+      "observed": "runner-2가 제작자의 Issue #4를 선점하고 계획(step 2개) 초안 PR #7을 열었다. 계획 검증에서 review/codex의 F1을 고친 뒤 원장에 open으로 남은 F1에 반박 댓글(지적/근거/요지)을 달았고, 두 검증자가 계획을 승인했다(head 1188e0a). step0 구현 뒤 head fd2f6ff에서 check·plan-gate·risk-gate·두 검증자 승인이 모두 success였지만 harness-guard가 'PR 본문에 체크된 \"- [x] 보호 경로 변경: …\" 줄이 없다'로 failure였다. runner는 그 줄을 적지 않는다(TD-37). harness-guard 수정 세션은 한도까지 되풀이하지 않고 첫 세션에서 질문을 남겼고, runner가 Issue #4에 제작자 멘션 댓글과 needs-human 라벨을 달고 '사람 대기'로 끝났다(03:43:58Z). 사람 개입 없이 병합까지 가지 못했다. 이어진 일(같은 날): 제작자가 Issue #4에 'A'로 답했고(05:45:17Z), 대화로 '봇이 직접 PR 본문에 줄을 추가하라'고 지시해 봇이 08:40:04Z에 본문 끝에 보호 경로 확인 줄을 더했다. 다시 띄운 runner-2는 답을 받아들여 needs-human 라벨을 떼고 계획을 active로 되돌린 뒤(커밋 6b9ddb8), main과 충돌(DIRTY, docs/harness/CHANGELOG.md)한 PR #7에 충돌 해결 세션을 띄워(약 6분) main 병합 커밋 9d72367을 올렸다(로그 'conflict-resolved'). 그 head의 check는 success였다. 그러나 그 사이 제작자가 뒷정리를 시작해 검증 App의 테스트 리포 접근을 뺐고, gates의 기록 job이 App 토큰 발급에서 실패해(실행 44268974049·44269937831, 'Not Found … repository installation') 필수 체크가 하나도 기록되지 않았다. 본문 줄을 더한 뒤의 harness-guard 재판정과 운영 단계의 제작자 승인 뒤 병합은 관찰하지 못했다. runner는 'CI·병합 대기'로 2분마다 다시 확인하다가 봇이 멈췄다(약 17분).",
       "verdict": "partial",
       "evidence": [
         "https://github.com/ariawell-hub/harness-ops-lab/issues/4",
         "https://github.com/ariawell-hub/harness-ops-lab/pull/7",
-        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44229968655"
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44229968655",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44268974049",
+        "https://github.com/ariawell-hub/harness-ops-lab/actions/runs/44269937831"
       ]
     }
   ]
