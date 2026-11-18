@@ -150,6 +150,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - 2026-11-18 step7: 미룬 P2의 나머지. F4(봇 PAT 재발급 시점)와 F5(`workflow` 권한 회수 뒤의 PR 갱신 push)는 step6에서 처리됐다(재발급은 테스트 리포 시험 중에 했고, F5의 사례는 만들 수 없어 `workflow-scope.json`에 `n/a`로 남기고 TD-38에 적었다). F6(`docs/index.md`)은 step6에서 넣은 줄을 이번에 하네스 리포 결과까지 가리키게 고쳤다.
 - 2026-11-18 step7: **CI가 멈췄다(제작자 차례).** PR #125의 F1 수정 커밋 `2c32caa`를 10:47Z에 올리자 `check`와 `gates`의 job이 러너를 받지 못하고 1초 만에 실패했다. job 주석은 "The job was not started because recent account payments have failed or your spending limit needs to be increased"다. 10:59Z에 `check`를 한 번 다시 실행해도 같았다(실행 44288730106, `gates` 44288784262). 그 전(10:03Z의 `check`, 10:11Z의 `judge-codex`)에는 정상이었다. 결제·지출 한도는 제작자만 볼 수 있고 비용 결정이라 Issue #102에 `needs-human`과 요청 댓글을 남겼다. 풀릴 때까지 PR #125는 병합되지 않고, 이 전환 PR은 PR #125가 병합된 뒤에 올린다. 그동안 CI 없이 되는 일(문서, `stage: operation`에서의 로컬 `check`)을 했다.
 - 2026-11-18 step7: `harness.config.json`의 `stage`를 `operation`으로 바꾼 트리에서 이 Mac의 전체 `check`가 통과했다(`test` 134.7초. #121의 수정이 들어간 뒤라 테스트 리포에서 본 `selftest.test.ts` 실패는 없다). `ops-check`·`doc-lint`·`codeowners`도 종료 코드 0이다. 여기까지를 로컬 커밋으로 남겼고 올리지 않았다(PR #125 병합과 `origin/main` 병합이 먼저다. 순서는 "다음 할 일").
+- 2026-11-18 step7: 제작자가 대화로 원인을 확인해 주었다: 결제 실패가 아니라 Actions 포함 사용량 소진이다(컴퓨트 $18.00 / $18.00, Pro 요금제). 봇이 이 리포의 11월 실행을 집계했다(발견 사항, TD-49). 남은 step7 작업의 예상 사용량은 100~150분이다(PR #125 재판정과 병합 약 25분, 전환 PR 판정 2라운드와 병합 약 60분, 재판정 여유 1~2라운드). 지출 한도를 올릴지 다음 달 포함량을 기다릴지는 제작자가 정한다(비용). 정해질 때까지 push하지 않는다(올려도 job이 돌지 않는다).
 
 ## 의사결정 로그
 
@@ -260,6 +261,7 @@ claimed_at: 2026-11-16T12:38:57+09:00 # new-task가 채운다
 - revert는 임시 git 리포, 가짜 GitHub(`HARNESS_FAKE_GH`)으로 끝까지 돌린다. `--live`는 이 머신에서 한 번 실행해 통과율을 진행 로그에 적는다.
 - `pull_request_target`·`workflow_run`으로 도는 변경(step0·1·3)은 병합된 뒤에야 실제로 돈다. 병합 뒤 다음 PR에서 처음 동작을 확인해 진행 로그에 남기고, 전체는 step6의 테스트 리포에서 확인한다.
 - step6·step7은 실제 GitHub 결과를 `lab/ops-transition/results/`에 남기고 `node lab/ops-transition/report.ts --all`과 `node scripts/harness.ts ops-check`로 확인한다.
+- (step7) GitHub Actions의 포함 사용량(Pro, $18 = 3,000분)이 2026-11-18에 바닥나 모든 job이 시작되지 않았다. 이 리포의 11-11~18 실행 893개를 job 소요 시간으로 세면 청구 약 2,399분, 실제 약 1,245분이다. 1분이 안 되는 job 1,428개가 1,428분으로 청구됐다(실제 439분). 판정 워크플로의 잘게 나눈 job이 크다. 사용량이 바닥난 것은 job이 실패한 뒤에야 알 수 있었다. → 처리: TD-49
 
 ## 다음 할 일
 
