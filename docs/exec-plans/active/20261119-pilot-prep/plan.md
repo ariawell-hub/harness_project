@@ -156,6 +156,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - `scripts/lib/exec.ts`에 `platformShell`(이 플랫폼의 셸 선택, `runShell`과 같은 값)을 내보냈다. 이유: `verify`는 실행 중인 자식의 핸들이 필요해 직접 spawn하는데, Windows의 Git Bash 찾기를 다시 구현하지 않기 위해서다. 기존 함수의 동작은 바꾸지 않았다.
   - 지시서에 없지만 넣은 것(모두 통과를 더 어렵게 하는 쪽): 출력 폴더가 이미 있으면 번호를 붙여 새로 만든다(같은 초에 같은 프로세스가 다시 돌리면 앞 실행의 `report.json`을 이번 결과로 읽을 수 있었다). `.harness-verify` 자리가 심볼릭 링크면 띄우지 않고 실패한다(리포 밖에 쓰게 된다). 관찰 기록 첨부가 둘 이상이면 실패다. 보고서에 `errors` 배열이 없으면 실패다. `judge`는 보고서 값을 따라 내려가지 않는다(step0의 F21·F22와 같은 꼴을 미리 막는다).
   - 남은 것: `CHANGELOG`·설계서 0절 변경 이력(PR #144 병합 뒤 `origin/main`을 병합하고 더한다), `check` → `complete-step` → push.
+- 2026-11-19: 다른 세션의 PR #144가 병합됐다(설계서 v0.7.59). `origin/main`을 병합하고(충돌 없음) step1의 `CHANGELOG`·설계서 0절 변경 이력(v0.7.60)을 더했다. 열린 다른 PR은 없다.
 
 ## 의사결정 로그
 
@@ -220,11 +221,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - step0 재작업(2026-11-19, F19·F20): AC 9개 모두 통과. `scripts/test/profile-web.test.ts`는 8개(처음 적용하는 변경의 재현 테스트 포함), 실물 확인은 세 실행·아홉 사례(`check-results.ts test-effect-vitest` 통과, `tool.vitest` 5.1.0).
 - step0 재작업(2026-11-19, F21): AC 9개 모두 통과. 검사기 테스트는 10개다.
 - step0 재작업(2026-11-19, F22): AC 9개 모두 통과. 검사기 테스트는 12개다.
+- step1(2026-11-19): AC 8개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 3은 `scripts/test/standard-args.test.ts`(6개), 수용 기준 4·5는 `scripts/test/verify-web.test.ts`(37개: `judge` 13, `isScenarioPath` 1, `verifyWeb` 17, 명령행 6)로 확인했다. 실제 Playwright로 도는 것은 step3의 실물 확인에서 본다.
 
 ## 다음 할 일
 
 1. (끝남) 계획 검증(G1): 4라운드에서 두 검증자 승인.
 2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
 3. (끝남) step0: PR #142 병합.
-4. step1: 로컬 구현은 끝났다. 다른 세션의 PR #144가 병합되면 `origin/main`을 병합하고 `CHANGELOG`·설계서 0절을 더한 뒤 `check` → `complete-step` → 초안 PR push. 두 검증자 승인 뒤 `pr-ready`.
+4. step1: `check` → `complete-step` → 초안 PR push. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
 5. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.
