@@ -264,16 +264,18 @@ export async function runCheck(
   // test를 건너뛴 실행은 캐시에 남기지 않는다. 캐시에 있는 결과는 모두 test를 실제로 돌린 것이라,
   // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다.
   // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다.
-  // 판정이 같아도 작업 트리가 도중에 바뀌었으면 남기지 않는다(TD-52): 끝날 때 키를 다시 만들어 시작할 때와 같아야 쓴다
-  if (
-    useCache &&
-    ok &&
-    !testSkipped &&
-    !judgeChanged &&
-    cacheKey(info, cfg, base, opts.only) === key
-  ) {
-    mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
+  // 판정이 같아도 작업 트리가 도중에 바뀌었으면 남기지 않는다(TD-52): 끝날 때 키를 다시 만들어 시작할 때와 같아야 쓴다.
+  // 캐시 쓰기는 통과 판정 뒤의 부가 작업이다. 키를 다시 만들지 못하거나(검사가 남긴 파일 때문에 트리 해시 계산이 실패하는 경우 등)
+  // 파일을 쓰지 못하면 쓰지 않을 뿐이고, 검사 결과는 그대로다
+  if (useCache && ok && !testSkipped && !judgeChanged) {
+    try {
+      if (cacheKey(info, cfg, base, opts.only) === key) {
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
+      }
+    } catch {
+      // 캐시에 남기지 않는다
+    }
   }
   if (!opts.quiet)
     process.stdout.write(ok ? 'check: 통과\n' : 'check: 실패 — 위 항목의 고치는 법을 따르라\n');

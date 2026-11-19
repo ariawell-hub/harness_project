@@ -2,7 +2,7 @@
 id: 20261119-check-cache-guard
 issue: 133 # GitHub Issue 번호
 type: feat # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: normal # low | normal | high
 author: claude-code
@@ -31,6 +31,8 @@ claimed_at: 2026-11-19T14:48:40+09:00
 - 2026-11-19: 제작자 대화 지시("이것들 진행하자". 남은 항목 목록의 TD-51·TD-52)로 봇이 Issue #133을 등록하고 시작했다. 두 항목을 한 PR로 묶었다(둘 다 `scripts/`라 따로 올리면 제작자 승인과 판정이 두 번 든다).
 - 2026-11-19: 테스트를 먼저 더했다. `check-skip.test.ts`: 처음부터 끝까지 목록 밖 변경이 있고(두 건너뛰기 판정이 같다) `fmt` 검사가 그 파일의 내용을 바꾸는 리포에서, `test`가 통과해도 캐시 폴더가 비어 있는지. `harness-guard.test.ts`: `testEffect`를 `null`로 바꾼 설정과 대상을 바꾼 설정이 신호로 잡히는지. 구현 전 `node --test scripts/test/check-skip.test.ts scripts/test/harness-guard.test.ts`: 31개 가운데 2개 실패(캐시 파일이 1개 남음, `testEffect` 신호 없음).
 - 2026-11-19: 구현했다. `runCheck`가 결과를 저장하기 전에 `cacheKey`를 다시 불러 시작할 때의 키와 비교한다. `CONFIG_KEYS`에 한 줄. 구현 뒤 `check-skip.test.ts`·`harness-guard.test.ts`·`gates.test.ts` 48개 통과. 설계서 v0.7.57, `CHANGELOG`, 기술 부채 표를 맞췄다.
+- 2026-11-19: 초안 PR #134 판정 1라운드(head `1b9e1df`). claude는 승인(지적 없음), codex는 수정 요청(P1 1, P2 1). F1(P1, 재현됨): 끝날 때 `cacheKey`가 예외를 내면(검사가 남긴 파일 때문에 `git add`가 실패하는 경우) 통과한 `check`가 예외로 끝난다. 받아들였다. 로컬에서 재현했다: `fmt` 검사가 읽을 수 없는 파일을 남기는 픽스처에서 `check-skip.test.ts`의 새 테스트가 `git add -A 실패 … Permission denied`로 실패했다. 끝날 때의 키 계산과 캐시 파일 쓰기를 함께 `try`로 감싸, 실패하면 캐시에 쓰지 않고 결과는 그대로 돌려주게 고쳤다(캐시 폴더를 만들 수 없는 경우도 같은 종류라 함께 막고 테스트를 더했다. 수정 전 코드에서는 두 테스트가 각각 `Permission denied`와 `EEXIST`로 실패한다). F2(P2, 미룸 처리된 것): `testEffect` 테스트가 "없던 키를 `null`로" 바꾸는 경우만 봤다. base에서 켜져 있던 검사를 head에서 끄는 전이와, 그대로 둔 경우에 신호가 없는 것을 테스트에 더했다(픽스처의 base 설정을 바꿀 수 있게 했다). 고친 뒤 `check-skip.test.ts`·`harness-guard.test.ts` 33개 통과.
+- 2026-11-19: 놓친 것. 시작할 때의 `cacheKey`가 실패하면 `check`가 실패하는 것은 원래 동작이라, 끝에 같은 호출을 더하면서 "통과한 뒤에 실패할 수 있는 지점"이 새로 생긴다는 것을 보지 않았다. 통과 판정 뒤에 더하는 부가 작업(캐시 쓰기)은 실패해도 판정을 바꾸지 않아야 한다.
 
 ## 의사결정 로그
 

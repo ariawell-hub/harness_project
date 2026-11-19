@@ -1,7 +1,7 @@
 // check의 test 건너뛰기(6절, Issue #129): 바뀐 파일이 모두 testInertPaths 안일 때만 test를 돌리지 않는다.
 // 픽스처의 test 명령은 항상 실패한다. 돌았으면 실패, 건너뛰었으면 통과로 구분된다.
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runCheck, testInert, testSkip } from '../commands/check.ts';
@@ -300,6 +300,31 @@ test('check 캐시: 실행 도중 작업 트리가 바뀌면 건너뛰기 판정
   // 바뀐 뒤의 트리로 다시 돌리면(이번에도 fmt가 덧붙여 또 바뀐다) 캐시 적중이 아니다
   const again = await fmtThenTest(moved.root, moved.base, PASSING_TEST);
   assert.equal(again.cached, false);
+});
+
+test('check 캐시: 끝날 때 키를 다시 만들지 못해도 통과한 check는 통과다. 캐시에만 쓰지 않는다 (PR #134 F1)', async () => {
+  // fmt 검사가 읽을 수 없는 파일을 남긴다: 끝날 때의 트리 해시 계산(git add)이 실패한다(POSIX. Windows에서는 읽혀서 "트리가 바뀜"으로 걸린다)
+  const locked = repo(
+    withFmt(
+      nodeE(
+        "const fs = require('fs'); fs.writeFileSync('docs/locked.md', 'x'); fs.chmodSync('docs/locked.md', 0)",
+      ),
+    ),
+  );
+  write(locked.root, 'docs/x.md', '# x\n');
+  const r = await fmtThenTest(locked.root, locked.base, PASSING_TEST);
+  assert.deepEqual([r.ok, r.cached, r.results[1].skipped], [true, false, false]);
+  assert.equal(cacheFiles(locked.root), 0);
+});
+
+test('check 캐시: 캐시 폴더를 만들 수 없어도(같은 이름의 파일이 있다) 통과한 check는 통과다', async () => {
+  const blocked = repo(withFmt(nodeE('process.exit(0)')));
+  write(blocked.root, 'docs/x.md', '# x\n');
+  const state = harnessStateDir(repoInfo(blocked.root), 'common');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(path.join(state, 'check-cache'), '');
+  const b = await fmtThenTest(blocked.root, blocked.base, PASSING_TEST);
+  assert.deepEqual([b.ok, b.cached], [true, false]);
 });
 
 test('testSkip: 판정과 이유를 돌려준다', () => {
