@@ -2,6 +2,7 @@
 // 사례마다 기대값을 대 보고, 하나라도 어긋나면 무엇이 어긋났는지 내고 종료 코드 1로 끝난다.
 //
 //   node lab/pilot-prep/check-results.ts test-effect-vitest
+//   node lab/pilot-prep/check-results.ts verify-playwright
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -126,6 +127,212 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
   return bad;
 }
 
+// --- verify 실물 확인(step3 지시서의 표) ---
+
+/** 실물 확인에 쓰는 Playwright 버전(README의 설치 명령과 같다) */
+export const PLAYWRIGHT_VERSION = '1.65.0';
+/** 설정이 브라우저에 주는 프록시 우회 값. 앱 포트 자리는 이름으로 적혀 온다 */
+export const VERIFY_BYPASS = '<-loopback>,http://127.0.0.1:<앱 포트>,ws://127.0.0.1:<앱 포트>';
+const EVIDENCE_FILES = ['summary.json', 'summary.md'];
+/** 표식이 든 호스트 이름 자리. 결과 파일의 marker로 바꿔 읽는다 */
+const MARKER_HOST = '<marker>.invalid';
+
+export interface VerifyCase {
+  id: string;
+  /** 기대 종료 코드. null이면 보지 않는다(신호로 끝난 실행) */
+  exit: 0 | 1 | null;
+  /** 거부 프록시에 닿은 건수: none은 0, some은 1 이상, any는 보지 않는다 */
+  denied: 'none' | 'some' | 'any';
+  /** denied가 some일 때 deniedTargets에 있어야 하는 대상. port의 이름은 결과 파일의 포트로 바꿔 읽는다 */
+  target?: { host: string; port: 'other' | 'tcp' | 'app' | number };
+  /** summary.json의 시나리오 파일 목록 */
+  files?: string[];
+  /** summary.json의 의도한 실패 건수 */
+  allowed?: { consoleErrors: number; failedRequests: number };
+  /** fixture도 앱 주소 밖 요청을 적었다(blocked 1 이상). 없으면 0이어야 한다 */
+  blocked?: boolean;
+  /** 실패의 이유를 요약의 값으로 확인한다 */
+  why?: 'console' | 'request' | 'no-observation' | 'skipped' | 'failed';
+  /** 아무것도 띄우지 않아 증거 묶음이 없다 */
+  noEvidence?: boolean;
+}
+
+const out = (id: string, host: string, port: 'other' | 'tcp' | 'app' | number): VerifyCase => ({
+  id,
+  exit: 1,
+  denied: 'some',
+  target: { host, port },
+  blocked: true,
+});
+const NONE = { consoleErrors: 0, failedRequests: 0 };
+
+export const VERIFY_CASES: readonly VerifyCase[] = [
+  { id: 'full-run', exit: 0, denied: 'none', files: ['e2e/smoke.spec.ts'], allowed: NONE },
+  { id: 'pass', exit: 0, denied: 'none', files: ['e2e/t-pass.spec.ts'], allowed: NONE },
+  { id: 'exact-select', exit: 0, denied: 'none', files: ['e2e/sel/a.spec.ts'], allowed: NONE },
+  { id: 'console-error', exit: 1, denied: 'none', why: 'console', allowed: NONE },
+  { id: 'failed-request', exit: 1, denied: 'none', why: 'request', allowed: NONE },
+  {
+    id: 'allowed-request-only',
+    exit: 1,
+    denied: 'none',
+    why: 'console',
+    allowed: { consoleErrors: 0, failedRequests: 1 },
+  },
+  {
+    id: 'allowed-failure',
+    exit: 0,
+    denied: 'none',
+    allowed: { consoleErrors: 1, failedRequests: 1 },
+  },
+  { id: 'ws-same-port', exit: 0, denied: 'none', allowed: NONE },
+  out('other-port', '127.0.0.1', 'other'),
+  out('localhost-port', 'localhost', 'other'),
+  out('named-host', 'ext.localhost', 'other'),
+  out('ipv6-loopback', '[::1]', 'other'),
+  out('app-alias', 'localhost', 'app'),
+  out('https-other-port', '127.0.0.1', 'tcp'),
+  out('external-name-http', 'external.invalid', 80),
+  out('external-name-https', 'external.invalid', 443),
+  out('redirect-out', '127.0.0.1', 'other'),
+  out('redirect-https-same-port', '127.0.0.1', 'app'),
+  out('websocket-out', '127.0.0.1', 'other'),
+  out('wss-same-port', '127.0.0.1', 'app'),
+  { id: 'service-worker', exit: 0, denied: 'none', allowed: NONE },
+  out('allow-blocked', '127.0.0.1', 'other'),
+  { id: 'no-fixture', exit: 1, denied: 'none', why: 'no-observation' },
+  {
+    id: 'no-fixture-out',
+    exit: 1,
+    denied: 'some',
+    target: { host: '127.0.0.1', port: 'other' },
+    why: 'no-observation',
+  },
+  { id: 'skipped', exit: 1, denied: 'none', why: 'skipped' },
+  { ...out('marker', MARKER_HOST, 80), why: 'failed' },
+  // 지시서의 표에 없는 사례(더 엄하게 본다): 시나리오 코드가 Node 쪽에서 보내는 요청도 거부 프록시에 닿는다
+  { id: 'node-request', exit: 1, denied: 'some', target: { host: '127.0.0.1', port: 'other' } },
+  { id: 'signal', exit: null, denied: 'any' },
+  { id: 'shell-arg', exit: 1, denied: 'none', noEvidence: true },
+];
+
+const isInt = (x: unknown): x is number => Number.isInteger(x);
+const isPort = (x: unknown): x is number => isInt(x) && x > 0 && x < 65536;
+
+/** 결과가 기대와 어긋난 점의 목록. 비어 있으면 통과다 */
+export function checkVerifyPlaywright(result: unknown): string[] {
+  const bad: string[] = [];
+  if (!isObj(result)) return ['결과가 객체가 아니다'];
+  const tool = isObj(result.tool) ? result.tool : {};
+  if (tool.playwright !== PLAYWRIGHT_VERSION)
+    bad.push(`tool.playwright: ${show(tool.playwright)}(기대 ${PLAYWRIGHT_VERSION})`);
+  if (result.bypass !== VERIFY_BYPASS)
+    bad.push(`bypass: ${show(result.bypass)}(기대 ${VERIFY_BYPASS})`);
+  if (result.traceOnlyInLocal !== true)
+    bad.push(`traceOnlyInLocal: ${show(result.traceOnlyInLocal)}(기대 true)`);
+  if (result.selfCheck !== true) bad.push(`selfCheck: ${show(result.selfCheck)}(기대 true)`);
+  const marker =
+    typeof result.marker === 'string' && /^[a-z0-9]{8,40}$/.test(result.marker)
+      ? result.marker
+      : null;
+  if (marker === null)
+    bad.push(`marker가 영문 소문자·숫자 8~40자가 아니다: ${show(result.marker)}`);
+  const ports = isObj(result.ports) ? result.ports : {};
+  for (const k of ['other', 'tcp'])
+    if (!isPort(ports[k])) bad.push(`ports.${k}가 포트 번호가 아니다: ${show(ports[k])}`);
+
+  const cases = Array.isArray(result.cases) ? result.cases.filter(isObj) : [];
+  if (!Array.isArray(result.cases) || cases.length !== result.cases.length)
+    bad.push('cases가 객체 배열이 아니다');
+  const known = new Set(VERIFY_CASES.map((c) => c.id));
+  for (const c of cases)
+    if (typeof c.id !== 'string' || !known.has(c.id)) bad.push(`모르는 사례가 있다: ${show(c.id)}`);
+
+  for (const want of VERIFY_CASES) {
+    const got = cases.filter((c) => c.id === want.id);
+    if (got.length !== 1) {
+      bad.push(`사례 ${want.id}가 ${got.length}개다(1개여야 한다)`);
+      continue;
+    }
+    const c = got[0];
+    const miss = (what: string, value: unknown, expected: string) =>
+      bad.push(`${want.id}: ${what}: ${showList(value)}(기대 ${expected})`);
+
+    if (want.exit !== null && c.exitCode !== want.exit)
+      miss('종료 코드', c.exitCode, String(want.exit));
+    // 공통 기대: 통제된 대상에 닿지 않았다, 남은 프로세스가 없다, 증거 묶음은 요약 둘뿐이고 새는 글자가 없다
+    if (c.targetHits !== 0) miss('targetHits', c.targetHits, '0');
+    if (c.leftover !== 0) miss('leftover', c.leftover, '0');
+    const files = want.noEvidence ? [] : EVIDENCE_FILES;
+    if (!sameStrings(c.evidenceFiles, files))
+      miss('evidenceFiles', c.evidenceFiles, `[${files.join(', ')}]`);
+    if (c.deniedTargetInEvidence !== false)
+      miss('deniedTargetInEvidence', c.deniedTargetInEvidence, 'false');
+    if (c.markerInEvidence !== false) miss('markerInEvidence', c.markerInEvidence, 'false');
+    if (c.markerFile !== false) miss('markerFile', c.markerFile, 'false');
+    if (c.swScriptHits !== 0) miss('swScriptHits', c.swScriptHits, '0');
+
+    if (want.denied === 'none' && c.denied !== 0) miss('denied', c.denied, '0');
+    if (want.denied === 'some') {
+      if (!isInt(c.denied) || c.denied < 1) miss('denied', c.denied, '1 이상');
+      const t = want.target;
+      if (t) {
+        const host = t.host === MARKER_HOST ? `${marker ?? ''}.invalid` : t.host;
+        const port =
+          t.port === 'app' ? c.appPort : typeof t.port === 'number' ? t.port : ports[t.port];
+        const target = isPort(port) ? `${host}:${port}` : null;
+        const listed = Array.isArray(c.deniedTargets) ? c.deniedTargets : [];
+        if (target === null) miss('대상의 포트', port, '포트 번호');
+        else if (!listed.includes(target)) miss('deniedTargets', c.deniedTargets, `${target} 포함`);
+      }
+    }
+    if (want.files && !sameStrings(c.scenarioFiles, want.files))
+      miss('scenarioFiles', c.scenarioFiles, `[${want.files.join(', ')}]`);
+    if (want.allowed) {
+      const a = isObj(c.allowed) ? c.allowed : {};
+      if (
+        a.consoleErrors !== want.allowed.consoleErrors ||
+        a.failedRequests !== want.allowed.failedRequests
+      )
+        bad.push(
+          `${want.id}: allowed: 콘솔 에러 ${show(a.consoleErrors)}·실패한 요청 ${show(a.failedRequests)}` +
+            `(기대 ${want.allowed.consoleErrors}·${want.allowed.failedRequests})`,
+        );
+    }
+    if (want.blocked ? !isInt(c.blocked) || c.blocked < 1 : c.blocked !== 0)
+      miss('blocked(fixture가 적은 앱 주소 밖 요청)', c.blocked, want.blocked ? '1 이상' : '0');
+
+    const scenarios = Array.isArray(c.scenarios) ? c.scenarios.filter(isObj) : [];
+    if (want.exit === 0) {
+      if (!scenarios.length || !scenarios.every((s) => s.ok === true && s.status === 'passed'))
+        bad.push(`${want.id}: 통과한 실행인데 passed가 아닌 시나리오가 있거나 시나리오가 없다`);
+    }
+    if (want.why) {
+      const s = scenarios.length === 1 ? scenarios[0] : null;
+      if (!s) bad.push(`${want.id}: 시나리오가 ${scenarios.length}개다(1개여야 한다)`);
+      else {
+        const count = (k: string) => (isInt(s[k]) ? (s[k] as number) : -1);
+        const ok = {
+          console: count('consoleErrors') >= 1 && s.failedRequests === 0,
+          request: count('failedRequests') >= 1,
+          'no-observation': s.status === 'passed' && s.observation === false,
+          skipped: s.status === 'skipped',
+          failed: s.status === 'failed',
+        }[want.why];
+        if (!ok)
+          bad.push(
+            `${want.id}: 실패의 이유가 기대(${want.why})와 다르다: 상태 ${show(s.status)}, 관찰 기록 ${show(s.observation)}, ` +
+              `콘솔 에러 ${show(s.consoleErrors)}, 실패한 요청 ${show(s.failedRequests)}`,
+          );
+      }
+    }
+    // 남은 프로세스를 세는 방법이 신호 전에 떠 있던 것(verify, dev, 실행기, 브라우저)을 실제로 봤다
+    if (want.id === 'signal' && (!isInt(c.runningBeforeSignal) || c.runningBeforeSignal < 3))
+      miss('runningBeforeSignal', c.runningBeforeSignal, '3 이상');
+  }
+  return bad;
+}
+
 function readJson(file: string): unknown {
   if (!existsSync(file)) throw new Error(`파일이 없다: ${path.relative(REPO_ROOT, file)}`);
   return JSON.parse(readFileSync(file, 'utf8'));
@@ -142,6 +349,8 @@ const CHECKS: Record<string, () => string[]> = {
       profile.config?.testEffect?.command,
     );
   },
+  'verify-playwright': () =>
+    checkVerifyPlaywright(readJson(path.join(RESULTS_DIR, 'verify-playwright.json'))),
 };
 
 function main(argv: string[]): number {

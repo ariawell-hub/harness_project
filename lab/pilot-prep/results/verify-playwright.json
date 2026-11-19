@@ -1,0 +1,972 @@
+{
+  "tool": {
+    "playwright": "1.65.0",
+    "chromium": "158.0.8127.18 (headless shell r1254)",
+    "node": "v22.23.3",
+    "os": "darwin-arm64"
+  },
+  "bypass": "<-loopback>,http://127.0.0.1:<앱 포트>,ws://127.0.0.1:<앱 포트>",
+  "marker": "zqtrialmark5d81e7",
+  "ports": {
+    "other": 57759,
+    "tcp": 57760
+  },
+  "traceOnlyInLocal": true,
+  "traces": 1,
+  "cases": [
+    {
+      "id": "full-run",
+      "exitCode": 0,
+      "signal": null,
+      "appPort": 57762,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/smoke.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/smoke.spec.ts",
+          "line": 6,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "pass",
+      "exitCode": 0,
+      "signal": null,
+      "appPort": 57769,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-pass.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-pass.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "exact-select",
+      "exitCode": 0,
+      "signal": null,
+      "appPort": 57776,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/sel/a.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/sel/a.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "console-error",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57783,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-console-error.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-console-error.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "failed-request",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57790,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-failed-request.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-failed-request.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 1,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "allowed-request-only",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57797,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-allowed-request-only.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-allowed-request-only.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 1
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 1
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "allowed-failure",
+      "exitCode": 0,
+      "signal": null,
+      "appPort": 57805,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-allowed-failure.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-allowed-failure.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 1,
+          "allowedFailedRequests": 1
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 1,
+        "failedRequests": 1
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "ws-same-port",
+      "exitCode": 0,
+      "signal": null,
+      "appPort": 57812,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-ws-same-port.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-ws-same-port.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "other-port",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57820,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57759"],
+      "scenarioFiles": ["e2e/t-other-port.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-other-port.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 2,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "localhost-port",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57830,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["localhost:57759"],
+      "scenarioFiles": ["e2e/t-localhost-port.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-localhost-port.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 2,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "named-host",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57838,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["ext.localhost:57759"],
+      "scenarioFiles": ["e2e/t-named-host.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-named-host.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 2,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "ipv6-loopback",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57846,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["[::1]:57759"],
+      "scenarioFiles": ["e2e/t-ipv6-loopback.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-ipv6-loopback.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 2,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "app-alias",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57854,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["localhost:57854"],
+      "scenarioFiles": ["e2e/t-app-alias.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-app-alias.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 2,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "https-other-port",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57862,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57760"],
+      "scenarioFiles": ["e2e/t-https-other-port.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-https-other-port.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "external-name-http",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57870,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["external.invalid:80"],
+      "scenarioFiles": ["e2e/t-external-name-http.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-external-name-http.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 2,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "external-name-https",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57878,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["external.invalid:443"],
+      "scenarioFiles": ["e2e/t-external-name-https.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-external-name-https.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "redirect-out",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57886,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57759"],
+      "scenarioFiles": ["e2e/t-redirect-out.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-redirect-out.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "redirect-https-same-port",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57894,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57894"],
+      "scenarioFiles": ["e2e/t-redirect-https-same-port.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-redirect-https-same-port.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "websocket-out",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57902,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57759"],
+      "scenarioFiles": ["e2e/t-websocket-out.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-websocket-out.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "wss-same-port",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57910,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57910"],
+      "scenarioFiles": ["e2e/t-wss-same-port.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-wss-same-port.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 1,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "service-worker",
+      "exitCode": 0,
+      "signal": null,
+      "appPort": 57918,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-service-worker.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-service-worker.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "allow-blocked",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57925,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57759"],
+      "scenarioFiles": ["e2e/t-allow-blocked.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-allow-blocked.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 1,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 2,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 2,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "no-fixture",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57933,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-no-fixture.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-no-fixture.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": false,
+          "consoleErrors": null,
+          "failedRequests": null,
+          "blockedRequests": null,
+          "allowedConsoleErrors": null,
+          "allowedFailedRequests": null
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "no-fixture-out",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57940,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["127.0.0.1:57759"],
+      "scenarioFiles": ["e2e/t-no-fixture-out.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-no-fixture-out.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": false,
+          "consoleErrors": null,
+          "failedRequests": null,
+          "blockedRequests": null,
+          "allowedConsoleErrors": null,
+          "allowedFailedRequests": null
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "skipped",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57949,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": ["e2e/t-skipped.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-skipped.spec.ts",
+          "line": 3,
+          "status": "skipped",
+          "ok": false,
+          "observation": false,
+          "consoleErrors": null,
+          "failedRequests": null,
+          "blockedRequests": null,
+          "allowedConsoleErrors": null,
+          "allowedFailedRequests": null
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "marker",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 57957,
+      "targetHits": 0,
+      "denied": 1,
+      "deniedTargets": ["zqtrialmark5d81e7.invalid:80"],
+      "scenarioFiles": ["e2e/t-marker.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-marker.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": false,
+          "observation": true,
+          "consoleErrors": 4,
+          "failedRequests": 2,
+          "blockedRequests": 1,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 1,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "signal",
+      "exitCode": null,
+      "signal": "SIGTERM",
+      "appPort": 57968,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": [],
+      "scenarios": [],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
+      "id": "shell-arg",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 0,
+      "targetHits": 0,
+      "denied": 0,
+      "deniedTargets": [],
+      "scenarioFiles": [],
+      "scenarios": [],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": [],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    }
+  ]
+}

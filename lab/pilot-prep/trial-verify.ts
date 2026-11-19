@@ -282,7 +282,20 @@ const CASES: Case[] = [
     content: (f) =>
       head(f) +
       `test('marker ${MARK}', async ({ page }) => {\n  await page.goto('/case/marker');\n` +
-      `  await expect(page.getByText('${MARK}')).toBeVisible();\n  await expect(page).toHaveTitle(/^done:/);\n});\n`,
+      `  await expect(page.getByText('${MARK}')).toBeVisible();\n  await expect(page).toHaveTitle(/^done:/);\n` +
+      // 시나리오 자체도 실패시킨다: 표식이 오류 문구, trace, 영상, 스크린샷에도 들어간다(모두 local/에만 남아야 한다)
+      `  expect(await page.title(), '${MARK}').toBe('${MARK}');\n});\n`,
+  },
+  {
+    // 시나리오 코드가 Node 쪽에서 보내는 요청(Playwright의 request). 브라우저 밖이지만 같은 프록시 설정을 따른다
+    id: 'node-request',
+    file: 'e2e/t-node-request.spec.ts',
+    content: (f) =>
+      head(f) +
+      "test('node-request', async ({ page, request }) => {\n  await page.goto('/');\n" +
+      `  const target = 'http://127.0.0.1:' + process.env.TRIAL_OTHER_PORT + '/from-node';\n` +
+      '  await request.get(target).catch(() => {});\n  await page.request.get(target).catch(() => {});\n' +
+      "  await expect(page).toHaveTitle('trial app');\n});\n",
   },
   {
     id: 'signal',
@@ -347,6 +360,79 @@ async function startTargets(): Promise<Targets> {
   });
   const tcpPort = await listen(tcp, 0, '127.0.0.1');
   return { otherPort, tcpPort, hits: () => count, reset: () => (count = 0) };
+}
+
+/** 계측 자기 점검: 대상 서버 셋에 직접 닿아 보고 계수기가 오르는지 확인한다 */
+async function selfCheckTargets(t: Targets): Promise<void> {
+  const get = (host: string) =>
+    new Promise<void>((resolve, reject) => {
+      http
+        .get({ host, port: t.otherPort, path: '/self-check', agent: false }, (res) => {
+          res.resume();
+          res.on('end', () => resolve());
+        })
+        .on('error', reject);
+    });
+  const connect = () =>
+    new Promise<void>((resolve, reject) => {
+      const s = net.connect(t.tcpPort, '127.0.0.1');
+      s.once('error', reject);
+      s.once('close', () => resolve());
+    });
+  t.reset();
+  await get('127.0.0.1');
+  const a = t.hits();
+  await get('::1');
+  const b = t.hits();
+  await connect();
+  const c = t.hits();
+  if (!(a > 0 && b > a && c > b))
+    fail(`자기 점검: 통제된 대상이 도달을 세지 못한다(${a}, ${b}, ${c})`);
+  t.reset();
+}
+
+/** 계측 자기 점검: 앱을 직접 띄워 Host가 다른 요청과 HTTP가 아닌 연결을 보내고 계수기가 오르는지 확인한다 */
+async function selfCheckApp(root: string): Promise<void> {
+  const port = await new Promise<number>((resolve, reject) => {
+    const s = net.createServer();
+    s.once('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const a = s.address();
+      const p = typeof a === 'object' && a ? a.port : 0;
+      s.close(() => resolve(p));
+    });
+  });
+  const app = spawn(process.execPath, [`${APP_DIR}/server.mjs`], {
+    cwd: root,
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' },
+    stdio: 'ignore',
+  });
+  const send = (payload: string) =>
+    new Promise<boolean>((resolve) => {
+      const s = net.connect(port, '127.0.0.1');
+      s.once('connect', () => s.write(payload));
+      s.once('error', () => resolve(false));
+      s.once('close', () => resolve(true));
+      s.on('data', () => s.destroy());
+    });
+  try {
+    const until = Date.now() + 15_000;
+    let up = false;
+    while (!up && Date.now() < until) {
+      up = await send(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
+      if (!up) await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!up) fail('자기 점검: 앱이 뜨지 않았다');
+    await send(`GET / HTTP/1.1\r\nHost: localhost:${port}\r\nConnection: close\r\n\r\n`);
+    await send('\x16\x03\x01\x00\x05hello\r\n\r\n');
+    const hits = JSON.parse(readFileSync(path.join(root, HITS), 'utf8')) as Record<string, number>;
+    if (hits.badHost !== 1 || hits.clientErrors !== 1)
+      fail(
+        `자기 점검: 앱이 도달을 세지 못한다(badHost ${hits.badHost}, clientErrors ${hits.clientErrors})`,
+      );
+  } finally {
+    app.kill('SIGKILL');
+  }
 }
 
 // --- 프로세스 ---
@@ -432,6 +518,7 @@ async function main(): Promise<void> {
     );
 
   const targets = await startTargets();
+  await selfCheckTargets(targets);
   write(`${APP_DIR}/server.mjs`, APP_SERVER);
   write(
     `${APP_DIR}/state.json`,
@@ -440,6 +527,7 @@ async function main(): Promise<void> {
   const pkg = readJson(at('package.json')) as { scripts?: Record<string, string> };
   pkg.scripts = { ...pkg.scripts, 'app:dev': `node ${APP_DIR}/server.mjs` };
   write('package.json', `${JSON.stringify(pkg, null, 2)}\n`);
+  await selfCheckApp(root);
 
   const runs = () => (existsSync(at('.harness-verify')) ? readdirSync(at('.harness-verify')) : []);
   const sum = (list: Json[], key: string) =>
@@ -464,9 +552,14 @@ async function main(): Promise<void> {
     const child = spawn(
       process.execPath,
       ['scripts/harness.ts', 'verify', ...(args.length ? ['--', ...args] : [])],
-      { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] },
+      {
+        cwd: root,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, TRIAL_OTHER_PORT: String(targets.otherPort) },
+      },
     );
     let output = '';
+    let runningBeforeSignal: number | null = null;
     child.stdout.on('data', (d: Buffer) => (output += d.toString()));
     child.stderr.on('data', (d: Buffer) => (output += d.toString()));
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
@@ -485,6 +578,8 @@ async function main(): Promise<void> {
         }
       }
       if (!started) process.stdout.write('    (시나리오가 시작되기 전에 끝났거나 시간이 지났다)\n');
+      // 신호를 보내기 전에 떠 있는 것을 센다(남은 프로세스를 세는 방법이 이 프로세스들을 실제로 보는지 확인한다)
+      runningBeforeSignal = leftover(before, root).length;
       child.kill('SIGTERM');
     }
     const end = await exited;
@@ -551,6 +646,7 @@ async function main(): Promise<void> {
       deniedTargetInEvidence,
       markerFile: existsSync(at(SHELL_MARKER)),
     };
+    if (runningBeforeSignal !== null) result.runningBeforeSignal = runningBeforeSignal;
     process.stdout.write(
       `${output
         .split('\n')
@@ -638,6 +734,8 @@ async function main(): Promise<void> {
     bypass,
     marker: MARK,
     ports: { other: targets.otherPort, tcp: targets.tcpPort },
+    // 계측 자기 점검: 통제된 대상과 앱의 계수기가 닿은 것을 실제로 센다(여기까지 왔으면 통과했다)
+    selfCheck: true,
     traceOnlyInLocal,
     traces: traces.length,
     cases,

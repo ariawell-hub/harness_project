@@ -144,9 +144,11 @@ test('설정: 산출물은 스크린샷은 항상, trace와 영상은 실패했�
 });
 
 test('설정: 프록시 우회는 <-loopback>과 그 실행의 앱 주소 둘(스킴까지)뿐이다', () => {
-  const p = proxyOf(load().config);
-  assert.equal(p?.server, PROXY);
-  assert.equal(p?.bypass, '<-loopback>,http://127.0.0.1:41001,ws://127.0.0.1:41001');
+  const c = load().config;
+  const want = { server: PROXY, bypass: '<-loopback>,http://127.0.0.1:41001,ws://127.0.0.1:41001' };
+  // 브라우저 실행과 컨텍스트 양쪽에 같은 값이다(컨텍스트 쪽은 Playwright가 Node에서 보내는 요청에도 쓰인다)
+  assert.deepEqual(proxyOf(c), want);
+  assert.deepEqual(use(c).proxy, want);
 });
 
 test('설정: 환경 변수가 하나라도 없으면 verify로 실행하라는 안내와 함께 오류다', () => {

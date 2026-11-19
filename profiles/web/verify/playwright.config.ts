@@ -65,6 +65,14 @@ function selected(): RegExp[] | null {
   return list.map((p) => new RegExp(`^${literal(path.join(root, p))}$`));
 }
 
+// 주소 제한: 브라우저의 요청을 모두 거부 프록시로 보내고, 이 실행의 앱 주소 둘만 프록시를 지나지 않게 한다.
+// 우회 항목은 스킴까지 적는다. 호스트:포트만 적으면 같은 포트로 가는 https·wss 요청이 프록시를 지나지 않는다.
+// 다른 항목(루프백 전체, 와일드카드, 다른 포트)을 더하지 않는다
+const proxy = {
+  server: `http://127.0.0.1:${proxyPort}`,
+  bypass: `<-loopback>,http://127.0.0.1:${appPort},ws://127.0.0.1:${appPort}`,
+};
+
 const config: PlaywrightTestConfig = {
   testDir: path.join(root, 'e2e'),
   testMatch: selected() ?? '**/*.spec.ts',
@@ -83,15 +91,11 @@ const config: PlaywrightTestConfig = {
     screenshot: 'on',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
-    launchOptions: {
-      // 주소 제한: 브라우저의 요청을 모두 거부 프록시로 보내고, 이 실행의 앱 주소 둘만 프록시를 지나지 않게 한다.
-      // 우회 항목은 스킴까지 적는다. 호스트:포트만 적으면 같은 포트로 가는 https·wss 요청이 프록시를 지나지 않는다.
-      // 다른 항목(루프백 전체, 와일드카드, 다른 포트)을 더하지 않는다
-      proxy: {
-        server: `http://127.0.0.1:${proxyPort}`,
-        bypass: `<-loopback>,http://127.0.0.1:${appPort},ws://127.0.0.1:${appPort}`,
-      },
-    },
+    // 주소 제한(아래 proxy)을 브라우저 실행과 컨텍스트 양쪽에 둔다. 컨텍스트 쪽 설정은 Playwright가 Node에서 보내는
+    // 요청(request fixture, page.request)에도 쓰인다. 그 요청은 우회 항목을 호스트 이름으로만 대 보므로 앱 주소로 가는
+    // 것까지 모두 거부 프록시에 닿는다(verify에서는 쓰지 못한다. 앱의 API는 페이지 안에서 fetch로 부른다)
+    proxy,
+    launchOptions: { proxy },
   },
 };
 
