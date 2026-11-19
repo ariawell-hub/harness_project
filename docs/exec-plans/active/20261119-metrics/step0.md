@@ -76,7 +76,7 @@ export function defaultSource(cwd: string, cfg: HarnessConfig): MetricsSource;
 - `parsePeriod`: 형식이 `YYYY-MM-DD`가 아니거나 없는 날짜이거나 `since`가 `until`보다 뒤면 예외(`SourceError`가 아닌 일반 오류, 명령이 종료 코드 1로 바꾼다). `until`이 없으면 `now`의 UTC 날짜, `since`가 없으면 `until`의 6일 전.
 - `inPeriod`: `since`일 00:00:00Z 이상이고 `until` 다음 날 00:00:00Z 미만이면 참.
 - `ghSource`는 받은 `gh` 함수로만 GitHub을 읽는다. 읽기 요청만 보낸다: 인자는 `pr list`, `issue list`, `api`(`--paginate`·`--jq`와 경로만. `-X`·`--method`·`-f`·`-F`·`--field`·`--raw-field`·`--input` 없음) 셋 중 하나다. `defaultSource`의 `gh` 함수는 `runSync('gh', args, { cwd, timeoutMs: 120_000 })`이고 종료 코드가 0이 아니면 예외다.
-  - `mergedPrs`: `gh pr list --state merged --search "merged:>=<since>" --limit 1000 --json …`으로 읽고 `mergedAt`이 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`(다 읽었는지 알 수 없다).
+  - `mergedPrs`: `gh pr list --state merged --base <cfg.github.defaultBranch> --search "merged:>=<since>" --limit 1000 --json …`으로 기본 브랜치에 병합된 PR을 읽고 `mergedAt`이 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`(다 읽었는지 알 수 없다).
   - `workflowRuns`: 기간의 날짜마다 `gh api --paginate "repos/{owner}/{repo}/actions/runs?created=<날짜>&per_page=100"`으로 읽는다. 이 API는 `created` 조건이 있으면 조회 하나에 1000건까지만 준다. 응답의 `total_count`를 함께 받아, 그날 받은 실행 수가 `total_count`와 다르거나 `total_count`가 1000 이상이면 `SourceError`다(1000건이면 상한에 닿은 것이라 다 읽었는지 알 수 없다).
   - `bugIssues`: `gh issue list --state all --label bug --search "created:>=<since>" --limit 1000 --json number,createdAt`으로 읽고 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`.
   - `ledger`: 받은 `ledger` 함수를 부른다. `defaultSource`는 `readPrLedger(getGitHub(cwd), cfg, pr)`를 끼운다(검증 App 봇이 쓴 원장 댓글만 인정하는 규칙을 그대로 쓴다).
@@ -88,6 +88,8 @@ export function defaultSource(cwd: string, cfg: HarnessConfig): MetricsSource;
 export interface PilotInput {
   period: Period;
   defaultBranch: string;
+  /** 기간 직전의 마지막 main `check` 실행(결론이 success·failure인 것)의 결론. 확인하지 못했으면 null */
+  priorMainCheck: 'success' | 'failure' | null;
   prs: MergedPr[];
   runs: WorkflowRun[];
   bugs: BugIssue[];
@@ -103,7 +105,7 @@ export function pilotMetrics(i: PilotInput): PilotMetrics;
   - revert PR: `prs` 가운데 `head`가 `revert/`로 시작하는 PR의 번호.
   - 버그 Issue: `bugs`의 번호.
 - **검증 누락**: 검증을 통과해 병합된 PR 가운데 그 병합 커밋에서 main `check`가 실패로 바뀐 PR의 수와 번호.
-  - 위 main `check` 실행(결론이 `success`·`failure`인 것만)을 `createdAt` 순으로 놓는다. 결론이 `failure`이고, 기간 안의 직전 실행이 없거나 직전 실행의 결론이 `success`인 실행이 "실패로 바뀐 실행"이다. 이미 실패 중인 main에 이어진 실패는 앞선 결함과 같은 것으로 보고 세지 않는다.
+  - 위 main `check` 실행(결론이 `success`·`failure`인 것만)을 `createdAt` 순으로 놓는다. 결론이 `failure`이고 직전 실행의 결론이 `success`인 실행이 "실패로 바뀐 실행"이다. 기간의 첫 실행은 `priorMainCheck`를 직전 실행의 결론으로 쓴다. 이미 실패 중인 main에 이어진 실패(직전이 `failure`)는 앞선 결함과 같은 것으로 보고 세지 않는다. 기간의 첫 실행이 `failure`인데 `priorMainCheck`가 null이면 "전환 여부 미확인"으로 따로 세고 검증 누락에 넣지 않는다. 기간 시작일을 옮겨도 같은 실행의 판정이 달라지지 않게 하려는 것이다.
   - 실패로 바뀐 실행의 `headSha`가 `prs` 중 하나의 `mergeSha`와 같으면 그 PR이 원인이다. PR 번호로 중복을 없앤다.
   - 원인 PR을 찾지 못한 "실패로 바뀐 실행"의 수를 따로 낸다(검증 누락에 더하지 않는다).
   - 버그 Issue는 원인 PR과 잇는 근거가 없어 검증 누락에 더하지 않는다. 병합 후 결함의 값으로만 낸다. 렌더가 이 사실을 검증 누락 항목 아래에 적는다("버그 Issue N건은 원인 PR이 이어지지 않아 넣지 않았다. 사람이 가른다").
@@ -141,20 +143,20 @@ export interface MetricsOptions {
 export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSource): number;
 ```
 
-- 순서: ① 기간 검사(틀리면 종료 코드 1) → ② `--write`면 쓰기 전 조건 검사(`repoInfo(cwd)`의 `isMainCheckout`이 참이거나 현재 브랜치가 `cfg.github.defaultBranch`면 종료 코드 1. 메인 체크아웃은 다른 브랜치나 detached HEAD로 바꿔 놓았어도 거부한다. 쓰는 파일은 `repoInfo(cwd).root` 아래의 것뿐이다. `docs/QUALITY_SCORE.md`가 없거나 표식 구간을 찾지 못하면 종료 코드 1) → ③ 자료 읽기(`source`가 없으면 `ghSource`. 예외가 나면 종료 코드 2) → ④ 계산·렌더 → ⑤ 표준 출력, `--write`면 파일 쓰기.
+- 순서: ① 기간 검사(틀리면 종료 코드 1) → ② `--write`면 쓰기 전 조건 검사(`repoInfo(cwd)`의 `isMainCheckout`이 참이거나 현재 브랜치가 `cfg.github.defaultBranch`면 종료 코드 1. 메인 체크아웃은 다른 브랜치나 detached HEAD로 바꿔 놓았어도 거부한다. 쓰는 파일은 `repoInfo(cwd).root` 아래의 것뿐이다. `docs/QUALITY_SCORE.md`가 없거나 표식 구간을 찾지 못하면 종료 코드 1) → ③ 자료 읽기(`source`가 없으면 `ghSource`. 예외가 나면 종료 코드 2. `priorMainCheck`는 기간 시작 전날부터 거꾸로 하루씩 `workflowRuns`를 읽어, 결론이 `success`·`failure`인 main `check` 실행이 처음 나온 날의 가장 늦은 실행의 결론으로 정한다. 7일을 거슬러도 없으면 null이다) → ④ 계산·렌더 → ⑤ 표준 출력, `--write`면 파일 쓰기.
 - ①·②는 GitHub을 읽기 전에 한다. ③이 실패하면(원장 읽기 예외 포함) 표준 출력에 집계 결과를 내지 않고 파일도 쓰지 않는다. 오류 메시지는 "무엇 + 고치는 법"으로 쓴다.
 - `source`가 없을 때 쓰는 것은 `defaultSource(cwd, cfg)`다.
 - `scripts/harness.ts`에는 등록만 한다: `HELP`에 `metrics [--since <날짜>] [--until <날짜>] [--write]` 한 줄, `OPTIONS`에 `since`·`until`, `case 'metrics'`에서 `runMetrics` 호출.
 
 ### 5. 테스트
 
-- `scripts/test/metrics-pilot.test.ts`: `parsePeriod`·`inPeriod`(경계 시각, 틀린 형식), `ghSource`(호출을 기록하고 고정 응답을 돌려주는 `gh` 함수를 끼운다: 응답이 위 형으로 바뀐다, 기간 밖 항목이 빠진다, 날짜마다 실행을 따로 읽는다, 받은 실행 수가 `total_count`와 다르면 `SourceError`, 받은 수와 `total_count`가 모두 1000이어도 `SourceError`, PR·Issue 수가 상한이면 `SourceError`, `gh`·`ledger` 함수의 예외가 `SourceError`가 된다, 기록된 모든 호출의 인자가 위 "읽기 요청" 꼴이다), `pilotMetrics`(위 정의의 값마다 고정 입력으로 단언: 재실행 뒤 통과 분리, 검증 누락은 실패로 바뀐 실행의 원인 PR만 세고 이어진 실패·원인 PR을 찾지 못한 실패·버그 Issue는 넣지 않는다, 같은 PR은 한 번만 센다, 동결 P1·P2 제외, 재현 안 됨과 rejected가 겹친 지적은 한 번, 짝수 개 중앙값, PR 0개일 때 null, 깨진 시각), `renderBlock`(null 표시, 표 없음), `replaceBlock`(구간 밖 보존, 표식 없음·중복·역순은 null).
-- `scripts/test/metrics-command.test.ts`: 임시 리포(`makeFixture`)와 메모리 `MetricsSource`로 `runMetrics`를 부른다. `--write`가 구간만 바꾸고 두 번 실행해도 같다, 자료 읽기 예외는 종료 코드 2이고 파일이 그대로다, 쓰기가 되는 사례는 기본 브랜치가 아닌 브랜치의 연결된 worktree(`git worktree add`)에서 한다, 기본 브랜치의 worktree에서 `--write`는 종료 코드 1이고 자료를 읽지 않는다, 메인 체크아웃을 다른 브랜치로 바꾼 뒤의 `--write`도 종료 코드 1이고 자료를 읽지 않으며 파일이 그대로다, 자료가 상한에 닿은 `ghSource`(실행 1000건, `total_count` 1000)로 `--write`하면 종료 코드 2이고 파일이 그대로다, 표식 없는 문서는 종료 코드 1이다, 원장 지적의 제목 문자열이 출력에 나오지 않는다. `scripts/harness.ts metrics --since 2026-13-01`을 자식 프로세스로 실행해 종료 코드 1과 오류 메시지를 확인한다(등록 확인. GitHub을 읽기 전에 끝난다). 이 리포의 `docs/QUALITY_SCORE.md`를 읽어 `replaceBlock`이 받아들이는 표식 구간이 있고, 구간의 첫 줄이 `집계 기간: <날짜> ~ <날짜>(UTC) · 병합 PR <수>개` 꼴이고, `### 파일럿 판정 지표` 아래에 지표 넷(병합 후 결함, 검증 누락, 오탐, PR당 대기 시간, PR당 사용량 항목)마다 수가 든 줄 또는 `—`와 이유가 든 줄이 있으며, 표(`|`로 시작하는 줄)가 남아 있지 않은 것을 단언한다. 이 테스트는 다음 집계 뒤에도 통과해야 하므로 날짜와 값 자체는 고정하지 않는다. 첫 집계의 시작일은 AC의 둘째 명령이 본다.
+- `scripts/test/metrics-pilot.test.ts`: `parsePeriod`·`inPeriod`(경계 시각, 틀린 형식), `ghSource`(호출을 기록하고 고정 응답을 돌려주는 `gh` 함수를 끼운다: 응답이 위 형으로 바뀐다, 기간 밖 항목이 빠진다, 날짜마다 실행을 따로 읽는다, 받은 실행 수가 `total_count`와 다르면 `SourceError`, 받은 수와 `total_count`가 모두 1000이어도 `SourceError`, PR·Issue 수가 상한이면 `SourceError`, `gh`·`ledger` 함수의 예외가 `SourceError`가 된다, 기록된 모든 호출의 인자가 위 "읽기 요청" 꼴이다), `pilotMetrics`(위 정의의 값마다 고정 입력으로 단언: 재실행 뒤 통과 분리, 자정(UTC)을 사이에 둔 연속 실패는 `priorMainCheck`가 `failure`라 검증 누락이 아니다, 기간 전 성공 뒤 기간 첫 실행의 실패는 검증 누락이다, `priorMainCheck`가 null인 첫 실패는 "전환 여부 미확인"이다, 검증 누락은 실패로 바뀐 실행의 원인 PR만 세고 이어진 실패·원인 PR을 찾지 못한 실패·버그 Issue는 넣지 않는다, 같은 PR은 한 번만 센다, 동결 P1·P2 제외, 재현 안 됨과 rejected가 겹친 지적은 한 번, 짝수 개 중앙값, PR 0개일 때 null, 깨진 시각), `renderBlock`(null 표시, 표 없음), `replaceBlock`(구간 밖 보존, 표식 없음·중복·역순은 null).
+- `scripts/test/metrics-command.test.ts`: 임시 리포(`makeFixture`)와 메모리 `MetricsSource`로 `runMetrics`를 부른다. `--write`가 구간만 바꾸고 두 번 실행해도 같다, 자료 읽기 예외는 종료 코드 2이고 파일이 그대로다, `priorMainCheck`를 전날 실행에서 찾는 경우·이틀 전에서 찾는 경우·7일 안에 없는 경우(null)에 `runMetrics`가 읽는 날짜와 결과가 맞다, 쓰기가 되는 사례는 기본 브랜치가 아닌 브랜치의 연결된 worktree(`git worktree add`)에서 한다, 기본 브랜치의 worktree에서 `--write`는 종료 코드 1이고 자료를 읽지 않는다, 메인 체크아웃을 다른 브랜치로 바꾼 뒤의 `--write`도 종료 코드 1이고 자료를 읽지 않으며 파일이 그대로다, 자료가 상한에 닿은 `ghSource`(실행 1000건, `total_count` 1000)로 `--write`하면 종료 코드 2이고 파일이 그대로다, 표식 없는 문서는 종료 코드 1이다, 원장 지적의 제목 문자열이 출력에 나오지 않는다. `scripts/harness.ts metrics --since 2026-13-01`을 자식 프로세스로 실행해 종료 코드 1과 오류 메시지를 확인한다(등록 확인. GitHub을 읽기 전에 끝난다). 이 리포의 `docs/QUALITY_SCORE.md`를 읽어 `replaceBlock`이 받아들이는 표식 구간이 있고, 구간의 첫 줄이 `집계 기간: <날짜> ~ <날짜>(UTC) · 병합 PR <수>개` 꼴이고, `### 파일럿 판정 지표` 아래에 지표 넷(병합 후 결함, 검증 누락, 오탐, PR당 대기 시간, PR당 사용량 항목)마다 수가 든 줄 또는 `—`와 이유가 든 줄이 있으며, 표(`|`로 시작하는 줄)가 남아 있지 않은 것을 단언한다. 이 테스트는 다음 집계 뒤에도 통과해야 하므로 날짜와 값 자체는 고정하지 않는다. 첫 집계의 시작일은 AC의 둘째 명령이 본다.
 
 ### 6. 문서와 첫 집계
 
 - `docs/QUALITY_SCORE.md`: 지금의 빈 표를 지우고 `## 집계 결과`(표식 구간), `## 측정 정의`(이 step의 지표 넷의 정의와 읽는 법: 무엇을 어디서 세는가, 겹칠 수 있는 값, 기간이 UTC인 것), `## 도메인·레이어별 등급`(그대로)으로 바꾼다. frontmatter의 `related_code`에 `scripts/metrics/`를 넣는다.
-- 이 리포에서 `node scripts/harness.ts metrics --since 2026-11-11 --until <작업일(UTC)> --write`를 실행해 첫 집계를 기록한다. 기록한 값 가운데 병합 PR 수, 버그 Issue 수, main `check` 실패 수를 `gh` 조회로 따로 세어 견준 결과(명령과 두 수)를 계획의 진행 로그와 PR 본문에 적는다. 다르면 고친 뒤에 완료 처리한다(필수).
+- 이 리포에서 `node scripts/harness.ts metrics --since 2026-11-11 --until <작업일(UTC)> --write`를 실행해 첫 집계를 기록한다. `--until`은 실행하는 날의 UTC 날짜(`date -u +%Y-%m-%d`)다. 대조 기록(필수)을 계획의 진행 로그와 PR 본문에 적는다: ① 기대 종료일(실행한 날의 UTC 날짜)과 문서 첫 줄의 종료일, 둘이 같은지 ② 병합 PR 수, 버그 Issue 수, main `check` 실패 수 각각에 대해 문서의 값과 `gh` 조회로 따로 센 값(조회 명령 포함), 둘이 같은지. 하나라도 다르면 고친 뒤에 완료 처리한다.
 - 이 step의 PR은 보호 경로(`scripts/**`, `docs/harness/**`)를 바꾼다. 운영 단계에서는 계획의 `risk`와 무관하게 `risk-gate`가 위험도 높음으로 판정하고 제작자 승인이 있어야 병합된다(절차서 5절 "운영 단계의 보호 경로 PR"). 초안으로 올리고, 완료 처리·`origin/main` 병합·`check`가 끝난 뒤 `pr-ready`로 승인을 한 번 요청한다.
 - 설계서 17.2절 첫 문장을 "`metrics` 명령으로 집계하고 측정 정의는 `docs/QUALITY_SCORE.md`에 둔다, 주 1회 실행은 정기 작업(12.2절, TD-11)이 한다"로 고치고 버전을 올린다(push 직전에 `origin/main`을 병합하고 그때의 마지막 버전 다음 번호). `docs/harness/architecture.md`에 `metrics/*` 행과 레이어 그림의 명령 이름을 더한다. `docs/harness/CHANGELOG.md`에 한 줄, 기술 부채 표 TD-11에 "품질 점수의 집계 명령은 있다(#146). 주 1회 실행이 남았다"를 적는다.
 
@@ -162,8 +164,10 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
 
 ```bash
 node --test scripts/test/metrics-pilot.test.ts scripts/test/metrics-command.test.ts
-grep -q '^집계 기간: 2026-11-11 ~ ' docs/QUALITY_SCORE.md
+grep -q "^집계 기간: 2026-11-11 ~ $(date -u +%Y-%m-%d)(UTC) · 병합 PR [0-9][0-9]*개$" docs/QUALITY_SCORE.md
 ```
+
+둘째 명령은 문서의 집계 기간이 2026-11-11부터 AC를 실행하는 날(UTC)까지인지 본다. 날짜가 바뀐 뒤에 완료 처리하게 되면 집계를 다시 실행한다.
 
 ## 금지사항
 
