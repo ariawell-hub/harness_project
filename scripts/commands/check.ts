@@ -88,7 +88,8 @@ export function testInert(file: string, cfg: HarnessConfig): boolean {
 }
 
 export interface TestSkip {
-  skip: boolean;
+  /** test를 돌리지 않아도 되는가 */
+  skippable: boolean;
   reason: string;
 }
 
@@ -102,7 +103,7 @@ export function testSkip(
   cfg: HarnessConfig,
   o: { base: string | null; committedOnly: boolean; env?: NodeJS.ProcessEnv },
 ): TestSkip {
-  const no = (reason: string): TestSkip => ({ skip: false, reason });
+  const no = (reason: string): TestSkip => ({ skippable: false, reason });
   if (cfg.testInertPaths.length === 0) return no('testInertPaths가 비어 있다');
   if (!o.base) return no('비교 기준(base)이 없다');
   const def = cfg.github.defaultBranch;
@@ -127,7 +128,7 @@ export function testSkip(
       `testInertPaths 밖의 변경 ${outside.length}개: ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ' …' : ''}`,
     );
   return {
-    skip: true,
+    skippable: true,
     reason: `바뀐 파일 ${files.length}개가 모두 설정 testInertPaths(테스트가 읽지 않는 경로) 안이다. 기본 브랜치의 check가 test를 전부 돌린다`,
   };
 }
@@ -174,7 +175,7 @@ export async function runCheck(
       name === 'test' && cfg.commands.test
         ? testSkip(info, cfg, { base, committedOnly: !!opts.ci, env: opts.env })
         : null;
-    if (inert?.skip) {
+    if (inert?.skippable) {
       skipped = true;
       note = ' (건너뜀)';
       output = inert.reason;
@@ -221,7 +222,7 @@ export async function runCheck(
       const mark = skipped ? '–' : ok ? '✓' : '✗';
       const label = note || (skipped ? ' (해당 없음)' : '');
       process.stdout.write(`${mark} ${name}${label} (${(sub.durationMs / 1000).toFixed(1)}s)\n`);
-      if (output && (!ok || name === 'doc-lint' || name === 'test-effect' || inert?.skip))
+      if (output && (!ok || name === 'doc-lint' || name === 'test-effect' || inert?.skippable))
         process.stdout.write(tail(output, 80).replace(/^/gm, '    ') + '\n');
     }
   }

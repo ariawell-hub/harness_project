@@ -148,14 +148,14 @@ test('testSkip: 판정과 이유를 돌려준다', () => {
   const info = repoInfo(root);
   const cfg = loadConfig(root);
   const o = { base, committedOnly: false, env: {} };
-  assert.deepEqual(testSkip(info, cfg, o).skip, false); // 바뀐 파일 없음
+  assert.deepEqual(testSkip(info, cfg, o).skippable, false); // 바뀐 파일 없음
   write(root, 'lab/x.json', '{}\n');
   const yes = testSkip(info, cfg, o);
-  assert.equal(yes.skip, true);
+  assert.equal(yes.skippable, true);
   assert.match(yes.reason, /바뀐 파일 1개.*testInertPaths/);
   write(root, 'scripts/a.ts', 'export const a = 3;\n');
   const no = testSkip(info, cfg, o);
-  assert.equal(no.skip, false);
+  assert.equal(no.skippable, false);
   assert.match(no.reason, /scripts\/a\.ts/);
 });
 

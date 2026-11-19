@@ -48,6 +48,7 @@ claimed_at: 2026-11-19T12:02:12+09:00
 - 2026-11-19: 테스트를 먼저 썼다(`scripts/test/check-skip.test.ts` 새 파일 10개, `scripts/test/harness-guard.test.ts`에 단언 1개). 구현 전 `node --test scripts/test/check-skip.test.ts scripts/test/harness-guard.test.ts`: 16개 가운데 2개 실패(`check-skip.test.ts`는 `testInert`를 내보내지 않아 모듈을 읽지 못함, `harness-guard.test.ts`의 "판정 관련 키 변경"은 `testInertPaths` 신호가 없어 단언 실패).
 - 2026-11-19: 구현했다. `scripts/commands/check.ts`에 `testInert`(파일 하나의 판정)와 `testSkip`(바뀐 파일 전체의 판정과 이유), `test` 단계 연결, 캐시 키. `scripts/lib/config.ts`에 `testInertPaths`(기본 `[]`, 형식 검증). `scripts/gates/harness-guard.ts`의 `CONFIG_KEYS`에 한 줄. 구현 뒤에는 "이 리포의 설정" 테스트 하나만 실패했고(`harness.config.json`에 목록이 아직 없었다), 목록을 넣은 뒤 25개가 모두 통과했다.
 - 2026-11-19: 문서를 맞췄다. 설계서 v0.7.56(6절 "`test` 건너뛰기", 5절 R4·R7 표, 변경 이력), 절차서 4절, `CHANGELOG`, TD-49(②의 결과와 다시 센 수치), TD-51 등록.
+- 2026-11-19: 첫 `check`는 `bypass-scan`에서 실패했다(`scripts/commands/check.ts`의 판정 결과 필드 이름이 테스트 건너뛰기 옵션과 같은 모양이라 R4 우회로 잡혔다). 필드 이름을 `skippable`로 바꿨다. 탐지 규칙은 건드리지 않았다. `test`는 138.5초 걸려 돌았다(이 변경은 `scripts/`를 바꾸므로 돌아야 맞다).
 
 ## 의사결정 로그
 
