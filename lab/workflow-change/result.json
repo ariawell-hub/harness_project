@@ -5,7 +5,7 @@
     {
       "name": "owner-commit-first",
       "expected": "제작자가 봇의 브랜치에 워크플로 파일만 바꾼 커밋을 올릴 수 있고, 그 내용이 봇이 준비한 패치와 같다",
-      "observed": "봇이 2026-11-19에 브랜치 chore/20261119-workflow-change-procedure에 계획과 패치(lab/workflow-change/judge-codex-repro-comment.patch)를 올렸다(94b2995, PR 없음). 제작자 계정(ariawell-hub)이 GitHub 웹에서 .github/workflows/judge-codex.yml에 한 줄을 더한 커밋 dc4995ffc66c를 그 브랜치에 올렸다(2026-11-19T09:15:08Z, 커미터 web-flow, 서명 확인됨, 1개 파일 1줄 추가). 봇이 git fetch와 git merge --ff-only로 받은 뒤 git apply --reverse --check가 종료 코드 0이었다(패치와 같다).",
+      "observed": "봇이 2026-11-19에 브랜치 chore/20261119-workflow-change-procedure에 계획과 패치(lab/workflow-change/judge-codex-repro-comment.patch)를 올렸다(94b2995, PR 없음). 제작자 계정(ariawell-hub)이 GitHub 웹에서 .github/workflows/judge-codex.yml에 한 줄을 더한 커밋 dc4995ffc66c를 그 브랜치에 올렸다(2026-11-19T09:15:08Z, 커미터 web-flow, 서명 확인됨, 1개 파일 1줄 추가). 봇이 git fetch와 git merge --ff-only로 받은 뒤 두 가지를 봤다. ① git apply --reverse --check가 종료 코드 0이었다. 이 검사는 패치의 줄이 들어 있는지만 보고, 함께 들어온 다른 변경은 보지 못한다. ② 기준 커밋 94b2995의 트리에 패치를 적용한 트리(임시 인덱스에서 git read-tree, git apply --cached, git write-tree)가 54dfd8c541834da8a0f4dc6d94212cadc117a372였고 dc4995f의 트리와 같았다. 94b2995..dc4995f의 커밋은 1개다. 제작자가 올린 것은 패치와 전체가 같다. ②는 PR #141의 판정 1라운드 지적(F1)을 받고 나서 돌렸다. 봇이 후속 커밋을 올린 뒤다.",
       "verdict": "pass",
       "evidence": [
         "https://github.com/ariawell-hub/harness_project/commit/dc4995ffc66c",
