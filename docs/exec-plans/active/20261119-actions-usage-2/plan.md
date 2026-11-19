@@ -2,7 +2,7 @@
 id: 20261119-actions-usage-2
 issue: 135 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: blocked # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -89,6 +89,8 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
   - `scripts/test/ci.test.ts`에는 `judge` job의 출력을 단언하는 줄이 지금 없다(재현 job 조건 단언 한 줄뿐이다). step0의 문장("단언하는 부분만 새 내용에 맞춘다")대로면 출력 줄 단언이 빠질 수 있었다. 새로 더한다고 고쳤다.
   - 절 번호를 고쳤다: 재현 job 설명은 설계서 10.2절 (3)과 10.4절이고(10.3절은 병합이다), `test-effect` 예외 줄은 절차서 3절, 계획 검증은 절차서 2절이다.
   - 그 밖에 고친 것: 예외 줄은 `check`를 실패시키지 않고 `test-effect` 명령으로 받는다(실패 횟수를 쌓지 않는다), `scan-output.test.ts`가 러너의 `GITHUB_OUTPUT`을 넘기지 않는다, `verify-patch.ts`가 `NODE_TEST_CONTEXT`를 뺀다, `judge-codex.yml`의 머리 주석에는 재현 job 설명이 없어 주석 위치를 `if` 위로 정했다, 구현·완료 처리를 한 push로 묶는다, 마지막 `origin/main` 병합 뒤 확인을 다시 돌린다, 병합을 누가 하는지(봇의 자동 병합이 거부되면 제작자)를 적었다, 문서에 "해 본 결과대로" 적을 수 없는 부분(패치 커밋 뒤의 절차)은 다음 PR로 넘긴다.
+- 2026-11-19: 계획 검증 5라운드(head `c0f49f7`). claude 승인(지적 없음), codex 수정 요청(P1 1, F9·F10은 해결로 판정). F11(P1): 제작자가 패치 적용을 빠뜨리고 브랜치 갱신 커밋만 올려도, 봇의 확인(최신 main 포함, 필수 체크 통과)이 모두 통과해 `pr-ready`와 자동 병합으로 넘어간다. `verify-patch.ts`는 패치가 없으면 임시 클론에 적용해 통과하므로 "실제 head에 패치가 들어갔는가"를 가리지 못한다. 맞는 지적이다.
+- 2026-11-19: **계획을 멈춘다(계획 검증 수정 요청 5회, 절차서 6절).** `status: blocked`. Issue #135에 중단 보고를 남기고 제작자의 결정을 기다린다. 이 커밋은 push하지 않는다(push하면 멈춘 계획에 6번째 판정이 돈다). worktree의 구현 초안은 그대로 둔다(미커밋).
 
 ## 의사결정 로그
 
@@ -128,5 +130,5 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
 
 ## 다음 할 일
 
-- 고친 계획을 계획만 담은 커밋으로 push해 계획 검증 5라운드를 받는다. 이번에도 수정 요청이면 5회째이므로 계획을 멈추고 보고한다(절차서 6절).
+- 멈춤. Issue #135의 중단 보고에 대한 제작자의 답을 기다린다.
 - 승인되면 step0을 구현한다(worktree의 초안을 승인된 step에 대조해 쓴다. 진행 로그).
