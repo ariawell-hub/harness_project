@@ -3,7 +3,7 @@
 // (설정 파일은 @playwright/test에서 형식만 가져오므로 패키지 없이도 불러올 수 있다).
 // 실제 브라우저에서 도는 것은 lab/pilot-prep의 실물 확인이 본다.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -214,8 +214,7 @@ test('설정: 시나리오를 지정하면 그 파일의 절대 경로에 처음
 
 test('설정: 실행 폴더 경로의 정규식 문자는 글자 그대로 읽는다', () => {
   const cwd = path.join(tmp('harness-pw-config-'), 'a+b (c) [d]');
-  const made = runSync('mkdir', ['-p', cwd]);
-  assert.equal(made.code, 0, made.stderr);
+  mkdirSync(cwd);
   const r = load({ HARNESS_VERIFY_SCENARIOS: JSON.stringify(['e2e/a.spec.ts']) }, cwd);
   assert.equal(r.code, 0, r.stderr);
   const [x] = r.config!.testMatch as { re: string; flags: string }[];
