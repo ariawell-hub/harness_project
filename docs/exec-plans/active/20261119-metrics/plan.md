@@ -66,6 +66,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 - 2026-11-19 23:25 계획 검증 3라운드(head `1cdbe20`): claude 승인. codex는 F5·F10·F11을 닫았고 F7만 열려 있다(같은 head 브랜치에서 base가 다른 PR). Actions 실행 목록의 `pull_requests`가 병합된 PR에서는 비어 있는 것을 확인했다(2026-11-12 27건, 11-18 10건 모두 0개). PR 번호로 이을 수 없으므로, 다른 base로 열린 적이 있는 head 브랜치의 PR을 지표에서 빼고 따로 세게 했다(`-base:main` 조회는 지금 0건).
 - 2026-11-19 23:32 계획 검증 4라운드(head `6c8cac2`): claude 승인. codex는 판정 없음(`error`)이다. 판정 job의 유출 검사가 `판정 형식 오류: resolutions[6].note가 문자열이 아니거나 너무 길다`로 끝났다(실행 44542064356). 인증·한도 문제가 아니라 검증자 출력의 형식 문제다. 이 기록을 올리는 push로 다시 판정받는다.
 - 2026-11-19 23:45 계획 검증 5라운드(head `0aeeec6`): claude 승인. codex는 F7을 다시 열어 두었다(닫았다 다시 연 PR과 base를 바꾼 다른 PR이 같은 head를 쓰는 경우). 경우를 하나씩 막지 않고, head 브랜치 이름으로 열린 PR이 그 PR 하나뿐일 때만 실행을 잇도록 바꿨다(`headPrCount`). `origin/main`(#145 병합, `72ef9b9`)을 함께 병합한다.
+- 2026-11-20 00:00 계획 검증 6라운드(head `fdd966e`): claude 승인. codex는 F7을 닫고 F12를 냈다(`steadyMetrics`의 입력에 head별 PR 수를 넘길 자리가 없다). `SteadyInput.headPrCounts`와 `runMetrics`가 넘기는 방법, 값만 1과 2로 바꾼 테스트를 step1에 적었다.
 
 ## 의사결정 로그
 
