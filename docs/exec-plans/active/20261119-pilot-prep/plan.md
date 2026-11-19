@@ -144,6 +144,11 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 2026-11-19: 구현 판정 2라운드(head `81c7a7f`). `review/claude` 승인, `review/codex` 수정 요청(P1 1건). F19·F20은 고쳐졌다고 판정됐다. 열린 차단 지적은 2건에서 1건으로 줄었다.
   - F21(P1): `lab/pilot-prep/check-results.ts`가 결과 파일의 값을 `String()`으로 메시지에 넣어, `{"toString":null}` 같은 값에서 TypeError가 나고 "결과를 읽지 못했다"로 끝났다(종료 코드는 1이지만 어느 칸이 틀렸는지와 뒤의 검사가 사라진다). 1라운드 대응에서 더한 버전 검사 줄이 지적됐고, 같은 꼴이 종료 코드·사례 id·file·outcome 메시지에도 있어 다섯 곳을 함께 고쳤다(`show`: 문자열은 그대로, 나머지는 JSON). 재현 테스트를 먼저 썼다(`lab/pilot-prep/test/check-results.test.ts`, 고치기 전에는 TypeError). 바뀐 것은 `lab/`의 검사기와 그 테스트뿐이다.
 - 2026-11-19T20:33:58+09:00 step0 재작업: 구현 판정 3라운드의 지적 F22 대응(결과 검사기가 깊게 중첩된 값에서 멈춘다)
+- 2026-11-19: 구현 판정 3라운드(head `0c74849`). `review/claude` 승인, `review/codex` 수정 요청(P1 1건). F21은 고쳐졌다고 판정됐다.
+  - F22(P1): 2라운드 대응에서 넣은 `show`가 `JSON.stringify`를 써서, 깊게 중첩된 값에서 RangeError가 나고 같은 증상(진단이 사라지고 뒤의 검사에 닿지 않는다)이 다시 났다. 받아들였다(반박 없음).
+  - 수렴 여부(절차서 6절 "수렴하지 않은 리뷰 라운드"): 새 차단 지적 1건, 해소 1건이라 "새 지적이 해소보다 많다"가 아니고, 줄이 달라(F21은 64행, F22는 63행) `divergence`의 "같은 위치"도 아니며, `check`는 통과했다. 되돌리지 않고 대응한다. 다만 같은 함수의 같은 증상이 두 번 지적됐으므로 입력 하나를 막는 식으로 덧대지 않고 방식을 바꿨다.
+  - 고친 방식: 검사기가 결과 파일의 값을 **따라 내려가지 않는다**. `String()`·템플릿 문자열·`JSON.stringify`를 결과 값에 쓰지 않는다. `show`는 문자열(200자에서 자른다)·숫자·불리언·null만 적고 객체·배열은 종류만 적는다. `command` 비교도 `JSON.stringify` 비교에서 "둘 다 문자열 배열이고 요소가 같다"로 바꿨다(같은 RangeError가 나던 곳이다. 지적에는 없었다). 판정 줄을 메시지에 넣는 세 곳도 `show`를 거친다.
+  - 재현 테스트를 먼저 썼다(깊이 20만의 값을 버전·`command`·종료 코드·사례 id·file·outcome·line에 넣는다. 고치기 전에는 RangeError). 바뀐 것은 `lab/`의 검사기와 그 테스트뿐이다.
 
 ## 의사결정 로그
 
@@ -207,11 +212,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - step0(2026-11-19): AC 9개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 1은 `scripts/test/profile-web.test.ts`(6개), 수용 기준 2는 실제 Vitest 5.1.0의 실물 확인(`lab/pilot-prep/results/test-effect-vitest.json`, 일곱 사례와 두 실행의 종료 코드)과 `check-results.ts test-effect-vitest`로 확인했다. 이 리포의 `test-effect`는 새 테스트 파일을 `effective(base에서 단언 실패)`로 판정했다.
 - step0 재작업(2026-11-19, F19·F20): AC 9개 모두 통과. `scripts/test/profile-web.test.ts`는 8개(처음 적용하는 변경의 재현 테스트 포함), 실물 확인은 세 실행·아홉 사례(`check-results.ts test-effect-vitest` 통과, `tool.vitest` 5.1.0).
 - step0 재작업(2026-11-19, F21): AC 9개 모두 통과. 검사기 테스트는 10개다.
+- step0 재작업(2026-11-19, F22): AC 9개 모두 통과. 검사기 테스트는 12개다.
 
 ## 다음 할 일
 
 1. (끝남) 계획 검증(G1): 4라운드에서 두 검증자 승인.
 2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
-3. 구현 판정 F19·F20·F21 대응을 올렸다. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
+3. 구현 판정 F19~F22 대응을 올렸다. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
 4. 병합 뒤 `new-task --plan 20261119-pilot-prep --step 1`.
 5. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.

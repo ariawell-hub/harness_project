@@ -136,10 +136,60 @@ test('문자열로 바꿀 수 없는 값이 있어도 멈추지 않고 그 칸�
   r.cases[1].outcome = weird();
   r.cases[2].id = weird();
   const bad = checkTestEffect(r, COMMAND).join('\n');
-  assert.match(bad, /tool\.vitest: \{"toString":null\}\(기대 /);
-  assert.match(bad, /runs\.all의 종료 코드: \{"toString":null\}\(기대 1\)/);
-  assert.match(bad, /passes-on-base: file: \{"toString":null\}\(기대 /);
-  assert.match(bad, /assertion: outcome: \{"toString":null\}\(기대 effective\)/);
-  assert.match(bad, /모르는 사례가 있다: \{"toString":null\}/);
+  assert.match(bad, /tool\.vitest: 객체\(기대 /);
+  assert.match(bad, /runs\.all의 종료 코드: 객체\(기대 1\)/);
+  assert.match(bad, /passes-on-base: file: 객체\(기대 /);
+  assert.match(bad, /assertion: outcome: 객체\(기대 effective\)/);
+  assert.match(bad, /모르는 사례가 있다: 객체/);
   assert.match(bad, /사례 new-module가 0개다/);
+});
+
+test('깊게 중첩된 값이 어느 칸에 있어도 멈추지 않고 그 칸과 나머지 어긋난 점을 모두 낸다', () => {
+  // JSON.stringify가 RangeError를 내는 깊이. 검사기는 결과 파일의 값을 따라 내려가지 않아야 한다
+  const deep = () => {
+    let v: unknown = {};
+    for (let i = 0; i < 200_000; i++) v = i % 2 ? { a: v } : [v];
+    return v as never;
+  };
+  const r = good() as unknown as {
+    tool: { vitest: unknown };
+    command: unknown;
+    runs: { id: string; exitCode: unknown }[];
+    cases: { id: unknown; file: unknown; outcome: unknown; line: unknown }[];
+  };
+  r.tool.vitest = deep();
+  r.command = ['node', deep()];
+  r.runs[0].exitCode = deep();
+  r.cases[0].file = deep();
+  r.cases[1].outcome = deep();
+  r.cases[2].id = deep();
+  r.cases[3].line = deep();
+  const bad = checkTestEffect(r, COMMAND).join('\n');
+  assert.match(bad, /tool\.vitest: (객체|배열\(길이 1\))\(기대 /);
+  assert.match(
+    bad,
+    /command가 프로파일의 testEffect\.command와 다르다: \[node, (객체|배열\(길이 1\))\] \/ \[node, profiles\/web\/test-effect\/run-one\.mjs\]/,
+  );
+  assert.match(bad, /runs\.all의 종료 코드: (객체|배열\(길이 1\))\(기대 1\)/);
+  assert.match(bad, /passes-on-base: file: (객체|배열\(길이 1\))\(기대 /);
+  assert.match(bad, /assertion: outcome: (객체|배열\(길이 1\))\(기대 effective\)/);
+  assert.match(bad, /모르는 사례가 있다: (객체|배열\(길이 1\))/);
+  assert.match(
+    bad,
+    /similar-pass: 판정 줄이 "src\/sim\/a\.test\.ts: ineffective\("로 시작하지 않는다/,
+  );
+  // command 자체가 깊게 중첩된 값이어도 같다
+  r.command = deep();
+  assert.match(
+    checkTestEffect(r, COMMAND).join('\n'),
+    /command가 프로파일의 testEffect\.command와 다르다: (객체|배열\(길이 1\)) \//,
+  );
+});
+
+test('메시지에 넣는 값은 길이를 자른다', () => {
+  const r = good();
+  r.tool.vitest = 'x'.repeat(5000);
+  const line = checkTestEffect(r, COMMAND).find((b) => b.startsWith('tool.vitest: '))!;
+  assert.ok(line.length < 300, String(line.length));
+  assert.match(line, /…\(기대 /);
 });

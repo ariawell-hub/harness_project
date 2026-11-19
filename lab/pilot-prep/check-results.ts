@@ -12,7 +12,29 @@ const REPO_ROOT = path.resolve(HERE, '..', '..');
 
 type Json = Record<string, unknown>;
 const isObj = (x: unknown): x is Json => !!x && typeof x === 'object' && !Array.isArray(x);
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// 결과 파일의 값은 따라 내려가지 않는다(String(), 템플릿 문자열, JSON.stringify를 쓰지 않는다).
+// `{"toString":null}`은 String()에서 TypeError를, 깊게 중첩된 값은 JSON.stringify에서 RangeError를 내
+// 검사가 멈추고 어느 칸이 틀렸는지가 사라진다(구현 판정 F21, F22).
+const SHOW_MAX = 200;
+/** 값을 메시지에 넣을 글자로 바꾼다. 어떤 값에도 예외를 내지 않는다. 문자열은 길이를 자르고, 객체·배열은 종류만 적는다 */
+function show(v: unknown): string {
+  if (typeof v === 'string') return v.length > SHOW_MAX ? `${v.slice(0, SHOW_MAX)}…` : v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (v === null) return 'null';
+  if (v === undefined) return '(없음)';
+  if (Array.isArray(v)) return `배열(길이 ${v.length})`;
+  return typeof v === 'object' ? '객체' : typeof v;
+}
+/** 문자열 배열이면 요소를 적고, 아니면 show와 같다(요소 안으로는 들어가지 않는다) */
+const showList = (v: unknown): string =>
+  Array.isArray(v) && v.length <= 20 ? `[${v.map(show).join(', ')}]` : show(v);
+/** 둘 다 문자열 배열이고 요소가 모두 같다 */
+const sameStrings = (a: unknown, b: unknown): boolean =>
+  Array.isArray(a) &&
+  Array.isArray(b) &&
+  a.length === b.length &&
+  a.every((x, i) => typeof x === 'string' && x === b[i]);
 
 /** test-effect 실물 확인의 사례와 기대(step0 지시서의 표). phrase는 판정 줄에 있어야 하는 문구 */
 export const TEST_EFFECT_CASES: readonly {
@@ -55,13 +77,6 @@ const TEST_EFFECT_RUNS: readonly { id: string; exitCode: number }[] = [
   { id: 'first-adoption', exitCode: 1 },
 ];
 
-/**
- * 결과 파일에서 읽은 값을 메시지에 넣을 글자로 바꾼다. 문자열은 그대로, 나머지는 JSON으로 적는다.
- * String()과 템플릿 문자열은 쓰지 않는다. `{"toString":null}` 같은 값에서 TypeError가 나 검사가 멈춘다(F21)
- */
-const show = (v: unknown): string =>
-  typeof v === 'string' ? v : (JSON.stringify(v) ?? 'undefined');
-
 /** 결과가 기대와 어긋난 점의 목록. 비어 있으면 통과다. profileCommand는 웹 프로파일의 testEffect.command */
 export function checkTestEffect(result: unknown, profileCommand: unknown): string[] {
   const bad: string[] = [];
@@ -69,9 +84,9 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
   const tool = isObj(result.tool) ? result.tool : {};
   if (tool.vitest !== VITEST_VERSION)
     bad.push(`tool.vitest: ${show(tool.vitest)}(기대 ${VITEST_VERSION})`);
-  if (!Array.isArray(profileCommand) || !same(result.command, profileCommand))
+  if (!sameStrings(result.command, profileCommand))
     bad.push(
-      `command가 프로파일의 testEffect.command와 다르다: ${JSON.stringify(result.command)} / ${JSON.stringify(profileCommand)}`,
+      `command가 프로파일의 testEffect.command와 다르다: ${showList(result.command)} / ${showList(profileCommand)}`,
     );
 
   const runs = Array.isArray(result.runs) ? result.runs.filter(isObj) : [];
@@ -100,11 +115,13 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
     if (c.outcome !== want.outcome)
       bad.push(`${want.id}: outcome: ${show(c.outcome)}(기대 ${want.outcome})`);
     if (!line.startsWith(`${want.file}: ${want.outcome}(`))
-      bad.push(`${want.id}: 판정 줄이 "${want.file}: ${want.outcome}("로 시작하지 않는다: ${line}`);
+      bad.push(
+        `${want.id}: 판정 줄이 "${want.file}: ${want.outcome}("로 시작하지 않는다: ${show(line)}`,
+      );
     if (want.phrase && !line.includes(want.phrase))
-      bad.push(`${want.id}: 판정 줄에 "${want.phrase}"가 없다: ${line}`);
+      bad.push(`${want.id}: 판정 줄에 "${want.phrase}"가 없다: ${show(line)}`);
     if (want.phrase === '단언 실패' && line.includes('단언 실패 아님'))
-      bad.push(`${want.id}: 판정 줄이 "단언 실패 아님"이다: ${line}`);
+      bad.push(`${want.id}: 판정 줄이 "단언 실패 아님"이다: ${show(line)}`);
   }
   return bad;
 }
