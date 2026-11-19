@@ -203,3 +203,64 @@ test('forwardSignals를 주지 않은 실행은 전과 같다(신호 처리기�
   // 실행이 끝나면 걸었던 처리기를 모두 뗀다
   assert.deepEqual(JSON.parse(out), { before: 0, during: 0, duringForward: 2, after: 0 });
 });
+
+test(
+  'forwardSignals 실행이 둘 이상이면 모두 끝난 뒤에 신호로 끝난다(먼저 끝난 쪽이 부모를 끝내지 않는다)',
+  T,
+  async () => {
+    const root = repo();
+    // 신호를 받으면 인자로 받은 시간 뒤에 이름을 적고 끝나는 프로그램
+    write(
+      root,
+      'slow.mjs',
+      `import { appendFileSync, writeFileSync } from 'node:fs';
+const [name, delay] = process.argv.slice(2);
+process.on('SIGTERM', () =>
+  setTimeout(() => {
+    appendFileSync('exited', name + '\\n');
+    process.exit(0);
+  }, Number(delay)),
+);
+writeFileSync('pid-' + name, String(process.pid));
+setInterval(() => {}, 1000);
+`,
+    );
+    const exec = pathToFileURL(path.join(HARNESS_ROOT, 'scripts', 'lib', 'exec.ts')).href;
+    const script = `
+    const { run } = await import(${JSON.stringify(exec)});
+    const o = { cwd: ${JSON.stringify(root)}, forwardSignals: true };
+    await Promise.all([
+      run(process.execPath, ['slow.mjs', 'fast', '0'], o),
+      run(process.execPath, ['slow.mjs', 'slow', '700'], o),
+    ]);
+  `;
+    const d = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    const done = exited(d);
+    const pidOf = (name: string) => Number(readFileSync(path.join(root, `pid-${name}`), 'utf8'));
+    let fast: number | undefined;
+    let slow: number | undefined;
+    try {
+      await waitFor(
+        () => existsSync(path.join(root, 'pid-fast')) && existsSync(path.join(root, 'pid-slow')),
+        30_000,
+        '두 명령의 pid 파일',
+      );
+      fast = pidOf('fast');
+      slow = pidOf('slow');
+      d.kill('SIGTERM');
+      const end = await done;
+      assert.equal(alive(slow), false, '늦게 끝나는 명령이 남았다');
+      assert.equal(alive(fast), false);
+      assert.deepEqual(readFileSync(path.join(root, 'exited'), 'utf8').trim().split('\n'), [
+        'fast',
+        'slow',
+      ]);
+      assert.deepEqual(end, { code: null, signal: 'SIGTERM' });
+    } finally {
+      reap(d.pid, fast, slow);
+    }
+  },
+);

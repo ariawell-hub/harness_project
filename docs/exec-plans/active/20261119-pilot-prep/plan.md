@@ -183,6 +183,16 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - F3(P1): `buildEvidence`가 `summary.json`을 쓴 뒤 `summary.md`를 쓰다 실패하면(디스크 공간 부족 등) `verify`는 실패로 끝나는데 공개 경로에 통과 요약 하나가 남는다. 쓸 내용을 먼저 다 만들고, 이름을 맞힐 수 없는 임시 폴더에 둘을 쓴 뒤 `evidence`로 이름을 바꾼다. 도중에 실패하면 쓰다 만 두 파일과 임시 폴더를 치우고 예외를 낸다(`evidence`는 생기지 않는다).
   - 같은 꼴 둘을 함께 고쳤다: 묶음이 나타난 뒤 진단 파일을 닫다 나는 오류가 판정을 바꾸지 않게 했고, 명령행의 출력을 받는 쪽이 먼저 닫혀도(EPIPE) 종료 코드가 판정을 따르게 했다.
   - 재현 테스트를 먼저 썼다(쓰기 둘과 이름 바꾸기 각각에 실패를 끼워 넣는다. 고치기 전에는 실패). 실패를 끼워 넣으려고 `buildEvidence`에 넷째 인자(`io`, 기본값은 Node의 `fs`)를 더했다. `verify`는 기본값만 쓴다.
+- 2026-11-20: step2 구현 판정 3라운드(head `a7ddbaa`)에서 두 검증자가 승인했다. `pr-ready`로 승인을 요청했고 제작자가 승인해 PR #148이 병합됐다.
+- 2026-11-20: step3(verify-playwright) 구현.
+  - 테스트를 먼저 썼다(`scripts/test/verify-playwright.test.ts`와 `profile-web.test.ts`의 두 항목. 구현 전 28개 가운데 18개 실패). 설정 파일은 `@playwright/test`에서 형식만 가져오게 해서(`import type`), 이 리포의 테스트가 패키지 없이 설정 파일을 불러 만들어진 값(우회 목록, `testMatch`, 오류 처리)을 직접 본다.
+  - `profiles/web/verify/playwright.config.ts`, `fixture.ts`, `profiles/web/templates/smoke.spec.ts`를 더하고 프로파일(web@0.3.0)의 `commands.verify`를 켰다.
+  - 실물 확인: `mktemp -d` 폴더에 복제해 웹 프로파일을 적용하고 Playwright를 설치했다. 이 리포의 설치 정책(`minimumReleaseAge`)이 1.65.1(게시 6일째)을 거부해 1.65.0으로 고정했다(Chromium 158 headless shell). 예시 시나리오 하나로 돌린 첫 실행이 통과했다(`DEFAULT_RUNNER`와 템플릿의 fixture import 경로가 실제로 돈다).
+  - **실물 확인에서 찾은 문제 1(신호)**: 끝나지 않는 시나리오를 돌리다 `node scripts/harness.ts verify`에 SIGTERM을 보내니 하네스만 끝나고 `web.ts`·`dev`·실행기·브라우저가 그대로 남았다. `web.ts`에 직접 보내면 0.2초 안에 모두 정리됐다. 원인은 표준 명령 실행기다: 명령을 새 프로세스 그룹으로 띄우면서 하네스가 받은 신호를 넘기지 않는다(`scripts/lib/exec.ts`의 `run`). 재현 테스트를 먼저 썼고(`scripts/test/standard-signal.test.ts`, 고치기 전 5개 모두 실패: 명령이 남는다) `run`에 `forwardSignals`를 더해 `runStandard`가 켜게 했다. 여러 실행이 동시에 돌 때 먼저 끝난 쪽이 부모를 끝내는 경우도 테스트로 재현한 뒤 고쳤다(6개).
+  - **실물 확인에서 찾은 문제 2(Node 쪽 요청)**: 시나리오가 Playwright의 `request` fixture로 다른 로컬 포트를 부르니 프록시를 지나지 않고 그대로 닿았다(대상 도달 1건, 응답 200). 브라우저 실행 옵션의 프록시는 `request` fixture에 쓰이지 않는다. 같은 프록시를 컨텍스트 옵션(`use.proxy`)에도 두니 `request`와 `page.request`가 모두 거부 프록시에 닿았다(대상 도달 0건). 이 요청들은 우회 항목을 호스트 이름으로만 대 보므로 앱 주소로 가는 것도 거부된다. 사례 `node-request`를 더했다.
+  - `lab/pilot-prep/trial-verify.ts`가 29개 사례(지시서의 28개와 `node-request`)를 돌려 `results/verify-playwright.json`을 썼고 `check-results.ts verify-playwright`가 통과한다. 첫 전체 실행에서 지시서의 28개가 모두 기대대로 나왔다(설정·fixture·`scripts/verify/`를 고쳐 다시 돌린 사례는 없다. 위 두 문제는 사례를 쓰기 전의 탐색과 표 밖의 확인에서 나왔다). 모든 사례에서 통제된 대상 도달 0건, 남은 프로세스 0, 공개 요약에 표식과 거부된 호스트 없음.
+  - 지시서에 없지만 넣은 것(모두 더 엄하게 보는 쪽): 사례 `node-request`. 계측 자기 점검(대상 서버 셋과 앱의 계수기가 실제로 세는지 먼저 확인한다, `selfCheck`). `signal` 사례의 `runningBeforeSignal`(남은 프로세스를 세는 방법이 신호 전의 프로세스들을 실제로 보는지). 사례별 `blocked`(fixture도 앱 주소 밖 요청을 적었는지)와 실패의 이유 확인(`console-error`는 콘솔 에러, `no-fixture`는 관찰 기록 없음, `skipped`는 상태). 거부를 기대하지 않는 사례의 거부 0건. `tool.playwright`를 "비어 있지 않다"가 아니라 `1.65.0`과 대 본다(step0의 F20과 같은 이유). `bypass`를 정해진 값과 대 본다. `marker` 사례의 시나리오를 실제로 실패시켜 표식이 오류 문구·trace·영상에도 들어가게 했다.
+  - 검사기 테스트(`lab/pilot-prep/test/check-verify.test.ts`, 16개)는 검사기를 쓴 뒤에 썼다(어긋난 결과마다 그 문구가 나오는지 본다).
 
 ## 의사결정 로그
 
@@ -212,6 +222,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 결정: 프록시는 읽을 수 없는 요청(HTTP로 해석되지 않는 바이트)도 거부 건수에 넣고(종류 `http`, 호스트 알 수 없음), 아무것도 보내지 않고 끊긴 연결과 헤더를 다 보내지 않은 채 시간이 지난 연결은 넣지 않는다. / 이유: 프록시에 무언가를 보냈으면 앱 주소 밖으로 가려던 것이다(판단하지 못하면 실패). 빈 연결은 브라우저의 미리 연결일 수 있어 세면 통과할 실행이 실패한다. 어느 쪽도 전달되지 않는다. / 버린 대안: 깨진 요청을 세지 않는다(형식을 깨뜨려 기록을 피할 수 있다).
 - 결정: `evidence/` 자리에 이미 무언가 있으면(실행기나 `dev`가 만든 폴더·파일·링크) 묶음을 만들지 않고 `verify`가 실패한다. 진단 파일(`local/detail.json`)은 로그 파일처럼 아무것도 띄우기 전에 새로 만들어 열어 둔다. / 이유: 실행기와 `dev`는 PR의 코드이고 출력 폴더에 쓸 수 있다. 미리 둔 스크린샷이 묶음에 섞이거나, 링크를 따라 리포 밖에 쓰는 일을 막는다(step1 구현 판정 F2와 같은 꼴). / 버린 대안: 있는 폴더를 비우고 쓴다(변수 경로의 재귀 삭제가 된다. R14).
 - 결정: 공개 요약의 "전체 문제"는 문제 문장의 정해진 앞부분으로 분류해 분류 이름과 건수만 적는다. 분류되지 않는 문장은 "기타"로 센다. / 이유: 문제 문장 뒤에는 실행 중에 만들어진 글자(URL, 콘솔 문구, 로그 끝부분)가 붙는다. `Verdict.problems`를 구조화하면 step1의 인터페이스가 바뀐다. / 버린 대안: `Verdict`에 분류 필드를 더한다(step1에서 승인받은 형식을 바꾼다. 분류가 더 필요해지면 그때 한다).
+- 결정: 표준 명령을 돌리는 동안 하네스 프로세스가 받은 SIGTERM·SIGINT·SIGHUP을 명령의 프로세스 그룹에 넘긴다(`scripts/lib/exec.ts`의 `run`에 `forwardSignals` 옵션, `runStandard`가 켠다). 넘긴 뒤 10초 안에 끝나지 않으면 SIGKILL을 보내고, 신호를 또 받으면 바로 SIGKILL을 보낸다. 명령이 끝나면 하네스도 같은 신호로 끝난다. / 이유: 수용 기준 4("신호 어느 경우에도 프로세스 트리가 남지 않는다")가 `node scripts/harness.ts verify`에서 지켜지지 않았다(실물 확인). 명령은 새 프로세스 그룹이라 부모에게 온 신호도 터미널의 Ctrl-C도 받지 못한다. step3 지시서는 고칠 곳을 "설정·fixture·`scripts/verify/`"로 적었지만 원인이 그 앞의 실행기에 있다. `web.ts`가 부모의 종료를 알아채게 하는 방법은 셸이 중간에 남는 경우(부모 pid가 바뀌지 않는다)에 듣지 않는다. 금지사항의 `scripts/harness.ts`·`scripts/lib/config.ts`는 고치지 않았다. 옵션을 켠 실행만 달라지고 다른 `run` 호출은 그대로다(테스트). `verify`만이 아니라 표준 명령 전체에 켠 이유는 `dev`·`test`도 같은 문제(Ctrl-C 뒤 서버나 테스트가 남는다)이기 때문이다. / 버린 대안: `verify`에만 켠다(같은 실행기에 두 동작이 생긴다). `web.ts`가 부모 pid를 살핀다(위 이유). Windows는 신호가 없어 아무것도 하지 않는다(`verify`는 Windows에서 띄우지 않는다).
+- 결정: 프록시 설정을 브라우저 실행 옵션(`launchOptions.proxy`)과 컨텍스트 옵션(`use.proxy`) 양쪽에 같은 값으로 둔다. / 이유: 실행 옵션만 두면 Playwright의 `request` fixture가 프록시 없이 나가 다른 로컬 포트에 닿았다(실물 확인). 컨텍스트 옵션은 `request` fixture에도 쓰인다. 실행 옵션은 시나리오가 따로 만든 컨텍스트에도 걸리므로 그대로 둔다. Playwright가 Node에서 보내는 요청은 우회 항목을 호스트 이름의 끝부분으로만 대 보아(스킴·포트를 보지 않는다) 앱 주소로 가는 요청도 거부 프록시에 닿는다. 앱만 열어 주려면 우회에 `127.0.0.1`을 적어야 하는데 그러면 브라우저 쪽에서 루프백의 모든 포트가 열린다(금지사항). 그래서 `request`·`page.request`는 `verify`에서 쓰지 못하는 것으로 하고(쓰면 실패한다) 앱의 API는 페이지 안의 `fetch`로 부르게 안내한다. / 버린 대안: 실행 옵션만 둔다(Node 쪽 요청이 어디로든 나간다). 시나리오 코드가 Node의 `fetch`를 직접 부르는 것은 여전히 막지 못한다(비범위: 일부러 우회하는 것).
+- 결정: 설정 파일은 `@playwright/test`에서 형식만 가져온다(`import type`, `defineConfig`를 쓰지 않는다). / 이유: 이 리포에는 Playwright가 없다. 값 import가 없으면 Node가 설정 파일을 그대로 불러올 수 있어, 테스트가 글자 검사가 아니라 만들어진 값(우회 목록이 정확히 셋인지, 지정한 경로만 고르는지, 틀린 환경 변수에서 오류로 끝나는지, 경로 규칙이 `isScenarioPath`와 같은지)을 본다. / 버린 대안: `defineConfig`를 쓰고 파일 내용만 본다(지시서의 테스트 항목. 그 항목들도 그대로 있다).
+- 결정: 잡히지 않은 예외는 페이지의 `pageerror`가 아니라 컨텍스트의 `weberror`로 받는다. / 이유: 같은 사건을 컨텍스트에서 한 번에 받는다. 페이지마다 리스너를 거는 방식은 팝업처럼 나중에 생긴 페이지에서 걸기 전의 예외를 놓칠 수 있다. 웹소켓은 컨텍스트 이벤트가 없어 페이지마다 건다.
+- 결정: fixture의 관찰 기록은 분류별 1000건, 항목당 2000자까지 적고, 넘친 것이 있으면 선언으로 뺄 수 없는 항목 하나("한도를 넘어 N건을 적지 못했다")를 남긴다. 의도한 실패 선언에 빈 문자열은 받지 않는다. / 이유: 콘솔에 끝없이 찍는 페이지에서 첨부가 커지는 것을 막되 조용히 통과시키지 않는다. 빈 문자열은 모든 항목에 맞아 선언이 아니라 끄기가 된다.
+- 결정: 실물 확인의 Playwright 버전은 1.65.0이다(계획 검증 때 전제를 확인한 버전은 1.65.1). / 이유: 이 리포의 설치 정책(게시 14일이 지난 버전만)이 1.65.1을 받지 않는다. 실물 확인은 대상 리포가 실제로 설치할 수 있는 버전으로 한다. 두 버전에서 본 동작(우회 규칙, 서비스 워커 차단, 404의 콘솔 에러)은 같았다.
 
 ## 발견 사항
 
@@ -229,6 +245,11 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - `verify`의 정리는 프로세스 그룹 단위다. `dev`나 실행기의 자손이 스스로 다른 그룹·세션으로 옮겨 가면(`setsid`) 보지 못한다. 표준 명령 실행기(`scripts/lib/exec.ts`)와 같은 한계다. 일반적인 `dev` 서버와 Playwright·브라우저는 그룹 안에 남는다. → 처리: TD-12 (step4에서 행을 갱신할 때 한계로 적는다)
 - 거부 프록시에 접속만 하고 아무것도 보내지 않는 연결이 있을 수 있다(브라우저가 프록시에 미리 연결해 두는 경우). 요청이 아니므로 세지 않는다. 실제 Chromium에서 통과 사례의 거부 건수가 0인지는 step3의 실물 확인(`pass`, `full-run` 사례의 `denied` 0)이 본다. → 처리: #140 (이 계획의 step3)
 - 공개 요약에 적는 숫자(줄 번호, 건수, 의도한 실패로 뺀 수)는 보고서에서 온 값을 그대로 적는다. 글자는 걸러지지만 숫자는 걸러지지 않는다. 우연히 새는 길은 아니고(토큰이 숫자 칸에 들어가지 않는다), 시나리오 코드가 일부러 숫자에 값을 싣는 것까지는 막지 않는다. → 처리: TD-12 (step4에서 행을 갱신할 때 한계로 적는다. 증거를 PR에 붙이는 수단을 정하는 별도 Issue에서 다시 본다)
+- 표준 명령 실행기는 명령을 새 프로세스 그룹으로 띄우면서 하네스가 받은 신호를 넘기지 않았다. `harness.ts dev`에서 Ctrl-C를 눌러도 서버가 남는 동작이었다(이 계획 전부터). → 처리: #140 (이 계획의 step3에서 고쳤다: `forwardSignals`)
+- Playwright의 `request` fixture는 브라우저 실행 옵션의 프록시를 쓰지 않는다(컨텍스트 옵션의 프록시를 쓴다). Node에서 보내는 요청의 우회 판단은 호스트 이름의 끝부분 비교뿐이라 브라우저(스킴·포트까지 본다)와 다르다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (양쪽에 프록시를 두고, `request`·`page.request`를 쓰지 못한다고 적었다)
+- Playwright는 브라우저를 자기 프로세스 그룹으로 띄운다(실행기의 그룹 밖이다). `verify`가 실행기 그룹에 SIGTERM을 보내면 Playwright가 브라우저를 스스로 닫는다. `ps`로 확인했다(브라우저의 그룹 번호가 실행기와 다르다). 실물 확인의 `signal` 사례에서 `verify`가 돌아간 시점에 브라우저 프로세스가 남지 않았다. 실행기 그룹을 SIGKILL로 끝내 보니(실행기가 2초 안에 끝나지 않을 때의 경로) 브라우저는 실행기와의 연결이 끊겨 스스로 끝났다(1초쯤 뒤에 본 목록에 없었다). 다만 `verify`의 "모두 끝났다" 확인은 `dev`와 실행기의 그룹만 보므로, 이 경로에서는 브라우저가 끝나기 전에 `verify`가 돌아갈 수 있다. → 처리: TD-12 (step4에서 행을 갱신할 때 한계로 적는다)
+- 빈 연결(브라우저가 프록시에 미리 연결해 두는 경우)을 거부 건수에 넣지 않은 결정(step2)은 실제 Chromium에서 문제없었다: 통과 사례(`full-run`, `pass`, `ws-same-port`, `service-worker`, `allowed-failure`, `exact-select`)의 거부 건수가 모두 0이다. → 처리: [실물 확인 기록](../../../../lab/pilot-prep/README.md)
+- `retain-on-failure`인 trace와 영상은 Playwright의 시나리오가 실패했을 때만 남는다. 시나리오는 통과했지만 `verify`가 실패로 판정한 실행(콘솔 에러, 거부된 요청)에는 스크린샷만 남는다. 원인은 `local/detail.json`의 문제 문장으로 본다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (출력 표에 적었다)
 
 ## 열린 질문
 
@@ -262,6 +283,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - step2(2026-11-19): AC 7개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 5(프록시에 닿은 요청 0건)·6(대상에 도달하지 않고 기록된다. 브라우저 쪽은 step3)·8(증거 묶음)은 `scripts/test/verify-guard.test.ts`(22개: 거부 프록시 5, `buildEvidence` 7, `verifyWeb` 9, 명령행 1)로 확인했다. `scripts/test/verify-web.test.ts`(43개)는 그대로 통과한다.
 - step2 재작업(2026-11-19, F1·F2): AC 7개 모두 통과. `scripts/test/verify-guard.test.ts`는 24개다(거부 프록시 5, `buildEvidence` 7, `verifyWeb` 10, 명령행 2).
 - step2 재작업(2026-11-20, F3): AC 7개 모두 통과. `scripts/test/verify-guard.test.ts`는 25개다(거부 프록시 5, `buildEvidence` 8, `verifyWeb` 10, 명령행 2).
+- step3(2026-11-20): AC 11개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 6·7은 `scripts/test/verify-playwright.test.ts`(19개: 파일 내용 7, 설정이 만드는 값 11, 템플릿 1)와 실물 확인, 수용 기준 4의 신호는 `scripts/test/standard-signal.test.ts`(6개)와 실물 확인의 `signal` 사례, 수용 기준 4·5·6·8·9는 실제 Playwright 1.65.0의 실물 확인(`lab/pilot-prep/results/verify-playwright.json`, 29개 사례)과 `check-results.ts verify-playwright`로 확인했다. `scripts/test/profile-web.test.ts`는 10개다. 검사기 테스트(`lab/pilot-prep/test/`)는 28개다.
 
 ## 다음 할 일
 
@@ -269,6 +291,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
 3. (끝남) step0: PR #142 병합.
 4. (끝남) step1: PR #145 병합(구현 판정 3라운드, 지적 F1~F4를 모두 고쳤다. 제작자 승인 2026-11-19).
-5. step2: `check` → `complete-step` → 초안 PR push. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR(지표 수집, Issue #146)이 설계서·`CHANGELOG`를 고치는 커밋을 올린 상태면 순서를 맞춘다(한 번에 하나).
-6. step3(Playwright 설정·fixture·실물 확인), step4(스킬·문서·TD-12 행)를 차례로 한다.
-7. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.
+5. (끝남) step2: PR #148 병합(구현 판정 3라운드, 지적 F1~F3을 모두 고쳤다. 제작자 승인 2026-11-20).
+6. step3: `check` → `complete-step` → 초안 PR push. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR #147(지표 수집, Issue #146)도 설계서·`CHANGELOG`를 고친다. 먼저 병합된 쪽 뒤에 나머지가 `origin/main`을 병합하고 버전 번호를 다시 잡는다(한 번에 하나).
+7. step4(스킬·절차서 4절·설계서 11.1절·TD-12 행)를 한다. TD-12 행에 적을 것: Windows 미지원, 프로세스 그룹 밖으로 나간 자손, 요약의 숫자, 실행기가 SIGKILL로 끝날 때의 브라우저, 증거를 PR에 붙이는 수단.
+8. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.

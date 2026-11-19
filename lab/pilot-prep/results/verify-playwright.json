@@ -8,17 +8,18 @@
   "bypass": "<-loopback>,http://127.0.0.1:<앱 포트>,ws://127.0.0.1:<앱 포트>",
   "marker": "zqtrialmark5d81e7",
   "ports": {
-    "other": 57759,
-    "tcp": 57760
+    "other": 58020,
+    "tcp": 58021
   },
+  "selfCheck": true,
   "traceOnlyInLocal": true,
-  "traces": 1,
+  "traces": 2,
   "cases": [
     {
       "id": "full-run",
       "exitCode": 0,
       "signal": null,
-      "appPort": 57762,
+      "appPort": 58032,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -53,7 +54,7 @@
       "id": "pass",
       "exitCode": 0,
       "signal": null,
-      "appPort": 57769,
+      "appPort": 58041,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -88,7 +89,7 @@
       "id": "exact-select",
       "exitCode": 0,
       "signal": null,
-      "appPort": 57776,
+      "appPort": 58048,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -123,7 +124,7 @@
       "id": "console-error",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57783,
+      "appPort": 58055,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -158,7 +159,7 @@
       "id": "failed-request",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57790,
+      "appPort": 58062,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -193,7 +194,7 @@
       "id": "allowed-request-only",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57797,
+      "appPort": 58069,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -228,7 +229,7 @@
       "id": "allowed-failure",
       "exitCode": 0,
       "signal": null,
-      "appPort": 57805,
+      "appPort": 58076,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -263,7 +264,7 @@
       "id": "ws-same-port",
       "exitCode": 0,
       "signal": null,
-      "appPort": 57812,
+      "appPort": 58083,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -298,10 +299,10 @@
       "id": "other-port",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57820,
+      "appPort": 58093,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57759"],
+      "deniedTargets": ["127.0.0.1:58020"],
       "scenarioFiles": ["e2e/t-other-port.spec.ts"],
       "scenarios": [
         {
@@ -333,10 +334,10 @@
       "id": "localhost-port",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57830,
+      "appPort": 58101,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["localhost:57759"],
+      "deniedTargets": ["localhost:58020"],
       "scenarioFiles": ["e2e/t-localhost-port.spec.ts"],
       "scenarios": [
         {
@@ -368,10 +369,10 @@
       "id": "named-host",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57838,
+      "appPort": 58109,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["ext.localhost:57759"],
+      "deniedTargets": ["ext.localhost:58020"],
       "scenarioFiles": ["e2e/t-named-host.spec.ts"],
       "scenarios": [
         {
@@ -403,10 +404,10 @@
       "id": "ipv6-loopback",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57846,
+      "appPort": 58117,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["[::1]:57759"],
+      "deniedTargets": ["[::1]:58020"],
       "scenarioFiles": ["e2e/t-ipv6-loopback.spec.ts"],
       "scenarios": [
         {
@@ -438,10 +439,10 @@
       "id": "app-alias",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57854,
+      "appPort": 58125,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["localhost:57854"],
+      "deniedTargets": ["localhost:58125"],
       "scenarioFiles": ["e2e/t-app-alias.spec.ts"],
       "scenarios": [
         {
@@ -473,10 +474,10 @@
       "id": "https-other-port",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57862,
+      "appPort": 58133,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57760"],
+      "deniedTargets": ["127.0.0.1:58021"],
       "scenarioFiles": ["e2e/t-https-other-port.spec.ts"],
       "scenarios": [
         {
@@ -508,7 +509,7 @@
       "id": "external-name-http",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57870,
+      "appPort": 58141,
       "targetHits": 0,
       "denied": 1,
       "deniedTargets": ["external.invalid:80"],
@@ -543,7 +544,7 @@
       "id": "external-name-https",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57878,
+      "appPort": 58149,
       "targetHits": 0,
       "denied": 1,
       "deniedTargets": ["external.invalid:443"],
@@ -578,10 +579,10 @@
       "id": "redirect-out",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57886,
+      "appPort": 58157,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57759"],
+      "deniedTargets": ["127.0.0.1:58020"],
       "scenarioFiles": ["e2e/t-redirect-out.spec.ts"],
       "scenarios": [
         {
@@ -613,10 +614,10 @@
       "id": "redirect-https-same-port",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57894,
+      "appPort": 58165,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57894"],
+      "deniedTargets": ["127.0.0.1:58165"],
       "scenarioFiles": ["e2e/t-redirect-https-same-port.spec.ts"],
       "scenarios": [
         {
@@ -648,10 +649,10 @@
       "id": "websocket-out",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57902,
+      "appPort": 58173,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57759"],
+      "deniedTargets": ["127.0.0.1:58020"],
       "scenarioFiles": ["e2e/t-websocket-out.spec.ts"],
       "scenarios": [
         {
@@ -683,10 +684,10 @@
       "id": "wss-same-port",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57910,
+      "appPort": 58181,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57910"],
+      "deniedTargets": ["127.0.0.1:58181"],
       "scenarioFiles": ["e2e/t-wss-same-port.spec.ts"],
       "scenarios": [
         {
@@ -718,7 +719,7 @@
       "id": "service-worker",
       "exitCode": 0,
       "signal": null,
-      "appPort": 57918,
+      "appPort": 58189,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -753,10 +754,10 @@
       "id": "allow-blocked",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57925,
+      "appPort": 58196,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57759"],
+      "deniedTargets": ["127.0.0.1:58020"],
       "scenarioFiles": ["e2e/t-allow-blocked.spec.ts"],
       "scenarios": [
         {
@@ -788,7 +789,7 @@
       "id": "no-fixture",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57933,
+      "appPort": 58204,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -823,10 +824,10 @@
       "id": "no-fixture-out",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57940,
+      "appPort": 58213,
       "targetHits": 0,
       "denied": 1,
-      "deniedTargets": ["127.0.0.1:57759"],
+      "deniedTargets": ["127.0.0.1:58020"],
       "scenarioFiles": ["e2e/t-no-fixture-out.spec.ts"],
       "scenarios": [
         {
@@ -858,7 +859,7 @@
       "id": "skipped",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57949,
+      "appPort": 58221,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -893,7 +894,7 @@
       "id": "marker",
       "exitCode": 1,
       "signal": null,
-      "appPort": 57957,
+      "appPort": 58227,
       "targetHits": 0,
       "denied": 1,
       "deniedTargets": ["zqtrialmark5d81e7.invalid:80"],
@@ -902,7 +903,7 @@
         {
           "file": "e2e/t-marker.spec.ts",
           "line": 3,
-          "status": "passed",
+          "status": "failed",
           "ok": false,
           "observation": true,
           "consoleErrors": 4,
@@ -925,10 +926,45 @@
       "markerFile": false
     },
     {
+      "id": "node-request",
+      "exitCode": 1,
+      "signal": null,
+      "appPort": 58235,
+      "targetHits": 0,
+      "denied": 2,
+      "deniedTargets": ["127.0.0.1:58020"],
+      "scenarioFiles": ["e2e/t-node-request.spec.ts"],
+      "scenarios": [
+        {
+          "file": "e2e/t-node-request.spec.ts",
+          "line": 3,
+          "status": "passed",
+          "ok": true,
+          "observation": true,
+          "consoleErrors": 0,
+          "failedRequests": 0,
+          "blockedRequests": 0,
+          "allowedConsoleErrors": 0,
+          "allowedFailedRequests": 0
+        }
+      ],
+      "allowed": {
+        "consoleErrors": 0,
+        "failedRequests": 0
+      },
+      "blocked": 0,
+      "evidenceFiles": ["summary.json", "summary.md"],
+      "leftover": 0,
+      "swScriptHits": 0,
+      "markerInEvidence": false,
+      "deniedTargetInEvidence": false,
+      "markerFile": false
+    },
+    {
       "id": "signal",
       "exitCode": null,
       "signal": "SIGTERM",
-      "appPort": 57968,
+      "appPort": 58244,
       "targetHits": 0,
       "denied": 0,
       "deniedTargets": [],
@@ -944,7 +980,8 @@
       "swScriptHits": 0,
       "markerInEvidence": false,
       "deniedTargetInEvidence": false,
-      "markerFile": false
+      "markerFile": false,
+      "runningBeforeSignal": 10
     },
     {
       "id": "shell-arg",

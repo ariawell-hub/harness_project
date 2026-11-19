@@ -34,6 +34,9 @@ export interface ExecOptions {
 }
 
 const FORWARDED: readonly NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+/** forwardSignals로 돌고 있는 실행의 수와, 그 실행들이 받아 아직 이 프로세스에 되돌려 보내지 않은 신호 */
+let forwardingRuns = 0;
+let pendingSignal: NodeJS.Signals | null = null;
 
 const MAX_KEEP = 2_000_000; // 출력은 끝부분 2MB만 보관한다
 const isWin = process.platform === 'win32';
@@ -81,11 +84,17 @@ export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promis
         return;
       }
       received = signal;
+      pendingSignal = signal;
       killTree(child.pid, signal);
       forceTimer = setTimeout(() => killTree(child.pid, 'SIGKILL'), opts.forwardGraceMs ?? 10_000);
     };
     const forwarding = opts.forwardSignals === true && !isWin;
-    if (forwarding) for (const s of FORWARDED) process.on(s, onSignal);
+    if (forwarding) {
+      forwardingRuns++;
+      for (const s of FORWARDED) process.on(s, onSignal);
+      // 다른 실행이 이미 신호를 받아 끝나는 중이면 이 실행도 바로 끝낸다
+      if (pendingSignal) onSignal(pendingSignal);
+    }
     const finish = (code: number) => {
       if (settled) return;
       settled = true;
@@ -95,8 +104,14 @@ export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promis
       child.stderr?.destroy();
       if (forwarding) {
         for (const s of FORWARDED) process.off(s, onSignal);
-        // 자식 트리가 끝났다. 받은 신호의 기본 동작(종료)으로 이어 간다. 이 프로세스에 다른 처리기가 있으면 그쪽이 받는다
-        if (received) process.kill(process.pid, received);
+        forwardingRuns--;
+        // 신호를 넘겨받은 실행이 모두 끝났다. 받은 신호의 기본 동작(종료)으로 이어 간다.
+        // 이 프로세스에 다른 처리기가 있으면 그쪽이 받는다. 아직 도는 실행이 있으면 그 실행이 끝날 때 한다
+        if (pendingSignal && forwardingRuns === 0) {
+          const signal = pendingSignal;
+          pendingSignal = null;
+          process.kill(process.pid, signal);
+        }
       }
       resolve({ code, stdout, stderr, timedOut, durationMs: Date.now() - started });
     };
