@@ -289,6 +289,19 @@ test('check 캐시: 도중에 판정이 바뀐 실행과 건너뛴 실행은 캐
   assert.equal(cacheFiles(code.root), 1);
 });
 
+test('check 캐시: 실행 도중 작업 트리가 바뀌면 건너뛰기 판정이 같아도 캐시에 남기지 않는다 (TD-52)', async () => {
+  // 처음부터 끝까지 목록 밖 변경(docs/x.md)이 있어 두 판정은 모두 "돌린다"다. fmt 검사가 그 파일의 내용을 바꾼다
+  const moved = repo(withFmt(nodeE("require('fs').appendFileSync('docs/x.md', 'more')")));
+  write(moved.root, 'docs/x.md', '# x\n');
+  const m = await fmtThenTest(moved.root, moved.base, PASSING_TEST);
+  assert.deepEqual([m.ok, m.cached, m.results[1].skipped], [true, false, false]);
+  // test가 본 트리는 키를 만든 트리와 다르다: 결과를 쓰지 않는다
+  assert.equal(cacheFiles(moved.root), 0);
+  // 바뀐 뒤의 트리로 다시 돌리면(이번에도 fmt가 덧붙여 또 바뀐다) 캐시 적중이 아니다
+  const again = await fmtThenTest(moved.root, moved.base, PASSING_TEST);
+  assert.equal(again.cached, false);
+});
+
 test('testSkip: 판정과 이유를 돌려준다', () => {
   const { root, base } = repo();
   const info = repoInfo(root);

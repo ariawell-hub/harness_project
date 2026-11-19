@@ -263,8 +263,15 @@ export async function runCheck(
   const result: CheckResult = { ok, cached: false, results };
   // test를 건너뛴 실행은 캐시에 남기지 않는다. 캐시에 있는 결과는 모두 test를 실제로 돌린 것이라,
   // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다.
-  // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다
-  if (useCache && ok && !testSkipped && !judgeChanged) {
+  // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다.
+  // 판정이 같아도 작업 트리가 도중에 바뀌었으면 남기지 않는다(TD-52): 끝날 때 키를 다시 만들어 시작할 때와 같아야 쓴다
+  if (
+    useCache &&
+    ok &&
+    !testSkipped &&
+    !judgeChanged &&
+    cacheKey(info, cfg, base, opts.only) === key
+  ) {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
   }

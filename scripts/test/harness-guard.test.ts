@@ -177,6 +177,26 @@ test('신호: harness.config.json의 판정 관련 키 변경(TD-10), 깨진 JSO
     ),
     /testInertPaths/,
   );
+  // 테스트 실효성 검사(R5)를 끄거나 대상을 줄이는 변경도 신호다(TD-51)
+  assert.match(
+    reasons(run({ 'harness.config.json': JSON.stringify({ ...c, testEffect: null }, null, 2) })),
+    /testEffect/,
+  );
+  assert.match(
+    reasons(
+      run({
+        'harness.config.json': JSON.stringify(
+          {
+            ...c,
+            testEffect: { files: ['t/*.test.ts'], command: ['node', '--test'], timeoutSec: 60 },
+          },
+          null,
+          2,
+        ),
+      }),
+    ),
+    /testEffect/,
+  );
   assert.match(reasons(run({ 'harness.config.json': '{' })), /harness\.config\.json/);
   // 판정과 무관한 키(limits)는 신호가 아니다
   const lim = { ...c, limits: { ...(c.limits as object), pollSec: 5 } };
