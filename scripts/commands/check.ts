@@ -73,7 +73,6 @@ export function cacheKey(
   cfg: HarnessConfig,
   base: string | null,
   only?: CheckStep[],
-  env?: NodeJS.ProcessEnv,
 ): string {
   const parts = {
     tree: worktreeTreeHash(info),
@@ -82,9 +81,6 @@ export function cacheKey(
     platform: `${process.platform}-${process.arch}`,
     commands: createHash('sha256').update(JSON.stringify(cfg.commands)).digest('hex'),
     testEffect: cfg.testEffect,
-    testInert: cfg.testInertPaths,
-    // test를 건너뛴 결과와 돌린 결과를 섞지 않는다: 같은 트리·같은 base라도 기본 브랜치에서는 test를 돌려야 한다
-    testSkippable: testSkip(info, cfg, { base, committedOnly: false, env }).skippable,
     base,
     only: only ?? null,
   };
@@ -160,7 +156,7 @@ export async function runCheck(
   const cacheDir = path.join(harnessStateDir(info, 'common'), 'check-cache');
   let key = '';
   if (useCache) {
-    key = cacheKey(info, cfg, base, opts.only, opts.env);
+    key = cacheKey(info, cfg, base, opts.only);
     const f = path.join(cacheDir, `${key}.json`);
     if (existsSync(f)) {
       const saved = JSON.parse(readFileSync(f, 'utf8')) as CheckResult;
@@ -173,6 +169,12 @@ export async function runCheck(
   }
 
   const steps = opts.only ?? [...CHECK_STEPS];
+  // test 건너뛰기는 실행을 시작할 때 한 번만 판정한다. 도중에 작업 트리가 바뀌어도 판정과 결과가 어긋나지 않는다
+  const inert =
+    steps.includes('test') && cfg.commands.test
+      ? testSkip(info, cfg, { base, committedOnly: !!opts.ci, env: opts.env })
+      : null;
+  const testSkipped = !!inert?.skippable;
   const results: SubResult[] = [];
   for (const name of steps) {
     const started = Date.now();
@@ -180,11 +182,7 @@ export async function runCheck(
     let skipped = false;
     let output = '';
     let note = '';
-    const inert =
-      name === 'test' && cfg.commands.test
-        ? testSkip(info, cfg, { base, committedOnly: !!opts.ci, env: opts.env })
-        : null;
-    if (inert?.skippable) {
+    if (name === 'test' && inert && testSkipped) {
       skipped = true;
       note = ' (건너뜀)';
       output = inert.reason;
@@ -231,7 +229,10 @@ export async function runCheck(
       const mark = skipped ? '–' : ok ? '✓' : '✗';
       const label = note || (skipped ? ' (해당 없음)' : '');
       process.stdout.write(`${mark} ${name}${label} (${(sub.durationMs / 1000).toFixed(1)}s)\n`);
-      if (output && (!ok || name === 'doc-lint' || name === 'test-effect' || inert?.skippable))
+      if (
+        output &&
+        (!ok || name === 'doc-lint' || name === 'test-effect' || (name === 'test' && testSkipped))
+      )
         process.stdout.write(tail(output, 80).replace(/^/gm, '    ') + '\n');
     }
   }
@@ -253,7 +254,9 @@ export async function runCheck(
     }
   }
   const result: CheckResult = { ok, cached: false, results };
-  if (useCache && ok) {
+  // test를 건너뛴 실행은 캐시에 남기지 않는다. 캐시에 있는 결과는 모두 test를 실제로 돌린 것이라,
+  // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다
+  if (useCache && ok && !testSkipped) {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
   }

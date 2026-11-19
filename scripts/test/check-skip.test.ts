@@ -1,12 +1,12 @@
 // check의 test 건너뛰기(6절, Issue #129): 바뀐 파일이 모두 testInertPaths 안일 때만 test를 돌리지 않는다.
 // 픽스처의 test 명령은 항상 실패한다. 돌았으면 실패, 건너뛰었으면 통과로 구분된다.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { cacheKey, runCheck, testInert, testSkip } from '../commands/check.ts';
+import { runCheck, testInert, testSkip } from '../commands/check.ts';
 import { ConfigError, loadConfig } from '../lib/config.ts';
-import { repoInfo } from '../lib/git.ts';
+import { harnessStateDir, repoInfo } from '../lib/git.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const INERT = ['plans/**', 'lab/**'];
@@ -158,7 +158,12 @@ test('check(test): 바뀐 파일을 구하지 못하면(없는 base) 멈추지 �
   assert.match(s.reason, /바뀐 파일을 구하지 못했다/);
 });
 
-test('check 캐시: test를 건너뛴 결과를 기본 브랜치의 check가 재사용하지 않는다', async () => {
+const cacheFiles = (root: string): number => {
+  const dir = path.join(harnessStateDir(repoInfo(root), 'common'), 'check-cache');
+  return existsSync(dir) ? readdirSync(dir).length : 0;
+};
+
+test('check 캐시: test를 건너뛴 실행은 캐시에 남기지 않는다(기본 브랜치가 재사용할 결과가 없다)', async () => {
   const { root, base } = repo();
   write(root, 'plans/p1.md', '# 계획 2\n');
   commitAll(root, 'plan');
@@ -170,12 +175,13 @@ test('check 캐시: test를 건너뛴 결과를 기본 브랜치의 check가 재
       noRecord: true,
       quiet: true,
     });
-  // 작업 브랜치: 건너뛰고 통과한 결과가 캐시에 남는다
+  // 작업 브랜치: 건너뛰고 통과하지만 캐시에는 쓰지 않는다. 다시 불러도 새로 판정한다
   const first = await cached();
   assert.deepEqual([first.ok, first.cached, first.results[0].skipped], [true, false, true]);
+  assert.equal(cacheFiles(root), 0);
   const again = await cached();
-  assert.deepEqual([again.ok, again.cached], [true, true]);
-  // 같은 트리·같은 base라도 기본 브랜치의 판정은 그 결과를 쓰지 않고 test를 돌린다
+  assert.deepEqual([again.ok, again.cached, again.results[0].skipped], [true, false, true]);
+  // 같은 트리·같은 base의 기본 브랜치 판정은 test를 돌린다
   const onMainRef = await cached({ GITHUB_REF: 'refs/heads/main' });
   assert.deepEqual([onMainRef.ok, onMainRef.cached], [false, false]);
   sh('git', ['checkout', '-q', 'main'], root);
@@ -183,6 +189,50 @@ test('check 캐시: test를 건너뛴 결과를 기본 브랜치의 check가 재
   const onMain = await cached();
   assert.deepEqual([onMain.ok, onMain.cached], [false, false]);
   assert.deepEqual(shape(onMain), RAN);
+});
+
+test('check: 건너뛰기 판정은 시작할 때 한 번 한다(도중에 작업 트리가 바뀌어도 건너뛴 결과가 캐시에 남지 않는다)', async () => {
+  // fmt 검사가 목록 밖 파일을 지우는 리포. 시작할 때는 목록 밖 변경(docs/x.md)이 있어 test를 돌려야 하고,
+  // fmt가 지운 뒤 다시 판정하면 "계획만 바뀜"으로 보인다
+  const rm = `"${process.execPath}" -e "require('fs').rmSync('docs/x.md', { force: true })"`;
+  const commands = {
+    setup: null,
+    fmt: { run: rm, check: rm, timeoutSec: 60 },
+    lint: null,
+    test: null,
+    build: null,
+    dev: null,
+    verify: null,
+  };
+  const run = (root: string, base: string, test: unknown) => {
+    const cfg = loadConfig(root);
+    (cfg.commands as Record<string, unknown>).test = test;
+    return runCheck(repoInfo(root), cfg, {
+      base,
+      env: {},
+      only: ['fmt', 'test'],
+      noRecord: true,
+      quiet: true,
+    });
+  };
+  const a = repo({ commands });
+  write(a.root, 'plans/p1.md', '# 계획 2\n');
+  write(a.root, 'docs/x.md', '# x\n');
+  const r = await run(a.root, a.base, FAILING_TEST);
+  assert.deepEqual(
+    r.results.map((x) => [x.name, x.ok, x.skipped]),
+    [
+      ['fmt', true, false],
+      ['test', false, false],
+    ],
+  );
+
+  // 반대 방향: 시작할 때 건너뛰기로 판정했으면 통과해도 캐시에 쓰지 않는다
+  const b = repo({ commands });
+  write(b.root, 'plans/p1.md', '# 계획 2\n');
+  const s = await run(b.root, b.base, FAILING_TEST);
+  assert.deepEqual([s.ok, s.results[1].skipped], [true, true]);
+  assert.equal(cacheFiles(b.root), 0);
 });
 
 test('testSkip: 판정과 이유를 돌려준다', () => {
@@ -201,18 +251,20 @@ test('testSkip: 판정과 이유를 돌려준다', () => {
   assert.match(no.reason, /scripts\/a\.ts/);
 });
 
-test('check 캐시 키: testInertPaths가 바뀌면 키가 달라진다', () => {
+test('check 캐시: test를 실제로 돌려 통과한 결과만 캐시에 남는다', async () => {
   const { root, base } = repo();
-  const info = repoInfo(root);
   const cfg = loadConfig(root);
-  const a = cacheKey(info, cfg, base);
-  const b = cacheKey(info, { ...cfg, testInertPaths: [...INERT, 'notes/**'] }, base);
-  assert.notEqual(a, b);
-  // 건너뛰는 상황과 돌리는 상황은 트리가 같아도 키가 다르다
-  write(root, 'lab/x.json', '{}\n');
-  const skipKey = cacheKey(info, cfg, base, undefined, {});
-  const mainKey = cacheKey(info, cfg, base, undefined, { GITHUB_REF: 'refs/heads/main' });
-  assert.notEqual(skipKey, mainKey);
+  (cfg.commands as Record<string, unknown>).test = {
+    run: `"${process.execPath}" -e "process.exit(0)"`,
+    timeoutSec: 60,
+  };
+  write(root, 'docs/guide.md', '# 안내\n'); // 목록 밖 변경: test가 돈다
+  const o = { base, env: {}, only: ['test' as const], noRecord: true, quiet: true };
+  const first = await runCheck(repoInfo(root), cfg, o);
+  assert.deepEqual([first.ok, first.cached, first.results[0].skipped], [true, false, false]);
+  assert.equal(cacheFiles(root), 1);
+  const again = await runCheck(repoInfo(root), cfg, o);
+  assert.deepEqual([again.ok, again.cached], [true, true]);
 });
 
 test('loadConfig: testInertPaths는 없으면 []이고, 리포 안 상대 경로 glob 배열이 아니면 ConfigError다', () => {
