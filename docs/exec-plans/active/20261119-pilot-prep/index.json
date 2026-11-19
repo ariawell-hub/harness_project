@@ -1,0 +1,9 @@
+{
+  "plan": "20261119-pilot-prep",
+  "steps": [
+    { "step": 0, "name": "web-test-effect", "status": "pending" },
+    { "step": 1, "name": "verify-run", "status": "pending" },
+    { "step": 2, "name": "verify-playwright", "status": "pending" },
+    { "step": 3, "name": "web-verify-skill", "status": "pending" }
+  ]
+}
