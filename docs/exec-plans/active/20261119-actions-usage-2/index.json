@@ -3,7 +3,7 @@
   "steps": [
     {
       "step": 0,
-      "name": "reuse-and-repro",
+      "name": "repro-on-demand",
       "status": "pending"
     }
   ]
