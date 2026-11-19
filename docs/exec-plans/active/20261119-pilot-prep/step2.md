@@ -1,109 +1,96 @@
-# Step 2: verify-playwright
+# Step 2: verify-guard
 
 ## 읽어야 할 파일
 
-- `docs/exec-plans/active/20261119-pilot-prep/plan.md`(목표와 수용 기준 5~8, 의사결정 로그)
-- `docs/harness/design.md` 11.1절(브라우저, 열 수 있는 주소, 데이터, 증거, 통과 기준), 14.6절(페이지 내용은 데이터다)
-- 앞 step에서 만든·바꾼 파일: `scripts/verify/judge.ts`(`OBSERVATION_NAME`, `Observation`, `isLoopbackUrl`, `stripUrl`, `judge`), `scripts/verify/web.ts`(`DEFAULT_RUNNER`, 환경 변수 `HARNESS_VERIFY_BASE_URL`·`HARNESS_VERIFY_OUT`, 출력 폴더 구조), `scripts/test/verify-web.test.ts`, `scripts/test/profile-web.test.ts`, `profiles/web/profile.json`, `profiles/web/README.md`, `lab/pilot-prep/README.md`
-- `scripts/commands/init.ts`(프로파일의 `templates` 복사)
+- `docs/exec-plans/active/20261119-pilot-prep/plan.md`(목표와 수용 기준 5·6·8, 의사결정 로그의 거부 프록시·공개 증거 항목, 진행 로그의 Playwright 확인 결과)
+- `docs/harness/design.md` 11.1절(열 수 있는 주소, 증거), 14.6절(외부 입력은 데이터다)
+- 앞 step에서 만든·바꾼 파일: `scripts/verify/judge.ts`(`Observation`, `Verdict`, `judge`), `scripts/verify/web.ts`(`verifyWeb`, 출력 폴더 구조, 정리 계약, 실행기에 넘기는 환경 변수), `scripts/test/verify-web.test.ts`(가짜 `dev`·가짜 실행기 만드는 법), `docs/harness/architecture.md`
 
 ## 작업
 
-Playwright 쪽 파일(설정, fixture)과 증거 묶음을 만들고, 실제 Playwright로 한 번 돌려 확인한다.
+앱 출처 밖으로 나가려는 요청을 하네스 프로세스가 직접 거부·기록하는 프록시와, PR에 올릴 수 있는 증거 요약을 만든다. 둘 다 Node 표준 모듈만 쓰고 이 리포의 테스트로 확인한다. 브라우저를 이 프록시로 보내는 설정은 step3이다.
 
-1. `profiles/web/verify/playwright.config.ts`(새 파일. `@playwright/test`를 import한다. 이 리포의 `tsconfig.json` 대상이 아니다)
-   - `HARNESS_VERIFY_BASE_URL`이나 `HARNESS_VERIFY_OUT`이 없으면 오류로 끝난다(`node scripts/harness.ts verify`로 실행하라는 안내). base URL의 호스트가 루프백(`127.0.0.1`, `localhost`, `[::1]`)이 아니어도 오류다.
-   - 시나리오 위치: 리포 루트의 `e2e/` 아래 `*.spec.ts`. `forbidOnly: true`, `retries: 0`.
-   - 리포터: JSON(`<OUT>/report.json`)과 줄 단위 출력.
-   - 산출물 폴더(`outputDir`): `<OUT>/local/artifacts`. 스크린샷은 항상, trace와 영상은 실패했을 때만 남긴다.
-   - 브라우저: Playwright가 받은 Chromium 하나. 시나리오마다 새 컨텍스트다(Playwright 기본 동작). `channel`, `userDataDir`, `connectOverCDP`, `launchPersistentContext`를 쓰지 않는다. 이유: 제작자가 로그인해 둔 브라우저에 붙지 않는다(E5).
-   - 실물 확인에서 되는 것이 확인되면 브라우저 수준에서 루프백 밖 접속을 한 겹 더 막는다(프록시 설정 또는 호스트 해석 규칙). 되지 않으면 넣지 않고 발견 사항에 적는다.
-
-2. `profiles/web/verify/fixture.ts`(새 파일)
-   - `export const test`(Playwright `test`를 확장), `export { expect }`. 시나리오는 이 파일에서 `test`를 import한다.
-   - 자동 fixture(시나리오가 따로 요청하지 않아도 돈다)가 컨텍스트에 아래를 건다.
-     - 주소 제한: 모든 요청을 라우팅해 호스트가 루프백이 아니면 보내지 않고 중단한다. `failedRequests`에 `blocked: true`로 적는다. 웹소켓도 같은 규칙으로 막는다(설치된 Playwright가 지원하는 방법으로. 지원하지 않으면 발견 사항에 적는다).
-     - 관찰: 페이지마다 콘솔의 `error` 메시지와 잡히지 않은 예외(`pageerror`)를 `consoleErrors`에, 실패한 요청(`requestfailed`)과 상태 코드 400 이상인 응답을 `failedRequests`에 적는다.
-     - URL은 출처와 경로만 적는다(쿼리 문자열·프래그먼트·사용자 정보 제외). 콘솔 문구는 앞 200자만 적는다. 요청·응답의 헤더, 쿠키, 본문은 적지 않는다.
-   - 의도한 실패 선언: fixture `verify`의 `allowConsoleError(pattern)`, `allowFailedRequest(pattern)`. 선언에 맞는 항목은 목록에서 빼고 `allowed` 건수로 센다. 주소 제한으로 막힌 요청(`blocked: true`)은 선언으로 뺄 수 없다.
-   - 시나리오가 끝날 때(성공·실패 모두) `Observation`(`version: 1`)을 `harness-verify`라는 이름의 JSON 첨부로 붙인다. 형식은 `scripts/verify/judge.ts`의 것과 같다.
-   - fixture는 `scripts/`의 파일을 import하지 않는다(루프백 판정 같은 짧은 로직은 이 파일에 다시 쓴다). 이유: Playwright의 TypeScript 로더와 Node의 로더가 달라 `.ts` 확장자 import가 어긋날 수 있다. 두 구현이 같은 판정을 내는지는 실물 확인의 사례로 본다.
-
-3. `scripts/verify/evidence.ts`(새 파일)와 `scripts/verify/web.ts` 연결
+1. `scripts/verify/deny-proxy.ts`(새 파일)
 
    ```ts
-   export const EVIDENCE_EXTENSIONS: string[]; // ['.png', '.webm']
+   export interface DeniedRequest {
+     kind: 'http' | 'connect' | 'upgrade';
+     host: string;
+     port: number;
+   }
+   export interface DenyProxy {
+     /** http://127.0.0.1:<포트> */
+     url: string;
+     /** 지금까지 거부한 요청(최대 1000건까지 담는다) */
+     denied(): DeniedRequest[];
+     /** 거부한 요청의 전체 건수(1000건을 넘어도 센다) */
+     count(): number;
+     close(): Promise<void>;
+   }
+   export function startDenyProxy(): Promise<DenyProxy>;
+   ```
+
+   - `127.0.0.1`의 0번 포트에서 뜬다. 다른 인터페이스에 바인드하지 않는다.
+   - 들어온 것은 **아무것도 전달하지 않는다.** 일반 HTTP 요청(절대 URL 형식 포함)은 403으로 답하고 닫는다. `CONNECT`는 403으로 답하고 소켓을 닫는다. 업그레이드 요청은 소켓을 닫는다. 깨진 요청은 닫는다.
+   - 기록은 종류, 대상 호스트, 포트뿐이다. 경로, 쿼리 문자열, 헤더, 본문은 읽어 두지도 기록하지도 않는다. 호스트를 알 수 없으면 `host: '(알 수 없음)'`, `port: 0`.
+   - `close()`는 열린 소켓을 모두 끊고 포트를 놓는다.
+
+2. `scripts/verify/web.ts` 연결
+   - `dev`를 띄우기 전에 프록시를 띄우고, 실행기에 환경 변수 `HARNESS_VERIFY_PROXY=<프록시 url>`을 더 넘긴다.
+   - 실행기가 끝난 뒤(판정 전) 프록시의 기록을 읽는다. `count()`가 0이 아니면 판정을 실패로 하고 전체 문제에 "앱 출처 밖으로 가려는 요청 N건"과 호스트:포트 목록(중복 제거)을 더한다. 이 실패는 관찰 기록의 `allowed`와 무관하다.
+   - `VerifyResult`에 `denied: { count: number; requests: DeniedRequest[] }`를 더한다.
+   - 정리 계약에 프록시를 넣는다: 어느 경우에도 돌아가기 전에 `close()`한다.
+   - 판정 뒤(통과·실패 모두, 결과 파일을 읽지 못한 경우 포함) 아래 3의 `buildEvidence`를 부르고 명령행 출력에 묶음 경로를 낸다. 에이전트가 원인을 볼 자세한 내용(시나리오별 문제, 관찰 기록, 거부된 요청)은 `local/detail.json`에 쓴다.
+
+3. `scripts/verify/evidence.ts`(새 파일)
+
+   ```ts
    export function buildEvidence(
      outDir: string,
-     report: unknown,
      verdict: Verdict,
-     meta: { baseUrl: string; startedAt: string },
+     meta: { startedAt: string; deniedCount: number },
    ): { dir: string; files: string[] };
    ```
 
-   - `<outDir>/evidence/`를 만들고 아래만 넣는다.
-     - `summary.json`: 실행 시각, 전체 판정, 시나리오별 제목·파일·상태·문제·관찰 건수(의도한 실패 건수 포함).
-     - `summary.md`: 같은 내용을 PR 본문에 옮길 수 있는 글로.
-     - 결과 파일의 첨부 가운데 경로가 `<outDir>` 안에 있고(실제 경로 기준), 심볼릭 링크가 아닌 일반 파일이며, 확장자가 `EVIDENCE_EXTENSIONS`에 드는 것의 사본. 파일 이름은 시나리오 순번과 원래 이름으로 만든다(시나리오 제목을 경로에 쓰지 않는다).
-   - trace(`.zip`), HAR, 그 밖의 형식은 넣지 않는다. `local/`에 그대로 둔다.
-   - 요약에 들어가는 URL은 `stripUrl`을 다시 거친다(관찰 기록을 믿지 않는다). 콘솔 문구는 앞 200자다.
-   - `verifyWeb`은 판정 뒤(통과·실패 모두) `buildEvidence`를 부르고 명령행 출력에 묶음 경로를 낸다. 결과 파일을 읽지 못했으면 요약만 만든다.
+   - `<outDir>/evidence/`에 `summary.json`과 `summary.md` **둘만** 만든다. 다른 파일은 복사하지 않는다(스크린샷, 영상, trace, HAR, 로그 모두 `local/`에 둔다).
+   - 요약에 넣는 것: 실행 시각, 전체 판정(통과/실패), 시나리오 수, 거부 프록시에 닿은 요청 건수, 시나리오별 `파일:줄`·상태·건수(콘솔 에러, 실패한 요청, 그 가운데 앱 출처 밖이라 막은 요청, 의도한 실패로 뺀 건수)·관찰 기록 유무, 전체 문제의 **분류**(예: "시나리오 없음", "결과 파일 읽지 못함", "실행기 종료 코드 0 아님", "앱 출처 밖 요청")와 건수.
+   - 요약에 넣지 않는 것: 실행 중에 만들어진 문자열 전부. 콘솔 문구, URL(호스트·경로·쿼리), 시나리오 제목, `judge`의 `problems` 문장, 거부된 요청의 호스트, 실행기·`dev`의 출력.
+   - 시나리오의 파일 경로는 `e2e/`로 시작하고 영문자·숫자·`._-/[]()`만으로 된 경우에만 그대로 적고, 아니면 `(경로 생략)`으로 적는다. 상태는 정해 둔 값(`passed`, `failed`, `timedOut`, `skipped`, `interrupted`)이 아니면 `(알 수 없음)`으로 적는다.
+   - `summary.md`는 PR 본문에 그대로 옮길 수 있는 글이다(표 하나와 한 줄 판정).
 
-4. 시나리오 예시 템플릿
-   - `profiles/web/templates/smoke.spec.ts`: fixture의 `test`로 첫 화면을 열어 제목이 있는지 보는 시나리오 하나.
-   - `profiles/web/profile.json`의 `templates`에 `{ "from": "templates/smoke.spec.ts", "to": "e2e/smoke.spec.ts" }`를 더하고 `version`을 `0.4.0`으로 올린다.
+4. 테스트 `scripts/test/verify-guard.test.ts`(새 파일)
+   - 프록시: Node `http` 클라이언트로 프록시에 ① 절대 URL 요청(`GET http://example.test:8080/path?token=<표식>`, 헤더 `Authorization: <표식>`), ② `CONNECT example.test:443`, ③ 업그레이드 요청을 보낸다. ①은 403, ②는 403 뒤 닫힘, ③은 닫힘이다. `denied()`가 종류·호스트·포트를 담고, 기록을 JSON으로 바꾼 문자열에 표식이 없다. `count()`가 3이다.
+   - 프록시가 전달하지 않는다: 테스트가 띄운 대상 서버로 가는 요청을 프록시에 보냈을 때 대상 서버의 도달 횟수가 0이다(일반 요청, `CONNECT` 각각).
+   - 1001번 보내면 `denied()`는 1000건, `count()`는 1001이다. `close()` 뒤 그 포트에 접속이 되지 않는다.
+   - `verifyWeb`: 가짜 실행기가 `HARNESS_VERIFY_PROXY`로 요청을 하나 보내고 통과 결과를 쓰면 `ok: false`이고 `denied.count`가 1이다. 관찰 기록의 `allowed`를 올려도 실패다. 요청을 보내지 않으면 `ok: true`다. 어느 경우에도 끝난 뒤 프록시 포트에 접속이 되지 않는다(시간 초과와 중단 신호 포함).
+   - `buildEvidence`: `evidence/`의 파일 목록이 정확히 `summary.json`, `summary.md`다. 통과·실패·결과 파일 없음 각각에서 만들어진다.
+   - 표식 누출 없음: 표식 문자열을 시나리오 제목, 콘솔 문구, 실패한 요청의 URL(호스트·경로·쿼리 각각), `problems`, 거부된 요청의 호스트, 틀린 형식의 파일 경로와 상태 값에 넣은 판정으로 `buildEvidence`를 불렀을 때 `evidence/` 두 파일 어디에도 표식이 없다. 같은 판정의 `local/detail.json`에는 있다(진단용).
+   - 건수가 맞다: 콘솔 에러 2, 실패한 요청 3(그 가운데 막은 것 1), 의도한 실패 1을 넣으면 요약의 숫자가 그대로다.
 
-5. 테스트 `scripts/test/verify-evidence.test.ts`(새 파일)
-   - `buildEvidence`: `.png`·`.webm` 첨부만 복사된다. `.zip`·`.har`·확장자 없는 파일, `<outDir>` 밖의 경로, 심볼릭 링크, 없는 파일은 복사되지 않는다. `evidence/`의 파일 목록이 요약 둘과 허용 형식뿐이다.
-   - 관찰 기록에 쿼리 문자열이 붙은 URL(`?token=…`)과 긴 콘솔 문구를 넣었을 때 `summary.json`·`summary.md`에 그 쿼리 값이 없고 문구가 200자로 잘려 있다.
-   - 실패한 판정에서도 묶음이 만들어지고 요약에 문제가 적힌다.
-   - 파일 내용 확인: `profiles/web/verify/playwright.config.ts`와 `fixture.ts`에 `connectOverCDP`, `launchPersistentContext`, `userDataDir`, `channel`이 없다. `fixture.ts`에 `OBSERVATION_NAME`의 값이 있다. 설정 파일에 `HARNESS_VERIFY_BASE_URL`과 `HARNESS_VERIFY_OUT`이 있다. `DEFAULT_RUNNER`의 `--config` 뒤 경로에 파일이 있다.
-   - `scripts/test/profile-web.test.ts`에 더한다: `templates`의 모든 `from` 파일이 있고, `init`을 적용하면 `e2e/smoke.spec.ts`가 생긴다.
-
-6. 실물 확인(`lab/pilot-prep/`)
-   - `mktemp -d`로 만든 폴더에 이 worktree를 로컬 복제하고 `init --profile web`을 적용한다. `@playwright/test`를 devDependency로 더하고(버전 고정) Chromium을 받는다. `app:dev`는 `PORT`를 따르는 작은 Node HTTP 서버로 둔다. 이 리포의 `package.json`·lockfile은 바꾸지 않는다.
-   - 사례마다 `node scripts/harness.ts verify`를 돌려 종료 코드와 판정 줄을 `lab/pilot-prep/results/verify-playwright.json`에 적는다.
-     - `pass`: 통과하는 시나리오. 종료 코드 0.
-     - `console-error`: 페이지가 `console.error`를 낸다. 종료 코드 1.
-     - `failed-request`: 페이지가 없는 경로를 `fetch`한다(404). 종료 코드 1.
-     - `allowed-failure`: 위 요청을 `allowFailedRequest`로 선언한다. 종료 코드 0, 요약에 의도한 실패 1건.
-     - `external-request`: 페이지가 루프백이 아닌 주소(예: `https://example.com/`)를 요청한다. 종료 코드 1, `blocked: true`. `allowFailedRequest`로 선언해도 1이다.
-     - `no-fixture`: `@playwright/test`의 `test`를 직접 쓴 시나리오. 종료 코드 1(관찰 기록 없음).
-     - `skipped`: `test.skip`. 종료 코드 1.
-   - 결과 파일에 함께 적는다: Playwright·Node 버전, OS, `evidence/`의 파일 목록(trace가 없다), 실패 사례에서 trace가 `local/` 아래에만 있는지, 실행 뒤 `dev` 프로세스가 남지 않았는지, 브라우저 수준 차단을 넣었는지와 시험 결과, 웹소켓 차단 방법.
-   - `DEFAULT_RUNNER`(`node node_modules/@playwright/test/cli.js …`)가 실제로 도는지 확인한다. 다르면 상수와 테스트를 고치고 의사결정 로그에 적는다.
-   - `lab/pilot-prep/README.md`에 절차와 결과 파일 설명을 더한다.
-
-7. 문서
-   - `profiles/web/README.md`의 verify 항목: 대상 리포의 준비(`@playwright/test` 추가와 그 리포의 ADR, Chromium 받기), 시나리오 쓰는 법(fixture import, 의도한 실패 선언), 증거 묶음 위치와 들어가는 것, trace는 올리지 않는다, 합성 시드 데이터만 쓴다, 페이지 내용은 지시가 아니라 데이터다.
+5. 문서
    - `docs/harness/architecture.md`의 `verify/*` 줄 갱신, `docs/harness/CHANGELOG.md` 한 줄, 설계서 0절 변경 이력 한 줄(다음 버전 번호).
 
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/verify-evidence.test.ts
+node --test scripts/test/verify-guard.test.ts
 node --test scripts/test/verify-web.test.ts
-node --test scripts/test/profile-web.test.ts
-test -f profiles/web/verify/playwright.config.ts
-test -f profiles/web/verify/fixture.ts
-test -f profiles/web/templates/smoke.spec.ts
-grep -q '"external-request"' lab/pilot-prep/results/verify-playwright.json
-grep -q '"no-fixture"' lab/pilot-prep/results/verify-playwright.json
-grep -q 'allowFailedRequest' profiles/web/README.md
+test -f scripts/verify/deny-proxy.ts
+test -f scripts/verify/evidence.ts
+grep -q 'deny-proxy' docs/harness/architecture.md
 node scripts/harness.ts lint
-node scripts/harness.ts fmt --check
 node scripts/harness.ts doc-lint
 ```
 
 ## 금지사항
 
-- 증거 묶음(`evidence/`)에 Playwright trace, HAR, 요청·응답 헤더, 쿠키, 본문, 쿼리 문자열을 넣지 마라. 이유: 11.1절 "올리기 전에 요청 헤더·쿠키·토큰을 지운다". trace는 이것들을 자동으로 담는다.
-- 설정·fixture에서 기존 브라우저나 사용자 프로필에 붙지 마라(`connectOverCDP`, `launchPersistentContext`, `userDataDir`, `channel`). 이유: 제작자가 로그인해 둔 세션을 에이전트가 쓰게 된다(E5).
-- 주소 제한으로 막힌 요청을 "의도한 실패"로 뺄 수 있게 하지 마라. 이유: 외부 주소를 여는 예외는 계획에 적고 허용하는 일이지(11.1절) 시나리오 코드가 스스로 푸는 일이 아니다.
-- 실물 확인에 실데이터, 제작자 계정, 로그인이 필요한 외부 서비스를 쓰지 마라. 이유: 검증은 합성 데이터로만 한다. 외부 주소 사례는 막히는 것만 확인한다.
-- 이 리포의 `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, `harness.config.json`, `scripts/harness.ts`, `scripts/lib/config.ts`를 바꾸지 마라. 이유: Playwright는 대상 리포의 의존성이다. 설정 키를 더하지 않는다.
-- `scripts/verify/`에서 `@playwright/test`를 import하지 마라. 이유: 이 리포의 `lint`가 실패한다.
-- 실물 확인 결과를 지어 쓰지 마라. 돌리지 못한 사례는 결과 파일에 "확인하지 못함"과 이유를 적는다. 이유: 이 파일이 수용 기준 5·8의 근거다.
-- 테스트가 `lab/`을 읽게 하지 마라. 이유: `lab/**`는 `testInertPaths`다.
-- 임시 폴더를 지우는 명령을 실행하지 마라. 이유: R14.
-- 기술 부채 표, 설계서 11.1절 본문·14.3절·18절·0.1절·0.2절·10.2~10.4절, 절차서 5절을 고치지 마라. 이유: 11.1절 반영은 step3이 한다. 나머지는 다른 세션과의 합의와 Q10·Q13 미결정.
+- 프록시가 요청을 어디로든 전달하게 하지 마라(앱 출처 포함). 이유: 앱 출처는 브라우저 설정이 프록시를 지나지 않게 한다. 프록시에 닿은 것은 모두 허용 밖이다. 전달 기능이 있으면 허용 목록 판단이 프록시 안에 생기고 그 버그가 곧 외부 접속이다.
+- 프록시가 경로·쿼리 문자열·헤더·본문을 기록하거나 출력하게 하지 마라. 이유: 자격증명이 들어 있을 수 있다(11.1절).
+- 프록시를 `127.0.0.1` 밖의 인터페이스에 바인드하지 마라. 이유: 같은 네트워크의 다른 기기에 열린다.
+- `evidence/`에 요약 두 파일 밖의 것을 넣지 마라. 요약에 실행 중에 만들어진 문자열을 넣지 마라(글자 수를 줄여 넣는 것 포함). 이유: 콘솔 문구·URL·제목·화면에 토큰이 찍힐 수 있고, 잘라도 남는다(계획 검증 F6). 스크린샷을 올리는 일은 이 계획의 범위 밖이다.
+- 거부 프록시에 닿은 요청을 관찰 기록의 `allowed`나 다른 선언으로 뺄 수 있게 하지 마라. 이유: 외부 주소를 여는 예외는 계획에 적고 허용하는 일이지(11.1절) 시나리오 코드가 스스로 푸는 일이 아니다.
+- 웹 프로파일의 `commands.verify`를 이 step에서 켜지 마라. 이유: Playwright 설정 파일은 step3에서 생긴다.
+- `scripts/verify/`에서 `@playwright/test`를 import하지 마라. `scripts/harness.ts`, `scripts/lib/config.ts`, `harness.config.json`을 고치지 마라. 이유: 이 리포의 `lint`가 실패한다. 다른 세션과 겹치고 설정 키를 더하지 않는다.
+- 테스트가 실제 외부 주소로 요청을 보내게 하지 마라. 이유: CI와 로컬 테스트는 네트워크에 기대지 않는다. 대상은 테스트가 띄운 로컬 서버나 `example.test`(프록시가 전달하지 않으므로 해석되지 않는다)로 한다.
+- `scripts/test/` 아래 기존 테스트 파일(이 계획의 앞 step이 만든 것 제외)을 고치지 마라. 테스트에서 `sleep`으로 고정 시간을 기다리지 마라. 이유: 다른 세션과 겹친다. CI에서 흔들린다.
+- 기술 부채 표, 설계서 11.1절 본문·14.3절·18절·0.1절·0.2절·10.2~10.4절, 절차서 5절을 고치지 마라. 이유: 11.1절 반영은 step4가 한다. 나머지는 다른 세션과의 합의와 Q10·Q13 미결정.
