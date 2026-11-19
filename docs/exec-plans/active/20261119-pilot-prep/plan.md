@@ -124,6 +124,9 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - `serviceWorkers: 'block'`: `register()`는 오류 없이 끝났고 워커 스크립트 요청이 앱에 오지 않았다(콘솔 에러·요청 이벤트 없음). `'allow'`로 바꾸면 워커가 돌았고 워커가 다른 포트로 보낸 요청은 프록시에 닿았다(대상 도달 0건).
   - 404 응답: `response` 이벤트(404)와 콘솔 에러(`Failed to load resource: the server responded with a status of 404`)가 둘 다 났다.
   - 실행기: `playwright test e2e/a.spec.ts`가 `e2e/a.spec.ts`와 `e2e/sub-e2e/a.spec.ts` 2개를 돌렸다. 설정의 `testMatch`를 절대 경로에 정확히 일치하는 정규식으로 주면 1개만 돌았고, 없는 파일이면 "No tests found"로 종료 코드 1이다. JSON 보고서의 파일 경로는 `config.rootDir`(시나리오 폴더) 기준 상대 경로다. `type: module`인 폴더에서는 설정 파일의 `__dirname`이 없어 로드가 실패했다. 컨텍스트의 `request` 이벤트는 리다이렉트의 뒤 목적지도 냈고 페이지의 `websocket` 이벤트는 프록시에서 거부된 연결의 URL도 냈다.
+- 2026-11-19: 계획 검증 3라운드(head `371129c`). 2라운드의 F12~F16은 모두 `fixed`로 닫혔다. `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 2건 F17·F18). 열린 차단 지적은 7 → 5 → 2건으로 줄었고 앞선 지적과 같은 위치가 아니라 수렴하는 라운드다. 둘 다 받아들여 고쳤다(반박 없음).
+  - F17(P1): `isScenarioPath`가 `e2e/./a.spec.ts`를 받아 실행 뒤 파일 집합 비교가 어긋난다. 경로의 모든 구간이 영문자·숫자로 시작해야 한다는 조건을 더해 `.` 구간과 점으로 시작하는 구간을 거부한다. 이 규칙에 맞는 경로는 정규화해도 그대로라 글자 그대로 비교한다. `root`는 실제 경로로 바꿔 쓴다(step1).
+  - F18(P1): 실물 확인의 `marker` 사례가 표식이 든 이름으로 요청해 그 표식이 거부 프록시 기록에 들어간 것을 확인하고, 모든 사례에서 프록시 기록의 대상 문자열이 `evidence/`에 없는지를 결과 검사기의 통과 조건으로 한다(수용 기준 8, step3).
 
 ## 의사결정 로그
 
@@ -183,7 +186,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-1. 고친 계획을 계획만 담은 커밋으로 push해 계획 검증(G1) 3라운드를 받는다(PR #142).
+1. 고친 계획을 계획만 담은 커밋으로 push해 계획 검증(G1) 4라운드를 받는다(PR #142).
 2. 승인 뒤 step0을 로컬에서 TDD로 구현한다. push하지 않는다.
 3. TD-53 PR(Issue #139, PR #141)이 병합되면 `origin/main`을 병합하고 `CHANGELOG`(v0.7.59)·TD-42 행을 더한 뒤 `check` → `complete-step` → push → `pr-ready`로 한 번만 승인을 요청한다. 그 전에 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
 4. 병합 뒤 `new-task --plan 20261119-pilot-prep --step 1`.

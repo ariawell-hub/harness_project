@@ -38,7 +38,7 @@
        allowed: { consoleErrors: number; failedRequests: number };
      }
      ```
-   - `export function isScenarioPath(p: string): boolean`: `e2e/`로 시작하고 `.spec.ts`로 끝나며, 영문자·숫자·`.`·`_`·`-`·`/`만으로 되어 있고, 빈 구간과 `..` 구간이 없는 상대 경로면 참이다. 명령행 인자 검사(아래 4)와 증거 요약의 경로 표시(step2)가 이 함수 하나를 쓴다.
+   - `export function isScenarioPath(p: string): boolean`: `e2e/`로 시작하고 `.spec.ts`로 끝나며, 영문자·숫자·`.`·`_`·`-`·`/`만으로 되어 있고, `/`로 나눈 구간이 모두 영문자나 숫자로 시작하는 상대 경로면 참이다(빈 구간, `.`, `..`, 점이나 `-`로 시작하는 구간은 거짓). 이 규칙에 맞는 경로는 정규화해도 바뀌지 않으므로, 지정한 경로와 보고서에서 얻은 리포 기준 경로를 글자 그대로 비교한다. 명령행 인자 검사(아래 4)와 증거 요약의 경로 표시(step2)가 이 함수 하나를 쓴다.
    - `judge(report: unknown, runnerCode: number, o: { root: string; scenarios?: string[] }): Verdict`. `report`는 Playwright JSON 리포터의 결과다(`config.rootDir`, `suites[].specs[].tests[].results[]`, `suites[].suites[]` 중첩, 최상위 `errors[]`). 시나리오 하나 = spec의 test 하나. `ScenarioVerdict.file`은 리포 루트 기준 상대 경로(`/` 구분)다: 보고서의 파일 경로는 `config.rootDir`(시나리오 폴더) 기준이므로 그것을 이어 붙인 뒤 `o.root` 기준으로 바꾼다.
      ```ts
      export interface ScenarioVerdict {
@@ -94,13 +94,14 @@
    ```
 
    - 순서: 출력 폴더 만들기 → 빈 포트 고르기 → `dev` 띄우기 → 준비 대기 → 실행기 → 결과 파일 읽기 → `judge` → 정리.
+   - `root`는 실제 경로(`realpath`)로 바꿔서 쓴다(실행기의 `cwd`, `judge`의 `o.root`, 출력 폴더). 이유: 보고서의 `config.rootDir`는 실행기가 본 실제 경로라서, 심볼릭 링크를 낀 경로(macOS의 임시 폴더)를 그대로 쓰면 리포 기준 경로가 어긋난다.
    - 출력 폴더: `<root>/.harness-verify/<YYYYMMDD-HHMMSS>-<pid>/`. 그 아래 `local/`(올리지 않는 것: `dev.log`, 실행기 출력 등). `.gitignore`에 `.harness-verify/`를 더한다.
    - `cfg.commands.dev`가 없으면 실패한다(무엇이 없는지와 고치는 법을 낸다).
    - 포트: `127.0.0.1`의 0번 포트로 잠깐 listen해 받은 번호. `baseUrl`은 `http://127.0.0.1:<포트>`이고 다른 값을 받는 길이 없다.
    - `dev`: `cfg.commands.dev.run`을 셸로, 자기 프로세스 그룹으로 띄운다. 환경 변수 `PORT=<포트>`, `HOST=127.0.0.1`. 출력은 `local/dev.log`로 보낸다.
    - 준비 대기: `baseUrl`에 HTTP 응답(상태 코드 무관)이 올 때까지. 제한 시간을 넘거나 그 전에 `dev`가 끝나면 실패하고 `dev.log` 끝부분을 보인다.
    - 실행기: `runner`(기본 `DEFAULT_RUNNER`)를 인자를 더 붙이지 않고 셸 없이, 자기 프로세스 그룹으로 띄운다(`cwd`는 `root`). 환경 변수 `HARNESS_VERIFY_BASE_URL=<baseUrl>`, `HARNESS_VERIFY_OUT=<출력 폴더>`, 그리고 `scenarios`가 있으면 `HARNESS_VERIFY_SCENARIOS=<경로들의 JSON 배열>`(없으면 이 변수를 지운다. 바깥에서 물려받은 값을 쓰지 않는다). 실행기는 `<출력 폴더>/report.json`에 결과를 쓴다. 출력은 `local/runner.log`로 보낸다.
-   - `scenarios`의 경로가 `isScenarioPath`에 맞지 않거나 그 파일이 `root`에 없으면 아무것도 띄우지 않고 실패한다. 실행 뒤 `judge`에 `root`와 `scenarios`를 넘겨 결과의 파일 집합을 확인한다.
+   - `scenarios`의 경로가 `isScenarioPath`에 맞지 않거나 `root` 아래의 일반 파일이 아니면(없음, 폴더, 심볼릭 링크) 아무것도 띄우지 않고 실패한다. 같은 경로를 두 번 주면 하나로 본다. 실행 뒤 `judge`에 `root`와 `scenarios`를 넘겨 결과의 파일 집합을 확인한다. 집합이 글자 그대로 같지 않으면 실패다(대소문자만 다른 이름처럼 비교할 수 없는 경우도 통과로 두지 않는다).
    - **정리 계약**: `dev`와 실행기 둘 다 실행 중인 자식의 핸들을 쥐고 있어야 한다(`scripts/lib/exec.ts`의 `run`은 핸들을 주지 않으므로 그대로는 쓸 수 없다). 정상 종료, 판정 실패, 예외, 실행기 시간 초과, 중단 신호 어느 경우에도 돌아가기 전에 실행기의 프로세스 트리와 `dev`의 프로세스 트리를 끝낸다: 그룹에 SIGTERM → 2초 안에 끝나지 않으면 SIGKILL → 두 트리가 끝난 것을 확인. 중단 신호를 받은 때부터 4초 안에 돌아간다. 이유: 표준 명령의 시간 제한은 SIGTERM 5초 뒤에 SIGKILL을 보낸다. 그 전에 정리를 마쳐야 한다.
    - 명령행 진입(`node scripts/verify/web.ts [시나리오 경로…]`): `repoInfo`·`loadConfig`로 설정을 읽고 `verifyWeb`을 부른다. 시나리오별 한 줄(`✓`/`✗`, 파일:줄, 제목, 문제)과 전체 문제, 출력 폴더를 stdout에 내고 종료 코드는 `ok ? 0 : 1`이다.
      - 추가 인자는 `isScenarioPath`에 맞는 경로만 받아 `scenarios`로 넘긴다. 그 밖의 인자가 하나라도 있으면 아무것도 띄우지 않고 종료 코드 1로 끝낸다. 이유: 옵션(`--config` 등)이나 정규식으로 해석될 문자가 실행기에 닿지 않게 한다.
@@ -110,7 +111,8 @@
    - `judge`: 통과 사례 하나와, 위 판정 규칙의 각 항목마다 실패 사례 하나. `allowed` 건수는 실패가 아니다.
    - `verifyWeb`: 통과하면 `ok`이고 실행기가 받은 `HARNESS_VERIFY_BASE_URL`이 `http://127.0.0.1:<포트>` 꼴이며 `HARNESS_VERIFY_OUT`이 출력 폴더다. 끝난 뒤 그 포트에 접속이 되지 않고 `dev`의 pid가 없다.
    - 시나리오 지정: `scenarios: ['e2e/a.spec.ts']`로 부르면 가짜 실행기가 받은 명령행 인자는 `runner` 그대로이고(더 붙은 것이 없다) `HARNESS_VERIFY_SCENARIOS`가 그 배열이다. 지정하지 않으면 그 변수가 없다(테스트 프로세스의 환경에 그 변수가 있어도). 가짜 실행기가 다른 파일(`e2e/sub-e2e/a.spec.ts`)의 시나리오까지 담은 통과 결과를 쓰면 `ok: false`다. 지정한 파일의 시나리오가 결과에 없어도 `ok: false`다. 리포에 없는 파일을 지정하면 `dev`도 실행기도 띄우지 않고 실패한다.
-   - `isScenarioPath`: `e2e/a.spec.ts`, `e2e/sub/a-b_c.spec.ts`는 참. `e2e/[id].spec.ts`, `e2e/(shop)/a.spec.ts`, `e2e/a b.spec.ts`, `e2e/../a.spec.ts`, `e2e//a.spec.ts`, `/abs/e2e/a.spec.ts`, `src/a.spec.ts`, `e2e/a.spec.tsx`, `--config`는 거짓.
+   - `isScenarioPath`: `e2e/a.spec.ts`, `e2e/sub/a-b_c.spec.ts`는 참. `e2e/./a.spec.ts`, `e2e/.hidden/a.spec.ts`, `e2e/-x/a.spec.ts`, `e2e/[id].spec.ts`, `e2e/(shop)/a.spec.ts`, `e2e/a b.spec.ts`, `e2e/../a.spec.ts`, `e2e//a.spec.ts`, `/abs/e2e/a.spec.ts`, `src/a.spec.ts`, `e2e/a.spec.tsx`, `--config`는 거짓.
+   - 경로 비교: `scenarios: ['e2e/a.spec.ts', 'e2e/a.spec.ts']`(중복)는 한 번 지정한 것과 결과가 같다. 심볼릭 링크인 시나리오 파일을 지정하면 띄우지 않고 실패한다. 임시 폴더를 가리키는 심볼릭 링크를 `root`로 주어도 통과 결과가 `ok`이고 `ScenarioVerdict.file`이 `e2e/a.spec.ts`다(가짜 실행기는 보고서의 `config.rootDir`를 자기 `process.cwd()` 아래 `e2e`로 쓴다). 명령행에 `e2e/./a.spec.ts`를 주면 `dev`도 실행기도 띄우지 않고 종료 코드 1이다.
    - `dev`가 준비되지 않는 경우(제한 시간 1초), `dev`가 곧바로 끝나는 경우, 실행기가 결과 파일을 쓰지 않는 경우, 실행기가 깨진 JSON을 쓰는 경우: 모두 `ok: false`이고 `dev`가 남지 않는다.
    - 실행기 시간 초과: 가짜 실행기가 손자 프로세스를 하나 띄우고 두 pid를 파일에 적은 뒤 끝나지 않는다. `runnerTimeoutSec: 1`로 부르면 `ok: false`이고 실행기·손자·`dev`의 pid가 모두 없다.
    - `commands.dev`가 `null`이면 실패한다.
