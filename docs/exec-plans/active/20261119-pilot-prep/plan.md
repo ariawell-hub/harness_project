@@ -127,6 +127,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 2026-11-19: 계획 검증 3라운드(head `371129c`). 2라운드의 F12~F16은 모두 `fixed`로 닫혔다. `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 2건 F17·F18). 열린 차단 지적은 7 → 5 → 2건으로 줄었고 앞선 지적과 같은 위치가 아니라 수렴하는 라운드다. 둘 다 받아들여 고쳤다(반박 없음).
   - F17(P1): `isScenarioPath`가 `e2e/./a.spec.ts`를 받아 실행 뒤 파일 집합 비교가 어긋난다. 경로의 모든 구간이 영문자·숫자로 시작해야 한다는 조건을 더해 `.` 구간과 점으로 시작하는 구간을 거부한다. 이 규칙에 맞는 경로는 정규화해도 그대로라 글자 그대로 비교한다. `root`는 실제 경로로 바꿔 쓴다(step1).
   - F18(P1): 실물 확인의 `marker` 사례가 표식이 든 이름으로 요청해 그 표식이 거부 프록시 기록에 들어간 것을 확인하고, 모든 사례에서 프록시 기록의 대상 문자열이 `evidence/`에 없는지를 결과 검사기의 통과 조건으로 한다(수용 기준 8, step3).
+- 2026-11-19: 계획 검증 4라운드(head `3bcd478`). `review/claude`, `review/codex` 모두 승인(지적 없음), 원장의 차단 지적 0건(전체 18건, 미룸 4건). 계획 검증(G1)이 끝나 step0의 구현을 시작했다.
+- 2026-11-19: step0을 로컬에서 구현했다(push하지 않았다. TD-53 PR #141이 제작자 승인 대기 중이다).
+  - 테스트를 먼저 썼다(`scripts/test/profile-web.test.ts`, 구현 전 6개 가운데 5개 실패). `profiles/web/test-effect/run-one.mjs`와 `profiles/web/profile.json`의 `testEffect`(버전 0.2.0)를 더해 6개 모두 통과한다.
+  - 실물 확인: `mktemp -d` 폴더에 이 worktree를 복제해 웹 프로파일을 적용하고 Vitest를 설치했다. 이 리포의 설치 정책(`minimumReleaseAge`)이 5.1.1 대신 5.1.0을 골랐다. `lab/pilot-prep/trial-test-effect.ts`가 일곱 사례를 만들어 `test-effect`를 두 번 돌렸고 첫 실행에서 모두 기대대로 나왔다(`all` 종료 코드 1, `effective-only` 0). 이름이 겹치는 세 파일(`src/sim/a.test.ts`, `a.test.tsx`, 더 깊은 폴더의 같은 이름)은 파일마다 자기 결과대로 판정됐다. `node lab/pilot-prep/check-results.ts test-effect-vitest` 통과.
+  - `lab/pilot-prep/check-results.ts`의 테스트(`lab/pilot-prep/test/`)를 더했다(어긋난 결과 파일을 통과시키지 않는지 8개).
+  - 남은 것: `CHANGELOG`·TD-42 행·설계서 0절 변경 이력(TD-53 병합 뒤 `origin/main`을 병합하고 더한다), `check` → `complete-step` → push → `pr-ready`.
 
 ## 의사결정 로그
 
@@ -160,6 +166,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - Playwright JSON 보고서의 파일 경로는 리포 루트가 아니라 시나리오 폴더(`config.rootDir`) 기준이다. → 처리: 이 계획의 step1(`judge`가 리포 기준 경로로 바꾼다)
 - Chromium은 404 응답에 콘솔 에러도 낸다. → 처리: 이 계획의 step3(fixture와 `profiles/web/README.md`)
 - `verify`의 브라우저에서는 서비스 워커가 돌지 않아 워커에 기대는 동작은 확인하지 못한다. → 처리: 이 계획의 step3(`profiles/web/README.md`에 한계로 적는다)
+- 웹 프로파일에 `testEffect` 키가 없던 동안, `init --profile web`을 적용한 리포에는 core 프로파일의 `testEffect`(`scripts/test/*.test.ts`, `node --test`)가 그대로 남아 있었다(`init`은 프로파일에 있는 키만 덮어쓴다). 그래서 `src/`의 테스트는 검사 대상에 들지 않고 지나갔다. → 처리: 이 계획의 step0(프로파일이 키를 채운다. TD-42 행을 고칠 때 이 내용을 적는다)
 
 ## 열린 질문
 
@@ -186,8 +193,8 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-1. 고친 계획을 계획만 담은 커밋으로 push해 계획 검증(G1) 4라운드를 받는다(PR #142).
-2. 승인 뒤 step0을 로컬에서 TDD로 구현한다. push하지 않는다.
+1. (끝남) 계획 검증(G1): 4라운드에서 두 검증자 승인.
+2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
 3. TD-53 PR(Issue #139, PR #141)이 병합되면 `origin/main`을 병합하고 `CHANGELOG`(v0.7.59)·TD-42 행을 더한 뒤 `check` → `complete-step` → push → `pr-ready`로 한 번만 승인을 요청한다. 그 전에 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
 4. 병합 뒤 `new-task --plan 20261119-pilot-prep --step 1`.
 5. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.

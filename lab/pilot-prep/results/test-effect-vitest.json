@@ -1,0 +1,62 @@
+{
+  "tool": {
+    "vitest": "5.1.0",
+    "node": "v22.23.3",
+    "os": "darwin-arm64"
+  },
+  "command": ["node", "profiles/web/test-effect/run-one.mjs"],
+  "runs": [
+    {
+      "id": "all",
+      "exitCode": 1
+    },
+    {
+      "id": "effective-only",
+      "exitCode": 0
+    }
+  ],
+  "cases": [
+    {
+      "id": "passes-on-base",
+      "file": "src/keep.test.ts",
+      "outcome": "ineffective",
+      "line": "src/keep.test.ts: ineffective(base에서도 통과)"
+    },
+    {
+      "id": "assertion",
+      "file": "src/change.test.ts",
+      "outcome": "effective",
+      "line": "src/change.test.ts: effective(base에서 단언 실패, 종료 코드 1)"
+    },
+    {
+      "id": "new-module",
+      "file": "src/fresh.test.ts",
+      "outcome": "effective",
+      "line": "src/fresh.test.ts: effective(base에서 실패(단언 실패 아님: 모듈 없음 등), 종료 코드 1)"
+    },
+    {
+      "id": "similar-pass",
+      "file": "src/sim/a.test.ts",
+      "outcome": "ineffective",
+      "line": "src/sim/a.test.ts: ineffective(base에서도 통과)"
+    },
+    {
+      "id": "similar-fail",
+      "file": "src/sim/a.test.tsx",
+      "outcome": "effective",
+      "line": "src/sim/a.test.tsx: effective(base에서 단언 실패, 종료 코드 1)"
+    },
+    {
+      "id": "similar-nested",
+      "file": "src/sim/deep/src/sim/a.test.ts",
+      "outcome": "effective",
+      "line": "src/sim/deep/src/sim/a.test.ts: effective(base에서 단언 실패, 종료 코드 1)"
+    },
+    {
+      "id": "special-path",
+      "file": "src/app/(shop)/[id]/page.test.tsx",
+      "outcome": "effective",
+      "line": "src/app/(shop)/[id]/page.test.tsx: effective(base에서 단언 실패, 종료 코드 1)"
+    }
+  ]
+}
