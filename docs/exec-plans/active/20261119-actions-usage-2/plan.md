@@ -26,8 +26,10 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
    - 판정을 내보내지 못한 실행(유출 검사 실패, 종료 코드 0이 아님): `repro` 줄을 쓰지 않는다.
    - `GITHUB_OUTPUT`이 없는 실행(로컬): 지금처럼 판정 파일만 쓰고 종료 코드 0이다.
 2. 워크플로 패치를 적용하면 두 판정 워크플로에서 `judge` job이 `repro` 출력을 내고, 재현 job의 조건이 `needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'`이다. 값이 없거나 `false`가 아닌 다른 값이면 지금처럼 돈다(모르면 돌린다).
-3. 재현 job의 권한·격리(비밀·environment·쓰기 권한 없음, `reproJobViolations` 위반 없음)와 기록 job의 입력·조건은 그대로다. 재현 job이 건너뛰어져도 기록 job은 돌고 재현 결과 없이 판정을 기록한다(지금 판정이 없을 때와 같은 경로).
-4. 워크플로 패치(`lab/actions-usage-2/workflows.patch`)가 main의 워크플로에 그대로 적용되고, 적용한 트리에서 `node scripts/harness.ts check`가 통과한다. 패치를 적용하지 않은 트리(봇이 올리는 head)에서도 통과한다.
+3. 재현 job의 권한·격리(비밀·environment·쓰기 권한 없음, `reproJobViolations` 위반 없음)와 기록 job의 입력·조건은 그대로다. 재현 job이 건너뛰어져도 기록 job은 돌고 재현 결과 없이 판정을 기록한다. 병합 전에 아래 둘을 테스트로 확인한다.
+   - 두 판정 워크플로의 기록 job 조건이 `${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}`이고(앞선 job이 건너뛰어져도 돈다) 재현 job의 결과를 조건에 쓰지 않는다. 패치 적용 전과 후의 워크플로 모두에서 단언한다.
+   - 기록 명령(`record-review`)이 빈 재현 결과(`--repro-results ''`)를 받으면 판정 상태와 원장을 기록하고, 원장 항목의 재현 칸은 비어 있다.
+4. 워크플로 패치(`lab/actions-usage-2/workflows.patch`)가 main의 워크플로에 그대로 적용되고, 적용한 트리에서 워크플로 구조 테스트(`scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`)와 `node scripts/harness.ts check`가 통과한다. 패치를 적용하지 않은 트리(봇이 올리는 head)에서도 통과한다. 적용한 트리의 구조 테스트는 명령 하나(`node lab/actions-usage-2/verify-patch.ts`)로 다시 돌릴 수 있다.
 5. 설계서(10.2절 (3), 10.3절의 재현 job), 절차서와 `docs/SECURITY.md`(운영 단계의 워크플로 변경 절차), `CHANGELOG`, 기술 부채 표(TD-49)가 바뀐 동작·절차와 맞는다.
 
 ## 범위 / 비범위
@@ -50,8 +52,9 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
 
 - `scripts/harness.ts`(`codex-scan`·`claude-scan` 명령), `scripts/ci/repro.ts`
 - 새 파일 `scripts/test/scan-output.test.ts`
+- `scripts/test/ci.test.ts`(기록 job 조건 단언을 봇의 커밋에서 더한다. 재현 job 조건 단언은 패치로 바꾼다), `scripts/test/record.test.ts`(빈 재현 결과)
 - 읽기만: `scripts/ci/verdict.ts`, `scripts/ci/codex-scan.ts`, `scripts/ci/claude-scan.ts`, `scripts/ci/ledger.ts`, `scripts/gates/harness-guard.ts`(`reproJobViolations`), `scripts/test/codex-scan.test.ts`·`scripts/test/claude-scan.test.ts`(픽스처)
-- `lab/actions-usage-2/workflows.patch`, `lab/actions-usage-2/README.md`(패치 적용 방법과 적용 뒤 확인 명령)
+- `lab/actions-usage-2/workflows.patch`, `lab/actions-usage-2/README.md`(패치 적용 방법과 적용 뒤 확인 명령), `lab/actions-usage-2/verify-patch.ts`(임시 클론에 패치를 적용해 구조 테스트를 돌린다)
 - 패치가 바꾸는 파일(봇은 커밋하지 않는다): `.github/workflows/judge-claude.yml`, `.github/workflows/judge-codex.yml`, `scripts/test/ci.test.ts`의 재현 job 단언
 - `docs/harness/design.md`, `docs/harness/workflow.md`, `docs/harness/CHANGELOG.md`, `docs/SECURITY.md`, `docs/exec-plans/tech-debt-tracker.md`
 
@@ -70,6 +73,10 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
   - F4(P1): 제작자가 패치를 push한 뒤 봇의 worktree가 이전 커밋에 남아 `pr-ready`가 실패한다. main이 그사이 전진한 경우의 절차도 없었다. step0의 5번에 넣었다.
   - F5(P1): AC가 유출 검사 명령의 출력 계약을 실제로 확인하지 않았다. 수용 기준 1을 명령 실행으로 확인하는 네 경우로 쓰고, 새 테스트 파일을 AC에 넣었다.
   - F1(P2, claude): AC의 `git apply --check`는 패치가 적용된 head에서는 실패한다. 적용 전이면 정방향, 적용 뒤면 역방향 확인이 통과하게 고쳤다.
+- 2026-11-19: 계획 검증 2라운드(head `c9099c9`). claude 승인(P2 1), codex 수정 요청(P1 1, 앞 라운드의 F2·F3·F5는 해결로 판정). 모두 받아들였다.
+  - F4(P1, 열린 채): PR 브랜치만 fetch하면 `origin/main`이 갱신되지 않아 뒤처짐을 놓친다. step0의 5번에서 main도 함께 fetch하게 고쳤다.
+  - F7(P1): 재현 job이 건너뛰어졌을 때 기록 job이 도는지를 AC가 확인하지 않았다. 기록 job의 조건 단언(두 워크플로, 패치 전후)과 빈 재현 결과로 기록하는 테스트를 수용 기준 3과 AC에 넣었다.
+  - F6(P2, claude): 패치 내용을 확인하는 명령이 AC 밖에 있었다. 임시 클론에 패치를 적용해 구조 테스트를 돌리는 스크립트(`lab/actions-usage-2/verify-patch.ts`)를 두고 AC에 넣었다.
 
 ## 의사결정 로그
 
@@ -99,13 +106,13 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
 ## 검증 방법과 결과
 
 - 수용 기준 1: `node --test scripts/test/scan-output.test.ts`(두 명령을 실제로 실행해 네 경우를 본다).
-- 수용 기준 2·3: 패치를 적용한 임시 클론에서 `node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts`(재현 job 조건·권한·`reproJobViolations`, 기록 job의 `needs`·조건·입력 단언).
-- 수용 기준 4: 임시 클론에서 `git apply --check lab/actions-usage-2/workflows.patch`와 적용 뒤의 `node scripts/harness.ts check`. 봇의 head에서는 `node scripts/harness.ts check`.
+- 수용 기준 2·3: `node lab/actions-usage-2/verify-patch.ts`(HEAD를 임시 클론으로 받아 패치를 적용하고 `node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts`를 돌린다: 재현 job 조건·권한·`reproJobViolations`, `judge` job의 `repro` 출력, 기록 job의 `needs`·조건·입력 단언. 패치가 이미 적용된 head에서는 적용 없이 같은 테스트를 돌린다). 기록 명령은 `node --test scripts/test/record.test.ts scripts/test/repro.test.ts`.
+- 수용 기준 4: 위 명령(패치 적용 가능 여부 포함)과, 패치를 적용한 임시 클론의 `node scripts/harness.ts check`(한 번 돌려 결과를 진행 로그에 적는다). 봇의 head에서는 `node scripts/harness.ts check`.
 - 수용 기준 5: `node scripts/harness.ts doc-lint`.
 - 병합 뒤(Issue #135 댓글): 재현 테스트가 없는 판정에서 두 워크플로의 `repro` job이 `skipped`이고 기록 job이 판정을 기록하는지, 재현 테스트가 붙은 판정이 나오면 `repro` job이 도는지(기회가 생기면).
 
 ## 다음 할 일
 
-- 고친 계획을 계획만 담은 커밋으로 push해 계획 검증 2라운드를 받는다.
+- 고친 계획을 계획만 담은 커밋으로 push해 계획 검증 3라운드를 받는다.
 - Issue #135의 질문을 위 "열린 질문"으로 바꿔 올린다.
 - 승인되면 step0을 구현한다.
