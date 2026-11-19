@@ -1,6 +1,7 @@
 // test-effect 실물 확인(계획 20261119-pilot-prep step0, 수용 기준 2).
 // 웹 프로파일을 적용하고 Vitest를 설치한 복제 폴더에 기준 커밋과 사례를 만들고,
-// `node scripts/harness.ts test-effect`를 두 번 돌려 판정 줄과 종료 코드를 결과 파일에 옮긴다.
+// `node scripts/harness.ts test-effect`를 세 번 돌려 판정 줄과 종료 코드를 결과 파일에 옮긴다.
+// 세 번째는 래퍼가 없는 기준 커밋과 비교한다(웹 프로파일을 처음 적용하는 변경).
 // 준비(복제, init, 의존성 설치)는 README의 명령으로 먼저 한다.
 //
 //   node lab/pilot-prep/trial-test-effect.ts <복제한 폴더>
@@ -42,6 +43,12 @@ const CASES: readonly { id: string; file: string; content: string }[] = [
     content: CLAMP_TEST('../../../math'),
   },
 ];
+/** 래퍼가 없는 기준 커밋과 비교하는 실행(first-adoption)에서 더하는 사례 */
+const ADOPTION: readonly { id: string; file: string; content: string }[] = [
+  { id: 'adoption-pass', file: 'src/adopt-pass.test.ts', content: ADD_TEST('./math') },
+  { id: 'adoption-fail', file: 'src/adopt-fail.test.ts', content: CLAMP_TEST('./math') },
+];
+const WRAPPER = 'profiles/web/test-effect/run-one.mjs';
 /** 두 번째 실행에서 빼는 사례(변경 전 코드에서도 통과하는 테스트) */
 const INEFFECTIVE = ['passes-on-base', 'similar-pass'];
 
@@ -88,6 +95,9 @@ function main(): void {
     );
   if (existsSync(path.join(root, 'src'))) fail('src/가 이미 있다. 새로 복제한 폴더에서 돌려라');
 
+  if (!existsSync(path.join(root, WRAPPER))) fail(`래퍼가 없다(${WRAPPER})`);
+  const wrapper = readFileSync(path.join(root, WRAPPER), 'utf8');
+
   // 기준 커밋: 작은 모듈과 통과하는 테스트. Vitest 설정은 래퍼가 덮어써야 하는 값을 일부러 넣는다
   write(
     'vitest.config.ts',
@@ -98,6 +108,12 @@ function main(): void {
     'export const add = (a: number, b: number) => a + b;\nexport const clamp = (x: number) => x;\n',
   );
   write('src/base.test.ts', ADD_TEST('./math'));
+  // 먼저 래퍼가 없는 기준 커밋(웹 프로파일을 처음 적용하기 전의 리포)을 만들고, 그 위에 래퍼가 있는 기준 커밋을 만든다
+  unlinkSync(path.join(root, WRAPPER));
+  git('add', '-A');
+  git('commit', '-q', '-m', 'trial: base without wrapper');
+  const baseNoWrapper = git('rev-parse', 'HEAD');
+  write(WRAPPER, wrapper);
   git('add', '-A');
   git('commit', '-q', '-m', 'trial: base');
   const base = git('rev-parse', 'HEAD');
@@ -110,21 +126,27 @@ function main(): void {
   write('src/fresh.ts', "export const fresh = () => 'fresh';\n");
   for (const c of CASES) write(c.file, c.content);
 
-  const testEffect = () =>
-    run(process.execPath, ['scripts/harness.ts', 'test-effect', '--base', base]);
-  const all = testEffect();
-  process.stdout.write(`--- all (종료 코드 ${all.code})\n${all.out}\n`);
-  const cases = CASES.map((c) => {
-    const line = all.out.split('\n').find((l) => l.startsWith(`${c.file}: `)) ?? '';
+  const testEffect = (against = base) =>
+    run(process.execPath, ['scripts/harness.ts', 'test-effect', '--base', against]);
+  const lineOf = (out: string, c: { id: string; file: string }) => {
+    const line = out.split('\n').find((l) => l.startsWith(`${c.file}: `)) ?? '';
     const outcome = /^: ([a-z]+)\(/.exec(line.slice(c.file.length))?.[1] ?? '';
     return { id: c.id, file: c.file, outcome, line };
-  });
+  };
+  const all = testEffect();
+  process.stdout.write(`--- all (종료 코드 ${all.code})\n${all.out}\n`);
+  const cases = CASES.map((c) => lineOf(all.out, c));
 
   for (const c of CASES) if (INEFFECTIVE.includes(c.id)) unlinkSync(path.join(root, c.file));
   const effectiveOnly = testEffect();
   process.stdout.write(
     `--- effective-only (종료 코드 ${effectiveOnly.code})\n${effectiveOnly.out}\n`,
   );
+
+  // 웹 프로파일을 처음 적용하는 변경: 래퍼가 없는 기준 커밋과 비교한다. 래퍼는 이 변경이 더한 파일이다
+  for (const c of ADOPTION) write(c.file, c.content);
+  const adoption = testEffect(baseNoWrapper);
+  process.stdout.write(`--- first-adoption (종료 코드 ${adoption.code})\n${adoption.out}\n`);
 
   const result = {
     tool: {
@@ -136,8 +158,9 @@ function main(): void {
     runs: [
       { id: 'all', exitCode: all.code },
       { id: 'effective-only', exitCode: effectiveOnly.code },
+      { id: 'first-adoption', exitCode: adoption.code },
     ],
-    cases,
+    cases: [...cases, ...ADOPTION.map((c) => lineOf(adoption.out, c))],
   };
   mkdirSync(path.dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify(result, null, 2) + '\n');

@@ -38,10 +38,21 @@ export const TEST_EFFECT_CASES: readonly {
     outcome: 'effective',
     phrase: '단언 실패',
   },
+  // 래퍼가 없는 기준 커밋과 비교한 실행(first-adoption): 변경 전 코드에서도 테스트를 실제로 돌려야 한다
+  { id: 'adoption-pass', file: 'src/adopt-pass.test.ts', outcome: 'ineffective', phrase: null },
+  {
+    id: 'adoption-fail',
+    file: 'src/adopt-fail.test.ts',
+    outcome: 'effective',
+    phrase: '단언 실패',
+  },
 ];
+/** 실물 확인에 쓰는 Vitest 버전(README의 설치 명령과 같다) */
+export const VITEST_VERSION = '5.1.0';
 const TEST_EFFECT_RUNS: readonly { id: string; exitCode: number }[] = [
   { id: 'all', exitCode: 1 },
   { id: 'effective-only', exitCode: 0 },
+  { id: 'first-adoption', exitCode: 1 },
 ];
 
 /** 결과가 기대와 어긋난 점의 목록. 비어 있으면 통과다. profileCommand는 웹 프로파일의 testEffect.command */
@@ -49,8 +60,8 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
   const bad: string[] = [];
   if (!isObj(result)) return ['결과가 객체가 아니다'];
   const tool = isObj(result.tool) ? result.tool : {};
-  if (typeof tool.vitest !== 'string' || tool.vitest.trim() === '')
-    bad.push('tool.vitest가 비어 있다');
+  if (tool.vitest !== VITEST_VERSION)
+    bad.push(`tool.vitest: ${String(tool.vitest)}(기대 ${VITEST_VERSION})`);
   if (!Array.isArray(profileCommand) || !same(result.command, profileCommand))
     bad.push(
       `command가 프로파일의 testEffect.command와 다르다: ${JSON.stringify(result.command)} / ${JSON.stringify(profileCommand)}`,

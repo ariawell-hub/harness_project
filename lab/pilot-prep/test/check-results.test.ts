@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkTestEffect, TEST_EFFECT_CASES } from '../check-results.ts';
+import { checkTestEffect, TEST_EFFECT_CASES, VITEST_VERSION } from '../check-results.ts';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'check-results.ts');
 const COMMAND = ['node', 'profiles/web/test-effect/run-one.mjs'];
@@ -25,11 +25,12 @@ function good(): {
   cases: { id: string; file: string; outcome: string; line: string }[];
 } {
   return {
-    tool: { vitest: '9.9.9', node: 'v22.0.0', os: 'test' },
+    tool: { vitest: VITEST_VERSION, node: 'v22.0.0', os: 'test' },
     command: [...COMMAND],
     runs: [
       { id: 'all', exitCode: 1 },
       { id: 'effective-only', exitCode: 0 },
+      { id: 'first-adoption', exitCode: 1 },
     ],
     cases: TEST_EFFECT_CASES.map((c) => ({
       id: c.id,
@@ -47,7 +48,7 @@ test('기대를 모두 채운 결과는 통과한다', () => {
 test('사례가 빠지거나 더 있으면 실패한다', () => {
   const missing = good();
   missing.cases.pop();
-  assert.match(checkTestEffect(missing, COMMAND).join('\n'), /special-path가 0개/);
+  assert.match(checkTestEffect(missing, COMMAND).join('\n'), /adoption-fail가 0개/);
   const extra = good();
   extra.cases.push({ id: 'extra', file: 'src/x.test.ts', outcome: 'effective', line: '' });
   assert.match(checkTestEffect(extra, COMMAND).join('\n'), /모르는 사례가 있다: extra/);
@@ -87,10 +88,10 @@ test('실행의 종료 코드, 도구 버전, 명령이 어긋나면 실패한�
   assert.match(checkTestEffect(run, COMMAND).join('\n'), /runs\.all의 종료 코드: 0\(기대 1\)/);
   const noRun = good();
   noRun.runs.pop();
-  assert.match(checkTestEffect(noRun, COMMAND).join('\n'), /runs에 effective-only가 0개/);
+  assert.match(checkTestEffect(noRun, COMMAND).join('\n'), /runs에 first-adoption가 0개/);
   const tool = good();
-  tool.tool.vitest = '';
-  assert.match(checkTestEffect(tool, COMMAND).join('\n'), /tool\.vitest가 비어 있다/);
+  tool.tool.vitest = '5.1.1';
+  assert.match(checkTestEffect(tool, COMMAND).join('\n'), /tool\.vitest: 5\.1\.1\(기대 /);
   const cmd = good();
   cmd.command = ['pnpm', 'exec', 'vitest', 'run'];
   assert.match(checkTestEffect(cmd, COMMAND).join('\n'), /command가 프로파일/);
@@ -108,4 +109,15 @@ test('명령행: 모르는 이름이나 인자 없음은 종료 코드 2다', ()
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, /사용법/);
   }
+});
+
+test('래퍼가 없는 기준 커밋과 비교한 실행에서 통과하는 테스트가 effective로 나오면 실패한다', () => {
+  const r = good();
+  const c = r.cases.find((x) => x.id === 'adoption-pass')!;
+  c.outcome = 'effective';
+  c.line = `${c.file}: effective(base에서 실패(단언 실패 아님: 모듈 없음 등), 종료 코드 1)`;
+  assert.match(
+    checkTestEffect(r, COMMAND).join('\n'),
+    /adoption-pass: outcome: effective\(기대 ineffective\)/,
+  );
 });

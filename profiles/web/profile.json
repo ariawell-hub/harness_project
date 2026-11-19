@@ -59,7 +59,7 @@
     "architecture": "도메인마다 Types → Config → Repo → Service → Runtime → UI. 횡단 관심사(인증, 텔레메트리, 기능 플래그)는 Providers로만 들어온다",
     "testEffect": {
       "files": ["src/**/*.test.ts", "src/**/*.test.tsx"],
-      "support": ["src/test/**"],
+      "support": ["src/test/**", "profiles/web/test-effect/**"],
       "command": ["node", "profiles/web/test-effect/run-one.mjs"],
       "timeoutSec": 300,
       "link": ["node_modules"],
