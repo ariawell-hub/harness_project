@@ -21,10 +21,11 @@
    - `judge` job의 `outputs`에서 `verdict` 줄 바로 아래에 `repro: ${{ steps.scan.outputs.repro }}`를 더한다.
    - 재현 job의 `if: needs.judge.outputs.verdict != ''`를 `if: needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'`로 바꾸고, 그 줄 바로 위에 이유를 적은 주석 한 줄을 더한다.
    - 그 밖의 줄은 바꾸지 않는다.
+   - **패치를 만들 때 구조 테스트를 함께 확인한다(제작자에게 요청하기 전).** `scripts/test/ci.test.ts`의 재현 job 테스트를 6번의 내용으로 먼저 고쳐, 지금 워크플로에서 새 단언이 실패하는 것을 본다. 워크플로 파일 두 개를 위와 같이 고쳐 AC 명령이 통과하는 것을 보고, 그 상태의 `git diff -- .github/workflows`를 패치 파일로 저장한다. 그다음 워크플로 파일을 되돌리고, `ci.test.ts`의 변경은 리포 밖 파일로 옮겨 둔다(push 1에 넣지 않는다). 되돌린 트리에 패치 파일을 다시 적용해도(`git apply --check`) 그대로 적용되는지 본다. 실패와 통과의 결과(실패한 단언, 통과한 테스트 수)를 진행 로그에 적는다.
 3. **문서**: 설계서 10.2절 (3)의 재현 job 항목과 10.4절에 도는 조건을 적고 버전을 올린다. `CHANGELOG`, TD-49 ④를 고친다.
 4. **push 1**: 1~3을 커밋하고 `check`를 통과시켜 push한다. 이때 `scripts/test/ci.test.ts`와 워크플로 파일은 바꾸지 않는다. 판정의 차단 지적을 먼저 해결한다. 그 뒤 Issue #143에 제작자 작업을 요청한다(`needs-human`). 요청한 뒤 제작자의 커밋이 올 때까지 이 브랜치에 push하지 않는다. 요청할 때의 원격 브랜치 head가 기준 커밋이다.
 5. **제작자의 워크플로 커밋을 받은 뒤**: `docs/SECURITY.md` "워크플로 변경 절차"의 4번대로 받은 head의 트리가 기준 커밋에 패치를 적용한 트리와 같은지 본다. 다르면 멈추고 제작자에게 알린다. 웹에서는 파일 하나에 커밋 하나가 되므로 커밋이 둘이어도 된다. 트리로 비교한다.
-6. **push 2**: `scripts/test/ci.test.ts`의 재현 job 테스트를 고친다. 재현 job의 조건 단언을 수용 기준 2의 조건으로 바꾸고, `judge` job의 `repro` 출력 단언과 수용 기준 3의 기록 job 조건 단언을 더한다. `docs/SECURITY.md` "워크플로 변경 절차"와 `lab/workflow-change/result.json`을 이번에 해 본 결과로 고친다. `check`, AC, 완료 처리 뒤 push한다.
+6. **push 2**: `scripts/test/ci.test.ts`의 재현 job 테스트를 고친다(2번에서 확인해 둔 변경이다). 재현 job의 조건 단언을 수용 기준 2의 조건으로 바꾸고, `judge` job의 `repro` 출력 단언과 수용 기준 3의 기록 job 조건 단언을 더한다. `docs/SECURITY.md` "워크플로 변경 절차"와 `lab/workflow-change/result.json`을 계획의 수용 기준 5대로 고친다. `check`, AC, 완료 처리 뒤 push한다.
 7. 판정을 통과하면 `pr-ready`로 승인을 요청한다. 병합 뒤 관찰(계획의 "검증 방법과 결과")을 Issue #143에 남긴다.
 
 ## Acceptance Criteria
