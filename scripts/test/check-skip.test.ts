@@ -1,10 +1,10 @@
 // check의 test 건너뛰기(6절, Issue #129): 바뀐 파일이 모두 testInertPaths 안일 때만 test를 돌리지 않는다.
 // 픽스처의 test 명령은 항상 실패한다. 돌았으면 실패, 건너뛰었으면 통과로 구분된다.
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { runCheck, testInert, testSkip } from '../commands/check.ts';
+import { cacheKey, runCheck, testInert, testSkip } from '../commands/check.ts';
 import { ConfigError, loadConfig } from '../lib/config.ts';
 import { harnessStateDir, repoInfo } from '../lib/git.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
@@ -287,6 +287,88 @@ test('check 캐시: 도중에 판정이 바뀐 실행과 건너뛴 실행은 캐
   const k = await fmtThenTest(code.root, code.base, PASSING_TEST);
   assert.deepEqual([k.ok, k.results[1].skipped], [true, false]);
   assert.equal(cacheFiles(code.root), 1);
+});
+
+test('check 캐시: 실행 도중 작업 트리가 바뀌면 건너뛰기 판정이 같아도 캐시에 남기지 않는다 (TD-52)', async () => {
+  // 처음부터 끝까지 목록 밖 변경(docs/x.md)이 있어 두 판정은 모두 "돌린다"다. fmt 검사가 그 파일의 내용을 바꾼다
+  const moved = repo(withFmt(nodeE("require('fs').appendFileSync('docs/x.md', 'more')")));
+  write(moved.root, 'docs/x.md', '# x\n');
+  const m = await fmtThenTest(moved.root, moved.base, PASSING_TEST);
+  assert.deepEqual([m.ok, m.cached, m.results[1].skipped], [true, false, false]);
+  // test가 본 트리는 키를 만든 트리와 다르다: 결과를 쓰지 않는다
+  assert.equal(cacheFiles(moved.root), 0);
+  // 바뀐 뒤의 트리로 다시 돌리면(이번에도 fmt가 덧붙여 또 바뀐다) 캐시 적중이 아니다
+  const again = await fmtThenTest(moved.root, moved.base, PASSING_TEST);
+  assert.equal(again.cached, false);
+});
+
+test('check 캐시: 끝날 때 키를 다시 만들지 못해도 통과한 check는 통과다. 캐시에만 쓰지 않는다 (PR #134 F1)', async () => {
+  // fmt 검사가 읽을 수 없는 파일을 남긴다: 끝날 때의 트리 해시 계산(git add)이 실패한다(POSIX. Windows에서는 읽혀서 "트리가 바뀜"으로 걸린다)
+  const locked = repo(
+    withFmt(
+      nodeE(
+        "const fs = require('fs'); fs.writeFileSync('docs/locked.md', 'x'); fs.chmodSync('docs/locked.md', 0)",
+      ),
+    ),
+  );
+  write(locked.root, 'docs/x.md', '# x\n');
+  const r = await fmtThenTest(locked.root, locked.base, PASSING_TEST);
+  assert.deepEqual([r.ok, r.cached, r.results[1].skipped], [true, false, false]);
+  assert.equal(cacheFiles(locked.root), 0);
+});
+
+test('check 캐시: 캐시 폴더를 만들 수 없어도(같은 이름의 파일이 있다) 통과한 check는 통과다', async () => {
+  const blocked = repo(withFmt(nodeE('process.exit(0)')));
+  write(blocked.root, 'docs/x.md', '# x\n');
+  const state = harnessStateDir(repoInfo(blocked.root), 'common');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(path.join(state, 'check-cache'), '');
+  const b = await fmtThenTest(blocked.root, blocked.base, PASSING_TEST);
+  assert.deepEqual([b.ok, b.cached], [true, false]);
+});
+
+test('check 캐시: 내용이 통과 표시와 정확히 같지 않은 캐시 파일은 없는 것으로 보고 다시 돌린다 (PR #134 F3·F4)', async () => {
+  const { root, base } = repo(withFmt(nodeE('process.exit(0)')));
+  write(root, 'docs/x.md', '# x\n');
+  const only: ('fmt' | 'test')[] = ['fmt', 'test'];
+  const config = () => {
+    const cfg = loadConfig(root);
+    (cfg.commands as Record<string, unknown>).test = PASSING_TEST;
+    return cfg;
+  };
+  const run = () =>
+    runCheck(repoInfo(root), config(), { base, env: {}, only, noRecord: true, quiet: true });
+  const dir = path.join(harnessStateDir(repoInfo(root), 'common'), 'check-cache');
+  const file = path.join(dir, `${cacheKey(repoInfo(root), config(), base, only)}.json`);
+  mkdirSync(dir, { recursive: true });
+  // 온전한 캐시의 내용을 먼저 얻는다
+  assert.equal((await run()).cached, false);
+  const good = readFileSync(file, 'utf8');
+  assert.equal((await run()).cached, true);
+  // 쓰다가 끊긴 캐시, 한 글자 다른 캐시, 다른 키의 캐시, 옛 형식(결과 본문 JSON. 항목이 손상된 것 포함), 빈 파일
+  const other = good.replace(/[0-9a-f]{32}/, 'f'.repeat(32));
+  assert.notEqual(other, good);
+  for (const broken of [
+    good.slice(0, -1),
+    good.slice(0, 10),
+    good + 'x',
+    other,
+    '{"ok":true,"cached":false,"results":[null]}',
+    '{"ok":true,"cached":false,"results":[{"name":"fmt","ok":true,"skipped":false,"durationMs":1,"output":""},{"name":"test","ok":true,"skipped":false,"durationMs":1,"output":""}]}',
+    '{"ok":true,"cached":false,"resul',
+    '[]',
+    'null',
+    '',
+  ]) {
+    writeFileSync(file, broken);
+    const r = await run();
+    // 캐시 적중이 아니라 실제로 돌았고, 통과했다
+    assert.deepEqual([r.ok, r.cached, r.results.length], [true, false, 2], broken);
+    // 온전한 결과로 다시 썼다: 다음 실행은 캐시 적중이다
+    assert.equal((await run()).cached, true, broken);
+  }
+  // 최종 파일 하나만 남는다(임시 파일 없음)
+  assert.deepEqual(readdirSync(dir), [path.basename(file)]);
 });
 
 test('testSkip: 판정과 이유를 돌려준다', () => {

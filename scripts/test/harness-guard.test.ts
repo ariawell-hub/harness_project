@@ -54,10 +54,10 @@ const CONFIG = () =>
     },
   });
 
-function repo(): { root: string; base: string; cfg: HarnessConfig } {
+function repo(baseConfig: unknown = CONFIG()): { root: string; base: string; cfg: HarnessConfig } {
   const root = path.join(tmp(), 'pr');
   gitInit(root);
-  write(root, 'harness.config.json', JSON.stringify(CONFIG(), null, 2));
+  write(root, 'harness.config.json', JSON.stringify(baseConfig, null, 2));
   write(root, LOG, '# 이력\n');
   write(root, '.github/workflows/w.yml', WF);
   write(root, '.claude/settings.json', JSON.stringify(CLAUDE, null, 2));
@@ -76,9 +76,9 @@ function repo(): { root: string; base: string; cfg: HarnessConfig } {
 /** 파일을 바꾸고(CHANGELOG 포함 여부 선택) 판정한다 */
 function run(
   files: Record<string, string | null>,
-  o: { log?: boolean; body?: string | null } = {},
+  o: { log?: boolean; body?: string | null; baseConfig?: unknown } = {},
 ): ReturnType<typeof harnessGuard> {
-  const r = repo();
+  const r = repo(o.baseConfig);
   for (const [f, c] of Object.entries(files)) {
     if (c === null) sh('git', ['rm', '-q', f], r.root);
     else write(r.root, f, c);
@@ -176,6 +176,47 @@ test('신호: harness.config.json의 판정 관련 키 변경(TD-10), 깨진 JSO
       }),
     ),
     /testInertPaths/,
+  );
+  // 테스트 실효성 검사(R5)를 끄거나 대상을 줄이는 변경도 신호다(TD-51)
+  assert.match(
+    reasons(run({ 'harness.config.json': JSON.stringify({ ...c, testEffect: null }, null, 2) })),
+    /testEffect/,
+  );
+  assert.match(
+    reasons(
+      run({
+        'harness.config.json': JSON.stringify(
+          {
+            ...c,
+            testEffect: { files: ['t/*.test.ts'], command: ['node', '--test'], timeoutSec: 60 },
+          },
+          null,
+          2,
+        ),
+      }),
+    ),
+    /testEffect/,
+  );
+  // 켜져 있던 검사를 끄는 전이: base에서 켜져 있고 head에서 null이다(PR #134 F2). 그대로 두면 testEffect 신호가 없다
+  const effect = { files: ['t/*.test.ts'], command: ['node', '--test'], timeoutSec: 60 };
+  const on = { ...c, testEffect: effect };
+  assert.match(
+    reasons(
+      run(
+        { 'harness.config.json': JSON.stringify({ ...on, testEffect: null }, null, 2) },
+        { baseConfig: on },
+      ),
+    ),
+    /testEffect/,
+  );
+  assert.doesNotMatch(
+    reasons(
+      run(
+        { 'harness.config.json': JSON.stringify({ ...on, stage: 'operation' }, null, 2) },
+        { baseConfig: on },
+      ),
+    ),
+    /testEffect/,
   );
   assert.match(reasons(run({ 'harness.config.json': '{' })), /harness\.config\.json/);
   // 판정과 무관한 키(limits)는 신호가 아니다

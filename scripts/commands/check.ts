@@ -3,7 +3,7 @@
 // CI(--ci)는 항상 새로 실행한다. 하위 검사별 결과를 실패 기록(attempts)에 남긴다.
 // test 건너뛰기(6절): 바뀐 파일이 모두 설정 testInertPaths(테스트가 읽지 않는 경로) 안이면 test를 돌리지 않는다.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { recordAttempt } from '../lib/attempts.ts';
 import type { HarnessConfig } from '../lib/config.ts';
@@ -47,6 +47,7 @@ export interface SubResult {
 export interface CheckResult {
   ok: boolean;
   cached: boolean;
+  /** 캐시 적중이면 비어 있다(캐시는 통과했다는 표시만 저장한다) */
   results: SubResult[];
 }
 
@@ -85,6 +86,22 @@ export function cacheKey(
     only: only ?? null,
   };
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32);
+}
+
+/**
+ * 캐시 파일의 내용: 이 키의 check가 통과했다는 표시 한 줄이다. 결과 본문은 두지 않는다.
+ * 본문을 두면 읽을 때 모양을 검증해야 하고, 쓰다 끊긴 파일·손상된 항목을 하나씩 가려내야 한다(PR #134의 F3·F4).
+ * 표시는 내용이 정확히 같은지만 보면 된다
+ */
+const cacheMark = (key: string): string => `harness-check-pass ${key}\n`;
+
+/** 이 키의 통과 표시가 온전히 있는가. 없거나, 읽지 못하거나, 내용이 한 글자라도 다르면(쓰다 끊김, 다른 키, 옛 형식, 손상) 캐시 미스다 */
+function cacheHit(file: string, key: string): boolean {
+  try {
+    return readFileSync(file, 'utf8') === cacheMark(key);
+  } catch {
+    return false;
+  }
 }
 
 /** 이 파일의 변경이 test 결과를 바꿀 수 없는가: testInertPaths 안이고 보호 경로가 아니다 */
@@ -157,14 +174,13 @@ export async function runCheck(
   let key = '';
   if (useCache) {
     key = cacheKey(info, cfg, base, opts.only);
-    const f = path.join(cacheDir, `${key}.json`);
-    if (existsSync(f)) {
-      const saved = JSON.parse(readFileSync(f, 'utf8')) as CheckResult;
+    if (cacheHit(path.join(cacheDir, `${key}.json`), key)) {
       if (!opts.quiet)
         process.stdout.write(
           `check: 캐시 적중(${key.slice(0, 12)}) — 같은 작업 트리·도구로 이미 통과했다\n`,
         );
-      return { ...saved, cached: true };
+      // 캐시에는 통과한 실행만 남는다. 단계별 결과(소요 시간, 출력)는 저장하지 않으므로 비어 있다
+      return { ok: true, cached: true, results: [] };
     }
   }
 
@@ -263,10 +279,20 @@ export async function runCheck(
   const result: CheckResult = { ok, cached: false, results };
   // test를 건너뛴 실행은 캐시에 남기지 않는다. 캐시에 있는 결과는 모두 test를 실제로 돌린 것이라,
   // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다.
-  // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다
+  // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다.
+  // 판정이 같아도 작업 트리가 도중에 바뀌었으면 남기지 않는다(TD-52): 끝날 때 키를 다시 만들어 시작할 때와 같아야 쓴다.
+  // 캐시 쓰기는 통과 판정 뒤의 부가 작업이다. 키를 다시 만들지 못하거나(검사가 남긴 파일 때문에 트리 해시 계산이 실패하는 경우 등)
+  // 파일을 쓰지 못하면 쓰지 않을 뿐이고, 검사 결과는 그대로다
   if (useCache && ok && !testSkipped && !judgeChanged) {
-    mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
+    try {
+      if (cacheKey(info, cfg, base, opts.only) === key) {
+        mkdirSync(cacheDir, { recursive: true });
+        // 쓰다가 끊겨 일부만 남아도 표시와 달라 캐시 미스가 되고, 다음에 통과한 실행이 덮어쓴다
+        writeFileSync(path.join(cacheDir, `${key}.json`), cacheMark(key));
+      }
+    } catch {
+      // 캐시에 남기지 않는다
+    }
   }
   if (!opts.quiet)
     process.stdout.write(ok ? 'check: 통과\n' : 'check: 실패 — 위 항목의 고치는 법을 따르라\n');
