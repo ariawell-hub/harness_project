@@ -21,7 +21,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 1. `node scripts/harness.ts metrics --since <YYYY-MM-DD> --until <YYYY-MM-DD>`가 그 기간(UTC 날짜, 양끝 포함)에 병합된 PR을 대상으로 지표를 집계해 마크다운으로 표준 출력에 낸다. 날짜를 주지 않으면 `until`은 오늘(UTC), `since`는 `until`의 6일 전이다. 읽기만 한다(GitHub에 쓰지 않는다).
 2. 파일럿 판정 지표 넷(병합 후 결함, 검증 누락, 오탐, PR당 대기 시간·사용량)이 step0의 정의대로 계산된다. 고정한 입력으로 계산 함수를 부르는 테스트가 값을 단언한다.
 3. `--write`를 주면 `docs/QUALITY_SCORE.md`의 표식 구간(`<!-- metrics:begin -->` ~ `<!-- metrics:end -->`)만 집계 결과로 바꾼다. 구간 밖(frontmatter, 측정 정의, 등급 절)은 바이트 단위로 그대로다. 같은 자료로 두 번 실행하면 파일이 같다.
-4. 자료를 끝까지 읽지 못하면(GitHub 조회 실패, 결과가 조회 상한에 닿음) 종료 코드 2로 끝나고 문서를 고치지 않는다. 기본 브랜치 체크아웃에서 `--write`를 주면 종료 코드 1로 거부한다(R3). 표식 구간이 없는 문서도 종료 코드 1이다.
+4. 자료를 끝까지 읽지 못하면(GitHub 조회 실패, 결과가 조회 상한에 닿음) 종료 코드 2로 끝나고 문서를 고치지 않는다. 메인 체크아웃(어느 브랜치로 바꿔 놓았든)이나 기본 브랜치의 worktree에서 `--write`를 주면 자료를 읽기 전에 종료 코드 1로 거부한다(R3). 표식 구간이 없는 문서도 종료 코드 1이다.
 5. 상시 지표는 지금 자료로 잴 수 있는 것을 모두 잰다(step1: GitHub 자료, step2: 리포 파일과 로컬 로그). 잴 수 없는 지표는 값 대신 이유와 TD 번호를 출력한다. step2가 끝나면 17.2절의 상시 지표 항목마다 값 또는 이유 한 줄이 집계 결과에 있다.
 6. 집계 결과에는 수와 PR·Issue 번호만 적는다. PR·Issue·지적의 제목과 본문 같은 외부 입력 문자열은 문서에 옮기지 않는다(14.6절).
 7. `docs/QUALITY_SCORE.md`에 지표별 측정 정의가 있고, 이 리포의 2026-11-11부터 step0 작업일까지의 첫 집계가 기록된다. 설계서 17.2절, `docs/harness/architecture.md`, `CHANGELOG`, 기술 부채 표(TD-11)가 바뀐 상태와 맞는다.
@@ -44,7 +44,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 
 ## 관련 파일·문서
 
-- `scripts/metrics/source.ts`, `scripts/metrics/pilot.ts`, `scripts/metrics/render.ts`, `scripts/metrics/steady.ts`, `scripts/metrics/local.ts`(모두 새 파일)
+- `scripts/metrics/source.ts`, `scripts/metrics/pilot.ts`, `scripts/metrics/render.ts`, `scripts/metrics/steady.ts`, `scripts/metrics/plans.ts`, `scripts/metrics/local.ts`(모두 새 파일)
 - `scripts/commands/metrics.ts`(새 파일), `scripts/harness.ts`(명령 등록)
 - `scripts/test/metrics-pilot.test.ts`, `scripts/test/metrics-command.test.ts`, `scripts/test/metrics-steady.test.ts`, `scripts/test/metrics-local.test.ts`(모두 새 파일)
 - `docs/QUALITY_SCORE.md`
@@ -61,13 +61,15 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 
 - 2026-11-19 22:50 Issue #146 등록(제작자 대화 지시), `new-task`로 worktree 생성. 자료 조사: 병합 PR 96개, 원장 댓글은 `harness-recorder[bot]`이 쓰고, 워크플로 실행은 하루 250건 안팎이다(2026-11-19).
 - 2026-11-19 23:30 계획과 step0~2 작성.
+- 2026-11-20 00:10 계획 검증 1라운드(head `caf9391`): claude 승인, codex 수정 요청(P1 10건, F1~F10). F2~F10을 계획에 반영했다: 조회 상한 판정(1000 이상), 검증 누락을 원인 PR이 이어지는 main 실패로 한정, `--write`의 메인 체크아웃 거부, 첫 집계 확인(AC의 `grep`과 독립 조회 대조), 리드타임을 계획 `claimed_at` 기준으로, CI 첫 실행을 PR이 열려 있던 시간으로 귀속, 충돌 중단 보고 분리, 라벨 수와 사유별 댓글 수를 따로, `judge-fail`을 AC 실패와 표준 검사 실패로 가름. F1(계획 `risk`)은 반박한다: 절차서 1절이 high를 보안·인증·마이그레이션·데이터 스크립트에만 붙이게 하고, 운영 단계의 보호 경로 변경은 계획 `risk`와 무관하게 `risk-gate`가 PR을 높음으로 판정한다(절차서 5절). 승인 절차는 step 파일에 적었다.
 
 ## 의사결정 로그
 
 - 결정: 지시 "17.2절을 진행하라"를 "17.2절 지표를 집계하는 명령을 만들고 첫 집계를 기록한다"로 잡는다. / 이유: 17.2절이 요구하는 것은 집계와 기록이고, 정기 실행 수단(12.2절)은 로드맵 4단계·TD-11이며 봇은 워크플로 파일을 올릴 수 없다. 3단계 완료 기준에는 수집만 있으면 된다. / 버린 대안: 주간 워크플로까지 한 계획에 넣기(제작자 워크플로 커밋이 필요하고 4단계 범위다).
 - 결정: 세로로 나눈 step 3개(파일럿 지표 → GitHub 상시 지표 → 로컬 상시 지표). / 이유: step0만 병합돼도 파일럿 판정 지표를 쓸 수 있고 PR이 작아진다. / 버린 대안: 레이어별 분할(자료 → 계산 → 명령)은 마지막 step 전까지 명령이 없다. PR 하나로 하면 1000줄을 넘는다.
 - 결정: 지표용 GitHub 조회를 `GitHubPort`에 더하지 않고 `scripts/metrics/source.ts`의 `MetricsSource`로 따로 둔다. 원장만 기존 `readPrLedger`(검증 App 봇이 쓴 댓글만 인정)를 그대로 쓴다. / 이유: `GitHubPort`와 가짜 구현은 runner·게이트 전체가 쓰고 다른 세션의 작업과 겹칠 수 있다. 지표 조회는 기간 단위 묶음 조회라 성격이 다르다. / 버린 대안: `GitHubPort` 확장.
-- 결정: 검증 누락 = 재실행 뒤에도 실패로 끝난 main `check` 실행 수 + 기간에 등록된 버그 Issue 수. / 이유: 이 리포의 변경은 모두 검증을 통과해 병합되므로, 일시 실패(재실행 뒤 통과)를 뺀 병합 후 결함은 검증자가 놓친 것이다. revert PR은 실패한 main `check`와 같은 결함이라 더하지 않는다(따로 보인다). / 버린 대안: 버그 Issue마다 원인 PR을 사람이 표시하는 라벨(자동 집계가 안 된다).
+- 결정: 검증 누락 = 병합 커밋에서 main `check`가 실패로 바뀐 PR의 수(재실행 뒤 통과와 이미 실패 중인 main에 이어진 실패는 뺀다). 버그 Issue는 더하지 않고 병합 후 결함으로만 낸다. / 이유: 원인 PR이 이어지는 것만 "검증자가 놓친 것"으로 셀 수 있다. 버그 Issue를 더하면 같은 결함을 두 번 세거나 그 기간의 병합과 무관한 버그를 센다(계획 검증 1라운드 F3). / 버린 대안: main 실패 수 + 버그 Issue 수(처음 안), 버그 Issue에 원인 PR을 적는 표기 규칙을 새로 정하기(절차 변경이라 이 계획 밖).
+- 결정: 리드타임의 시작은 계획 frontmatter의 `claimed_at`이다. / 이유: `new-task`가 계획을 만들 때 적는 시각이라 "계획 생성"에 그대로 해당한다. PR의 첫 커밋 시각은 계획이 없는 PR에도 있고 둘째 step부터는 앞선 기간을 빠뜨린다(F6).
 - 결정: 오탐의 분모는 차단 지적(P0·P1 가운데 상태가 `deferred`가 아닌 것)이다. / 이유: 17.2절이 "차단 지적"과 "반박이 받아들여진 지적"을 말하고, 반박은 열린 차단 지적에만 낼 수 있다. 동결된 P1과 P2·P3은 병합을 막지 않았다.
 - 결정: 집계 결과는 목록으로 쓰고 표를 쓰지 않는다. 집계 시각은 넣지 않는다. / 이유: `docs/QUALITY_SCORE.md`는 prettier 검사 대상이고 prettier는 표의 열을 문자 폭에 맞춰 정렬한다. 목록은 그대로 통과한다. 시각을 넣지 않으면 같은 자료에서 같은 파일이 나온다. / 버린 대안: 표와 폭 계산 구현, 실행 뒤 `fmt` 강제.
 - 결정: 추이(주별 값의 변화)는 문서에 쌓지 않고 git 이력으로 본다. / 이유: 최소 구성으로 시작한다(B4). 파일럿에서 필요해지면 더한다.
