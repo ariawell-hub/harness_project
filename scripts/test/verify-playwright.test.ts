@@ -15,6 +15,7 @@ import { HARNESS_ROOT, tmp } from './helpers.ts';
 const DIR = path.join(HARNESS_ROOT, 'profiles', 'web', 'verify');
 const CONFIG = path.join(DIR, 'playwright.config.ts');
 const FIXTURE = path.join(DIR, 'fixture.ts');
+const OBSERVE = path.join(DIR, 'observe.ts');
 const read = (f: string) => readFileSync(f, 'utf8');
 
 const APP = 'http://127.0.0.1:41001';
@@ -62,7 +63,7 @@ const proxyOf = (c: Loaded['config']) =>
 // --- 파일 내용 ---
 
 test('설정과 fixture에 기존 브라우저·프로필에 붙는 경로가 없다', () => {
-  for (const f of [CONFIG, FIXTURE]) {
+  for (const f of [CONFIG, FIXTURE, OBSERVE]) {
     const text = read(f);
     for (const word of ['connectOverCDP', 'launchPersistentContext', 'userDataDir', 'channel'])
       assert.equal(text.includes(word), false, `${path.basename(f)}에 ${word}가 있다`);
@@ -88,17 +89,21 @@ test('fixture에 관찰 기록 첨부의 이름과 앱 주소 환경 변수가 �
 });
 
 test('fixture는 요청을 막지 않는다(라우팅을 쓰지 않는다)', () => {
-  const text = read(FIXTURE);
-  for (const word of ['.route(', 'routeWebSocket', '.abort('])
-    assert.equal(text.includes(word), false, `fixture에 ${word}가 있다`);
+  for (const f of [FIXTURE, OBSERVE]) {
+    const text = read(f);
+    for (const word of ['.route(', 'routeWebSocket', '.abort('])
+      assert.equal(text.includes(word), false, `${path.basename(f)}에 ${word}가 있다`);
+  }
 });
 
 test('fixture와 설정 파일은 scripts/의 파일을 import하지 않는다', () => {
   const froms = (f: string) =>
     [...read(f).matchAll(/^import\s[^;]*?from\s+'([^']+)';/gms)].map((m) => m[1]);
-  assert.deepEqual(froms(FIXTURE), ['@playwright/test']);
+  // fixture의 판단 부분(observe.ts)은 같은 폴더에 있고 아무것도 import하지 않는다
+  assert.deepEqual(froms(FIXTURE), ['@playwright/test', './observe']);
+  assert.deepEqual(froms(OBSERVE), []);
   assert.deepEqual(froms(CONFIG), ['node:path', '@playwright/test']);
-  for (const f of [FIXTURE, CONFIG]) {
+  for (const f of [FIXTURE, OBSERVE, CONFIG]) {
     assert.equal(/\brequire\s*\(/.test(read(f)), false);
     assert.equal(/\bimport\s*\(/.test(read(f)), false);
   }

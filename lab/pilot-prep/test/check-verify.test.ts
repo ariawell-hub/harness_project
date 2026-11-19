@@ -69,12 +69,12 @@ function good(): { [k: string]: unknown; tool: Row; ports: Row; cases: Row[] } {
     traceOnlyInLocal: true,
     traces: 2,
     cases: VERIFY_CASES.map((w) => {
-      const none = w.noEvidence || w.id === 'signal';
+      const none = w.noEvidence || w.interrupt !== undefined;
       const scenarios = none ? [] : [scenario(w)];
       const row: Row = {
         id: w.id,
         exitCode: w.exit,
-        signal: w.exit === null ? 'SIGTERM' : null,
+        signal: w.signal ?? null,
         appPort: w.noEvidence ? 0 : APP_PORT,
         targetHits: 0,
         denied: w.denied === 'some' ? 1 : 0,
@@ -90,7 +90,12 @@ function good(): { [k: string]: unknown; tool: Row; ports: Row; cases: Row[] } {
         deniedTargetInEvidence: false,
         markerFile: false,
       };
-      if (w.id === 'signal') row.runningBeforeSignal = 8;
+      if (w.interrupt) {
+        row.started = true;
+        row.signalSent = true;
+        row.runningBeforeSignal = 8;
+        row.browsersBeforeSignal = 4;
+      }
       return row;
     }),
   };
@@ -154,16 +159,81 @@ test('증거 묶음이 하나만 있거나 없으면 실패한다(아무것도 �
   assert.match(check(shell), /shell-arg: evidenceFiles: /);
 });
 
-test('종료 코드가 기대와 다르면 실패한다(신호로 끝난 사례는 보지 않는다)', () => {
+test('종료 코드가 기대와 다르면 실패한다(신호로 끝나야 하는 사례는 종료 코드가 없어야 한다)', () => {
   for (const w of VERIFY_CASES) {
-    if (w.exit === null) continue;
     const r = good();
     of(r, w.id).exitCode = w.exit === 0 ? 1 : 0;
     assert.match(check(r), new RegExp(`${w.id}: 종료 코드: `));
   }
   const signal = good();
   of(signal, 'signal').exitCode = 143;
-  assert.deepEqual(checkVerifyPlaywright(signal), []);
+  assert.match(check(signal), /signal: 종료 코드: 143\(기대 없음\(신호로 끝난다\)\)/);
+});
+
+// 구현 판정 F3: 신호 사례가 신호로 끝났는지, 시나리오가 시작된 뒤에 신호를 보냈는지를 본다
+test('신호 사례: 하네스가 기대한 신호로 끝나지 않았으면 실패한다', () => {
+  const wants = VERIFY_CASES.filter((w) => w.signal);
+  assert.deepEqual(
+    wants.map((w) => [w.id, w.signal, w.exit]),
+    [
+      ['signal', 'SIGTERM', null],
+      ['signal-hup', 'SIGHUP', null],
+    ],
+  );
+  for (const w of wants) {
+    // 프로세스 수를 센 뒤 명령이 스스로 끝난 실행
+    const natural = good();
+    Object.assign(of(natural, w.id), { signal: null, exitCode: 0 });
+    assert.match(check(natural), new RegExp(`${w.id}: 끝난 신호: null\\(기대 ${w.signal}\\)`));
+    assert.match(check(natural), new RegExp(`${w.id}: 종료 코드: 0`));
+    const other = good();
+    of(other, w.id).signal = 'SIGKILL';
+    assert.match(check(other), new RegExp(`${w.id}: 끝난 신호: SIGKILL\\(기대 ${w.signal}\\)`));
+    const absent = good();
+    delete of(absent, w.id).signal;
+    assert.match(check(absent), new RegExp(`${w.id}: 끝난 신호: \\(없음\\)`));
+  }
+});
+
+test('신호로 끝나지 않아야 하는 사례가 신호로 끝났으면 실패한다', () => {
+  for (const w of VERIFY_CASES) {
+    if (w.signal) continue;
+    const r = good();
+    of(r, w.id).signal = 'SIGTERM';
+    assert.match(check(r), new RegExp(`${w.id}: 끝난 신호: SIGTERM\\(기대 없음\\)`));
+  }
+});
+
+test('도중에 끊는 사례: 시나리오 시작을 보지 못했거나 신호를 보내지 못했으면 실패한다', () => {
+  const wants = VERIFY_CASES.filter((w) => w.interrupt);
+  assert.deepEqual(
+    wants.map((w) => [w.id, w.interrupt]),
+    [
+      ['signal', 'harness'],
+      ['signal-hup', 'harness'],
+      ['runner-killed', 'runner'],
+    ],
+  );
+  for (const w of wants) {
+    for (const key of ['started', 'signalSent']) {
+      const no = good();
+      of(no, w.id)[key] = false;
+      assert.match(check(no), new RegExp(`${w.id}: ${key}: false\\(기대 true\\)`));
+      const absent = good();
+      delete of(absent, w.id)[key];
+      assert.match(check(absent), new RegExp(`${w.id}: ${key}: \\(없음\\)`));
+    }
+    const blind = good();
+    of(blind, w.id).runningBeforeSignal = 2;
+    assert.match(check(blind), new RegExp(`${w.id}: runningBeforeSignal: 2\\(기대 3 이상\\)`));
+    const noBrowser = good();
+    of(noBrowser, w.id).browsersBeforeSignal = 0;
+    assert.match(check(noBrowser), new RegExp(`${w.id}: browsersBeforeSignal: 0\\(기대 1 이상\\)`));
+  }
+  // 실행기를 강제로 끝낸 사례: verify는 신호로 죽지 않고 스스로 실패로 끝난다
+  const killed = VERIFY_CASES.find((w) => w.id === 'runner-killed')!;
+  assert.equal(killed.exit, 1);
+  assert.equal(killed.signal, undefined);
 });
 
 test('앱 주소 밖 사례: 거부 건수가 0이거나 그 사례의 대상이 기록에 없으면 실패한다', () => {

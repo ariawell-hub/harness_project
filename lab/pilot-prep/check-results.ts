@@ -139,8 +139,15 @@ const MARKER_HOST = '<marker>.invalid';
 
 export interface VerifyCase {
   id: string;
-  /** 기대 종료 코드. null이면 보지 않는다(신호로 끝난 실행) */
+  /** 하네스(`node scripts/harness.ts verify`)의 기대 종료 코드. null은 신호로 끝나 종료 코드가 없는 실행이다 */
   exit: 0 | 1 | null;
+  /** 하네스가 이 신호로 끝나야 한다. 없으면 신호로 끝나지 않아야 한다 */
+  signal?: 'SIGTERM' | 'SIGHUP';
+  /**
+   * 끝나지 않는 시나리오가 시작된 뒤에 도중에 끊는 사례. harness: 하네스에 `signal`을 보낸다.
+   * runner: 실행기의 프로세스 그룹을 SIGKILL로 끝낸다(verify는 스스로 실패로 끝난다)
+   */
+  interrupt?: 'harness' | 'runner';
   /** 거부 프록시에 닿은 건수: none은 0, some은 1 이상, any는 보지 않는다 */
   denied: 'none' | 'some' | 'any';
   /** denied가 some일 때 deniedTargets에 있어야 하는 대상. port의 이름은 결과 파일의 포트로 바꿔 읽는다 */
@@ -212,7 +219,11 @@ export const VERIFY_CASES: readonly VerifyCase[] = [
   { ...out('marker', MARKER_HOST, 80), why: 'failed' },
   // 지시서의 표에 없는 사례(더 엄하게 본다): 시나리오 코드가 Node 쪽에서 보내는 요청도 거부 프록시에 닿는다
   { id: 'node-request', exit: 1, denied: 'some', target: { host: '127.0.0.1', port: 'other' } },
-  { id: 'signal', exit: null, denied: 'any' },
+  { id: 'signal', exit: null, signal: 'SIGTERM', interrupt: 'harness', denied: 'any' },
+  // 구현 판정 F1: 하네스가 넘기는 신호 가운데 SIGHUP에서도 verify가 정리한다
+  { id: 'signal-hup', exit: null, signal: 'SIGHUP', interrupt: 'harness', denied: 'any' },
+  // 구현 판정 F2: 실행기가 SIGKILL로 끝나 브라우저를 닫아 줄 것이 없을 때도 verify가 돌아간 시점에 브라우저가 없다
+  { id: 'runner-killed', exit: 1, interrupt: 'runner', denied: 'any' },
   { id: 'shell-arg', exit: 1, denied: 'none', noEvidence: true },
 ];
 
@@ -258,8 +269,10 @@ export function checkVerifyPlaywright(result: unknown): string[] {
     const miss = (what: string, value: unknown, expected: string) =>
       bad.push(`${want.id}: ${what}: ${showList(value)}(기대 ${expected})`);
 
-    if (want.exit !== null && c.exitCode !== want.exit)
-      miss('종료 코드', c.exitCode, String(want.exit));
+    if (c.exitCode !== want.exit)
+      miss('종료 코드', c.exitCode, want.exit === null ? '없음(신호로 끝난다)' : String(want.exit));
+    // 신호로 끝나야 하는 사례는 그 신호로, 나머지는 신호 없이 끝났어야 한다(스스로 끝난 실행을 신호 사례로 치지 않는다)
+    if (c.signal !== (want.signal ?? null)) miss('끝난 신호', c.signal, want.signal ?? '없음');
     // 공통 기대: 통제된 대상에 닿지 않았다, 남은 프로세스가 없다, 증거 묶음은 요약 둘뿐이고 새는 글자가 없다
     if (c.targetHits !== 0) miss('targetHits', c.targetHits, '0');
     if (c.leftover !== 0) miss('leftover', c.leftover, '0');
@@ -326,9 +339,16 @@ export function checkVerifyPlaywright(result: unknown): string[] {
           );
       }
     }
-    // 남은 프로세스를 세는 방법이 신호 전에 떠 있던 것(verify, dev, 실행기, 브라우저)을 실제로 봤다
-    if (want.id === 'signal' && (!isInt(c.runningBeforeSignal) || c.runningBeforeSignal < 3))
-      miss('runningBeforeSignal', c.runningBeforeSignal, '3 이상');
+    if (want.interrupt) {
+      // 끊기 전에 시나리오가 브라우저로 앱에 닿은 것을 봤고, 신호를 실제로 보냈다
+      if (c.started !== true) miss('started', c.started, 'true');
+      if (c.signalSent !== true) miss('signalSent', c.signalSent, 'true');
+      // 남은 프로세스를 세는 방법이 끊기 전에 떠 있던 것(verify, dev, 실행기)과 브라우저를 실제로 봤다
+      if (!isInt(c.runningBeforeSignal) || c.runningBeforeSignal < 3)
+        miss('runningBeforeSignal', c.runningBeforeSignal, '3 이상');
+      if (!isInt(c.browsersBeforeSignal) || c.browsersBeforeSignal < 1)
+        miss('browsersBeforeSignal', c.browsersBeforeSignal, '1 이상');
+    }
   }
   return bad;
 }

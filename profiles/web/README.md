@@ -23,6 +23,7 @@
 
 1. `@playwright/test`를 devDependency로 더한다. 새 직접 의존성이므로 그 리포에 ADR을 남긴다. 버전은 아래 "확인한 버전"에 맞춘다.
 2. Chromium을 받는다: `pnpm exec playwright install chromium`. 설치 스크립트가 아니라 따로 실행하는 명령이라 `onlyBuiltDependencies`에 더할 것은 없다.
+   - `ps` 명령이 있어야 한다(macOS에는 있다. Linux 컨테이너에서는 `procps`). `verify`는 `ps -A -o pid=,ppid=,pgid=,stat=`으로 브라우저가 끝났는지 확인하고, 읽지 못하면 실패한다.
 3. `package.json`의 `app:dev`가 환경 변수 `PORT`와 `HOST`를 따르게 한다. `verify`는 실행마다 빈 포트를 골라 `PORT=<포트>`, `HOST=127.0.0.1`로 `dev`를 띄우고 `http://127.0.0.1:<포트>`에서 응답이 올 때까지 기다린다(120초).
 4. `init`이 복사한 `e2e/smoke.spec.ts`를 그 앱의 첫 화면에 맞게 고친다.
 
@@ -57,7 +58,7 @@ node scripts/harness.ts verify                       # e2e/의 시나리오 전�
 node scripts/harness.ts verify -- e2e/login.spec.ts  # 지정한 파일만(여러 개를 줄 수 있다)
 ```
 
-지정한 실행은 그 파일의 시나리오만 돈다. 결과에 다른 파일의 시나리오가 있거나 지정한 파일의 시나리오가 없으면 실패다. 도중에 멈추려면 SIGINT(Ctrl-C)나 SIGTERM을 보낸다. 띄운 것을 모두 끝낸 뒤에 돌아간다.
+지정한 실행은 그 파일의 시나리오만 돈다. 결과에 다른 파일의 시나리오가 있거나 지정한 파일의 시나리오가 없으면 실패다. 도중에 멈추려면 SIGINT(Ctrl-C), SIGTERM, SIGHUP 가운데 하나를 보낸다. 띄운 것(`dev`, 실행기, 브라우저)을 모두 끝낸 뒤에 돌아간다. SIGKILL로 끝내면 정리하지 못한다.
 
 ### 통과 기준
 
@@ -68,7 +69,7 @@ node scripts/harness.ts verify -- e2e/login.spec.ts  # 지정한 파일만(여�
 - 콘솔 에러(잡히지 않은 예외 포함) 0건, 실패한 요청(요청 실패, 상태 코드 400 이상) 0건. 의도한 실패로 선언한 것은 뺀다.
 - 거부 프록시에 닿은 요청이 0건이다.
 - 실행기의 종료 코드가 0이고 결과 파일을 읽을 수 있다.
-- 띄운 프로세스가 모두 끝났다.
+- 띄운 프로세스가 모두 끝났다. `dev`와 실행기, 그리고 그 둘이 띄운 것(브라우저)까지 본다. 끝났는지 확인하지 못해도 실패다.
 
 ### 주소 제한
 

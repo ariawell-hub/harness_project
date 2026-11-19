@@ -33,7 +33,8 @@ export interface ExecOptions {
   forwardGraceMs?: number;
 }
 
-const FORWARDED: readonly NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+/** forwardSignals가 자식에게 넘기는 신호. 정리할 것이 있는 명령(scripts/verify/web.ts)은 이 셋을 모두 처리해야 한다 */
+export const FORWARDED: readonly NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP'];
 /** forwardSignals로 돌고 있는 실행의 수와, 그 실행들이 받아 아직 이 프로세스에 되돌려 보내지 않은 신호 */
 let forwardingRuns = 0;
 let pendingSignal: NodeJS.Signals | null = null;

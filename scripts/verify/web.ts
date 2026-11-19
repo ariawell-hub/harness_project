@@ -23,11 +23,12 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { killTree, tail } from '../lib/exec.ts';
+import { FORWARDED, killTree, tail } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { startDenyProxy, type DeniedRequest, type DenyProxy } from './deny-proxy.ts';
 import { buildEvidence } from './evidence.ts';
 import { isScenarioPath, judge, type Verdict } from './judge.ts';
+import { Descendants, listProcesses, type ListProcesses } from './tree.ts';
 
 /** 시나리오 실행기. 인자를 더 붙이지 않는다(시나리오는 환경 변수로 넘긴다) */
 export const DEFAULT_RUNNER: string[] = [
@@ -42,8 +43,10 @@ export const OUT_DIR = '.harness-verify';
 const HOST = '127.0.0.1';
 /** 정리: SIGTERM 뒤 이만큼 기다리고 SIGKILL을 보낸다 */
 const TERM_GRACE_MS = 2000;
-/** 정리: SIGKILL 뒤 끝난 것을 확인하는 시간. 둘을 더해도 중단 신호부터 4초 안이다 */
+/** 정리: SIGKILL 뒤 끝난 것을 확인하는 시간. 둘을 더해도 중단 신호부터 4초 안이다(프로세스 목록을 읽는 시간은 따로 든다) */
 const KILL_CONFIRM_MS = 1500;
+/** 도는 동안 dev와 실행기의 자손(브라우저 등)을 찾아 두는 주기 */
+const FOLLOW_MS = 250;
 
 export interface VerifyOptions {
   runner?: string[];
@@ -55,6 +58,8 @@ export interface VerifyOptions {
   runnerTimeoutSec?: number;
   /** 중단 신호. 끊기면 띄운 것을 정리하고 실패로 돌아간다 */
   signal?: AbortSignal;
+  /** 프로세스 목록을 읽는 수단(dev와 실행기가 다른 프로세스 그룹에 띄운 것을 찾는다). 기본은 ps. 테스트가 바꾼다 */
+  listProcesses?: ListProcesses;
 }
 
 export interface VerifyResult {
@@ -84,7 +89,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * 이 플랫폼에서 verify를 돌릴 수 없으면 이유를, 돌릴 수 있으면 null을 돌려준다.
- * 정리 계약은 프로세스 그룹에 기댄다: dev와 실행기를 각자의 그룹으로 띄우고, 그룹에 신호를 보내고, 그룹이 빈 것을 확인한다.
+ * 정리 계약은 프로세스 그룹에 기댄다: dev와 실행기를 각자의 그룹으로 띄우고, 그룹에 신호를 보내고, 그룹이 빈 것을 확인한다
+ * (dev와 실행기가 다른 그룹에 띄운 것, 곧 브라우저는 프로세스 목록에서 따라간다: tree.ts).
  * Windows에는 이것이 없다. 부모가 먼저 끝나면 남은 자식(브라우저 등)을 찾을 길이 없어(taskkill /T는 살아 있는 부모에서만
  * 내려간다) 프로세스가 남았는데도 정리됐다고 판정하게 된다. 그래서 띄우지 않고 실패한다(구현 판정 F1)
  */
@@ -175,25 +181,77 @@ function treeAlive(p: Proc): boolean {
   }
 }
 
-async function goneWithin(procs: Proc[], ms: number): Promise<boolean> {
-  const until = Date.now() + ms;
-  for (;;) {
-    if (!procs.some(treeAlive)) return true;
-    if (Date.now() >= until) return false;
-    await sleep(25);
-  }
+/** 아직 떠 있는 것의 pid. 끝난 것의 pid는 뿌리로 쓰지 않는다(다른 프로세스가 그 번호를 다시 쓸 수 있다) */
+const running = (procs: readonly Proc[]): number[] =>
+  procs.flatMap((p) => (p.code === null && p.child.pid ? [p.child.pid] : []));
+
+/**
+ * 도는 동안 띄운 것(`procs`: dev, 실행기. 나중에 더해도 된다)의 자손을 주기적으로 찾아 둔다.
+ * 돌려준 함수를 부르면 멈추고, 돌고 있던 읽기가 끝난 뒤 돌아간다
+ */
+function follow(tracker: Descendants, procs: readonly Proc[]): () => Promise<void> {
+  let on = true;
+  let wake = () => {};
+  const loop = (async () => {
+    while (on) {
+      await tracker.refresh(running(procs));
+      if (!on) break;
+      let timer: NodeJS.Timeout | undefined;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        timer = setTimeout(resolve, FOLLOW_MS);
+      });
+      clearTimeout(timer);
+    }
+  })();
+  return async () => {
+    on = false;
+    wake();
+    await loop;
+  };
 }
+
+/** clean: 모두 끝났다. left: 남은 것이 있다. unknown: 프로세스 목록을 읽지 못해 남은 것이 없는지 확인하지 못했다 */
+type Cleaned = 'clean' | 'left' | 'unknown';
 
 /**
  * 정리 계약: 띄운 트리를 모두 끝내고 끝난 것을 확인한 뒤 돌아간다.
- * 그룹에 SIGTERM → 2초 안에 끝나지 않으면 SIGKILL → 확인. 남은 것이 있으면 false
+ * 대상은 dev와 실행기의 프로세스 그룹, 그리고 그 둘이 다른 그룹에 띄운 자손(`tracker`가 따라간 브라우저 등)이다.
+ * 모두에 SIGTERM → 2초 안에 끝나지 않으면 SIGKILL → 확인.
+ * 신호를 보내기 전에, 아직 떠 있는 dev와 실행기의 자손을 마지막으로 한 번 더 찾는다
  */
-async function cleanup(procs: Proc[]): Promise<boolean> {
+async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
   const live = procs.filter((p) => p.child.pid);
-  for (const p of live) killTree(p.child.pid, 'SIGTERM');
-  if (await goneWithin(live, TERM_GRACE_MS)) return true;
-  for (const p of live) killTree(p.child.pid, 'SIGKILL');
-  return goneWithin(live, KILL_CONFIRM_MS);
+  const signalAll = (signal: NodeJS.Signals) => {
+    for (const p of live) killTree(p.child.pid, signal);
+    for (const pid of tracker.pids()) {
+      try {
+        process.kill(pid, signal);
+      } catch {
+        // 이미 끝났다
+      }
+    }
+  };
+  const goneWithin = async (ms: number): Promise<Cleaned> => {
+    const until = Date.now() + ms;
+    for (;;) {
+      if (!live.some(treeAlive)) {
+        // 그룹이 비었다. 그룹 밖의 자손이 남았는지는 프로세스 목록으로만 알 수 있다
+        if (!(await tracker.refresh())) return 'unknown';
+        if (tracker.pids().length === 0) return 'clean';
+      }
+      if (Date.now() >= until) return 'left';
+      await sleep(25);
+    }
+  };
+  // 이미 끝난 것은 빼고(번호가 다시 쓰였을 수 있다) 지금 떠 있는 것에만 신호를 보낸다
+  await tracker.refresh(running(procs));
+  signalAll('SIGTERM');
+  const first = await goneWithin(TERM_GRACE_MS);
+  if (first !== 'left') return first;
+  await tracker.refresh();
+  signalAll('SIGKILL');
+  return goneWithin(KILL_CONFIRM_MS);
 }
 
 /**
@@ -416,6 +474,9 @@ export async function verifyWeb(
     signal?.addEventListener('abort', () => resolve('aborted'), { once: true }),
   );
   const procs: Proc[] = [];
+  // dev와 실행기가 다른 프로세스 그룹에 띄우는 것(브라우저 등)을 따라간다. 정리할 때 그것까지 끝낸다
+  const tracker = new Descendants(o.listProcesses ?? listProcesses);
+  let stopFollowing: (() => Promise<void>) | undefined;
   let baseUrl = '';
   let verdict: Verdict;
   let proxy: DenyProxy | null = null;
@@ -439,6 +500,7 @@ export async function verifyWeb(
       log: devLog,
     });
     procs.push(devProc);
+    stopFollowing = follow(tracker, procs);
 
     // 준비 대기: 응답이 오거나, dev가 끝나거나, 제한 시간이 지나거나, 중단 신호가 올 때까지
     const readyUntil = Date.now() + (o.readyTimeoutSec ?? 120) * 1000;
@@ -469,20 +531,20 @@ export async function verifyWeb(
       env.HARNESS_VERIFY_PROXY = proxy.url;
       env.HARNESS_VERIFY_OUT = outDir;
       if (scenarios) env.HARNESS_VERIFY_SCENARIOS = JSON.stringify(scenarios);
-      const runnerProc = start(runner[0], runner.slice(1), {
+      const started = start(runner[0], runner.slice(1), {
         cwd: root,
         env,
         shell: false,
         log: runnerLog,
       });
-      procs.push(runnerProc);
+      procs.push(started);
       const timeoutSec = o.runnerTimeoutSec ?? 900;
       let timer: NodeJS.Timeout | undefined;
       const timedOut = new Promise<'timeout'>((resolve) => {
         timer = setTimeout(() => resolve('timeout'), timeoutSec * 1000);
       });
       const ended = await Promise.race([
-        runnerProc.exited.then(() => 'exited' as const),
+        started.exited.then(() => 'exited' as const),
         timedOut,
         aborted,
       ]);
@@ -496,8 +558,8 @@ export async function verifyWeb(
           : readReport(path.join(outDir, 'report.json'));
         verdict =
           'problem' in read
-            ? failed(`${read.problem}(실행기 종료 코드 ${runnerProc.code})`)
-            : judge(read.report, runnerProc.code ?? 1, { root, scenarios });
+            ? failed(`${read.problem}(실행기 종료 코드 ${started.code})`)
+            : judge(read.report, started.code ?? 1, { root, scenarios });
       }
     }
   } catch (e) {
@@ -506,10 +568,25 @@ export async function verifyWeb(
     );
   } finally {
     try {
-      const clean = await cleanup(procs);
-      if (!clean) {
-        // 남은 프로세스가 있으면 통과로 두지 않는다
-        verdict = failed('띄운 프로세스를 끝내지 못했다(dev 또는 실행기의 프로세스가 남아 있다)');
+      await stopFollowing?.();
+      const cleaned = await cleanup(procs, tracker);
+      // 남은 프로세스가 있거나 남은 것이 없는지 확인하지 못했으면 통과로 두지 않는다.
+      // 시나리오별 결과는 그대로 두고 전체 문제로 더한다
+      const problem = {
+        clean: null,
+        left: '띄운 프로세스를 끝내지 못했다(dev, 실행기 또는 그 둘이 띄운 프로세스가 남아 있다)',
+        unknown:
+          '띄운 프로세스를 끝내지 못했다고 본다: 프로세스 목록(ps)을 읽지 못해 dev와 실행기가 띄운 프로세스(브라우저 등)가 모두 끝났는지 확인하지 못했다',
+      }[cleaned];
+      if (problem) {
+        const judged: Verdict = verdict!;
+        verdict = {
+          ok: false,
+          scenarios: judged.scenarios,
+          problems: judged.problems.includes(problem)
+            ? judged.problems
+            : [...judged.problems, problem],
+        };
       }
     } finally {
       // 어느 경우에도 돌아가기 전에 프록시를 닫는다. 기록은 띄운 것을 모두 끝낸 뒤에 읽는다:
@@ -537,6 +614,9 @@ function report(r: VerifyResult, write: (s: string) => void): void {
   if (r.outDir) write(`진단(로컬에서만 본다): ${path.join(r.outDir, 'local', 'detail.json')}\n`);
 }
 
+/** 받으면 띄운 것을 정리하고 실패로 끝나는 신호: 표준 명령 실행기가 넘기는 신호 전부다 */
+export const STOP_SIGNALS: readonly NodeJS.Signals[] = FORWARDED;
+
 async function main(argv: string[]): Promise<number> {
   const out = (s: string) => process.stdout.write(s);
   // 출력을 받는 쪽이 먼저 닫혀도(EPIPE) 종료 코드는 판정을 따른다. 공개 요약과 어긋나지 않게 한다
@@ -555,8 +635,9 @@ async function main(argv: string[]): Promise<number> {
   const cfg = loadConfig(info.root);
   const ac = new AbortController();
   const onSignal = () => ac.abort();
-  process.on('SIGTERM', onSignal);
-  process.on('SIGINT', onSignal);
+  // 하네스(표준 명령 실행기)가 넘겨주는 신호 셋을 모두 받는다. 하나라도 빠지면 그 신호에서 이 프로세스만 끝나고
+  // dev와 실행기(각자의 프로세스 그룹)가 남는다
+  for (const s of STOP_SIGNALS) process.on(s, onSignal);
   try {
     const r = await verifyWeb(info.root, cfg, {
       scenarios: argv.length ? argv : undefined,
@@ -566,8 +647,7 @@ async function main(argv: string[]): Promise<number> {
     // 판정은 verifyWeb이 정한 하나다(중단 신호 포함). 여기서 다시 따지면 공개 요약과 종료 코드가 어긋난다
     return r.ok ? 0 : 1;
   } finally {
-    process.off('SIGTERM', onSignal);
-    process.off('SIGINT', onSignal);
+    for (const s of STOP_SIGNALS) process.off(s, onSignal);
   }
 }
 

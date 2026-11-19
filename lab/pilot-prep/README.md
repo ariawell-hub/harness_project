@@ -92,54 +92,59 @@ node lab/pilot-prep/check-results.ts verify-playwright
 
 사례마다 적는 값:
 
-| 값                                | 뜻                                                                                                                               |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `exitCode`                        | `verify`의 종료 코드(신호로 끝났으면 `null`이고 `signal`에 신호 이름)                                                            |
-| `targetHits`                      | 그 실행에서 통제된 대상에 닿은 횟수의 합                                                                                         |
-| `denied`, `deniedTargets`         | 거부 프록시에 닿은 요청의 건수와 호스트:포트 목록(`local/detail.json`)                                                           |
-| `scenarioFiles`, `scenarios`      | `evidence/summary.json`의 시나리오 파일 목록과 시나리오별 값                                                                     |
-| `allowed`                         | 의도한 실패로 뺀 건수(분류별)                                                                                                    |
-| `blocked`                         | fixture가 적은 앱 주소 밖 요청의 건수                                                                                            |
-| `evidenceFiles`                   | `evidence/`의 파일 이름 목록                                                                                                     |
-| `leftover`                        | `verify`가 돌아간 시점에 남아 있는 `dev`·실행기·브라우저·`verify` 프로세스 수                                                    |
-| `swScriptHits`                    | 앱에 온 서비스 워커 스크립트 요청 수                                                                                             |
-| `markerInEvidence`                | `evidence/` 두 파일에 합성 표식이 있는가                                                                                         |
-| `deniedTargetInEvidence`          | 거부된 대상(호스트:포트)이나 그 호스트 이름이 `evidence/` 두 파일에 있는가(`127.0.0.1`, `localhost`, `::1`은 이름 검사에서 뺀다) |
-| `markerFile`                      | 셸이 인자를 실행했을 때 생기는 표식 파일이 있는가                                                                                |
-| `runningBeforeSignal`(`signal`만) | 신호를 보내기 직전에 같은 방법으로 센 프로세스 수(세는 방법이 그 프로세스들을 실제로 보는지 확인한다)                            |
+| 값                                                                | 뜻                                                                                                                                                  |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exitCode`, `signal`                                              | `node scripts/harness.ts verify`의 종료 코드와 끝난 신호. 신호로 끝났으면 종료 코드가 `null`이고 `signal`에 신호 이름, 아니면 `signal`이 `null`이다 |
+| `targetHits`                                                      | 그 실행에서 통제된 대상에 닿은 횟수의 합                                                                                                            |
+| `denied`, `deniedTargets`                                         | 거부 프록시에 닿은 요청의 건수와 호스트:포트 목록(`local/detail.json`)                                                                              |
+| `scenarioFiles`, `scenarios`                                      | `evidence/summary.json`의 시나리오 파일 목록과 시나리오별 값                                                                                        |
+| `allowed`                                                         | 의도한 실패로 뺀 건수(분류별)                                                                                                                       |
+| `blocked`                                                         | fixture가 적은 앱 주소 밖 요청의 건수                                                                                                               |
+| `evidenceFiles`                                                   | `evidence/`의 파일 이름 목록                                                                                                                        |
+| `leftover`                                                        | `verify`가 돌아간 시점에 남아 있는 `dev`·실행기·브라우저·`verify` 프로세스 수                                                                       |
+| `swScriptHits`                                                    | 앱에 온 서비스 워커 스크립트 요청 수                                                                                                                |
+| `markerInEvidence`                                                | `evidence/` 두 파일에 합성 표식이 있는가                                                                                                            |
+| `deniedTargetInEvidence`                                          | 거부된 대상(호스트:포트)이나 그 호스트 이름이 `evidence/` 두 파일에 있는가(`127.0.0.1`, `localhost`, `::1`은 이름 검사에서 뺀다)                    |
+| `markerFile`                                                      | 셸이 인자를 실행했을 때 생기는 표식 파일이 있는가                                                                                                   |
+| `started`, `signalSent`(도중에 끊는 사례만)                       | 끊기 전에 시나리오가 브라우저로 앱에 닿은 것을 봤는가, 신호를 실제로 보냈는가                                                                       |
+| `runningBeforeSignal`, `browsersBeforeSignal`(도중에 끊는 사례만) | 끊기 직전에 같은 방법으로 센 프로세스 수와 그 가운데 브라우저 수(세는 방법이 그 프로세스들을 실제로 보는지 확인한다)                                |
 
-| 사례 id                    | 내용                                                                                     | 기대                                                                          |
-| -------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `full-run`                 | `e2e/smoke.spec.ts`만 있을 때 인자 없이 실행                                             | 종료 코드 0, 시나리오 파일은 `e2e/smoke.spec.ts` 하나                         |
-| `pass`                     | 통과하는 시나리오                                                                        | 종료 코드 0, 거부 0건                                                         |
-| `exact-select`             | `e2e/sel/a.spec.ts`를 지정. 실패하는 `e2e/sel/more-e2e/sel/a.spec.ts`가 함께 있다        | 종료 코드 0, 시나리오 파일은 지정한 것 하나                                   |
-| `console-error`            | 페이지가 `console.error`를 낸다                                                          | 종료 코드 1(콘솔 에러 1건 이상)                                               |
-| `failed-request`           | 페이지가 앱의 없는 경로를 `fetch`한다(404)                                               | 종료 코드 1(실패한 요청 1건 이상)                                             |
-| `allowed-request-only`     | 위 요청을 `allowFailedRequest`로만 선언                                                  | 종료 코드 1(404의 콘솔 에러가 남는다), 뺀 요청 1건                            |
-| `allowed-failure`          | 요청은 `allowFailedRequest`로, 콘솔 에러는 `allowConsoleError`로 선언                    | 종료 코드 0, 뺀 요청 1건·뺀 콘솔 에러 1건                                     |
-| `ws-same-port`             | `ws://127.0.0.1:<앱 포트>`로 웹소켓을 열고 앱이 받아 준다                                | 종료 코드 0, 거부 0건                                                         |
-| `other-port`               | `http://127.0.0.1:<다른 포트>`를 `fetch`                                                 | 종료 코드 1, 거부 1건 이상                                                    |
-| `localhost-port`           | 같은 요청을 `localhost` 이름으로                                                         | 종료 코드 1, 거부 1건 이상                                                    |
-| `named-host`               | 같은 요청을 `ext.localhost` 이름으로                                                     | 종료 코드 1, 거부 1건 이상                                                    |
-| `ipv6-loopback`            | 같은 요청을 `[::1]`로                                                                    | 종료 코드 1, 거부 1건 이상                                                    |
-| `app-alias`                | 앱 포트를 다른 이름으로(`http://localhost:<앱 포트>`)                                    | 종료 코드 1, 거부 1건 이상                                                    |
-| `https-other-port`         | `https://127.0.0.1:<TCP 서버 포트>`를 `fetch`                                            | 종료 코드 1, 거부 1건 이상                                                    |
-| `external-name-http`       | `http://external.invalid/`를 `fetch`                                                     | 종료 코드 1, 거부 기록에 `external.invalid:80`                                |
-| `external-name-https`      | `https://external.invalid/`를 `fetch`                                                    | 종료 코드 1, 거부 기록에 `external.invalid:443`                               |
-| `redirect-out`             | 앱의 경로가 다른 서버로 302 리다이렉트                                                   | 종료 코드 1, 거부 1건 이상                                                    |
-| `redirect-https-same-port` | 앱의 경로가 `https://127.0.0.1:<앱 포트>/`로 302 리다이렉트                              | 종료 코드 1, 거부 1건 이상                                                    |
-| `websocket-out`            | 다른 서버로 웹소켓을 연다                                                                | 종료 코드 1, 거부 1건 이상                                                    |
-| `wss-same-port`            | `wss://127.0.0.1:<앱 포트>`로 웹소켓을 연다                                              | 종료 코드 1, 거부 1건 이상                                                    |
-| `service-worker`           | 다른 서버로 `fetch`하는 서비스 워커를 등록한다                                           | 종료 코드 0, 거부 0건, 워커 스크립트 요청 0건                                 |
-| `allow-blocked`            | `other-port`의 요청과 콘솔 에러를 모든 것에 맞는 패턴으로 선언                           | 종료 코드 1, 거부 1건 이상                                                    |
-| `no-fixture`               | `@playwright/test`의 `test`를 직접 쓴, 통과하는 시나리오                                 | 종료 코드 1(관찰 기록 없음)                                                   |
-| `no-fixture-out`           | 직접 쓴 시나리오에서 다른 서버를 `fetch`                                                 | 종료 코드 1, 거부 1건 이상                                                    |
-| `skipped`                  | 건너뛰게 표시한 시나리오                                                                 | 종료 코드 1(상태 `skipped`)                                                   |
-| `marker`                   | 합성 표식을 화면·콘솔 에러·요청 경로와 쿼리·시나리오 제목·단언 문구·호스트 이름에 넣는다 | 종료 코드 1(상태 `failed`), 거부 기록에 `<표식>.invalid:80`, 요약에 표식 없음 |
-| `node-request`             | 시나리오 코드가 Playwright의 `request`와 `page.request`로 다른 서버를 부른다             | 종료 코드 1, 거부 1건 이상                                                    |
-| `signal`                   | 끝나지 않는 시나리오를 돌리다 `node scripts/harness.ts verify`에 SIGTERM을 보낸다        | 남은 프로세스 0                                                               |
-| `shell-arg`                | `verify -- 'e2e/$(touch <표식 파일>).spec.ts'`                                           | 종료 코드 1, 표식 파일 없음, 아무것도 띄우지 않는다(증거 묶음 없음)           |
+| 사례 id                    | 내용                                                                                                         | 기대                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `full-run`                 | `e2e/smoke.spec.ts`만 있을 때 인자 없이 실행                                                                 | 종료 코드 0, 시나리오 파일은 `e2e/smoke.spec.ts` 하나                         |
+| `pass`                     | 통과하는 시나리오                                                                                            | 종료 코드 0, 거부 0건                                                         |
+| `exact-select`             | `e2e/sel/a.spec.ts`를 지정. 실패하는 `e2e/sel/more-e2e/sel/a.spec.ts`가 함께 있다                            | 종료 코드 0, 시나리오 파일은 지정한 것 하나                                   |
+| `console-error`            | 페이지가 `console.error`를 낸다                                                                              | 종료 코드 1(콘솔 에러 1건 이상)                                               |
+| `failed-request`           | 페이지가 앱의 없는 경로를 `fetch`한다(404)                                                                   | 종료 코드 1(실패한 요청 1건 이상)                                             |
+| `allowed-request-only`     | 위 요청을 `allowFailedRequest`로만 선언                                                                      | 종료 코드 1(404의 콘솔 에러가 남는다), 뺀 요청 1건                            |
+| `allowed-failure`          | 요청은 `allowFailedRequest`로, 콘솔 에러는 `allowConsoleError`로 선언                                        | 종료 코드 0, 뺀 요청 1건·뺀 콘솔 에러 1건                                     |
+| `ws-same-port`             | `ws://127.0.0.1:<앱 포트>`로 웹소켓을 열고 앱이 받아 준다                                                    | 종료 코드 0, 거부 0건                                                         |
+| `other-port`               | `http://127.0.0.1:<다른 포트>`를 `fetch`                                                                     | 종료 코드 1, 거부 1건 이상                                                    |
+| `localhost-port`           | 같은 요청을 `localhost` 이름으로                                                                             | 종료 코드 1, 거부 1건 이상                                                    |
+| `named-host`               | 같은 요청을 `ext.localhost` 이름으로                                                                         | 종료 코드 1, 거부 1건 이상                                                    |
+| `ipv6-loopback`            | 같은 요청을 `[::1]`로                                                                                        | 종료 코드 1, 거부 1건 이상                                                    |
+| `app-alias`                | 앱 포트를 다른 이름으로(`http://localhost:<앱 포트>`)                                                        | 종료 코드 1, 거부 1건 이상                                                    |
+| `https-other-port`         | `https://127.0.0.1:<TCP 서버 포트>`를 `fetch`                                                                | 종료 코드 1, 거부 1건 이상                                                    |
+| `external-name-http`       | `http://external.invalid/`를 `fetch`                                                                         | 종료 코드 1, 거부 기록에 `external.invalid:80`                                |
+| `external-name-https`      | `https://external.invalid/`를 `fetch`                                                                        | 종료 코드 1, 거부 기록에 `external.invalid:443`                               |
+| `redirect-out`             | 앱의 경로가 다른 서버로 302 리다이렉트                                                                       | 종료 코드 1, 거부 1건 이상                                                    |
+| `redirect-https-same-port` | 앱의 경로가 `https://127.0.0.1:<앱 포트>/`로 302 리다이렉트                                                  | 종료 코드 1, 거부 1건 이상                                                    |
+| `websocket-out`            | 다른 서버로 웹소켓을 연다                                                                                    | 종료 코드 1, 거부 1건 이상                                                    |
+| `wss-same-port`            | `wss://127.0.0.1:<앱 포트>`로 웹소켓을 연다                                                                  | 종료 코드 1, 거부 1건 이상                                                    |
+| `service-worker`           | 다른 서버로 `fetch`하는 서비스 워커를 등록한다                                                               | 종료 코드 0, 거부 0건, 워커 스크립트 요청 0건                                 |
+| `allow-blocked`            | `other-port`의 요청과 콘솔 에러를 모든 것에 맞는 패턴으로 선언                                               | 종료 코드 1, 거부 1건 이상                                                    |
+| `no-fixture`               | `@playwright/test`의 `test`를 직접 쓴, 통과하는 시나리오                                                     | 종료 코드 1(관찰 기록 없음)                                                   |
+| `no-fixture-out`           | 직접 쓴 시나리오에서 다른 서버를 `fetch`                                                                     | 종료 코드 1, 거부 1건 이상                                                    |
+| `skipped`                  | 건너뛰게 표시한 시나리오                                                                                     | 종료 코드 1(상태 `skipped`)                                                   |
+| `marker`                   | 합성 표식을 화면·콘솔 에러·요청 경로와 쿼리·시나리오 제목·단언 문구·호스트 이름에 넣는다                     | 종료 코드 1(상태 `failed`), 거부 기록에 `<표식>.invalid:80`, 요약에 표식 없음 |
+| `node-request`             | 시나리오 코드가 Playwright의 `request`와 `page.request`로 다른 서버를 부른다                                 | 종료 코드 1, 거부 1건 이상                                                    |
+| `signal`                   | 끝나지 않는 시나리오가 시작된 뒤 `node scripts/harness.ts verify`에 SIGTERM을 보낸다                         | 하네스가 SIGTERM으로 끝난다(종료 코드 없음), 남은 프로세스 0                  |
+| `signal-hup`               | 같은 일을 SIGHUP으로 한다                                                                                    | 하네스가 SIGHUP으로 끝난다(종료 코드 없음), 남은 프로세스 0                   |
+| `runner-killed`            | 끝나지 않는 시나리오가 시작된 뒤 실행기의 프로세스 그룹을 SIGKILL로 끝낸다(브라우저를 닫아 줄 것이 없어진다) | 종료 코드 1(신호로 끝나지 않는다), 남은 프로세스 0                            |
+| `shell-arg`                | `verify -- 'e2e/$(touch <표식 파일>).spec.ts'`                                                               | 종료 코드 1, 표식 파일 없음, 아무것도 띄우지 않는다(증거 묶음 없음)           |
 
 공통 기대(`check-results.ts verify-playwright`가 모든 사례에서 확인한다): `targetHits` 0, `leftover` 0, `evidenceFiles`는 `summary.json`과 `summary.md`뿐(`shell-arg`는 비어 있다), `markerInEvidence`와 `deniedTargetInEvidence`는 거짓, 워커 스크립트 요청 0건. 거부를 기대하는 사례는 `deniedTargets`에 그 사례의 대상 호스트:포트가 있어야 하고, fixture를 쓴 사례는 fixture도 그 요청을 적었어야 한다(`blocked` 1 이상). 거부를 기대하지 않는 사례는 거부 0건이어야 한다. 그 밖에 `tool.playwright`가 `1.65.0`, `bypass`가 `<-loopback>,http://127.0.0.1:<앱 포트>,ws://127.0.0.1:<앱 포트>`, `selfCheck`와 `traceOnlyInLocal`(스크린샷·trace·영상이 출력 폴더의 `local/` 아래에만 있고 trace가 하나 이상 있다)이 참인지 본다.
 
-`node-request`는 step3 지시서의 표에 없던 사례다. 실물 확인을 하다 Playwright의 `request` fixture가 브라우저 실행 옵션의 프록시를 따르지 않고 다른 포트에 그대로 닿는 것을 보고, 설정의 컨텍스트 옵션에도 같은 프록시를 두고 사례로 남겼다.
+도중에 끊는 사례 셋(`signal`, `signal-hup`, `runner-killed`)은 `started`와 `signalSent`가 참이고 `runningBeforeSignal`이 3 이상, `browsersBeforeSignal`이 1 이상이어야 한다. 시나리오가 시작되기 전에 끝났거나 스스로 끝난 실행은 통과하지 못한다. 모든 사례에서 `signal`이 기대와 같아야 한다(신호 사례는 그 신호, 나머지는 `null`).
+
+`node-request`, `signal-hup`, `runner-killed`는 step3 지시서의 표에 없던 사례다. `signal-hup`과 `runner-killed`는 구현 판정의 지적(F1: SIGHUP에서 정리하지 않음, F2: 실행기를 강제로 끝낸 뒤 브라우저의 종료를 확인하지 않음)을 고치며 더했다. `runner-killed`에서 실제 Chromium은 실행기와의 연결이 끊기면 스스로 끝나므로, 브라우저가 스스로 끝나지 않는 경우는 이 리포의 테스트(`scripts/test/verify-tree.test.ts`)가 본다. `node-request`: 실물 확인을 하다 Playwright의 `request` fixture가 브라우저 실행 옵션의 프록시를 따르지 않고 다른 포트에 그대로 닿는 것을 보고, 설정의 컨텍스트 옵션에도 같은 프록시를 두고 사례로 남겼다.

@@ -178,8 +178,18 @@ interface Case {
   extra?: { file: string; content: (file: string) => string }[];
   /** verify에 넘기는 인자. 없으면 [file] */
   args?: string[];
-  signal?: boolean;
+  /**
+   * 끝나지 않는 시나리오가 브라우저로 앱에 닿은 뒤에 도중에 끊는다.
+   * 신호 이름: 하네스(`node scripts/harness.ts verify`)에 그 신호를 보낸다.
+   * runner: 실행기의 프로세스 그룹을 SIGKILL로 끝낸다(브라우저를 닫아 줄 것이 없어진다)
+   */
+  interrupt?: 'SIGTERM' | 'SIGHUP' | 'runner';
 }
+
+/** 끝나지 않는 시나리오. 앱의 /signal-started에 닿아 시작을 알린다 */
+const endless = (name: string) =>
+  `test('${name}', async ({ page }) => {\n  test.setTimeout(600_000);\n  await page.goto('/signal-started');\n` +
+  '  await new Promise(() => {});\n  expect(true).toBe(true);\n});\n';
 
 const OUTSIDE_PAGES = [
   'other-port',
@@ -300,11 +310,20 @@ const CASES: Case[] = [
   {
     id: 'signal',
     file: 'e2e/t-signal.spec.ts',
-    content: (f) =>
-      head(f) +
-      "test('signal', async ({ page }) => {\n  test.setTimeout(600_000);\n  await page.goto('/signal-started');\n" +
-      '  await new Promise(() => {});\n  expect(true).toBe(true);\n});\n',
-    signal: true,
+    content: (f) => head(f) + endless('signal'),
+    interrupt: 'SIGTERM',
+  },
+  {
+    id: 'signal-hup',
+    file: 'e2e/t-signal-hup.spec.ts',
+    content: (f) => head(f) + endless('signal-hup'),
+    interrupt: 'SIGHUP',
+  },
+  {
+    id: 'runner-killed',
+    file: 'e2e/t-runner-killed.spec.ts',
+    content: (f) => head(f) + endless('runner-killed'),
+    interrupt: 'runner',
   },
   { id: 'shell-arg', file: null },
 ];
@@ -466,6 +485,8 @@ function cwdOf(pid: number): string {
   }
 }
 const BROWSER = /ms-playwright|headless[-_]shell/;
+/** verify가 띄운 실행기(그 프로세스 그룹의 첫 프로세스) */
+const RUNNER = /node_modules\/@playwright\/test\/cli\.js test /;
 const OURS =
   /playwright|trial-app\/server\.mjs|scripts\/verify\/web\.ts|scripts\/harness\.ts verify/;
 /** 이 실행이 띄웠고 아직 남아 있는 dev·실행기·브라우저·verify 프로세스 */
@@ -559,14 +580,14 @@ async function main(): Promise<void> {
       },
     );
     let output = '';
-    let runningBeforeSignal: number | null = null;
+    let interrupted: Json | null = null;
     child.stdout.on('data', (d: Buffer) => (output += d.toString()));
     child.stderr.on('data', (d: Buffer) => (output += d.toString()));
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
       child.once('exit', (code, signal) => resolve({ code, signal })),
     );
-    if (c.signal) {
-      // 시나리오가 브라우저로 앱에 닿은 뒤에 신호를 보낸다
+    if (c.interrupt) {
+      // 시나리오가 브라우저로 앱에 닿은 뒤에 끊는다
       const until = Date.now() + 120_000;
       let started = false;
       while (!started && child.exitCode === null && Date.now() < until) {
@@ -578,9 +599,30 @@ async function main(): Promise<void> {
         }
       }
       if (!started) process.stdout.write('    (시나리오가 시작되기 전에 끝났거나 시간이 지났다)\n');
-      // 신호를 보내기 전에 떠 있는 것을 센다(남은 프로세스를 세는 방법이 이 프로세스들을 실제로 보는지 확인한다)
-      runningBeforeSignal = leftover(before, root).length;
-      child.kill('SIGTERM');
+      // 끊기 전에 떠 있는 것을 센다(남은 프로세스를 세는 방법이 이 프로세스들과 브라우저를 실제로 보는지 확인한다)
+      const running = leftover(before, root);
+      let signalSent = false;
+      if (started && c.interrupt === 'runner') {
+        const runner = [...processes()].find(
+          ([pid, command]) => !before.has(pid) && RUNNER.test(command) && cwdOf(pid) === root,
+        );
+        try {
+          if (runner) {
+            process.kill(-runner[0], 'SIGKILL');
+            signalSent = true;
+          }
+        } catch {
+          // 보내지 못했다
+        }
+      } else if (started && c.interrupt !== 'runner') signalSent = child.kill(c.interrupt);
+      // 시작을 보지 못했거나 보내지 못했으면 실행을 끝내기만 한다(결과에는 보내지 못한 것으로 남는다)
+      if (!signalSent) child.kill('SIGTERM');
+      interrupted = {
+        started,
+        signalSent,
+        runningBeforeSignal: running.length,
+        browsersBeforeSignal: running.filter((l) => BROWSER.test(l)).length,
+      };
     }
     const end = await exited;
     // 남은 프로세스는 verify가 돌아간 바로 그 시점에 센다
@@ -646,7 +688,7 @@ async function main(): Promise<void> {
       deniedTargetInEvidence,
       markerFile: existsSync(at(SHELL_MARKER)),
     };
-    if (runningBeforeSignal !== null) result.runningBeforeSignal = runningBeforeSignal;
+    if (interrupted) Object.assign(result, interrupted);
     process.stdout.write(
       `${output
         .split('\n')
