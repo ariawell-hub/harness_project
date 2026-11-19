@@ -693,7 +693,14 @@ test('judge-*.yml: 재현 job은 비밀·environment·쓰기 권한 없이 base 
     );
     assert.match(repro, /^ {4}permissions:\n {6}contents: read$/m);
     assert.match(repro, /^ {4}needs: \[plan, judge\]$/m);
-    assert.match(repro, /^ {4}if: needs\.judge\.outputs\.verdict != ''$/m);
+    // 판정이 있고, 재현 테스트가 없다고 확인된 경우(judge의 repro 출력이 false)가 아니면 돈다.
+    // 값이 없거나 깨졌으면 돈다: "true일 때만"으로 쓰면 출력이 빠졌을 때 재현이 빠진다(Issue #143)
+    assert.match(
+      repro,
+      /^ {4}if: needs\.judge\.outputs\.verdict != '' && needs\.judge\.outputs\.repro != 'false'$/m,
+    );
+    // 그 값은 유출 검사 단계(main의 스크립트)가 낸다
+    assert.match(j.get('judge')!, /^ {6}repro: \$\{\{ steps\.scan\.outputs\.repro \}\}$/m);
     assert.match(repro, /^ {4}timeout-minutes: \d+$/m);
     // 스크립트와 설정은 base에서만 읽고, PR 트리의 스크립트를 직접 실행하지 않는다
     assert.match(
@@ -707,6 +714,13 @@ test('judge-*.yml: 재현 job은 비밀·environment·쓰기 권한 없이 base 
     assert.match(record, /^ {4}needs: \[plan, judge, repro\]$/m);
     assert.match(record, /REPRO: \$\{\{ needs\.repro\.outputs\.results \}\}/);
     assert.match(record, /--repro-results "\$REPRO"/);
+    // 재현 job이 건너뛰어져도 기록 job은 돈다: 조건이 !cancelled()로 시작하고 재현 job의 결과를 보지 않는다
+    const cond = /^ {4}if: (.*)$/m.exec(record)?.[1];
+    assert.equal(
+      cond,
+      "${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}",
+    );
+    assert.doesNotMatch(cond ?? '', /needs\.repro/);
     assert.deepEqual(reproJobViolations(wf), []);
   }
 });
