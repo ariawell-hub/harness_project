@@ -1,10 +1,31 @@
 {
   "plan": "20261119-pilot-prep",
   "steps": [
-    { "step": 0, "name": "web-test-effect", "status": "pending" },
-    { "step": 1, "name": "verify-run", "status": "pending" },
-    { "step": 2, "name": "verify-guard", "status": "pending" },
-    { "step": 3, "name": "verify-playwright", "status": "pending" },
-    { "step": 4, "name": "web-verify-skill", "status": "pending" }
+    {
+      "step": 0,
+      "name": "web-test-effect",
+      "status": "completed",
+      "completed_at": "2026-11-19T19:42:34+09:00"
+    },
+    {
+      "step": 1,
+      "name": "verify-run",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "verify-guard",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "verify-playwright",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "web-verify-skill",
+      "status": "pending"
+    }
   ]
 }

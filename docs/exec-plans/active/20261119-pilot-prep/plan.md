@@ -133,6 +133,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 실물 확인: `mktemp -d` 폴더에 이 worktree를 복제해 웹 프로파일을 적용하고 Vitest를 설치했다. 이 리포의 설치 정책(`minimumReleaseAge`)이 5.1.1 대신 5.1.0을 골랐다. `lab/pilot-prep/trial-test-effect.ts`가 일곱 사례를 만들어 `test-effect`를 두 번 돌렸고 첫 실행에서 모두 기대대로 나왔다(`all` 종료 코드 1, `effective-only` 0). 이름이 겹치는 세 파일(`src/sim/a.test.ts`, `a.test.tsx`, 더 깊은 폴더의 같은 이름)은 파일마다 자기 결과대로 판정됐다. `node lab/pilot-prep/check-results.ts test-effect-vitest` 통과.
   - `lab/pilot-prep/check-results.ts`의 테스트(`lab/pilot-prep/test/`)를 더했다(어긋난 결과 파일을 통과시키지 않는지 8개).
   - 남은 것: `CHANGELOG`·TD-42 행·설계서 0절 변경 이력(TD-53 병합 뒤 `origin/main`을 병합하고 더한다), `check` → `complete-step` → push → `pr-ready`.
+- 2026-11-19: TD-53 PR(#141)이 병합됐다(`bd18dd0`). `origin/main`을 병합하고(충돌 없음) `CHANGELOG` 한 줄, TD-42 행의 상태 칸, 설계서 0절 변경 이력(v0.7.58)을 더했다. 열린 다른 PR은 없다.
 
 ## 의사결정 로그
 
@@ -155,18 +156,19 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 결정: step을 5개로 나눈다(1라운드의 4개에서 거부 프록시·증거 요약을 따로 뗐다). / 이유: 거부 프록시와 인자 인용이 더해져 실행·판정 step이 PR 하나 크기를 넘는다. 프록시와 요약은 Playwright 없이 이 리포의 테스트로 확인되는 모듈이다. / 버린 대안: 4개로 두고 step1·step2를 키운다.
 - 결정: step0의 구현은 계획 검증 뒤 로컬에서 끝내 두고, push와 승인 요청은 TD-53 PR(Issue #139)이 병합된 뒤에 한다. `CHANGELOG`·기술 부채 표·설계서의 변경은 그 병합을 `origin/main`에서 받아 온 뒤에 더하고 버전은 v0.7.59부터 쓴다. / 이유: 다른 세션과의 합의(세 파일을 고치는 PR은 한 번에 하나, 제작자 승인 대기 중인 PR이 있으면 `pr-ready`를 하지 않는다). push 한 번이 판정 한 라운드라 준비가 끝난 뒤 한 번에 올린다(절차서 5절). / 버린 대안: 구현을 먼저 올리고 `CHANGELOG`를 나중 커밋으로 더한다(라운드가 늘고 `harness-guard`가 그 사이 실패한다).
 - 결정: Q10·Q13은 "열린 질문"에 올리되 step0~4는 답을 기다리지 않는다. / 이유: 어느 step도 DB·ORM이나 리포 소유 계정에 기대지 않는다. 답이 필요한 일(14.3절·18절, DB 차단 목록, 일회용 DB)은 비범위다.
+- 결정: step0의 설계서 버전은 v0.7.58이다(위 결정의 "v0.7.59부터"를 바꾼다). / 이유: TD-53 PR(#141)은 설계서를 고치지 않고 병합돼 v0.7.58을 쓰지 않았다. main의 마지막 버전은 v0.7.57이고 step0 지시서의 규칙은 "`origin/main`의 마지막 버전 다음 번호"다. 다른 세션의 남은 브랜치(`feat/20261119-actions-usage-2-s0`)도 v0.7.58·v0.7.59를 쓰지 않는 것을 확인했다(계획을 접은 상태다). 번호를 건너뛰면 변경 이력에 빈 번호가 남는다. / 버린 대안: 합의의 숫자대로 v0.7.59를 쓴다(겹치지 않게 하려던 합의의 목적은 v0.7.58로도 지켜진다).
 
 ## 발견 사항
 
 - `verify`가 만든 증거를 봇이 PR에 붙일 길이 지금은 없다(댓글 파일 첨부 API 없음, 커밋하면 바이너리라 위험도 높음). → 처리: TD-12(행을 갱신할 때 남은 일로 적는다. 필수 상태 체크의 별도 Issue에서 정한다)
 - E2E 시나리오는 `test-effect` 대상이 아니다(실행 중인 앱이 필요하다). 11.1절 절차 7("재현 시나리오는 E2E 테스트로 남긴다")의 실효성은 `verify`의 전후 비교로만 본다. → 처리: TD-12(남은 일로 적는다)
-- 표준 명령의 추가 인자가 큰따옴표로 셸에 붙어 `$(…)`가 실행된다(`scripts/commands/standard.ts`, 이 계획 전부터 있던 동작. 계획 검증 F4). → 처리: 이 계획의 step1에서 고친다
-- Vitest CLI의 파일 인자는 부분 문자열 필터다(`a.test.ts`를 넘기면 `a.test.tsx`도 돈다). → 처리: 이 계획의 step0(래퍼)과 `profiles/web/README.md`
-- Playwright CLI의 파일 인자는 정규식이다(`e2e/a.spec.ts`가 `e2e/sub-e2e/a.spec.ts`도 고른다). → 처리: 이 계획의 step1·step3(환경 변수와 정확 일치)
-- Playwright JSON 보고서의 파일 경로는 리포 루트가 아니라 시나리오 폴더(`config.rootDir`) 기준이다. → 처리: 이 계획의 step1(`judge`가 리포 기준 경로로 바꾼다)
-- Chromium은 404 응답에 콘솔 에러도 낸다. → 처리: 이 계획의 step3(fixture와 `profiles/web/README.md`)
-- `verify`의 브라우저에서는 서비스 워커가 돌지 않아 워커에 기대는 동작은 확인하지 못한다. → 처리: 이 계획의 step3(`profiles/web/README.md`에 한계로 적는다)
-- 웹 프로파일에 `testEffect` 키가 없던 동안, `init --profile web`을 적용한 리포에는 core 프로파일의 `testEffect`(`scripts/test/*.test.ts`, `node --test`)가 그대로 남아 있었다(`init`은 프로파일에 있는 키만 덮어쓴다). 그래서 `src/`의 테스트는 검사 대상에 들지 않고 지나갔다. → 처리: 이 계획의 step0(프로파일이 키를 채운다. TD-42 행을 고칠 때 이 내용을 적는다)
+- 표준 명령의 추가 인자가 큰따옴표로 셸에 붙어 `$(…)`가 실행된다(`scripts/commands/standard.ts`, 이 계획 전부터 있던 동작. 계획 검증 F4). → 처리: #140 (이 계획의 step1에서 고친다)
+- Vitest CLI의 파일 인자는 부분 문자열 필터다(`a.test.ts`를 넘기면 `a.test.tsx`도 돈다). → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (step0의 래퍼로 피하고 이유를 README에 적었다)
+- Playwright CLI의 파일 인자는 정규식이다(`e2e/a.spec.ts`가 `e2e/sub-e2e/a.spec.ts`도 고른다). → 처리: #140 (이 계획의 step1·step3: 환경 변수와 정확 일치)
+- Playwright JSON 보고서의 파일 경로는 리포 루트가 아니라 시나리오 폴더(`config.rootDir`) 기준이다. → 처리: #140 (이 계획의 step1: `judge`가 리포 기준 경로로 바꾼다)
+- Chromium은 404 응답에 콘솔 에러도 낸다. → 처리: #140 (이 계획의 step3: fixture와 `profiles/web/README.md`)
+- `verify`의 브라우저에서는 서비스 워커가 돌지 않아 워커에 기대는 동작은 확인하지 못한다. → 처리: #140 (이 계획의 step3: `profiles/web/README.md`에 한계로 적는다)
+- 웹 프로파일에 `testEffect` 키가 없던 동안, `init --profile web`을 적용한 리포에는 core 프로파일의 `testEffect`(`scripts/test/*.test.ts`, `node --test`)가 그대로 남아 있었다(`init`은 프로파일에 있는 키만 덮어쓴다). 그래서 `src/`의 테스트는 검사 대상에 들지 않고 지나갔다. → 처리: TD-42 (step0에서 프로파일이 키를 채웠고, 행의 상태 칸에 이 내용을 적었다)
 
 ## 열린 질문
 
@@ -190,11 +192,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 각 step의 AC 명령과 `node scripts/harness.ts check`.
 - 실물 확인(임시 폴더의 실제 웹 프로젝트): step0은 Vitest로 `test-effect`, step3은 Playwright로 `verify`. 절차는 `lab/pilot-prep/README.md`, 결과는 `lab/pilot-prep/results/`에 남기고 `lab/pilot-prep/check-results.ts`로 사례별 기대값을 검사한다. 이 리포의 테스트는 `lab/`을 읽지 않는다(`testInertPaths`).
 - 결과는 step을 진행하며 진행 로그에 적는다.
+- step0(2026-11-19): AC 9개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 1은 `scripts/test/profile-web.test.ts`(6개), 수용 기준 2는 실제 Vitest 5.1.0의 실물 확인(`lab/pilot-prep/results/test-effect-vitest.json`, 일곱 사례와 두 실행의 종료 코드)과 `check-results.ts test-effect-vitest`로 확인했다. 이 리포의 `test-effect`는 새 테스트 파일을 `effective(base에서 단언 실패)`로 판정했다.
 
 ## 다음 할 일
 
 1. (끝남) 계획 검증(G1): 4라운드에서 두 검증자 승인.
 2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
-3. TD-53 PR(Issue #139, PR #141)이 병합되면 `origin/main`을 병합하고 `CHANGELOG`(v0.7.59)·TD-42 행을 더한 뒤 `check` → `complete-step` → push → `pr-ready`로 한 번만 승인을 요청한다. 그 전에 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
+3. `check` → `complete-step` → push → `pr-ready`로 한 번만 승인을 요청한다(TD-53 PR #141은 병합됐다).
 4. 병합 뒤 `new-task --plan 20261119-pilot-prep --step 1`.
 5. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.
