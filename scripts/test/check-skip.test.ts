@@ -191,48 +191,102 @@ test('check 캐시: test를 건너뛴 실행은 캐시에 남기지 않는다(�
   assert.deepEqual(shape(onMain), RAN);
 });
 
-test('check: 건너뛰기 판정은 시작할 때 한 번 한다(도중에 작업 트리가 바뀌어도 건너뛴 결과가 캐시에 남지 않는다)', async () => {
-  // fmt 검사가 목록 밖 파일을 지우는 리포. 시작할 때는 목록 밖 변경(docs/x.md)이 있어 test를 돌려야 하고,
-  // fmt가 지운 뒤 다시 판정하면 "계획만 바뀜"으로 보인다
-  const rm = `"${process.execPath}" -e "require('fs').rmSync('docs/x.md', { force: true })"`;
-  const commands = {
+// 실행 도중 작업 트리가 바뀌는 경우: fmt 검사 명령이 파일을 지우거나 고치는 리포로 만든다
+const PASSING_TEST = { run: `"${process.execPath}" -e "process.exit(0)"`, timeoutSec: 60 };
+const nodeE = (js: string) => `"${process.execPath}" -e "${js}"`;
+const withFmt = (fmt: string) => ({
+  commands: {
     setup: null,
-    fmt: { run: rm, check: rm, timeoutSec: 60 },
+    fmt: { run: fmt, check: fmt, timeoutSec: 60 },
     lint: null,
     test: null,
     build: null,
     dev: null,
     verify: null,
-  };
-  const run = (root: string, base: string, test: unknown) => {
-    const cfg = loadConfig(root);
-    (cfg.commands as Record<string, unknown>).test = test;
-    return runCheck(repoInfo(root), cfg, {
-      base,
-      env: {},
-      only: ['fmt', 'test'],
-      noRecord: true,
-      quiet: true,
-    });
-  };
-  const a = repo({ commands });
-  write(a.root, 'plans/p1.md', '# 계획 2\n');
-  write(a.root, 'docs/x.md', '# x\n');
-  const r = await run(a.root, a.base, FAILING_TEST);
-  assert.deepEqual(
-    r.results.map((x) => [x.name, x.ok, x.skipped]),
-    [
-      ['fmt', true, false],
-      ['test', false, false],
-    ],
-  );
+  },
+});
+const fmtThenTest = (root: string, base: string, testCmd: unknown, ci = false) => {
+  const cfg = loadConfig(root);
+  (cfg.commands as Record<string, unknown>).test = testCmd;
+  return runCheck(repoInfo(root), cfg, {
+    base,
+    ci,
+    env: {},
+    only: ['fmt', 'test'],
+    noRecord: true,
+    quiet: true,
+  });
+};
+const FMT_RAN_TEST_RAN = [
+  ['fmt', true, false],
+  ['test', false, false],
+];
 
-  // 반대 방향: 시작할 때 건너뛰기로 판정했으면 통과해도 캐시에 쓰지 않는다
-  const b = repo({ commands });
-  write(b.root, 'plans/p1.md', '# 계획 2\n');
-  const s = await run(b.root, b.base, FAILING_TEST);
-  assert.deepEqual([s.ok, s.results[1].skipped], [true, true]);
-  assert.equal(cacheFiles(b.root), 0);
+test('check: 시작할 때 목록 밖 변경이 있었으면, 앞선 검사가 그것을 지워도 test를 돌린다', async () => {
+  const { root, base } = repo(withFmt(nodeE("require('fs').rmSync('docs/x.md', { force: true })")));
+  write(root, 'plans/p1.md', '# 계획 2\n');
+  write(root, 'docs/x.md', '# x\n');
+  assert.deepEqual(shape(await fmtThenTest(root, base, FAILING_TEST)), FMT_RAN_TEST_RAN);
+});
+
+test('check: 시작할 때는 계획만 바뀌었어도, 앞선 검사가 보호 경로를 바꾸면 test를 돌린다', async () => {
+  const { root, base } = repo(
+    withFmt(nodeE("require('fs').writeFileSync('scripts/a.ts', 'export const a = 9;')")),
+  );
+  write(root, 'plans/p1.md', '# 계획 2\n');
+  assert.deepEqual(shape(await fmtThenTest(root, base, FAILING_TEST)), FMT_RAN_TEST_RAN);
+
+  // CI 방식(시작할 때는 커밋된 변경만 본다)에서도 test 직전에는 작업 트리를 본다
+  const ci = repo(
+    withFmt(nodeE("require('fs').writeFileSync('scripts/a.ts', 'export const a = 9;')")),
+  );
+  write(ci.root, 'plans/p1.md', '# 계획 2\n');
+  commitAll(ci.root, 'plan');
+  assert.deepEqual(
+    shape(await fmtThenTest(ci.root, ci.base, FAILING_TEST, true)),
+    FMT_RAN_TEST_RAN,
+  );
+  // 앞선 검사가 아무것도 바꾸지 않으면 CI 방식에서도 건너뛴다
+  const calm = repo(withFmt(nodeE('process.exit(0)')));
+  write(calm.root, 'plans/p1.md', '# 계획 2\n');
+  commitAll(calm.root, 'plan');
+  assert.deepEqual(shape(await fmtThenTest(calm.root, calm.base, FAILING_TEST, true)), [
+    ['fmt', true, false],
+    ['test', true, true],
+  ]);
+});
+
+test('check 캐시: 도중에 판정이 바뀐 실행과 건너뛴 실행은 캐시에 남기지 않는다', async () => {
+  // 목록 밖 파일이 생김: test는 돌고 통과하지만, 시작할 때의 트리로 만든 키에 결과를 쓰지 않는다
+  const grew = repo(
+    withFmt(nodeE("require('fs').writeFileSync('scripts/a.ts', 'export const a = 9;')")),
+  );
+  write(grew.root, 'plans/p1.md', '# 계획 2\n');
+  const g = await fmtThenTest(grew.root, grew.base, PASSING_TEST);
+  assert.deepEqual([g.ok, g.results[1].skipped], [true, false]);
+  assert.equal(cacheFiles(grew.root), 0);
+
+  // 목록 밖 파일이 사라짐: 같다
+  const shrank = repo(withFmt(nodeE("require('fs').rmSync('docs/x.md', { force: true })")));
+  write(shrank.root, 'plans/p1.md', '# 계획 2\n');
+  write(shrank.root, 'docs/x.md', '# x\n');
+  const s = await fmtThenTest(shrank.root, shrank.base, PASSING_TEST);
+  assert.deepEqual([s.ok, s.results[1].skipped], [true, false]);
+  assert.equal(cacheFiles(shrank.root), 0);
+
+  // 처음부터 끝까지 계획만 바뀜: 건너뛰고, 캐시에 쓰지 않는다
+  const calm = repo(withFmt(nodeE('process.exit(0)')));
+  write(calm.root, 'plans/p1.md', '# 계획 2\n');
+  const c = await fmtThenTest(calm.root, calm.base, FAILING_TEST);
+  assert.deepEqual([c.ok, c.results[1].skipped], [true, true]);
+  assert.equal(cacheFiles(calm.root), 0);
+
+  // 처음부터 끝까지 목록 밖 변경이 있음: test가 돌고, 통과한 결과는 캐시에 남는다
+  const code = repo(withFmt(nodeE('process.exit(0)')));
+  write(code.root, 'docs/x.md', '# x\n');
+  const k = await fmtThenTest(code.root, code.base, PASSING_TEST);
+  assert.deepEqual([k.ok, k.results[1].skipped], [true, false]);
+  assert.equal(cacheFiles(code.root), 1);
 });
 
 test('testSkip: 판정과 이유를 돌려준다', () => {

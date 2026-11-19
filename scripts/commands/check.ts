@@ -169,12 +169,14 @@ export async function runCheck(
   }
 
   const steps = opts.only ?? [...CHECK_STEPS];
-  // test 건너뛰기는 실행을 시작할 때 한 번만 판정한다. 도중에 작업 트리가 바뀌어도 판정과 결과가 어긋나지 않는다
-  const inert =
-    steps.includes('test') && cfg.commands.test
-      ? testSkip(info, cfg, { base, committedOnly: !!opts.ci, env: opts.env })
-      : null;
-  const testSkipped = !!inert?.skippable;
+  // test 건너뛰기는 두 번 판정한다: 시작할 때(캐시 키를 만든 때)와 test 직전. 둘 다 "건너뛰어도 된다"일 때만 건너뛴다.
+  // 시작할 때는 검사 대상 변경을 본다(CI는 커밋된 변경만). test 직전에는 test가 실제로 보게 될 작업 트리 전체를 본다.
+  // 앞선 검사가 도중에 파일을 바꿔 판정이 달라지면 test를 돌리고, 그 실행은 캐시에 남기지 않는다
+  const judge = (committedOnly: boolean) =>
+    testSkip(info, cfg, { base, committedOnly, env: opts.env });
+  const atStart = steps.includes('test') && cfg.commands.test ? judge(!!opts.ci) : null;
+  let testSkipped = false;
+  let judgeChanged = false;
   const results: SubResult[] = [];
   for (const name of steps) {
     const started = Date.now();
@@ -182,10 +184,15 @@ export async function runCheck(
     let skipped = false;
     let output = '';
     let note = '';
-    if (name === 'test' && inert && testSkipped) {
+    const atStep = name === 'test' && atStart ? judge(false) : null;
+    if (atStart && atStep) {
+      judgeChanged = atStart.skippable !== atStep.skippable;
+      testSkipped = atStart.skippable && atStep.skippable;
+    }
+    if (atStep && testSkipped) {
       skipped = true;
       note = ' (건너뜀)';
-      output = inert.reason;
+      output = atStep.reason;
     } else if (name === 'fmt' || name === 'lint' || name === 'test' || name === 'build') {
       const r = await runStandard(name, root, cfg, { checkMode: name === 'fmt' });
       skipped = r.notApplicable;
@@ -255,8 +262,9 @@ export async function runCheck(
   }
   const result: CheckResult = { ok, cached: false, results };
   // test를 건너뛴 실행은 캐시에 남기지 않는다. 캐시에 있는 결과는 모두 test를 실제로 돌린 것이라,
-  // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다
-  if (useCache && ok && !testSkipped) {
+  // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다.
+  // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다
+  if (useCache && ok && !testSkipped && !judgeChanged) {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
   }
