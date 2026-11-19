@@ -135,6 +135,11 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 남은 것: `CHANGELOG`·TD-42 행·설계서 0절 변경 이력(TD-53 병합 뒤 `origin/main`을 병합하고 더한다), `check` → `complete-step` → push → `pr-ready`.
 - 2026-11-19: TD-53 PR(#141)이 병합됐다(`bd18dd0`). `origin/main`을 병합하고(충돌 없음) `CHANGELOG` 한 줄, TD-42 행의 상태 칸, 설계서 0절 변경 이력(v0.7.58)을 더했다. 열린 다른 PR은 없다.
 - 2026-11-19T20:01:40+09:00 step0 재작업: 구현 판정 1라운드의 지적 F19·F20 대응(변경 전 코드에 래퍼가 없는 경우, 실물 확인의 Vitest 버전 고정)
+- 2026-11-19: 구현 판정 1라운드(head `f4368c6`). `review/claude` 승인, `review/codex` 수정 요청(P1 2건). 둘 다 받아들였다(반박 없음).
+  - F19(P1): 웹 프로파일과 `src/` 테스트를 한 변경에서 함께 더하면 변경 전 코드에 래퍼가 없다. `test-effect`는 변경 전 코드의 임시 체크아웃에 테스트 파일과 `support` 파일만 옮기므로 Node가 래퍼를 찾지 못하고, 변경 전에도 통과하는 테스트까지 `effective`(단언 실패 아님)로 판정됐다. 재현 테스트를 먼저 썼다(`scripts/test/profile-web.test.ts`, 래퍼가 없는 기준 커밋과 가짜 `vitest/node`. 고치기 전에는 두 테스트 파일 모두 `effective`). 프로파일의 `testEffect.support`에 `profiles/web/test-effect/**`를 더해 고쳤다. `scripts/gates/test-effect.ts`는 바꾸지 않았다.
+  - F20(P1): 실물 확인의 설치 명령이 Vitest 버전을 고정하지 않았다. README의 명령을 `vitest@5.1.0`으로 고치고, `check-results.ts`가 결과 파일의 `tool.vitest`를 `5.1.0`과 대 보게 했다(`VITEST_VERSION`).
+  - 실물 확인을 새 임시 복제본에서 다시 돌렸다(Vitest 5.1.0). `trial-test-effect.ts`에 세 번째 실행 `first-adoption`(래퍼가 없는 기준 커밋과 비교, 사례 `adoption-pass`·`adoption-fail`)을 더했다. 세 실행의 종료 코드는 1·0·1이고 아홉 사례가 모두 기대대로 나왔다. `adoption-pass`는 `ineffective(base에서도 통과)`다.
+  - step0 지시서와 달라진 값: `support`(지시서는 `["src/test/**"]`), 실물 확인의 실행 수(지시서는 둘)와 사례 수(지시서는 일곱), `tool.vitest` 검사(지시서는 "비어 있지 않다"). 모두 검사를 더 엄하게 하는 쪽이다. step 파일은 실행하는 PR이 고칠 수 없어 그대로 두고 여기와 의사결정 로그에 적는다. AC 명령은 그대로이고 모두 통과한다.
 
 ## 의사결정 로그
 
@@ -158,6 +163,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 결정: step0의 구현은 계획 검증 뒤 로컬에서 끝내 두고, push와 승인 요청은 TD-53 PR(Issue #139)이 병합된 뒤에 한다. `CHANGELOG`·기술 부채 표·설계서의 변경은 그 병합을 `origin/main`에서 받아 온 뒤에 더하고 버전은 v0.7.59부터 쓴다. / 이유: 다른 세션과의 합의(세 파일을 고치는 PR은 한 번에 하나, 제작자 승인 대기 중인 PR이 있으면 `pr-ready`를 하지 않는다). push 한 번이 판정 한 라운드라 준비가 끝난 뒤 한 번에 올린다(절차서 5절). / 버린 대안: 구현을 먼저 올리고 `CHANGELOG`를 나중 커밋으로 더한다(라운드가 늘고 `harness-guard`가 그 사이 실패한다).
 - 결정: Q10·Q13은 "열린 질문"에 올리되 step0~4는 답을 기다리지 않는다. / 이유: 어느 step도 DB·ORM이나 리포 소유 계정에 기대지 않는다. 답이 필요한 일(14.3절·18절, DB 차단 목록, 일회용 DB)은 비범위다.
 - 결정: step0의 설계서 버전은 v0.7.58이다(위 결정의 "v0.7.59부터"를 바꾼다). / 이유: TD-53 PR(#141)은 설계서를 고치지 않고 병합돼 v0.7.58을 쓰지 않았다. main의 마지막 버전은 v0.7.57이고 step0 지시서의 규칙은 "`origin/main`의 마지막 버전 다음 번호"다. 다른 세션의 남은 브랜치(`feat/20261119-actions-usage-2-s0`)도 v0.7.58·v0.7.59를 쓰지 않는 것을 확인했다(계획을 접은 상태다). 번호를 건너뛰면 변경 이력에 빈 번호가 남는다. / 버린 대안: 합의의 숫자대로 v0.7.59를 쓴다(겹치지 않게 하려던 합의의 목적은 v0.7.58로도 지켜진다).
+- 결정: 웹 프로파일의 `testEffect.support`에 래퍼 폴더(`profiles/web/test-effect/**`)를 넣는다(step0 지시서의 `["src/test/**"]`에 더한다). / 이유: 구현 판정 F19. 변경 전 코드에 래퍼가 없는 변경(웹 프로파일을 처음 적용, 래퍼 경로가 바뀐 판으로 올림)에서 래퍼가 변경 전 코드 위에 놓여야 테스트가 실제로 돈다. `support`는 "이 변경이 더하거나 고친 보조 파일을 변경 전 코드 위에 놓는다"는 기존 규칙이라 게이트 코드를 바꾸지 않아도 된다. / 대안: `scripts/gates/test-effect.ts`가 `command`의 스크립트를 스스로 옮기게 한다(판정 규칙 변경이라 이 step의 금지사항이다), 계획을 고쳐 계획 검증을 다시 받는다(값 하나를 더 엄하게 하는 변경에 코드를 되돌리고 다시 올리는 라운드가 든다. 구현 판정이 같은 변경을 본다). / 남는 한계: 래퍼를 고친 변경에서는 고친 판이 변경 전 코드 위에서 돈다. 래퍼를 고쳐 실패를 꾸며 낼 수 있지만, 래퍼는 보호 경로(`profiles/**`)라 그 변경은 제작자 승인 대상이다.
 
 ## 발견 사항
 
@@ -170,6 +176,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - Chromium은 404 응답에 콘솔 에러도 낸다. → 처리: #140 (이 계획의 step3: fixture와 `profiles/web/README.md`)
 - `verify`의 브라우저에서는 서비스 워커가 돌지 않아 워커에 기대는 동작은 확인하지 못한다. → 처리: #140 (이 계획의 step3: `profiles/web/README.md`에 한계로 적는다)
 - 웹 프로파일에 `testEffect` 키가 없던 동안, `init --profile web`을 적용한 리포에는 core 프로파일의 `testEffect`(`scripts/test/*.test.ts`, `node --test`)가 그대로 남아 있었다(`init`은 프로파일에 있는 키만 덮어쓴다). 그래서 `src/`의 테스트는 검사 대상에 들지 않고 지나갔다. → 처리: TD-42 (step0에서 프로파일이 키를 채웠고, 행의 상태 칸에 이 내용을 적었다)
+- `test-effect`는 `command`가 가리키는 스크립트가 변경 전 코드에 없으면 실행 실패를 "변경 전 코드에서 실패"로 읽어 `effective`(단언 실패 아님)로 판정한다. 명령 스크립트를 리포 안에 두는 프로파일은 그 경로를 `support`에 넣어야 한다. core 프로파일은 `node --test`라 해당하지 않는다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (웹 프로파일은 `support`에 넣고 이유를 적었다)
 
 ## 열린 질문
 
@@ -194,11 +201,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 실물 확인(임시 폴더의 실제 웹 프로젝트): step0은 Vitest로 `test-effect`, step3은 Playwright로 `verify`. 절차는 `lab/pilot-prep/README.md`, 결과는 `lab/pilot-prep/results/`에 남기고 `lab/pilot-prep/check-results.ts`로 사례별 기대값을 검사한다. 이 리포의 테스트는 `lab/`을 읽지 않는다(`testInertPaths`).
 - 결과는 step을 진행하며 진행 로그에 적는다.
 - step0(2026-11-19): AC 9개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 1은 `scripts/test/profile-web.test.ts`(6개), 수용 기준 2는 실제 Vitest 5.1.0의 실물 확인(`lab/pilot-prep/results/test-effect-vitest.json`, 일곱 사례와 두 실행의 종료 코드)과 `check-results.ts test-effect-vitest`로 확인했다. 이 리포의 `test-effect`는 새 테스트 파일을 `effective(base에서 단언 실패)`로 판정했다.
+- step0 재작업(2026-11-19, F19·F20): AC 9개 모두 통과. `scripts/test/profile-web.test.ts`는 8개(처음 적용하는 변경의 재현 테스트 포함), 실물 확인은 세 실행·아홉 사례(`check-results.ts test-effect-vitest` 통과, `tool.vitest` 5.1.0).
 
 ## 다음 할 일
 
 1. (끝남) 계획 검증(G1): 4라운드에서 두 검증자 승인.
 2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
-3. `check` → `complete-step` → push → `pr-ready`로 한 번만 승인을 요청한다(TD-53 PR #141은 병합됐다).
+3. 구현 판정 F19·F20 대응을 올렸다. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
 4. 병합 뒤 `new-task --plan 20261119-pilot-prep --step 1`.
 5. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.

@@ -13,6 +13,10 @@
     {
       "id": "effective-only",
       "exitCode": 0
+    },
+    {
+      "id": "first-adoption",
+      "exitCode": 1
     }
   ],
   "cases": [
@@ -57,6 +61,18 @@
       "file": "src/app/(shop)/[id]/page.test.tsx",
       "outcome": "effective",
       "line": "src/app/(shop)/[id]/page.test.tsx: effective(base에서 단언 실패, 종료 코드 1)"
+    },
+    {
+      "id": "adoption-pass",
+      "file": "src/adopt-pass.test.ts",
+      "outcome": "ineffective",
+      "line": "src/adopt-pass.test.ts: ineffective(base에서도 통과)"
+    },
+    {
+      "id": "adoption-fail",
+      "file": "src/adopt-fail.test.ts",
+      "outcome": "effective",
+      "line": "src/adopt-fail.test.ts: effective(base에서 단언 실패, 종료 코드 1)"
     }
   ]
 }
