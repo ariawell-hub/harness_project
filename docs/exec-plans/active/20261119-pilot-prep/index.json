@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "verify-run",
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-11-19T21:07:53+09:00"
     },
     {
       "step": 2,

@@ -168,6 +168,11 @@ function gitBash(): string | null {
   return gitBashCache;
 }
 
+/** 이 플랫폼에서 셸 명령을 띄울 때 쓰는 `shell` 값(runShell과 같다). 실행 중인 자식의 핸들이 필요한 쪽(verify)이 직접 spawn할 때 쓴다 */
+export function platformShell(): true | string | null {
+  return shellOption(process.platform, gitBash);
+}
+
 export const GIT_BASH_MISSING =
   '[exec] Windows에서 셸 명령(step AC·표준 명령)은 Git Bash로 실행한다. Git for Windows(bash.exe)를 찾지 못해 실행하지 않았다.\n' +
   '고치는 법: Git for Windows를 설치하거나 HARNESS_BASH에 bash.exe 경로를 지정하라. WSL bash는 쓰지 않는다.\n' +
