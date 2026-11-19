@@ -10,8 +10,9 @@
     {
       "step": 1,
       "name": "verify-run",
-      "status": "in_progress",
-      "started_at": "2026-11-19T21:07:53+09:00"
+      "status": "completed",
+      "started_at": "2026-11-19T21:07:53+09:00",
+      "completed_at": "2026-11-19T22:48:55+09:00"
     },
     {
       "step": 2,
