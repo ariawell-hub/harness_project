@@ -89,6 +89,7 @@
     "link": ["node_modules"],
     "assertPattern": "AssertionError|ERR_ASSERTION"
   },
+  "testInertPaths": ["docs/exec-plans/active/**", "docs/exec-plans/completed/**", "lab/**"],
   "planReview": {
     "required": true
   },
