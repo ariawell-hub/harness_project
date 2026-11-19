@@ -30,7 +30,7 @@
    - `judge-claude.yml`, `judge-codex.yml`: `judge` job의 출력에 `repro: ${{ steps.scan.outputs.repro }}`를 더하고, `repro` job의 조건을 `needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'`로 바꾼다. `repro` job의 `if` 바로 위에 조건을 설명하는 주석 한 줄을 둔다(두 파일 모두. `judge-codex.yml`의 머리 주석에는 재현 job 설명이 없어 머리 주석은 건드리지 않는다). 그 밖의 줄(권한, `needs`, 기록 job)은 바꾸지 않는다.
    - `scripts/test/ci.test.ts`(패치에 함께 넣는다): 재현 job 테스트에서 둘을 바꾼다. ① 조건 단언(지금은 `if: needs.judge.outputs.verdict != ''`인 줄을 본다)을 새 조건 `if: needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'`로 바꾼다. ② 두 워크플로의 `judge` job에 `repro: ${{ steps.scan.outputs.repro }}` 줄(들여쓰기 6칸, 줄 전체 일치)이 있다는 단언을 **새로 더한다**. 지금은 `judge` job의 출력을 단언하는 줄이 없어서, 이 단언이 없으면 패치가 한 워크플로에서 출력 줄을 빠뜨려도 구조 테스트가 통과하고 재현 job은 값이 없어 계속 돈다. 패치 전의 워크플로에서는 지금 단언이 통과해야 하므로 이 둘은 봇의 커밋에 넣지 않는다.
    - `lab/actions-usage-2/README.md`: 적용 명령(브랜치 받기, `git apply`, 커밋, push), 적용 뒤 확인 명령(`node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts`, `node scripts/harness.ts check`), 패치가 바꾸는 줄의 요약을 적는다.
-   - `lab/actions-usage-2/verify-patch.ts`: HEAD를 임시 폴더(`mkdtemp`)에 클론하고, 패치가 적용되면 적용한 뒤, 이미 적용돼 있으면(역방향 확인이 통과) 그대로 `node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts`를 돌린다. 둘 다 아니면 실패한다. 테스트가 실패하면 실패한다. 자식 `node --test`의 환경에서 `NODE_TEST_CONTEXT`를 뺀다(이 변수가 있으면 중첩된 `node --test`가 테스트를 돌리지 않고 0으로 끝난다). 작업 트리는 바꾸지 않고 임시 폴더는 지우지 않는다.
+   - `lab/actions-usage-2/verify-patch.ts`: HEAD를 임시 폴더(`mkdtemp`)에 클론하고, 패치가 적용되면 적용한 뒤, 이미 적용돼 있으면(역방향 확인이 통과) 그대로 `node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts`를 돌린다. 둘 다 아니면 실패한다. 테스트가 실패하면 실패한다. 어느 쪽이었는지 출력한다(`패치를 적용했다` 또는 `패치가 이미 적용돼 있다`). 자식 `node --test`의 환경에서 `NODE_TEST_CONTEXT`를 뺀다(이 변수가 있으면 중첩된 `node --test`가 테스트를 돌리지 않고 0으로 끝난다). 작업 트리는 바꾸지 않고 임시 폴더는 지우지 않는다.
    - 패치를 적용한 트리의 `check`: 1번의 확인 순서에서 만든 클론(같은 `$BASE`, `node_modules` 링크, 패치 적용)에서 `node scripts/harness.ts check --base "$BASE" --no-cache`를 돌린다(`--base`를 빼지 않는다. 클론의 `origin/main`은 실제 원격이 아니라 원본 리포의 로컬 `main`이고, 비교 기준을 찾지 못하면 `test-effect`와 커밋 범위 검사가 건너뛰어진 채 통과한다). 통과 조건은 넷 모두다: 종료 코드 0, 출력에 `✓ test (`로 시작하는 줄이 있다, `✓ test-effect (`로 시작하는 줄이 있다, `check: 캐시 적중`이 없다. 하나라도 아니면(`test`나 `test-effect` 줄에 `(건너뜀)`·`(해당 없음)`이 붙었다, 실패했다) 확인 실패다. 결과를 진행 로그에 적는다.
 
 3. 문서
@@ -42,14 +42,15 @@
    - 초안으로 올린다. AC와 `check`가 통과하면 완료 처리(`complete-step`)와 기록까지 끝낸 뒤 한 번에 push한다(위험도 높음은 승인 이어받기가 없어 push마다 다시 판정한다. 절차서 5절). 판정 지적이 나오면 절차서 5절대로 대응한다.
 
 5. 제작자 작업과 그 뒤의 봇 작업
-   - 봇의 작업이 모두 끝나고 판정이 통과한 뒤에 제작자에게 **한 번에** 요청한다: ① `lab/actions-usage-2/README.md`의 명령으로 패치 커밋을 이 브랜치에 올리기, ② 그 head의 판정이 통과하면 승인. 요청하기 직전에 `origin/main`이 뒤처져 있으면 병합한다. 병합했으면 AC 세 줄, 1번의 확인 순서, 2번의 패치를 적용한 트리의 `check`를 다시 돌려 통과를 확인하고(main이 워크플로나 `ci.test.ts`를 바꿨으면 패치가 적용되지 않을 수 있다. 그러면 패치를 다시 만든다) push해 그 head의 판정을 받은 뒤에 요청한다.
+   - 봇의 작업이 모두 끝나고 판정이 통과한 뒤에 제작자에게 **한 번에** 요청한다: ① `lab/actions-usage-2/README.md`의 명령으로 패치 커밋을 이 브랜치에 올리기, ② 그 head의 판정이 통과하면 승인. 이 PR은 아래의 패치 확인이 통과할 때까지 초안으로 두고 자동 병합을 켜지 않는다(초안 PR은 병합되지 않는다. 제작자가 패치 커밋 전에 승인하더라도 `risk-gate`는 head 커밋의 승인만 보므로 그 승인은 새 head에 남지 않는다). 요청하기 직전에 `origin/main`이 뒤처져 있으면 병합한다. 병합했으면 AC 세 줄, 1번의 확인 순서, 2번의 패치를 적용한 트리의 `check`를 다시 돌려 통과를 확인하고(main이 워크플로나 `ci.test.ts`를 바꿨으면 패치가 적용되지 않을 수 있다. 그러면 패치를 다시 만든다) push해 그 head의 판정을 받은 뒤에 요청한다.
    - 제작자가 push한 뒤 봇은 PR 브랜치와 main을 함께 받아(`git fetch origin main <브랜치>`. `origin/main`도 갱신된다) worktree를 원격 PR head로 fast-forward한다(`git merge --ff-only origin/<브랜치>`). fast-forward가 안 되면(로컬에 다른 커밋이 있다) 멈추고 알린다.
    - 방금 받은 `origin/main`이 그 head의 조상인지 본다(`git merge-base --is-ancestor origin/main HEAD`). 아니면(그사이 main이 전진) 봇이 push하지 않고 제작자에게 브랜치 갱신(GitHub의 "Update branch" 또는 `origin/main` 병합 push)을 요청한다. 갱신되면 같은 두 명령으로 다시 받고 다시 확인한다.
-   - 최신 main을 담은 head의 `check`와 판정(필수 체크 가운데 `risk-gate` 말고 전부)이 통과한 것을 `pr-state`로 확인한 뒤 `node scripts/harness.ts pr-ready`로 초안을 해제하고 승인을 요청한다.
+   - 패치가 그 head에 들어 있는지 본다(제작자가 패치를 빠뜨리고 브랜치 갱신만 올려도 `check`와 판정은 통과한다. 패치 전의 head도 통과하게 돼 있기 때문이다). worktree가 깨끗하고(`git status --porcelain`의 출력이 없다) `HEAD`가 `origin/<브랜치>`와 같은(`git rev-parse HEAD origin/<브랜치>`의 두 줄이 같다) 상태에서 `git apply --reverse --check lab/actions-usage-2/workflows.patch`를 돌린다. 종료 코드 0이면 패치의 모든 변경(두 워크플로와 `scripts/test/ci.test.ts`)이 head에 들어 있다. 0이 아니면(패치를 빠뜨렸다, 일부만 넣었다, 다르게 고쳤다) 멈춘다: `pr-ready`와 자동 병합으로 넘어가지 않고, 제작자에게 결과를 알리고 `lab/actions-usage-2/README.md`의 명령으로 패치 커밋을 올려 달라고 다시 요청한다. 0이면 이어서 `node lab/actions-usage-2/verify-patch.ts`를 돌려 종료 코드 0과 출력의 `패치가 이미 적용돼 있다`를 확인한다(`패치를 적용했다`가 나오면 head에 패치가 없는 것이므로 실패로 본다). 제작자가 브랜치를 다시 갱신해 head가 바뀌면 이 확인을 새 head에서 다시 한다. 결과(head SHA, 두 명령의 종료 코드)를 Issue #135에 남긴다.
+   - 위의 패치 확인이 통과했고, 최신 main을 담은 그 head의 `check`와 판정(필수 체크 가운데 `risk-gate` 말고 전부)이 통과한 것을 `pr-state`로 확인한 뒤에만 `node scripts/harness.ts pr-ready`로 초안을 해제하고 승인을 요청한다.
    - 병합: `pr-ready` 뒤 봇이 `gh pr merge --auto --squash`로 자동 병합을 켠다. 워크플로 파일이 든 PR이라 봇 토큰(`workflow` 권한 없음)으로는 거부될 수 있다(해 본 적이 없다). 거부되면 우회하지 않고, 제작자에게 승인과 함께 Squash 병합을 요청한다. 어느 쪽이었는지 Issue #135에 남긴다.
    - 패치 커밋이 올라간 뒤에는 봇이 이 브랜치에 push하지 않는다. 그 뒤에 고칠 것이 생기면(판정 지적 등) 제작자에게 먼저 알리고, 봇의 push가 거부되면 제작자에게 패치로 넘긴다.
 
-6. 병합 뒤 확인(Issue #135 댓글): 재현 테스트가 없는 판정에서 두 워크플로의 `repro` job이 `skipped`이고 기록 job이 판정을 기록했는지를 run 링크와 함께 남긴다. 기대와 다르면 Issue를 등록한다.
+6. 병합 뒤 확인(Issue #135 댓글): main을 받아 두 판정 워크플로에 새 조건과 출력이 있는지 본다(`grep -c "needs.judge.outputs.repro != 'false'" .github/workflows/judge-claude.yml .github/workflows/judge-codex.yml`이 파일마다 1, `grep -c 'repro: ${{ steps.scan.outputs.repro }}'`도 파일마다 1). 없으면 Issue를 등록한다. 그리고 재현 테스트가 없는 판정에서 두 워크플로의 `repro` job이 `skipped`이고 기록 job이 판정을 기록했는지를 run 링크와 함께 남긴다. 기대와 다르면 Issue를 등록한다.
 
 ## Acceptance Criteria
 
@@ -59,7 +60,7 @@ node lab/actions-usage-2/verify-patch.ts
 node scripts/harness.ts doc-lint
 ```
 
-첫 줄은 지금 head의 워크플로에서 돈다(기록 job 조건, 유출 검사 명령의 출력, 빈 재현 결과의 기록). 둘째 줄은 패치를 적용한 트리의 워크플로 구조 테스트다: 패치 전의 head에서는 임시 클론에 패치를 적용해서, 제작자가 패치 커밋을 올린 뒤의 head에서는 적용 없이 돌린다.
+첫 줄은 지금 head의 워크플로에서 돈다(기록 job 조건, 유출 검사 명령의 출력, 빈 재현 결과의 기록). 둘째 줄은 패치를 적용한 트리의 워크플로 구조 테스트다: 패치 전의 head에서는 임시 클론에 패치를 적용해서, 제작자가 패치 커밋을 올린 뒤의 head에서는 적용 없이 돌린다. 둘째 줄은 두 경우 모두 통과하므로 "head에 패치가 들어 있는가"는 가리지 못한다. 그것은 "작업" 5번의 역방향 적용 검사(`git apply --reverse --check lab/actions-usage-2/workflows.patch`, 종료 코드 0)와 둘째 줄의 출력(`패치가 이미 적용돼 있다`)으로 확인하고, 통과해야 승인 요청으로 넘어간다.
 
 ## 금지사항
 

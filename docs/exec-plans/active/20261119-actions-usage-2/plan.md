@@ -2,7 +2,7 @@
 id: 20261119-actions-usage-2
 issue: 135 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: blocked # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -31,6 +31,7 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
    - 기록 명령(`record-review`)이 빈 재현 결과(`--repro-results ''`)를 받으면 판정 상태와 원장을 기록하고, 원장 항목의 재현 칸은 비어 있다.
 4. 워크플로 패치(`lab/actions-usage-2/workflows.patch`)가 main의 워크플로에 그대로 적용되고, 적용한 트리에서 워크플로 구조 테스트(`scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`)와 `node scripts/harness.ts check`가 통과한다. 패치를 적용하지 않은 트리(봇이 올리는 head)에서도 통과한다. 적용한 트리의 구조 테스트는 명령 하나(`node lab/actions-usage-2/verify-patch.ts`)로 다시 돌릴 수 있다.
 5. 설계서(10.2절 (3), 10.4절의 재현 job), 절차서와 `docs/SECURITY.md`(운영 단계의 워크플로 변경 절차), `CHANGELOG`, 기술 부채 표(TD-49)가 바뀐 동작·절차와 맞는다.
+6. 병합되는 head에 워크플로 패치가 전부 들어 있다. 제작자의 패치 커밋 뒤 봇이 깨끗한 worktree의 그 head에서 `git apply --reverse --check lab/actions-usage-2/workflows.patch`가 종료 코드 0인 것을 확인하고, 그 전에는 PR을 초안으로 두며 승인 요청(`pr-ready`)과 자동 병합으로 넘어가지 않는다. 병합 뒤 main의 두 판정 워크플로에 새 조건과 `judge` job의 `repro` 출력이 있다.
 
 ## 범위 / 비범위
 
@@ -91,6 +92,8 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
   - 그 밖에 고친 것: 예외 줄은 `check`를 실패시키지 않고 `test-effect` 명령으로 받는다(실패 횟수를 쌓지 않는다), `scan-output.test.ts`가 러너의 `GITHUB_OUTPUT`을 넘기지 않는다, `verify-patch.ts`가 `NODE_TEST_CONTEXT`를 뺀다, `judge-codex.yml`의 머리 주석에는 재현 job 설명이 없어 주석 위치를 `if` 위로 정했다, 구현·완료 처리를 한 push로 묶는다, 마지막 `origin/main` 병합 뒤 확인을 다시 돌린다, 병합을 누가 하는지(봇의 자동 병합이 거부되면 제작자)를 적었다, 문서에 "해 본 결과대로" 적을 수 없는 부분(패치 커밋 뒤의 절차)은 다음 PR로 넘긴다.
 - 2026-11-19: 계획 검증 5라운드(head `c0f49f7`). claude 승인(지적 없음), codex 수정 요청(P1 1, F9·F10은 해결로 판정). F11(P1): 제작자가 패치 적용을 빠뜨리고 브랜치 갱신 커밋만 올려도, 봇의 확인(최신 main 포함, 필수 체크 통과)이 모두 통과해 `pr-ready`와 자동 병합으로 넘어간다. `verify-patch.ts`는 패치가 없으면 임시 클론에 적용해 통과하므로 "실제 head에 패치가 들어갔는가"를 가리지 못한다. 맞는 지적이다.
 - 2026-11-19: **계획을 멈춘다(계획 검증 수정 요청 5회, 절차서 6절).** `status: blocked`. Issue #135에 중단 보고를 남기고 제작자의 결정을 기다린다. 이 커밋은 push하지 않는다(push하면 멈춘 계획에 6번째 판정이 돈다). worktree의 구현 초안은 그대로 둔다(미커밋).
+- 2026-11-19: 제작자가 대화에서 중단 보고에 A로 답했다(F11을 고쳐 한 번 더 올린다. 또 수정 요청이 나오면 더 올리지 않고 접는다). Issue #135에 기록하고 `needs-human`을 뗐다. `status: active`로 되돌렸다.
+- 2026-11-19: F11 대응. 제작자 push 뒤 봇이 깨끗한 worktree의 그 head에서 패치의 역방향 적용 검사를 통과해야 `pr-ready`와 자동 병합으로 넘어가게 했다(step0의 5번, 수용 기준 6, AC 설명). 새 스크립트나 인자를 더하지 않고 `git apply --reverse --check`의 종료 코드를 쓴다(전부 적용된 트리에서만 0이다). `verify-patch.ts`는 어느 경로로 통과했는지 출력하게 했다. 사람 손이 들어가는 나머지 단계도 "빠지면 무엇이 잡는가"로 다시 봤다: 패치 커밋 전의 승인(초안이라 병합되지 않고, `risk-gate`는 head 승인만 본다. `scripts/gates/risk-gate.ts`), 브랜치 재갱신(head가 바뀌면 확인을 다시 한다), 제작자의 수동 병합(필수 체크는 그대로 걸린다), 병합 뒤(main의 워크플로를 `grep`으로 본다).
 
 ## 의사결정 로그
 
@@ -101,6 +104,7 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
 - 결정: 스크립트와 워크플로 패치를 한 PR에 넣고, 제작자가 패치 커밋을 그 브랜치의 마지막 커밋으로 올린다. / 이유: 판정 워크플로는 병합된 뒤의 정의로 돌기 때문에 스크립트와 워크플로가 한 번에 들어가야 어긋나는 구간이 없다(따로 들어가도 조건이 "`false`가 아니면 돈다"라 안전하지만 판정 라운드와 승인이 한 번씩 더 든다). 제작자가 따로 PR을 올리면 제작자는 자기 PR을 승인할 수 없어 `risk-gate`의 제작자 head 승인을 채울 수 없다. 봇이 연 PR에 제작자가 커밋을 더하면 두 검증자가 워크플로 변경까지 판정하고 제작자가 승인할 수 있다. 워크플로 커밋이 브랜치에 들어간 뒤에 봇이 그 위에 push할 수 있는지는 확인된 적이 없어, 봇의 작업을 모두 끝낸 뒤 마지막에 올린다. / 버린 대안: 스크립트 PR과 워크플로 PR을 따로, 봇 토큰에 `workflow` 권한 주기(`docs/SECURITY.md`가 금지한다).
 - 방법 전환(계획 검증, 3회): 가설 지적된 항목만 고치면 다음 라운드에 수렴한다 / 시도한 방법 라운드마다 지적된 문장만 고쳐 다시 올렸다 / 폐기 이유 세 라운드 모두 다른 자리에서 같은 종류의 새 지적("계획대로 하면 그 명령·검사가 실제로 어떻게 동작하는가": AC가 수용 기준을 확인하지 않음, 제작자 push 뒤의 절차, `test-effect` 예외)이 나왔다 / 새 방법 계획을 올리기 전에 step의 "작업"·AC 문장마다 그 문장이 기대는 기존 코드(명령의 기본값과 종료 코드, 검사가 건너뛰는 조건, 판정 조건)를 직접 읽어 대조하고, 확인 절차에는 통과 조건과 실패로 보는 경우를 함께 적는다. 구현과 구현에 대한 AC·`check` 실행은 G1 승인 뒤에 한다(절차서 2절 "계획 검증"). 4라운드에 올린 판(구현을 먼저 끝까지 돌려 보고 계획을 고친다)은 그 순서를 뒤집는 것이어서 버렸다(진행 로그 F10).
 - 결정: 제작자의 답(2026-11-19 대화, A)에 따라 main의 중복 `test` 생략은 하지 않는다. / 이유: 절감(이틀에 40~50분 추정)에 비해 필수 체크 `check`의 job 구조와 권한을 바꾸는 위험과 비용이 크다. / 버린 대안: 별도 Issue로 다시 설계(B).
+- 결정: 제작자의 답(2026-11-19 대화, 중단 보고의 A)에 따라 F11을 고쳐 계획 검증을 한 번 더 받는다. 다시 수정 요청이면 더 올리지 않고 접는다(PR #136을 닫고 TD-49에 남긴다). / 이유: 열린 지적이 하나이고 고칠 내용이 정해져 있다. 수렴한다는 근거는 없어 한 번으로 정했다. / 버린 대안: 절차와 코드를 나누기(B), 바로 접기(C).
 - 결정: step은 하나로 둔다. 병합 뒤 확인은 Issue 댓글로 남긴다. / 이유: 계획 위험도가 높음이라 기록만 하는 둘째 step PR도 제작자 승인이 필요해진다. 급하지 않은 기록은 다음 PR에 모으는 것이 절차서 5절의 규칙이다. / 버린 대안: 관찰·기록 step을 따로 두기.
 
 ## 발견 사항
@@ -126,9 +130,10 @@ GitHub Actions 청구 분을 줄인다(TD-49, Issue #135, 제작자 지시 2026-
 - 수용 기준 2·3: `node lab/actions-usage-2/verify-patch.ts`(HEAD를 임시 클론으로 받아 패치를 적용하고 `node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts`를 돌린다: 재현 job 조건·권한·`reproJobViolations`, `judge` job의 `repro` 출력, 기록 job의 `needs`·조건·입력 단언. 패치가 이미 적용된 head에서는 적용 없이 같은 테스트를 돌린다). 기록 명령은 `node --test scripts/test/record.test.ts scripts/test/repro.test.ts`.
 - 수용 기준 4: 위 명령(패치 적용 가능 여부 포함)과, 패치를 적용한 임시 클론의 `node scripts/harness.ts check --base <비교 기준> --no-cache`(step0의 2번. `test`와 `test-effect`가 실제로 돈 것을 통과 조건으로 본다. 결과를 진행 로그에 적는다). 봇의 head에서는 `node scripts/harness.ts check`.
 - 수용 기준 5: `node scripts/harness.ts doc-lint`.
+- 수용 기준 6: step0의 5번(제작자 push 뒤 역방향 적용 검사의 종료 코드와 `verify-patch.ts`의 출력 `패치가 이미 적용돼 있다`. 결과를 Issue #135에 남긴다)과 6번(병합 뒤 main의 두 워크플로를 `grep`으로 확인).
 - 병합 뒤(Issue #135 댓글): 재현 테스트가 없는 판정에서 두 워크플로의 `repro` job이 `skipped`이고 기록 job이 판정을 기록하는지, 재현 테스트가 붙은 판정이 나오면 `repro` job이 도는지(기회가 생기면).
 
 ## 다음 할 일
 
-- 멈춤. Issue #135의 중단 보고에 대한 제작자의 답을 기다린다.
+- 고친 계획을 계획만 담은 커밋으로 push해 계획 검증 6라운드를 받는다(제작자가 허락한 마지막 한 번).
 - 승인되면 step0을 구현한다(worktree의 초안을 승인된 step에 대조해 쓴다. 진행 로그).
