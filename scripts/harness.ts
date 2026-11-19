@@ -49,7 +49,7 @@ import {
   recordStatuses,
   reviewLogLines,
 } from './ci/record.ts';
-import { parseReproResults, reproResultsData, runRepro } from './ci/repro.ts';
+import { parseReproResults, reproOutputValue, reproResultsData, runRepro } from './ci/repro.ts';
 import { targetCheckOf } from './ci/revert-evidence.ts';
 import { decodeSelfTest } from './ci/selftest-result.ts';
 import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
@@ -171,6 +171,15 @@ CI(gates 워크플로, 10.4절):
 `;
 
 type OptionKind = 'string' | 'boolean';
+
+/**
+ * 유출 검사를 통과한 판정에 재현 테스트가 있는지를 job 출력(repro=true|false)으로 낸다(10.2절 (3), Issue #143).
+ * 재현 job은 이 값이 false가 아니면 돈다. GITHUB_OUTPUT이 없으면(로컬) 쓰지 않는다
+ */
+function writeReproOutput(verdict: unknown): void {
+  const output = process.env.GITHUB_OUTPUT;
+  if (output) appendFileSync(output, `repro=${reproOutputValue(verdict)}\n`);
+}
 
 /**
  * `--` 앞 인자를 훑어 도움말 요청과 모르는 옵션을 찾는다(TD-17).
@@ -762,6 +771,7 @@ async function main(argv: string[]): Promise<number> {
         return 1;
       }
       writeFileSync(out, JSON.stringify(r.verdict) + '\n');
+      writeReproOutput(r.verdict);
       log('claude-scan: 통과, 판정을 냈다');
       return 0;
     }
@@ -855,6 +865,7 @@ async function main(argv: string[]): Promise<number> {
         return 1;
       }
       writeFileSync(out, JSON.stringify(r.verdict) + '\n');
+      writeReproOutput(r.verdict);
       log('codex-scan: 통과, 판정을 냈다');
       return 0;
     }

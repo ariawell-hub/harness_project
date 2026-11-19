@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runSync } from '../lib/exec.ts';
 import type { ReproResult } from './ledger.ts';
-import type { Verdict } from './verdict.ts';
+import { validateVerdict, type Verdict } from './verdict.ts';
 
 export interface ReproConfig {
   /** 재현 테스트를 둘 폴더(리포 루트 기준). 이 폴더 바로 아래에만 쓴다 */
@@ -100,6 +100,23 @@ export function runRepro(o: {
     }
   }
   return out;
+}
+
+/**
+ * 판정에 재현 테스트가 붙은 지적이 있는가. runRepro가 실행 대상으로 삼는 기준(내용이 비어 있지 않다)과 같다.
+ * 판정 job의 유출 검사 명령이 job 출력 `repro`로 내고, 재현 job은 그 값이 false가 아니면 돈다(10.2절 (3), Issue #143)
+ */
+export function hasRepro(verdict: Verdict): boolean {
+  return verdict.findings.some((f) => f.repro.content !== '');
+}
+
+/**
+ * 유출 검사 명령이 job 출력 `repro`에 쓸 값. 유출 검사는 형식 검사를 통과한 판정만 내보내지만,
+ * 여기서 읽지 못하면 돌리는 쪽(true)으로 낸다: 모르는 채로 재현을 건너뛰지 않는다
+ */
+export function reproOutputValue(verdict: unknown): boolean {
+  const v = validateVerdict(verdict);
+  return v.ok ? hasRepro(v.value) : true;
 }
 
 /** job 사이에 넘길 값(base64 JSON). 없으면 '' */
