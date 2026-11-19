@@ -13,7 +13,7 @@ claimed_at: 2026-11-19T18:02:04+09:00
 # chore: 운영 단계의 워크플로 변경 절차를 정하고 작은 변경으로 한 번 해 본다 (TD-53)
 
 - 목표: 봇이 push할 수 없는 워크플로 파일을 바꾸는 절차를 정하고, 동작이 바뀌지 않는 작은 변경(`judge-codex.yml` 머리 주석에 빠진 재현 job 설명 한 줄)으로 처음부터 끝까지 해 본 뒤, 해 본 대로 문서에 적는다(Issue #139, TD-53).
-- 변경: ① 제작자가 올릴 패치와 적용 방법(`lab/workflow-change/`) ② 두 판정 워크플로의 머리 주석이 모든 job을 설명하는지 보는 구조 테스트(`scripts/test/ci.test.ts`. 워크플로 커밋이 없는 head에서는 실패한다) ③ 제작자의 워크플로 커밋(`.github/workflows/judge-codex.yml`, 주석 한 줄. 봇은 올리지 않는다) ④ 절차 문서(`docs/SECURITY.md`, 절차서 5절, `CHANGELOG`, 필요하면 설계서 0.1절 E1)와 시험 기록(`lab/workflow-change/result.json`), TD-53·TD-38 갱신.
+- 변경: ① 제작자가 올릴 패치와 적용 방법(`lab/workflow-change/`) ② 두 판정 워크플로의 머리 주석이 모든 job을 설명하는지 보는 구조 테스트(`scripts/test/ci.test.ts`. 워크플로 커밋이 없는 head에서는 실패한다) ③ 제작자의 워크플로 커밋(`.github/workflows/judge-codex.yml`, 주석 한 줄. 봇은 올리지 않는다) ④ 절차 문서(`docs/SECURITY.md`, 절차서 5절, `CHANGELOG`. 설계서는 바꾸지 않는다)와 시험 기록(`lab/workflow-change/result.json`), TD-53·TD-38 갱신.
 - 검증: node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts
 - 그 밖의 검증: `node scripts/harness.ts check`, `node scripts/harness.ts doc-lint`. 병합 뒤 Issue #139에 관찰(자동 병합을 누가 켰는지, main의 워크플로)을 남긴다.
 
@@ -42,6 +42,11 @@ claimed_at: 2026-11-19T18:02:04+09:00
 ## 진행 로그
 
 - 2026-11-19: 제작자 대화 지시("TD-53대로 워크플로 변경 절차를 먼저 따로 정한 뒤 새 Issue로 다시 시작해")로 봇이 Issue #139를 등록하고 시작했다.
+- 2026-11-19: 테스트를 먼저 썼다(`scripts/test/ci.test.ts`의 "judge-*.yml: 머리 주석이 모든 job을 설명한다"). 지금 워크플로에서 실패했다(34개 가운데 1개: "머리 주석에 repro job의 설명이 없다"). 워크플로에 한 줄을 넣어 패치를 뜨고 그 상태에서 `ci.test.ts`·`harness-guard.test.ts` 49개가 통과하는 것을 본 뒤 워크플로를 되돌렸다. 테스트는 올리지 않고 계획과 패치만 올렸다(`94b2995`, `check` 통과, PR 없음). Issue #139에 제작자 작업을 요청했다.
+- 2026-11-19: **봇의 잘못된 안내.** 제작자 작업의 방법 A로 "이 Mac의 터미널에서 봇의 worktree에 커밋해 push한다"를 적었다. 에이전트가 도는 머신에 제작자 자격증명을 두지 않는다는 E5에 어긋난다. 다른 세션이 짚어 제작자는 GitHub 웹에서 했다. README와 절차 문서는 웹 커밋으로 고쳤다.
+- 2026-11-19: 제작자가 GitHub 웹에서 워크플로 커밋을 올렸다(`dc4995f`, 09:15:08Z, 1개 파일 1줄). 받아서(`git merge --ff-only`) 패치의 역방향 적용 검사가 종료 코드 0인 것을 확인했다. 테스트를 적용해 49개 통과.
+- 2026-11-19: (가) 확인. 테스트만 담은 커밋 `25c6cda`를 `check` 통과 뒤(`test` 293.7초, `test-effect`는 `ci.test.ts`를 `effective(base에서 단언 실패)`로 판정) push했고 받아들여졌다(09:21:36Z, `dc4995f..25c6cda`). 워크플로 변경이 든 브랜치에도 봇이 워크플로를 건드리지 않는 커밋은 올릴 수 있다.
+- 2026-11-19: 절차를 `docs/SECURITY.md` "워크플로 변경 절차"와 절차서 5절에 적고, `CHANGELOG`, TD-53(해결)·TD-38, `lab/workflow-change/result.json`을 고쳤다. 설계서는 바꾸지 않았다(0.2절의 문장이 새 절차와 어긋나지 않는다. 다른 세션의 설계서 작업과 겹치는 파일을 줄인다).
 
 ## 의사결정 로그
 
@@ -52,4 +57,4 @@ claimed_at: 2026-11-19T18:02:04+09:00
 
 ## 발견 사항
 
-- 없음
+- 제작자에게 작업을 요청할 때 "에이전트가 도는 머신의 터미널에서 하라"고 적으면 E5에 어긋난다. 제작자 손이 필요한 GitHub 작업은 웹(또는 에이전트가 돌지 않는 머신)으로 안내해야 한다. → 처리: [docs/SECURITY.md](../../SECURITY.md)

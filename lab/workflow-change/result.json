@@ -1,0 +1,37 @@
+{
+  "item": "workflow-change-procedure",
+  "summary": "운영 단계(봇 토큰에 workflow 권한 없음)에서 워크플로 파일을 바꾸는 절차를 주석 한 줄로 해 본 결과다. 제작자가 봇의 브랜치에 워크플로 커밋을 GitHub 웹으로 먼저 올렸고, 봇이 그 위에 구조 테스트를 올린 push가 받아들여졌다. 자동 병합과 병합 뒤의 관찰은 PR이 병합된 뒤 Issue #139에 남긴다.",
+  "cases": [
+    {
+      "name": "owner-commit-first",
+      "expected": "제작자가 봇의 브랜치에 워크플로 파일만 바꾼 커밋을 올릴 수 있고, 그 내용이 봇이 준비한 패치와 같다",
+      "observed": "봇이 2026-11-19에 브랜치 chore/20261119-workflow-change-procedure에 계획과 패치(lab/workflow-change/judge-codex-repro-comment.patch)를 올렸다(94b2995, PR 없음). 제작자 계정(ariawell-hub)이 GitHub 웹에서 .github/workflows/judge-codex.yml에 한 줄을 더한 커밋 dc4995ffc66c를 그 브랜치에 올렸다(2026-11-19T09:15:08Z, 커미터 web-flow, 서명 확인됨, 1개 파일 1줄 추가). 봇이 git fetch와 git merge --ff-only로 받은 뒤 git apply --reverse --check가 종료 코드 0이었다(패치와 같다).",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/commit/dc4995ffc66c",
+        "https://github.com/ariawell-hub/harness_project/issues/139"
+      ]
+    },
+    {
+      "name": "test-requires-workflow-commit",
+      "expected": "봇의 구조 테스트는 워크플로 커밋이 없는 트리에서 실패하고 있는 트리에서 통과한다",
+      "observed": "테스트 \"judge-*.yml: 머리 주석이 모든 job을 설명한다\"(scripts/test/ci.test.ts)를 먼저 썼다. 워크플로 커밋 전의 트리(94b2995)에서 node --test scripts/test/ci.test.ts가 34개 가운데 1개 실패했다(\"머리 주석에 repro job의 설명이 없다\"). 제작자의 커밋 위(dc4995f)에서는 ci.test.ts와 harness-guard.test.ts 49개가 통과했다. check의 test-effect는 이 파일을 effective(base에서 단언 실패)로 판정했다.",
+      "verdict": "pass",
+      "evidence": []
+    },
+    {
+      "name": "bot-push-on-top",
+      "expected": "워크플로 변경이 이미 올라가 있는 브랜치에, workflow 권한 없는 봇 토큰이 워크플로를 건드리지 않는 커밋을 push할 수 있다",
+      "observed": "제작자의 커밋 dc4995f 위에 scripts/test/ci.test.ts만 바꾼 커밋 25c6cda를 만들어 로컬 check를 통과시킨 뒤 2026-11-19T09:21:36Z에 git push origin chore/20261119-workflow-change-procedure를 실행했다. 종료 코드 0, 출력 \"dc4995f..25c6cda\". git ls-remote로 원격 브랜치가 25c6cda인 것을 확인했다. 봇 토큰의 범위는 read:org, repo다(ops-check 3번).",
+      "verdict": "pass",
+      "evidence": ["https://github.com/ariawell-hub/harness_project/commit/25c6cda3937f"]
+    },
+    {
+      "name": "bot-enables-auto-merge",
+      "expected": "워크플로 변경이 든 PR의 자동 병합을 봇이 켤 수 있다. 안 되면 제작자가 승인 뒤 Squash 병합한다",
+      "observed": "이 파일을 올리는 시점에는 아직 하지 않았다. PR이 병합된 뒤 Issue #139에 결과를 남긴다.",
+      "verdict": "n/a",
+      "evidence": []
+    }
+  ]
+}

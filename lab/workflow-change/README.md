@@ -15,12 +15,13 @@
 
 ## 제작자 작업
 
-제작자 계정의 자격증명이 있는 터미널에서 한다. 에이전트 세션 안(`!` 명령 포함)에서는 봇 토큰이 쓰여 push가 거부된다.
+GitHub 웹에서 한다. 브랜치 `chore/20261119-workflow-change-procedure`에서 `.github/workflows/judge-codex.yml`을 열어 `# store:` 줄 바로 아래에 패치의 `+` 줄(맨 앞의 `+`는 빼고)을 넣고 그 브랜치에 바로 커밋한다.
 
-방법 A(터미널). 봇의 worktree에서 바로 한다. 다른 브랜치로 옮기거나 받을 것이 없다.
+에이전트가 도는 머신의 터미널에서는 하지 않는다. 그 머신에는 제작자 자격증명을 두지 않는다(설계서 E5). 처음에 봇이 아래의 터미널 명령을 방법 A로 안내했는데 E5에 어긋나는 안내였다. 실제로는 웹에서 했다. 변경이 커서 웹에서 고치기 어려울 때 에이전트가 돌지 않는 머신에서 쓰는 명령으로 남겨 둔다(경로는 그 머신의 클론으로 바꾼다).
 
 ```bash
-cd /Users/sol/Desktop/harness_project.worktrees/chore/20261119-workflow-change-procedure
+git fetch origin chore/20261119-workflow-change-procedure
+git switch chore/20261119-workflow-change-procedure
 git status --short                    # 아무것도 나오지 않아야 한다
 git apply lab/workflow-change/judge-codex-repro-comment.patch
 git add .github/workflows/judge-codex.yml
@@ -28,10 +29,8 @@ git commit -m "ci(judge-codex): 머리 주석에 재현 job 설명을 더한다"
 git push origin chore/20261119-workflow-change-procedure
 ```
 
-방법 B(GitHub 웹). 브랜치 `chore/20261119-workflow-change-procedure`에서 `.github/workflows/judge-codex.yml`을 열어 `# store:` 줄 바로 아래에 패치의 `+` 줄(맨 앞의 `+`는 빼고)을 넣고 그 브랜치에 바로 커밋한다.
-
-확인: push가 거부되지 않으면 된 것이다. `git log --oneline -1 origin/chore/20261119-workflow-change-procedure`에 방금 커밋이 보인다. 끝나면 봇에게 알린다.
+확인: 브랜치의 커밋 목록에 방금 커밋이 보인다. 끝나면 봇에게 알린다.
 
 ## 결과
 
-`result.json`에 적는다(봇이 3번에서 올린다).
+`result.json`. 2026-11-19에 1~3번을 했다: 제작자가 웹에서 커밋을 올렸고(`dc4995f`), 봇이 그 위에 올린 push가 받아들여졌다(`25c6cda`). 자동 병합과 병합 뒤의 관찰은 Issue #139에 남긴다.
