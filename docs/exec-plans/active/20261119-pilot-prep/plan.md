@@ -199,7 +199,8 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - F3(P1) 검사기가 신호 사례의 종료 방식을 보지 않는다: 시나리오가 시작되기 전에 끝났거나 스스로 끝난 실행도 통과했다. 실물 확인 스크립트가 `started`(시작을 봤는가)와 `signalSent`(신호를 실제로 보냈는가), 끊기 전의 브라우저 수(`browsersBeforeSignal`)를 적고, 검사기가 그 값과 끝난 신호·종료 코드를 모든 사례에서 본다(신호 사례는 그 신호로 끝나고 종료 코드가 없어야 한다. 나머지는 신호 없이 끝나야 한다). 검사기 테스트를 먼저 고쳤다(고치기 전 실패).
   - F4(P1) 정규식 선언의 `y` 플래그를 떼어 내 선언보다 넓게 맞는다: `allowConsoleError(/expected/y)`가 `unexpected`를 뺐다. 플래그를 그대로 둔 새 정규식으로 항목마다 처음 위치부터 본다. fixture의 판단 부분(앱 주소 밖 판정, 선언의 일치, 관찰 기록 만들기)을 Playwright를 쓰지 않는 `profiles/web/verify/observe.ts`로 옮겨 이 리포의 테스트(`scripts/test/verify-observe.test.ts`)가 직접 보게 했다. 옮긴 직후(버그는 그대로) 테스트 10개 가운데 `y` 항목만 실패하는 것을 확인하고 고쳤다.
   - 같은 꼴을 함께 고쳤다: `dev`가 다른 그룹에 띄운 프로세스도 같은 방법으로 따라가 끝낸다(이 테스트는 구현과 함께 썼다). 프로세스 목록은 POSIX의 `ps -A -o`로 읽는다. 실물 확인의 SIGHUP 사례(`signal-hup`)를 더했다.
-  - 실물 확인을 새 복제본에서 다시 돌렸다(31개 사례). 도중에 끊는 사례 셋에서 시작과 신호 전송을 봤고, 끊기 전 프로세스 10개(브라우저 5개)가 `verify`가 돌아간 시점에 모두 없다.
+  - 고치는 중에 찾은 것: 전체 테스트를 함께 돌리니 `verify` 테스트 몇 개가 "프로세스 목록을 읽지 못했다"로 실패했다. macOS의 `ps`는 막 생기거나 끝나는 중인 프로세스의 상태 칸을 `?`·`?E`로 적는데, 파서가 그 줄을 읽지 못한 줄로 보고 목록 전체를 버렸다. 프로세스를 계속 띄우며 `ps`를 495번 읽어 읽지 못한 줄이 모두 이 꼴인 것을 확인했다. 상태 칸을 빈칸 없는 글자열로 받고, 읽지 못하면 3번까지 다시 읽게 했다(재현 테스트 둘을 먼저 썼다: 그 꼴의 줄, 프로세스가 계속 바뀌는 동안 실제 `ps` 읽기).
+  - 실물 확인을 마지막 코드의 새 복제본에서 다시 돌렸다(31개 사례). 도중에 끊는 사례 셋에서 시작과 신호 전송을 봤고, 끊기 전 프로세스 10개(브라우저 5개)가 `verify`가 돌아간 시점에 모두 없다.
 - 2026-11-20T07:03:29+09:00 step3 재작업: 구현 판정 1라운드 지적 F1~F4 대응
 
 ## 의사결정 로그
@@ -259,6 +260,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - Playwright의 `request` fixture는 브라우저 실행 옵션의 프록시를 쓰지 않는다(컨텍스트 옵션의 프록시를 쓴다). Node에서 보내는 요청의 우회 판단은 호스트 이름의 끝부분 비교뿐이라 브라우저(스킴·포트까지 본다)와 다르다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (양쪽에 프록시를 두고, `request`·`page.request`를 쓰지 못한다고 적었다)
 - Playwright는 브라우저를 자기 프로세스 그룹으로 띄운다(실행기의 그룹 밖이다). `verify`가 실행기 그룹에 SIGTERM을 보내면 Playwright가 브라우저를 스스로 닫는다. `ps`로 확인했다(브라우저의 그룹 번호가 실행기와 다르다). 실물 확인의 `signal` 사례에서 `verify`가 돌아간 시점에 브라우저 프로세스가 남지 않았다. 실행기 그룹을 SIGKILL로 끝내 보니(실행기가 2초 안에 끝나지 않을 때의 경로) 브라우저는 실행기와의 연결이 끊겨 스스로 끝났다(1초쯤 뒤에 본 목록에 없었다). 다만 `verify`의 "모두 끝났다" 확인은 `dev`와 실행기의 그룹만 보아, 이 경로에서는 브라우저가 끝나기 전에 `verify`가 돌아갈 수 있었다(구현 판정 F2). → 처리: #140 (이 계획의 step3에서 고쳤다: `scripts/verify/tree.ts`가 그룹 밖의 자손을 따라가고 정리가 그것까지 확인한다)
 - 그룹 밖 자손을 따라가는 방법은 프로세스 목록을 주기적으로 읽는 것이라, 읽는 사이(250ms)에 띄워지고 부모가 곧바로 끝난 프로세스는 놓칠 수 있다. `ps`가 없는 환경에서는 `verify`가 실패한다. → 처리: TD-12 (step4에서 행을 갱신할 때 한계로 적는다)
+- macOS의 `ps`는 막 생기거나 끝나는 중인 프로세스의 상태 칸을 `?`·`?E`로 적는다. 상태를 영문자로만 기대하면 프로세스가 자주 바뀌는 동안(테스트를 병렬로 돌릴 때) 목록을 읽지 못한다. → 처리: #140 (이 계획의 step3에서 고쳤다: `scripts/verify/tree.ts`의 `parseProcessList`와 다시 읽기)
 - 빈 연결(브라우저가 프록시에 미리 연결해 두는 경우)을 거부 건수에 넣지 않은 결정(step2)은 실제 Chromium에서 문제없었다: 통과 사례(`full-run`, `pass`, `ws-same-port`, `service-worker`, `allowed-failure`, `exact-select`)의 거부 건수가 모두 0이다. → 처리: [실물 확인 기록](../../../../lab/pilot-prep/README.md)
 - `retain-on-failure`인 trace와 영상은 Playwright의 시나리오가 실패했을 때만 남는다. 시나리오는 통과했지만 `verify`가 실패로 판정한 실행(콘솔 에러, 거부된 요청)에는 스크린샷만 남는다. 원인은 `local/detail.json`의 문제 문장으로 본다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (출력 표에 적었다)
 
@@ -295,7 +297,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - step2 재작업(2026-11-19, F1·F2): AC 7개 모두 통과. `scripts/test/verify-guard.test.ts`는 24개다(거부 프록시 5, `buildEvidence` 7, `verifyWeb` 10, 명령행 2).
 - step2 재작업(2026-11-20, F3): AC 7개 모두 통과. `scripts/test/verify-guard.test.ts`는 25개다(거부 프록시 5, `buildEvidence` 8, `verifyWeb` 10, 명령행 2).
 - step3(2026-11-20): AC 11개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 6·7은 `scripts/test/verify-playwright.test.ts`(19개: 파일 내용 7, 설정이 만드는 값 11, 템플릿 1)와 실물 확인, 수용 기준 4의 신호는 `scripts/test/standard-signal.test.ts`(6개)와 실물 확인의 `signal` 사례, 수용 기준 4·5·6·8·9는 실제 Playwright 1.65.0의 실물 확인(`lab/pilot-prep/results/verify-playwright.json`, 29개 사례)과 `check-results.ts verify-playwright`로 확인했다. `scripts/test/profile-web.test.ts`는 10개다. 검사기 테스트(`lab/pilot-prep/test/`)는 28개다.
-- step3 재작업(2026-11-20, F1~F4): AC 11개 모두 통과, `check` 통과. `scripts/test/verify-tree.test.ts`(21개: 프로세스 목록·자손 추적 10, 신호 목록 1, `verifyWeb` 6, 명령행의 신호 셋 3, 하네스 진입점의 SIGHUP 1)와 `scripts/test/verify-observe.test.ts`(10개)를 더했다. 실물 확인은 31개 사례다. 검사기 테스트(`lab/pilot-prep/test/`)는 31개다.
+- step3 재작업(2026-11-20, F1~F4): AC 11개 모두 통과, `check` 통과. `scripts/test/verify-tree.test.ts`(23개: 프로세스 목록·자손 추적 12, 신호 목록 1, `verifyWeb` 6, 명령행의 신호 셋 3, 하네스 진입점의 SIGHUP 1)와 `scripts/test/verify-observe.test.ts`(10개)를 더했다. 실물 확인은 31개 사례다. 검사기 테스트(`lab/pilot-prep/test/`)는 31개다.
 
 ## 다음 할 일
 
