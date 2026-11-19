@@ -3,16 +3,21 @@
 // Playwright는 브라우저를 새 프로세스 그룹으로 띄운다. 실행기 그룹에 보낸 신호는 브라우저에 닿지 않는다.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { loadConfig } from '../lib/config.ts';
 import { FORWARDED } from '../lib/exec.ts';
 import {
   Descendants,
+  findMarked,
   listProcesses,
+  parseMarked,
   parseProcessList,
   readProcessList,
+  RUN_MARK,
+  scanProc,
   type ProcessRow,
 } from '../verify/tree.ts';
 import { DEFAULT_RUNNER, STOP_SIGNALS, verifyWeb } from '../verify/web.ts';
@@ -183,6 +188,115 @@ test('Descendants: 이 프로세스 자신은 넣지 않는다', async () => {
   assert.deepEqual(d.pids(), []);
 });
 
+// ---------- 표식으로 찾기 ----------
+
+const NEEDLE = `${RUN_MARK}=0123456789abcdef0123456789abcdef`;
+
+test('parseMarked: 표식이 한 낱말로 든 줄의 pid만 돌려준다', () => {
+  const text = [
+    `  101 /usr/bin/node app.js PATH=/usr/bin ${NEEDLE} HOME=/home/u`,
+    `  102 /usr/bin/node other.js PATH=/usr/bin ${RUN_MARK}=ffff HOME=/home/u`,
+    ` 9103 chrome-headless-shell --type=renderer ${NEEDLE}`,
+    // 값이 더 길거나 이름 앞에 글자가 붙은 것은 다른 변수다
+    `  104 node x.js ${NEEDLE}0 X${NEEDLE}`,
+    `  105 node y.js`,
+    `${NEEDLE} (pid가 없는 줄)`,
+    '',
+  ].join('\n');
+  assert.deepEqual(parseMarked(text, NEEDLE), [101, 9103]);
+  assert.deepEqual(parseMarked('', NEEDLE), []);
+});
+
+test('scanProc: environ에 표식이 있는 pid만 돌려주고, 읽을 수 없는 프로세스는 건너뛴다', () => {
+  const proc = tmp('harness-fake-proc-');
+  const env = (pid: string, entries: string[]) =>
+    write(proc, `${pid}/environ`, entries.map((e) => `${e}\0`).join(''));
+  env('201', ['PATH=/usr/bin', NEEDLE, 'HOME=/home/u']);
+  env('202', [NEEDLE]);
+  env('203', ['PATH=/usr/bin', `${RUN_MARK}=ffff`]);
+  // 값이 더 길거나 다른 변수의 값 안에 든 것은 표식이 아니다
+  env('204', [`${NEEDLE}0`, `OTHER=x ${NEEDLE}`]);
+  env('205', []);
+  // environ이 없는 프로세스(읽는 사이 끝났다), 숫자가 아닌 항목
+  mkdirSync(path.join(proc, '206'));
+  write(proc, 'self/environ', `${NEEDLE}\0`);
+  write(proc, 'uptime', '1 1\n');
+  assert.deepEqual(scanProc(proc, NEEDLE)?.sort(), [201, 202]);
+  assert.equal(scanProc(path.join(proc, 'missing'), NEEDLE), null);
+});
+
+test('findMarked: 표식을 환경으로 물려받은 실제 프로세스를 부모와 무관하게 찾는다', T, async () => {
+  const value = randomBytes(16).toString('hex');
+  const needle = `${RUN_MARK}=${value}`;
+  // 중간 프로세스가 손자를 새 그룹에 띄우고 바로 끝난다. 손자는 다른 부모로 넘어간다
+  const dir = tmp('harness-marked-');
+  const middle = spawn(
+    process.execPath,
+    [
+      '-e',
+      "const c = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });" +
+        "c.unref(); require('node:fs').writeFileSync('orphan.pid', String(c.pid));",
+    ],
+    { cwd: dir, stdio: 'ignore', env: { ...process.env, [RUN_MARK]: value } },
+  );
+  await new Promise((r) => middle.once('exit', r));
+  const orphan = Number(readFileSync(path.join(dir, 'orphan.pid'), 'utf8'));
+  try {
+    assert.equal(alive(orphan), true);
+    const found = await findMarked(needle);
+    assert.ok(found);
+    assert.ok(found.includes(orphan), '부모를 잃은 프로세스를 찾지 못했다');
+    // 이 프로세스(표식 없음)는 들어 있지 않다
+    assert.equal(found.includes(process.pid), false);
+    assert.deepEqual(await findMarked(`${RUN_MARK}=${randomBytes(16).toString('hex')}`), []);
+  } finally {
+    process.kill(orphan, 'SIGKILL');
+  }
+});
+
+test('Descendants: 표식을 가진 프로세스는 부모가 누구든 더하고 그 자식도 따라간다', async () => {
+  const lists = [
+    // 실행기는 이미 끝났다. 300은 다른 부모로 넘어간 브라우저(표식 있음), 301은 그 자식(표식을 읽지 못했다)
+    [row(1, 0, 1), row(300, 1, 300), row(301, 300, 300), row(400, 1, 400)],
+  ];
+  const d = new Descendants(
+    () => Promise.resolve(lists[0]),
+    () => Promise.resolve([300, 999]),
+  );
+  // 표식으로 찾으라고 하지 않으면 찾지 않는다
+  assert.equal(await d.refresh(), true);
+  assert.deepEqual(d.pids(), []);
+  assert.equal(await d.refresh([], true), true);
+  // 목록에 없는 pid(999)는 넣지 않는다
+  assert.deepEqual(d.pids(), [300, 301]);
+});
+
+test('Descendants: 표식을 가졌어도 이 프로세스와 뿌리는 넣지 않고, 좀비도 넣지 않는다', async () => {
+  const d = new Descendants(
+    () =>
+      Promise.resolve([
+        row(100, 1, 100),
+        row(process.pid, 1, process.pid),
+        row(200, 1, 200, true),
+        row(300, 1, 300),
+      ]),
+    () => Promise.resolve([100, process.pid, 200, 300]),
+  );
+  await d.refresh([100], true);
+  assert.deepEqual(d.pids(), [300]);
+});
+
+test('Descendants: 표식을 읽지 못하면 부모·자식 관계로 찾은 데까지 반영하고 false를 돌려준다', async () => {
+  const d = new Descendants(
+    () => Promise.resolve([row(100, 1, 100), row(200, 100, 200), row(300, 1, 300)]),
+    () => Promise.resolve(null),
+  );
+  assert.equal(await d.refresh([100], true), false);
+  assert.deepEqual(d.pids(), [200]);
+  // 표식을 쓰지 않는 읽기는 그대로 true다
+  assert.equal(await d.refresh([100]), true);
+});
+
 // ---------- verifyWeb ----------
 
 test('verify가 처리하는 신호는 표준 명령 실행기가 넘기는 신호와 같다', () => {
@@ -199,6 +313,8 @@ interface RunnerCfg {
   hang?: boolean;
   /** dev가 새 프로세스 그룹에 프로세스를 하나 띄워 둔다(helper.pid) */
   devHelper?: boolean;
+  /** 브라우저를 띄우고 조금 뒤 SIGKILL로 죽는다(브라우저를 닫아 줄 것이 없다) */
+  crash?: boolean;
 }
 
 const DEV = (helper: boolean) => `import http from 'node:http';
@@ -209,6 +325,7 @@ if (${String(helper)}) {
   h.unref();
   writeFileSync('helper.pid', String(h.pid));
 }
+writeFileSync('dev-mark', process.env.HARNESS_VERIFY_RUN ?? '');
 http.createServer((req, res) => res.end('fake dev')).listen(Number(process.env.PORT), process.env.HOST, () =>
   writeFileSync('dev.pid', String(process.pid)),
 );
@@ -230,6 +347,7 @@ const browser = spawn(process.execPath, ['-e', ${JSON.stringify(browserScript(cf
 browser.unref();
 fs.writeFileSync('browser.pid', String(browser.pid));
 fs.writeFileSync('runner.pid', String(process.pid));
+fs.writeFileSync('runner-env.json', JSON.stringify({ mark: process.env.HARNESS_VERIFY_RUN ?? null }));
 const observation = { version: 1, consoleErrors: [], failedRequests: [], allowed: { consoleErrors: 0, failedRequests: 0 } };
 const report = {
   config: { rootDir: path.join(process.cwd(), 'e2e') },
@@ -240,7 +358,8 @@ const report = {
   }] }] }],
   errors: [],
 };
-if (CFG.hang) setInterval(() => {}, 1000);
+if (CFG.crash) setTimeout(() => process.kill(process.pid, 'SIGKILL'), 700);
+else if (CFG.hang) setInterval(() => {}, 1000);
 else
   // verify가 이 실행기의 자손을 한 번은 볼 수 있을 만큼 떠 있다가 통과 보고서를 쓰고 끝난다(브라우저는 남긴다)
   setTimeout(() => {
@@ -373,6 +492,66 @@ test(
   },
 );
 
+// 구현 판정 2라운드 F2: 목록을 읽는 사이에 브라우저가 뜨고 실행기가 죽으면, 브라우저는 다른 부모로 넘어가
+// 부모·자식 관계로는 찾을 수 없다. 여기서는 실행기가 떠 있는 동안의 목록을 비워 "한 번도 보지 못한" 경우를 만든다
+test(
+  'verifyWeb: 실행기가 떠 있는 동안 한 번도 보지 못한 다른 그룹의 프로세스도, 실행기가 죽은 뒤에 찾아 끝낸다',
+  T,
+  async () => {
+    const f = fx({ browser: 'plain', crash: true });
+    const runnerAlive = () =>
+      existsSync(path.join(f.root, 'runner.pid')) && alive(pidIn(f.root, 'runner.pid'));
+    let sawRunner = false;
+    const blind = async () => {
+      const rows = await listProcesses();
+      if (!rows) return null;
+      // 실행기가 뜨기 전과 떠 있는 동안에는 dev만 있는 것처럼 보인다(실행기와 그 자손을 보지 못한다)
+      if (!existsSync(path.join(f.root, 'runner.pid'))) return rows;
+      if (runnerAlive()) {
+        sawRunner = true;
+        return [];
+      }
+      return rows;
+    };
+    try {
+      const r = await run(f, { listProcesses: blind });
+      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+      assert.equal(r.ok, false);
+      assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
+      // 실행기가 떠 있는 동안 목록을 실제로 읽었다(가린 것이 쓰였다)
+      assert.equal(sawRunner, true);
+    } finally {
+      reap(f.root);
+    }
+  },
+);
+
+// 구현 판정 2라운드 F5: 정리 도중 목록을 읽지 못해도, 이미 알고 있는 자손에는 SIGKILL까지 보낸다
+test(
+  'verifyWeb: 정리 도중 프로세스 목록을 읽지 못하게 돼도 알고 있던 프로세스는 SIGKILL로 끝내고, 실패로 돌아간다',
+  T,
+  async () => {
+    const f = fx({ browser: 'stubborn', hang: true });
+    const runnerGone = () =>
+      existsSync(path.join(f.root, 'runner.pid')) && !alive(pidIn(f.root, 'runner.pid'));
+    // 실행기가 끝난 뒤(정리가 시작된 뒤)부터는 목록을 읽지 못한다
+    const failing = async () => (runnerGone() ? null : listProcesses());
+    try {
+      const r = await run(f, { runnerTimeoutSec: 3, listProcesses: failing });
+      assert.equal(
+        alive(pidIn(f.root, 'browser.pid')),
+        false,
+        'SIGTERM을 무시하는 브라우저가 남았다',
+      );
+      assert.equal(r.ok, false);
+      // 끝났는지 목록으로 확인하지는 못했다
+      assert.match(problems(r), /띄운 프로세스를 끝내지 못했다.*프로세스 목록/);
+    } finally {
+      reap(f.root);
+    }
+  },
+);
+
 test('verifyWeb: dev가 다른 그룹에 띄운 프로세스도 끝낸다', T, async () => {
   const f = fx({ browser: 'plain', devHelper: true });
   try {
@@ -383,6 +562,44 @@ test('verifyWeb: dev가 다른 그룹에 띄운 프로세스도 끝낸다', T, a
   } finally {
     reap(f.root);
   }
+});
+
+test('verifyWeb: 표식을 가진 프로세스를 읽지 못해도 통과로 두지 않는다', T, async () => {
+  const f = fx({ browser: 'plain' });
+  try {
+    const r = await run(f, { findMarked: () => Promise.resolve(null) });
+    assert.equal(r.ok, false);
+    assert.match(problems(r), /띄운 프로세스를 끝내지 못했다.*프로세스 목록/);
+    // 부모·자식 관계로 찾은 것은 끝냈다
+    assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+  } finally {
+    reap(f.root);
+  }
+});
+
+test('verifyWeb: dev와 실행기에 이번 실행의 표식을 주고, 실행마다 값이 다르다', T, async () => {
+  const seen: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    const f = fx({ browser: 'plain' });
+    try {
+      const r = await run(f, {
+        findMarked: (needle) => {
+          if (!seen.includes(needle)) seen.push(needle);
+          return findMarked(needle);
+        },
+      });
+      assert.equal(r.ok, true, problems(r));
+      const env = JSON.parse(readFileSync(path.join(f.root, 'runner-env.json'), 'utf8')) as {
+        mark: string | null;
+      };
+      assert.equal(`${RUN_MARK}=${String(env.mark)}`, seen[i]);
+      assert.equal(readFileSync(path.join(f.root, 'dev-mark'), 'utf8'), env.mark);
+    } finally {
+      reap(f.root);
+    }
+  }
+  assert.equal(seen.length, 2);
+  for (const needle of seen) assert.match(needle, new RegExp(`^${RUN_MARK}=[0-9a-f]{32}$`));
 });
 
 test(

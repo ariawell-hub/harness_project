@@ -4,8 +4,17 @@
 // 브라우저를 닫아 줄 것이 없다). 그래서 도는 동안 프로세스 목록에서 자손을 찾아 기억하고, 정리할 때 그 프로세스들에도
 // 신호를 보내고 모두 사라진 것을 확인한다.
 //
-// 한계: 목록을 읽는 사이(주기는 web.ts)에 띄워지고 그 부모가 곧바로 끝난 프로세스는 놓칠 수 있다.
+// 찾는 방법은 둘이다.
+// 1. 부모·자식 관계: 프로세스 목록에서 뿌리(dev, 실행기)와 이미 아는 프로세스의 자식을 따라간다. 주기적으로 읽는다.
+//    부모가 먼저 끝나 다른 부모로 넘어간 프로세스는, 그 전에 한 번이라도 봤어야 계속 따라갈 수 있다.
+// 2. 표식: verify는 dev와 실행기에 이번 실행만의 환경 변수(HARNESS_VERIFY_RUN=<난수>)를 준다. 환경은 자손에게
+//    물려지므로, 부모가 누구든 그 표식을 가진 프로세스는 이번 실행이 띄운 것이다. 한 번도 보지 못한 채 부모를 잃은
+//    프로세스(목록을 읽는 사이에 브라우저가 뜨고 실행기가 죽은 경우)도 이것으로 찾는다. 정리할 때 읽는다.
+//
+// 한계: 환경을 읽을 수 없거나(Linux에서 다른 사용자나 덤프가 막힌 프로세스) 표식을 지운 프로세스가, 목록을 읽는
+// 사이(주기는 web.ts)에 띄워지고 그 부모가 곧바로 끝나면 놓칠 수 있다.
 import { execFile } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 
 export interface ProcessRow {
   pid: number;
@@ -70,6 +79,67 @@ const listOnce: ListProcesses = () =>
 /** ps로 읽는다. 읽지 못하면 `LIST_ATTEMPTS`번까지 다시 읽는다 */
 export const listProcesses: ListProcesses = () => readProcessList(listOnce, LIST_ATTEMPTS);
 
+/** 이번 실행의 표식을 담는 환경 변수 이름 */
+export const RUN_MARK = 'HARNESS_VERIFY_RUN';
+
+/** 환경(이나 명령행)에 `needle`(`이름=값`)이 있는 프로세스의 pid. 읽지 못했으면 null */
+export type FindMarked = (needle: string) => Promise<number[] | null>;
+
+/**
+ * `ps -A -E -o pid=,command=`의 출력(명령행 뒤에 환경이 빈칸으로 이어진다)에서 `needle`이 한 낱말로 든 줄의 pid.
+ * 명령행에 같은 글자가 든 프로세스도 잡힌다(표식은 난수라 이번 실행이 띄운 것만 그 글자를 안다)
+ */
+export function parseMarked(text: string, needle: string): number[] {
+  const pids: number[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^\s*(\d+)\s/.exec(line);
+    if (m && ` ${line} `.includes(` ${needle} `)) pids.push(Number(m[1]));
+  }
+  return pids;
+}
+
+/**
+ * Linux: `<procDir>/<pid>/environ`(NUL로 나뉜 `이름=값`)에 `needle`이 있는 pid.
+ * 읽을 수 없는 프로세스(다른 사용자, 덤프가 막힌 프로세스, 읽는 사이 끝난 프로세스)는 건너뛴다.
+ * 폴더 자체를 읽지 못하면 null
+ */
+export function scanProc(procDir: string, needle: string): number[] | null {
+  let names: string[];
+  try {
+    names = readdirSync(procDir);
+  } catch {
+    return null;
+  }
+  const pids: number[] = [];
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const env = readFileSync(`${procDir}/${name}/environ`, 'latin1');
+      if (`\0${env}\0`.includes(`\0${needle}\0`)) pids.push(Number(name));
+    } catch {
+      // 읽을 수 없다
+    }
+  }
+  return pids;
+}
+
+/** Linux는 /proc, 그 밖(macOS)은 `ps -E`로 읽는다. 읽지 못하면 `LIST_ATTEMPTS`번까지 다시 읽는다 */
+export const findMarked: FindMarked = async (needle) => {
+  if (process.platform === 'linux') return scanProc('/proc', needle);
+  for (let i = 0; i < LIST_ATTEMPTS; i++) {
+    const found = await new Promise<number[] | null>((resolve) => {
+      execFile(
+        'ps',
+        ['-A', '-E', '-o', 'pid=,command='],
+        { timeout: LIST_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 256 * 1024 * 1024 },
+        (err, stdout) => resolve(err ? null : parseMarked(stdout, needle)),
+      );
+    });
+    if (found) return found;
+  }
+  return null;
+};
+
 /**
  * 뿌리 프로세스들의 자손을 기억한다. 뿌리 자신은 넣지 않는다(뿌리와 그 그룹은 부르는 쪽이 따로 다룬다).
  * `refresh`를 부를 때마다 목록을 다시 읽어:
@@ -77,23 +147,31 @@ export const listProcesses: ListProcesses = () => readProcessList(listOnce, LIST
  *   다시 쓰였을 때(그룹이 다르다) 그것을 우리 것으로 보지 않는다
  * - 뿌리와 남은 프로세스의 자식을 새로 더한다(부모가 끝나 다른 부모로 넘어간 프로세스도 이미 알고 있으면 계속 따라간다)
  * - 좀비는 뺀다
+ * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다
  */
 export class Descendants {
   /** pid → 프로세스 그룹 */
   private known = new Map<number, number>();
   private readonly list: ListProcesses;
+  private readonly marked: (() => Promise<number[] | null>) | undefined;
 
-  constructor(list: ListProcesses = listProcesses) {
+  /** `marked`: 이번 실행의 표식을 가진 프로세스의 pid를 돌려준다(읽지 못했으면 null). 없으면 표식으로는 찾지 않는다 */
+  constructor(list: ListProcesses = listProcesses, marked?: () => Promise<number[] | null>) {
     this.list = list;
+    this.marked = marked;
   }
 
   /**
    * 목록을 다시 읽는다. `roots`에는 아직 떠 있는 뿌리만 준다(끝난 뒤의 번호는 다른 프로세스일 수 있다).
-   * 읽지 못했으면 false이고 알던 것은 그대로 둔다
+   * `byMark`가 참이면 표식으로도 찾는다(정리할 때 쓴다).
+   * 다 읽었으면 true. 목록을 읽지 못했으면 false이고 알던 것은 그대로 둔다. 목록은 읽었지만 표식을 읽지 못했으면
+   * 부모·자식 관계로 찾은 데까지 반영하고 false다(없다고 확인하지 못했다)
    */
-  async refresh(roots: readonly number[] = []): Promise<boolean> {
+  async refresh(roots: readonly number[] = [], byMark = false): Promise<boolean> {
     const rows = await this.list();
     if (!rows) return false;
+    const tagged = byMark && this.marked ? await this.marked() : [];
+    const mine = new Set(tagged ?? []);
     const next = new Map<number, number>();
     const children = new Map<number, ProcessRow[]>();
     for (const r of rows) {
@@ -101,7 +179,8 @@ export class Descendants {
       const siblings = children.get(r.ppid);
       if (siblings) siblings.push(r);
       else children.set(r.ppid, [r]);
-      if (this.known.get(r.pid) === r.pgid) next.set(r.pid, r.pgid);
+      if (r.pid === process.pid || roots.includes(r.pid)) continue;
+      if (this.known.get(r.pid) === r.pgid || mine.has(r.pid)) next.set(r.pid, r.pgid);
     }
     const queue = [...next.keys(), ...roots];
     while (queue.length) {
@@ -114,7 +193,7 @@ export class Descendants {
       }
     }
     this.known = next;
-    return true;
+    return tagged !== null;
   }
 
   /** 지금 알고 있는(마지막으로 읽은 목록에 있던) 자손의 pid */

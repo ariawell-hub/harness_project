@@ -23,7 +23,7 @@
 
 1. `@playwright/test`를 devDependency로 더한다. 새 직접 의존성이므로 그 리포에 ADR을 남긴다. 버전은 아래 "확인한 버전"에 맞춘다.
 2. Chromium을 받는다: `pnpm exec playwright install chromium`. 설치 스크립트가 아니라 따로 실행하는 명령이라 `onlyBuiltDependencies`에 더할 것은 없다.
-   - `ps` 명령이 있어야 한다(macOS에는 있다. Linux 컨테이너에서는 `procps`). `verify`는 `ps -A -o pid=,ppid=,pgid=,stat=`으로 브라우저가 끝났는지 확인하고, 읽지 못하면 실패한다.
+   - `ps` 명령이 있어야 한다(macOS에는 있다. Linux 컨테이너에서는 `procps`). `verify`는 `ps -A -o pid=,ppid=,pgid=,stat=`과, 띄운 것에 준 환경 변수 표식(`HARNESS_VERIFY_RUN`. macOS는 `ps -E`, Linux는 `/proc/<pid>/environ`으로 읽는다)으로 브라우저가 끝났는지 확인하고, 읽지 못하면 실패한다.
 3. `package.json`의 `app:dev`가 환경 변수 `PORT`와 `HOST`를 따르게 한다. `verify`는 실행마다 빈 포트를 골라 `PORT=<포트>`, `HOST=127.0.0.1`로 `dev`를 띄우고 `http://127.0.0.1:<포트>`에서 응답이 올 때까지 기다린다(120초).
 4. `init`이 복사한 `e2e/smoke.spec.ts`를 그 앱의 첫 화면에 맞게 고친다.
 

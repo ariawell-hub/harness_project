@@ -6,6 +6,7 @@
 // 실행기(Playwright)는 명령(인자 배열)으로만 다룬다. 이 파일은 실행기 패키지를 import하지 않는다.
 // 실행기 명령, 설정 파일 경로, 앱 주소는 환경 변수·명령행 인자·설정 파일로 바꿀 수 없다(검사를 약화시키는 길이 된다).
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -28,7 +29,14 @@ import { repoInfo } from '../lib/git.ts';
 import { startDenyProxy, type DeniedRequest, type DenyProxy } from './deny-proxy.ts';
 import { buildEvidence } from './evidence.ts';
 import { isScenarioPath, judge, type Verdict } from './judge.ts';
-import { Descendants, listProcesses, type ListProcesses } from './tree.ts';
+import {
+  Descendants,
+  findMarked,
+  listProcesses,
+  RUN_MARK,
+  type FindMarked,
+  type ListProcesses,
+} from './tree.ts';
 
 /** 시나리오 실행기. 인자를 더 붙이지 않는다(시나리오는 환경 변수로 넘긴다) */
 export const DEFAULT_RUNNER: string[] = [
@@ -60,6 +68,8 @@ export interface VerifyOptions {
   signal?: AbortSignal;
   /** 프로세스 목록을 읽는 수단(dev와 실행기가 다른 프로세스 그룹에 띄운 것을 찾는다). 기본은 ps. 테스트가 바꾼다 */
   listProcesses?: ListProcesses;
+  /** 이번 실행의 표식(환경 변수)을 가진 프로세스를 찾는 수단. 기본은 ps -E(Linux는 /proc). 테스트가 바꾼다 */
+  findMarked?: FindMarked;
 }
 
 export interface VerifyResult {
@@ -211,6 +221,9 @@ function follow(tracker: Descendants, procs: readonly Proc[]): () => Promise<voi
   };
 }
 
+/** 정리하는 동안 그룹 밖의 자손이 남았는지 다시 보는 간격 */
+const RECHECK_MS = 50;
+
 /** clean: 모두 끝났다. left: 남은 것이 있다. unknown: 프로세스 목록을 읽지 못해 남은 것이 없는지 확인하지 못했다 */
 type Cleaned = 'clean' | 'left' | 'unknown';
 
@@ -222,6 +235,12 @@ type Cleaned = 'clean' | 'left' | 'unknown';
  */
 async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
   const live = procs.filter((p) => p.child.pid);
+  /** 마지막으로 본 것이 온전한가(목록과 표식을 모두 읽었는가) */
+  let seen = false;
+  /** 그룹 밖의 자손을 다시 찾는다: 부모·자식 관계와 이번 실행의 표식 둘 다로 */
+  const look = async () => {
+    seen = await tracker.refresh(running(procs), true);
+  };
   const signalAll = (signal: NodeJS.Signals) => {
     for (const p of live) killTree(p.child.pid, signal);
     for (const pid of tracker.pids()) {
@@ -232,26 +251,29 @@ async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
       }
     }
   };
-  const goneWithin = async (ms: number): Promise<Cleaned> => {
+  const goneWithin = async (ms: number): Promise<boolean> => {
     const until = Date.now() + ms;
     for (;;) {
       if (!live.some(treeAlive)) {
-        // 그룹이 비었다. 그룹 밖의 자손이 남았는지는 프로세스 목록으로만 알 수 있다
-        if (!(await tracker.refresh())) return 'unknown';
-        if (tracker.pids().length === 0) return 'clean';
+        // 그룹이 비었다. 그룹 밖의 자손이 남았는지는 프로세스 목록으로만 알 수 있다.
+        // 읽지 못했으면 끝났다고 보지 않고 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다)
+        await look();
+        if (seen && tracker.pids().length === 0) return true;
       }
-      if (Date.now() >= until) return 'left';
-      await sleep(25);
+      if (Date.now() >= until) return false;
+      await sleep(live.some(treeAlive) ? 25 : RECHECK_MS);
     }
   };
   // 이미 끝난 것은 빼고(번호가 다시 쓰였을 수 있다) 지금 떠 있는 것에만 신호를 보낸다
-  await tracker.refresh(running(procs));
+  await look();
   signalAll('SIGTERM');
-  const first = await goneWithin(TERM_GRACE_MS);
-  if (first !== 'left') return first;
-  await tracker.refresh();
+  if (await goneWithin(TERM_GRACE_MS)) return 'clean';
+  // 목록을 읽지 못하는 중이어도 멈추지 않는다: 그룹과, 마지막으로 알던 자손에 SIGKILL을 보낸다(구현 판정 F5)
+  await look();
   signalAll('SIGKILL');
-  return goneWithin(KILL_CONFIRM_MS);
+  if (await goneWithin(KILL_CONFIRM_MS)) return 'clean';
+  if (live.some(treeAlive)) return 'left';
+  return seen ? 'left' : 'unknown';
 }
 
 /**
@@ -475,7 +497,16 @@ export async function verifyWeb(
   );
   const procs: Proc[] = [];
   // dev와 실행기가 다른 프로세스 그룹에 띄우는 것(브라우저 등)을 따라간다. 정리할 때 그것까지 끝낸다
-  const tracker = new Descendants(o.listProcesses ?? listProcesses);
+  // 표식: dev와 실행기에 이번 실행만의 환경 변수를 준다. 자손이 물려받으므로, 한 번도 보지 못한 채 부모를 잃은
+  // 프로세스도 이것으로 찾는다(tree.ts)
+  const mark = `${RUN_MARK}=${randomBytes(16).toString('hex')}`;
+  const tracker = new Descendants(o.listProcesses ?? listProcesses, () =>
+    (o.findMarked ?? findMarked)(mark),
+  );
+  const marked = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
+    ...env,
+    [RUN_MARK]: mark.slice(RUN_MARK.length + 1),
+  });
   let stopFollowing: (() => Promise<void>) | undefined;
   let baseUrl = '';
   let verdict: Verdict;
@@ -495,7 +526,7 @@ export async function verifyWeb(
     baseUrl = `http://${HOST}:${port}`;
     const devProc = start(dev.run, [], {
       cwd: root,
-      env: { ...process.env, PORT: String(port), HOST },
+      env: marked({ ...process.env, PORT: String(port), HOST }),
       shell: true,
       log: devLog,
     });
@@ -533,7 +564,7 @@ export async function verifyWeb(
       if (scenarios) env.HARNESS_VERIFY_SCENARIOS = JSON.stringify(scenarios);
       const started = start(runner[0], runner.slice(1), {
         cwd: root,
-        env,
+        env: marked(env),
         shell: false,
         log: runnerLog,
       });
