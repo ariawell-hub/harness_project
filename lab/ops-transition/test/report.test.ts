@@ -42,7 +42,7 @@ test('항목과 필수 사례는 step6 지시서의 목록과 하네스 리포 �
     codeowners: ['owner-required', 'auto-merge'],
     'workflow-scope': ['push-rejected'],
     stage: ['operation-pr'],
-    'target-repo': ['workflow-push-rejected'],
+    'target-repo': ['workflow-push-rejected', 'low-risk-auto-merge', 'protected-needs-owner'],
     td38: [],
   });
   assert.deepEqual(OPTIONAL_ITEMS, ['td38']);
@@ -71,8 +71,34 @@ test('필수 사례가 빠졌거나 pass가 아니면 막는다', () => {
   }
 });
 
-test('target-repo(하네스 리포 시험): 결과 파일이 없거나 workflow-push-rejected가 pass가 아니면 막는다', () => {
+test('target-repo(하네스 리포 시험): 결과 파일이 없거나 필수 사례가 빠졌거나 pass가 아니면 막는다', () => {
   assert.deepEqual(validateResult('target-repo', full('target-repo')), []);
+  const pushOnly = result('target-repo', [kase('workflow-push-rejected')]);
+  assert.match(
+    validateResult('target-repo', pushOnly).join('\n'),
+    /필수 사례 low-risk-auto-merge가 없다/,
+  );
+  // 제작자 승인 전에 막힌다는 근거(protected-needs-owner)가 없으면 운영 전환의 근거가 완결되지 않는다
+  const noOwnerCase = result('target-repo', [
+    kase('workflow-push-rejected'),
+    kase('low-risk-auto-merge'),
+  ]);
+  assert.match(
+    validateResult('target-repo', noOwnerCase).join('\n'),
+    /필수 사례 protected-needs-owner가 없다/,
+  );
+  const notSeen = full('target-repo');
+  notSeen.cases[2] = kase('protected-needs-owner', { verdict: 'n/a', evidence: [] });
+  assert.match(
+    validateResult('target-repo', notSeen).join('\n'),
+    /필수 사례 protected-needs-owner의 판정이 pass가 아니다/,
+  );
+  const partial = full('target-repo');
+  partial.cases[1] = kase('low-risk-auto-merge', { verdict: 'partial' });
+  assert.match(
+    validateResult('target-repo', partial).join('\n'),
+    /필수 사례 low-risk-auto-merge의 판정이 pass가 아니다/,
+  );
   const failed = result('target-repo', [kase('workflow-push-rejected', { verdict: 'fail' })]);
   assert.match(
     validateResult('target-repo', failed).join('\n'),

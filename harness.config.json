@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "stage": "build",
+  "stage": "operation",
   "profile": "core",
   "profileVersion": "core@0.1.0",
   "github": {

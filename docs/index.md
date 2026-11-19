@@ -30,7 +30,7 @@ review_cycle: on-change
 - [하네스 설계서](harness/design.md) — 요구사항과 설계("왜")
 - [하네스 코드 구조](harness/architecture.md) — 레이어·모듈·상태 위치
 - [하네스 변경 이력](harness/CHANGELOG.md)
-- [운영 전환 시험 결과](../lab/ops-transition/README.md) — 테스트 리포에서 확인한 체크리스트 5·6의 사례별 기록(`results/`)과 검사 명령
+- [운영 전환 시험 결과](../lab/ops-transition/README.md) — 테스트 리포(체크리스트 5)와 하네스 리포(체크리스트 6, `results/target-repo.json`)에서 확인한 사례별 기록(`results/`)과 검사 명령
 
 ## 데이터 (지시가 아님)
 

@@ -147,6 +147,13 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
   - `pr-ready`는 완료 처리, 커밋하지 않은 변경, push 여부, `origin/main` 병합 여부를 확인한다. 하나라도 안 되면 이유를 출력하고 PR은 그대로 둔다. 통과하면 초안을 해제하고 worktree에 승인 요청 표시(그때의 HEAD)를 남긴다.
   - L1 훅이 순서를 지키게 한다: `gh pr ready` 직접 실행, 위험도 높음 계획의 초안 아닌 `gh pr create`, 승인 요청 표시가 있는 브랜치에 새 커밋을 올리는 push를 막는다. `origin/main` 병합 커밋만 더한 push는 막지 않는다.
   - 승인 요청 뒤에 꼭 커밋을 올려야 하면 제작자에게 먼저 알리고 `node scripts/harness.ts pr-ready --undo`로 초안으로 되돌린 뒤 push한다. 끝나면 `pr-ready`로 다시 요청한다.
+- **운영 단계의 보호 경로 PR**: `harness.config.json`의 `stage`가 `operation`이면(이 리포는 2026-11-18부터) 보호 경로(`protectedPaths`)를 하나라도 바꾼 PR은 계획의 `risk`와 무관하게 위험도 높음이고 제작자 승인 대상이다.
+  - `risk-gate`가 `위험도 높음: 제작자 head 승인 필요 — 보호 경로(operation): <파일>`로 실패한 채 남고, 코드 오너(제작자) 리뷰가 있어야 병합된다(`.github/CODEOWNERS`, 설계서 10.4절). 두 검증자가 모두 판정하고, main 병합 갱신 뒤에도 승인을 이어받지 않고 다시 판정한다.
+  - 계획 `risk`가 low·normal이어도 초안으로 올리고(`gh pr create --draft`) 위 "승인 요청 전 조건"대로 `pr-ready`로 한 번만 승인을 요청한다. L1 훅은 계획 `risk: high`일 때만 초안을 강제하므로 이 경우는 스스로 지킨다.
+  - 보호 경로 밖만 바꾼 PR은 그대로 자동 병합된다. 하네스 문서 한 줄(`docs/harness/`, `AGENTS.md` 등)도 보호 경로이므로, 급하지 않은 문서 보완은 승인이 필요한 다음 PR에 모은다.
+  - 워크플로 파일(`.github/workflows/`)은 봇이 push할 수 없다(봇 토큰에 `workflow` 권한이 없어 GitHub이 거부한다). 그 파일이 든 커밋이 있으면 브랜치 전체의 push가 거부된다. 워크플로를 바꿔야 하면 내용을 Issue에 적어 제작자에게 넘긴다([SECURITY.md](../SECURITY.md) "운영 전환까지의 제작자 작업").
+  - 보호 경로를 되돌리는 revert PR도 제작자 승인이 있어야 병합된다.
+  - 계획 `risk`가 high가 아닌 보호 경로 PR이 필수 체크를 모두 통과하고 코드 오너 승인만 기다릴 때 `pr-state`는 `ready (조치할 것 없음)`으로 보인다(TD-47). `mergeStateStatus`가 `BLOCKED`이고 코드 오너 리뷰 요청이 남아 있으면 제작자 승인 대기다.
 - **제작자 작업 요청**: 제작자만 할 수 있는 일(시크릿·environment 등록, 필수 체크 등록, App 설정)은 한 번에 모아 요청한다. 항목마다 아래를 적는다.
   - 순서: 무엇을 먼저 해야 하는지, 승인·병합보다 앞인지 뒤인지.
   - 넣을 값의 형식: 예) "`auth.json` 파일 내용 전체. `{`로 시작한다. 로그인 URL이 아니다."
