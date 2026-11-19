@@ -1,4 +1,5 @@
-// verify 표준 명령의 웹 구현(설계서 11.1절): dev를 띄우고, 시나리오 실행기를 돌리고, 판정하고, 정리한다.
+// verify 표준 명령의 웹 구현(설계서 11.1절): 거부 프록시와 dev를 띄우고, 시나리오 실행기를 돌리고, 판정하고, 정리하고,
+// 공개 증거 요약(evidence/)과 진단 파일(local/detail.json)을 남긴다.
 //
 //   node scripts/verify/web.ts [e2e/<시나리오>.spec.ts …]
 //
@@ -9,11 +10,13 @@ import {
   closeSync,
   constants,
   fstatSync,
+  ftruncateSync,
   lstatSync,
   mkdirSync,
   openSync,
   readSync,
   realpathSync,
+  writeSync,
 } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -22,6 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { killTree, tail } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
+import { startDenyProxy, type DeniedRequest, type DenyProxy } from './deny-proxy.ts';
+import { buildEvidence } from './evidence.ts';
 import { isScenarioPath, judge, type Verdict } from './judge.ts';
 
 /** 시나리오 실행기. 인자를 더 붙이지 않는다(시나리오는 환경 변수로 넘긴다) */
@@ -57,9 +62,24 @@ export interface VerifyResult {
   outDir: string;
   baseUrl: string;
   verdict: Verdict;
+  /** 거부 프록시에 닿은 요청(앱 주소 밖으로 가려던 것). 하나라도 있으면 실패다 */
+  denied: { count: number; requests: DeniedRequest[] };
+  /** PR에 올릴 수 있는 요약 묶음(`<outDir>/evidence/`). 출력 폴더를 만들지 못했거나 묶음을 만들지 못했으면 null */
+  evidence: { dir: string; files: string[] } | null;
 }
 
 const failed = (problem: string): Verdict => ({ ok: false, scenarios: [], problems: [problem] });
+const noDenied = (): VerifyResult['denied'] => ({ count: 0, requests: [] });
+const ABORTED = '중단 신호를 받았다';
+
+/** 문제 문구에 적는 대상 수 */
+const DENIED_SHOWN = 20;
+/** 거부 프록시에 닿은 요청의 문제 문구. 대상(호스트:포트)은 한 번씩만 적는다 */
+function deniedProblem(d: VerifyResult['denied']): string {
+  const targets = [...new Set(d.requests.map((r) => `${r.host}:${r.port}`))];
+  const more = targets.length > DENIED_SHOWN ? ` 외 ${targets.length - DENIED_SHOWN}곳` : '';
+  return `앱 주소 밖으로 가려는 요청 ${d.count}건: ${targets.slice(0, DENIED_SHOWN).join(', ')}${more}`;
+}
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
@@ -292,39 +312,105 @@ export async function verifyWeb(
   cfg: HarnessConfig,
   o: VerifyOptions = {},
 ): Promise<VerifyResult> {
+  const early = (problem: string): VerifyResult => ({
+    ok: false,
+    outDir: '',
+    baseUrl: '',
+    verdict: failed(problem),
+    denied: noDenied(),
+    evidence: null,
+  });
   const unsupported = unsupportedPlatform(process.platform);
-  if (unsupported) return { ok: false, outDir: '', baseUrl: '', verdict: failed(unsupported) };
+  if (unsupported) return early(unsupported);
   // 보고서의 config.rootDir는 실행기가 본 실제 경로다. 심볼릭 링크를 낀 경로를 그대로 쓰면 리포 기준 경로가 어긋난다
   root = realpathSync(root);
   const made = makeOutDir(root);
-  if ('problem' in made)
-    return { ok: false, outDir: '', baseUrl: '', verdict: failed(made.problem) };
+  if ('problem' in made) return early(made.problem);
   const outDir = made.outDir;
   const local = path.join(outDir, 'local');
   mkdirSync(local);
-  const result = (baseUrl: string, verdict: Verdict): VerifyResult => ({
-    ok: verdict.ok,
-    outDir,
-    baseUrl,
-    verdict,
-  });
+  const startedAt = new Date().toISOString();
+  // 진단 파일은 아무것도 띄우기 전에 새로 만들어 열어 두고 끝에 이 fd로 쓴다(로그 파일과 같은 이유:
+  // dev나 실행기가 그 자리를 링크나 FIFO로 바꿔도 따라가지 않는다)
+  const detailFd = openSync(path.join(local, 'detail.json'), 'wx');
+  /**
+   * 마무리: 프록시 기록을 판정에 반영하고, 진단 파일(local/detail.json)과 공개 증거 요약(evidence/)을 남긴다.
+   * 띄운 것을 모두 끝낸 뒤에만 부른다
+   */
+  const finish = (baseUrl: string, judged: Verdict, denied = noDenied()): VerifyResult => {
+    let verdict = judged;
+    const fail = (problem: string) => {
+      verdict = {
+        ok: false,
+        scenarios: verdict.scenarios,
+        problems: [...verdict.problems, problem],
+      };
+    };
+    // 판정은 여기서 한 번 정해지고 반환값·진단 파일·공개 요약·명령행의 종료 코드가 모두 이것을 쓴다.
+    // 이 함수는 기다리는 곳이 없어 도중에 중단 신호의 상태가 바뀌지 않는다.
+    // 통과로 판정한 뒤 정리하는 동안 온 중단 신호도 실패다(구현 판정 F2)
+    if (o.signal?.aborted && !verdict.problems.some((p) => p.startsWith(ABORTED))) fail(ABORTED);
+    // 관찰 기록의 allowed와 무관하다: 프록시에 닿은 것은 시나리오 코드가 뺄 수 없다
+    if (denied.count) fail(deniedProblem(denied));
+    /** 지금의 판정으로 진단 파일을 처음부터 다시 쓴다 */
+    const writeDetail = (): boolean => {
+      try {
+        const detail = {
+          startedAt,
+          ok: verdict.ok,
+          baseUrl,
+          denied,
+          problems: verdict.problems,
+          scenarios: verdict.scenarios,
+        };
+        const buf = Buffer.from(`${JSON.stringify(detail, null, 2)}\n`);
+        ftruncateSync(detailFd, 0);
+        let off = 0;
+        while (off < buf.length) off += writeSync(detailFd, buf, off, buf.length - off, off);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let evidence: VerifyResult['evidence'] = null;
+    try {
+      // 진단 파일을 쓰지 못한 것도 요약의 판정에 들어가게 요약보다 먼저 쓴다
+      if (!writeDetail()) fail('진단 파일(local/detail.json)을 쓰지 못했다');
+      try {
+        // 마지막 단계다: 묶음은 다 쓰인 채로 한 번에 나타나거나 아예 생기지 않는다. 이 뒤로는 판정이 바뀌지 않는다
+        evidence = buildEvidence(outDir, verdict, { startedAt, deniedCount: denied.count });
+      } catch (e) {
+        fail(`증거 묶음을 만들지 못했다: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+        // 요약이 없으므로 판정이 어긋날 곳은 진단 파일뿐이다. 마지막 판정으로 다시 쓴다
+        writeDetail();
+      }
+    } finally {
+      // 요약이 나타난 뒤에는 판정을 바꿀 일이 없어야 한다. 닫기 실패는 판정에 넣지 않는다
+      try {
+        closeSync(detailFd);
+      } catch {
+        // 진단 파일은 이미 썼다
+      }
+    }
+    return { ok: verdict.ok, outDir, baseUrl, verdict, denied, evidence };
+  };
 
   let scenarios: string[] | undefined;
   if (o.scenarios) {
     const checked = checkScenarios(root, o.scenarios);
-    if ('problem' in checked) return result('', failed(checked.problem));
+    if ('problem' in checked) return finish('', failed(checked.problem));
     scenarios = checked.scenarios;
   }
   const dev = cfg.commands.dev;
   if (!dev)
-    return result(
+    return finish(
       '',
       failed(
         'commands.dev가 없다. verify는 dev로 앱을 띄운다. 고치는 법: harness.config.json의 commands.dev에 앱 실행 명령(run, timeoutSec)을 넣어라(PORT·HOST 환경 변수를 따라야 한다)',
       ),
     );
   const signal = o.signal;
-  if (signal?.aborted) return result('', failed('중단 신호를 받았다'));
+  if (signal?.aborted) return finish('', failed('중단 신호를 받았다'));
 
   const aborted = new Promise<'aborted'>((resolve) =>
     signal?.addEventListener('abort', () => resolve('aborted'), { once: true }),
@@ -332,6 +418,8 @@ export async function verifyWeb(
   const procs: Proc[] = [];
   let baseUrl = '';
   let verdict: Verdict;
+  let proxy: DenyProxy | null = null;
+  let denied = noDenied();
   // 로그 파일 둘은 아무것도 띄우기 전에 새로 만들어 열어 둔다(wx: 이미 있으면 실패). dev가 실행기 로그 자리에
   // FIFO나 링크를 미리 둘 수 없고, 로그 끝부분은 이 fd로 읽는다(그래서 dev.log는 읽기도 되는 wx+로 연다)
   const logs: number[] = [];
@@ -340,6 +428,8 @@ export async function verifyWeb(
     logs.push(devLog);
     const runnerLog = openSync(path.join(local, 'runner.log'), 'wx');
     logs.push(runnerLog);
+    // 거부 프록시는 dev보다 먼저 띄운다. 브라우저의 요청 가운데 앱 주소가 아닌 것이 여기로 온다
+    proxy = await startDenyProxy();
     const port = await freePort();
     baseUrl = `http://${HOST}:${port}`;
     const devProc = start(dev.run, [], {
@@ -376,6 +466,7 @@ export async function verifyWeb(
       // 바깥에서 물려받은 값을 쓰지 않는다
       delete env.HARNESS_VERIFY_SCENARIOS;
       env.HARNESS_VERIFY_BASE_URL = baseUrl;
+      env.HARNESS_VERIFY_PROXY = proxy.url;
       env.HARNESS_VERIFY_OUT = outDir;
       if (scenarios) env.HARNESS_VERIFY_SCENARIOS = JSON.stringify(scenarios);
       const runnerProc = start(runner[0], runner.slice(1), {
@@ -414,14 +505,23 @@ export async function verifyWeb(
       `verify를 끝내지 못했다: ${e instanceof Error ? e.message : '알 수 없는 오류'}`,
     );
   } finally {
-    const clean = await cleanup(procs);
-    if (!clean) {
-      // 남은 프로세스가 있으면 통과로 두지 않는다
-      verdict = failed('띄운 프로세스를 끝내지 못했다(dev 또는 실행기의 프로세스가 남아 있다)');
+    try {
+      const clean = await cleanup(procs);
+      if (!clean) {
+        // 남은 프로세스가 있으면 통과로 두지 않는다
+        verdict = failed('띄운 프로세스를 끝내지 못했다(dev 또는 실행기의 프로세스가 남아 있다)');
+      }
+    } finally {
+      // 어느 경우에도 돌아가기 전에 프록시를 닫는다. 기록은 띄운 것을 모두 끝낸 뒤에 읽는다:
+      // 실행기가 끝난 뒤에도 남은 자식(브라우저)이 보낸 요청까지 센다
+      if (proxy) {
+        denied = { count: proxy.count(), requests: proxy.denied() };
+        await proxy.close();
+      }
+      for (const fd of logs) closeSync(fd);
     }
-    for (const fd of logs) closeSync(fd);
   }
-  return result(baseUrl, verdict!);
+  return finish(baseUrl, verdict!, denied);
 }
 
 function report(r: VerifyResult, write: (s: string) => void): void {
@@ -433,10 +533,14 @@ function report(r: VerifyResult, write: (s: string) => void): void {
   write(
     `verify: ${r.ok ? '통과' : '실패'} (시나리오 ${r.verdict.scenarios.length}개) · 출력 ${r.outDir}\n`,
   );
+  if (r.evidence) write(`증거 묶음(PR에 올릴 수 있는 요약): ${r.evidence.dir}\n`);
+  if (r.outDir) write(`진단(로컬에서만 본다): ${path.join(r.outDir, 'local', 'detail.json')}\n`);
 }
 
 async function main(argv: string[]): Promise<number> {
   const out = (s: string) => process.stdout.write(s);
+  // 출력을 받는 쪽이 먼저 닫혀도(EPIPE) 종료 코드는 판정을 따른다. 공개 요약과 어긋나지 않게 한다
+  process.stdout.on('error', () => {});
   // 시나리오 경로만 받는다. 옵션(--config 등)이나 정규식으로 읽힐 문자가 실행기에 닿지 않게 한다
   const bad = argv.filter((a) => !isScenarioPath(a));
   if (bad.length) {
@@ -459,7 +563,8 @@ async function main(argv: string[]): Promise<number> {
       signal: ac.signal,
     });
     report(r, out);
-    return r.ok && !ac.signal.aborted ? 0 : 1;
+    // 판정은 verifyWeb이 정한 하나다(중단 신호 포함). 여기서 다시 따지면 공개 요약과 종료 코드가 어긋난다
+    return r.ok ? 0 : 1;
   } finally {
     process.off('SIGTERM', onSignal);
     process.off('SIGINT', onSignal);
