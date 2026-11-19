@@ -8,7 +8,13 @@ import path from 'node:path';
 import { recordAttempt } from '../lib/attempts.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import { runSync, tail } from '../lib/exec.ts';
-import { defaultBase, git, harnessStateDir, worktreeTreeHash, type RepoInfo } from '../lib/git.ts';
+import {
+  defaultBase,
+  gitTry,
+  harnessStateDir,
+  worktreeTreeHash,
+  type RepoInfo,
+} from '../lib/git.ts';
 import { parseBranch } from '../lib/plan.ts';
 import { formatProblem, matchesAny, type Problem } from '../lib/util.ts';
 import { bypassScan } from '../gates/bypass-scan.ts';
@@ -67,6 +73,7 @@ export function cacheKey(
   cfg: HarnessConfig,
   base: string | null,
   only?: CheckStep[],
+  env?: NodeJS.ProcessEnv,
 ): string {
   const parts = {
     tree: worktreeTreeHash(info),
@@ -76,6 +83,8 @@ export function cacheKey(
     commands: createHash('sha256').update(JSON.stringify(cfg.commands)).digest('hex'),
     testEffect: cfg.testEffect,
     testInert: cfg.testInertPaths,
+    // test를 건너뛴 결과와 돌린 결과를 섞지 않는다: 같은 트리·같은 base라도 기본 브랜치에서는 test를 돌려야 한다
+    testSkippable: testSkip(info, cfg, { base, committedOnly: false, env }).skippable,
     base,
     only: only ?? null,
   };
@@ -112,15 +121,15 @@ export function testSkip(
     return no(`기본 브랜치(${def})의 check는 건너뛰지 않는다`);
   // 이름 바꾸기는 옛 경로와 새 경로가 모두 나오게 한다(--no-renames). 삭제도 센다
   const diff = ['diff', '--no-renames', '--name-only', '-z', o.base];
-  const list = (out: string) => out.split('\0').filter(Boolean);
-  const files = o.committedOnly
-    ? list(git([...diff, 'HEAD'], info.root))
+  // 목록을 구하지 못하면(없는 base 등) 멈추지 않고 test를 돌린다. 모를 때는 건너뛰지 않는다
+  const runs = o.committedOnly
+    ? [gitTry([...diff, 'HEAD'], info.root)]
     : [
-        ...new Set([
-          ...list(git(diff, info.root)),
-          ...list(git(['ls-files', '--others', '--exclude-standard', '-z'], info.root)),
-        ]),
+        gitTry(diff, info.root),
+        gitTry(['ls-files', '--others', '--exclude-standard', '-z'], info.root),
       ];
+  if (runs.some((r) => !r.ok)) return no('바뀐 파일을 구하지 못했다(base를 확인하라)');
+  const files = [...new Set(runs.flatMap((r) => r.stdout.split('\0').filter(Boolean)))];
   if (files.length === 0) return no('바뀐 파일이 없다');
   const outside = files.filter((f) => !testInert(f, cfg));
   if (outside.length)
@@ -151,7 +160,7 @@ export async function runCheck(
   const cacheDir = path.join(harnessStateDir(info, 'common'), 'check-cache');
   let key = '';
   if (useCache) {
-    key = cacheKey(info, cfg, base, opts.only);
+    key = cacheKey(info, cfg, base, opts.only, opts.env);
     const f = path.join(cacheDir, `${key}.json`);
     if (existsSync(f)) {
       const saved = JSON.parse(readFileSync(f, 'utf8')) as CheckResult;

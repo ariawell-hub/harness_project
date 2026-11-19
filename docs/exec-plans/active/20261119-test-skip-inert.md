@@ -2,7 +2,7 @@
 id: 20261119-test-skip-inert
 issue: 129 # GitHub Issue 번호
 type: feat # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -49,6 +49,9 @@ claimed_at: 2026-11-19T12:02:12+09:00
 - 2026-11-19: 구현했다. `scripts/commands/check.ts`에 `testInert`(파일 하나의 판정)와 `testSkip`(바뀐 파일 전체의 판정과 이유), `test` 단계 연결, 캐시 키. `scripts/lib/config.ts`에 `testInertPaths`(기본 `[]`, 형식 검증). `scripts/gates/harness-guard.ts`의 `CONFIG_KEYS`에 한 줄. 구현 뒤에는 "이 리포의 설정" 테스트 하나만 실패했고(`harness.config.json`에 목록이 아직 없었다), 목록을 넣은 뒤 25개가 모두 통과했다.
 - 2026-11-19: 문서를 맞췄다. 설계서 v0.7.56(6절 "`test` 건너뛰기", 5절 R4·R7 표, 변경 이력), 절차서 4절, `CHANGELOG`, TD-49(②의 결과와 다시 센 수치), TD-51 등록.
 - 2026-11-19: 첫 `check`는 `bypass-scan`에서 실패했다(`scripts/commands/check.ts`의 판정 결과 필드 이름이 테스트 건너뛰기 옵션과 같은 모양이라 R4 우회로 잡혔다). 필드 이름을 `skippable`로 바꿨다. 탐지 규칙은 건드리지 않았다. `test`는 138.5초 걸려 돌았다(이 변경은 `scripts/`를 바꾸므로 돌아야 맞다).
+- 2026-11-19: `check`가 통과했다(`test` 142.5초, `test-effect`는 두 테스트 파일을 변경 전 코드에서 실패로 확인). 임시 사본에서 실제 명령으로 봤다: 계획 파일만 바꾸면 `– test (건너뜀) (0.0s)`와 이유가 나오고 통과, `docs/note.md`를 함께 바꾸면 판정이 "testInertPaths 밖의 변경 1개"다. 완료 처리하고 초안 PR #130을 올렸다.
+- 2026-11-19: 1라운드 판정(head `6393d02`). `check` 통과(CI에서도 `test`가 돌았다), `harness-guard` "보호 경로 변경 9개: 통과 · 자체 테스트 통과 10"(판정은 main의 정의로 돌아 `testInertPaths` 신호는 아직 없다), `risk-gate` 높음, `review/claude` 승인(지적 없음), `review/codex` 수정 요청(P1 2건, 둘 다 재현됨). F1: 작업 브랜치에서 `test`를 건너뛰고 통과한 결과가 캐시에 남고, 같은 트리·같은 base의 기본 브랜치 `check`가 그 캐시를 재사용한다. F2: 바뀐 파일을 구하는 `git diff`가 실패하면(없는 base) 예외로 `check`가 `test`를 돌리기 전에 멈춘다. 둘 다 맞는 지적이라 받아들인다.
+- 2026-11-19: F1·F2 대응. 테스트를 먼저 더했다(없는 base에서 `test`가 도는지, 건너뛴 결과의 캐시를 `GITHUB_REF`가 기본 브랜치일 때와 기본 브랜치를 체크아웃했을 때 쓰지 않는지, 캐시 키가 갈리는지). 수정 전 12개 가운데 3개 실패. 수정: `testSkip`이 `gitTry`로 목록을 구하고 실패하면 "건너뛰지 않음"을 돌려준다. `cacheKey`에 건너뛰기 판정(`testSkippable`)을 넣었다. 수정 뒤 `check-skip.test.ts`·`harness-guard.test.ts`·`gates.test.ts` 44개 통과. 계획을 `active/`로 되돌려 다시 연다.
 
 ## 의사결정 로그
 
@@ -60,6 +63,8 @@ claimed_at: 2026-11-19T12:02:12+09:00
 - 결정: 프로파일(`profiles/core`, `profiles/web`)에는 키를 넣지 않는다. / 이유: 기본값이 "건너뛰지 않음"이어야 템플릿을 받은 리포의 검사가 조용히 줄지 않는다. 어떤 경로를 테스트가 읽지 않는지는 리포마다 다르다. / 버린 대안: 계획 폴더 둘을 프로파일 기본값으로 넣기.
 - 결정: 기본 브랜치인지는 브랜치 이름과 `GITHUB_REF` 둘로 본다. / 이유: main push의 CI에서 체크아웃이 브랜치인지 분리된 HEAD인지에 기대지 않으려는 것이다(`actions/checkout`의 동작에 묶이지 않는다). 테스트는 `env`를 넣어 CI의 환경 변수와 무관하게 돈다. / 버린 대안: `--ci`에 `--event` 같은 인자를 더해 워크플로가 알려 주기(워크플로 파일을 바꿔야 한다).
 - 결정: 바뀐 파일은 `git diff --no-renames --name-only`로 직접 구한다(`lib/git.ts`의 `changedFiles`를 쓰지 않는다). / 이유: `changedFiles`는 이름 바꾸기를 새 경로 하나로만 돌려준다. `scripts/x.ts`를 `lab/x.ts`로 옮긴 변경이 "`lab/`만 바뀜"으로 보이면 안 된다. `test-effect`도 같은 방식으로 구한다. / 버린 대안: `changedFiles`에 옵션 추가(다른 호출자의 동작을 건드린다).
+- 결정(2라운드): 건너뛴 결과를 캐시에 남기되 캐시 키에 건너뛰기 판정을 넣는다. / 이유: 키가 "같은 트리 + 같은 base"만 보면 브랜치가 달라 판정이 다른 두 상황이 한 결과를 나눠 쓴다. 판정을 키에 넣으면 브랜치 이름과 `GITHUB_REF`를 따로 넣지 않아도 두 상황이 갈린다. / 버린 대안: 건너뛴 결과는 캐시하지 않기(계획만 고친 브랜치에서 `check`를 되풀이할 때 `fmt`·`doc-lint`가 매번 다시 돈다. 판정을 키에 넣는 쪽이 원인을 직접 막는다), 브랜치 이름을 키에 넣기(브랜치마다 캐시가 갈려 재사용이 준다).
+- 결정(2라운드): 바뀐 파일을 구하지 못하면 `test`를 돌린다. / 이유: 모를 때는 건너뛰지 않는 쪽이 안전하고, `test` 단계가 다른 단계의 입력 문제로 멈추면 안 된다. / 버린 대안: 오류로 `check`를 실패시키기(없는 base는 뒤의 `test-effect`·`bypass-scan`이 각자 다룬다).
 
 ## 발견 사항
 

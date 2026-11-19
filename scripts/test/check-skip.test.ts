@@ -143,6 +143,48 @@ test('check(test): 이름 바꾸기와 삭제는 옛 경로로도 센다', async
   assert.deepEqual(shape(await check(rm.root, base2)), RAN);
 });
 
+test('check(test): 바뀐 파일을 구하지 못하면(없는 base) 멈추지 않고 test를 돌린다', async () => {
+  const { root } = repo();
+  write(root, 'plans/p1.md', '# 계획 2\n');
+  const missing = '0123456789abcdef0123456789abcdef01234567';
+  assert.deepEqual(shape(await check(root, missing)), RAN);
+  assert.deepEqual(shape(await check(root, missing, { ci: true })), RAN);
+  const s = testSkip(repoInfo(root), loadConfig(root), {
+    base: missing,
+    committedOnly: false,
+    env: {},
+  });
+  assert.equal(s.skippable, false);
+  assert.match(s.reason, /바뀐 파일을 구하지 못했다/);
+});
+
+test('check 캐시: test를 건너뛴 결과를 기본 브랜치의 check가 재사용하지 않는다', async () => {
+  const { root, base } = repo();
+  write(root, 'plans/p1.md', '# 계획 2\n');
+  commitAll(root, 'plan');
+  const cached = (env: NodeJS.ProcessEnv = {}) =>
+    runCheck(repoInfo(root), loadConfig(root), {
+      base,
+      env,
+      only: ['test'],
+      noRecord: true,
+      quiet: true,
+    });
+  // 작업 브랜치: 건너뛰고 통과한 결과가 캐시에 남는다
+  const first = await cached();
+  assert.deepEqual([first.ok, first.cached, first.results[0].skipped], [true, false, true]);
+  const again = await cached();
+  assert.deepEqual([again.ok, again.cached], [true, true]);
+  // 같은 트리·같은 base라도 기본 브랜치의 판정은 그 결과를 쓰지 않고 test를 돌린다
+  const onMainRef = await cached({ GITHUB_REF: 'refs/heads/main' });
+  assert.deepEqual([onMainRef.ok, onMainRef.cached], [false, false]);
+  sh('git', ['checkout', '-q', 'main'], root);
+  sh('git', ['merge', '-q', '--ff-only', 'feat/x'], root);
+  const onMain = await cached();
+  assert.deepEqual([onMain.ok, onMain.cached], [false, false]);
+  assert.deepEqual(shape(onMain), RAN);
+});
+
 test('testSkip: 판정과 이유를 돌려준다', () => {
   const { root, base } = repo();
   const info = repoInfo(root);
@@ -166,6 +208,11 @@ test('check 캐시 키: testInertPaths가 바뀌면 키가 달라진다', () => 
   const a = cacheKey(info, cfg, base);
   const b = cacheKey(info, { ...cfg, testInertPaths: [...INERT, 'notes/**'] }, base);
   assert.notEqual(a, b);
+  // 건너뛰는 상황과 돌리는 상황은 트리가 같아도 키가 다르다
+  write(root, 'lab/x.json', '{}\n');
+  const skipKey = cacheKey(info, cfg, base, undefined, {});
+  const mainKey = cacheKey(info, cfg, base, undefined, { GITHUB_REF: 'refs/heads/main' });
+  assert.notEqual(skipKey, mainKey);
 });
 
 test('loadConfig: testInertPaths는 없으면 []이고, 리포 안 상대 경로 glob 배열이 아니면 ConfigError다', () => {
