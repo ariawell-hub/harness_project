@@ -48,6 +48,14 @@ export function daysBefore(day: string, n: number): string {
   return dayOf(t - n * DAY_MS);
 }
 
+/**
+ * GitHub 검색의 날짜 범위. 종료일 뒤의 항목이 쌓여도 조회 상한에 닿지 않게 끝을 둔다.
+ * 끝은 하루 넉넉히 잡는다(검색의 날짜 경계 해석에 기대지 않는다). 받은 뒤에 `inPeriod`로 다시 거른다
+ */
+function searchRange(p: Period): string {
+  return `${p.since}..${daysBefore(p.until, -1)}`;
+}
+
 export function parsePeriod(
   since: string | undefined,
   until: string | undefined,
@@ -159,7 +167,7 @@ function capped(what: string, n: number): void {
 
 /** 실행 목록의 한 페이지를 머리 줄(`{"total":N}`)과 실행 줄들로 바꾼다. 줄마다 JSON 하나다 */
 const RUNS_JQ =
-  '({total: .total_count} | tojson), (.workflow_runs[] | {path, event, branch: .head_branch, headSha: .head_sha, status, conclusion, createdAt: .created_at, startedAt: .run_started_at, updatedAt: .updated_at, attempt: .run_attempt} | tojson)';
+  '({total: .total_count} | tojson), (.workflow_runs[] | {id, path, event, branch: .head_branch, headSha: .head_sha, status, conclusion, createdAt: .created_at, startedAt: .run_started_at, updatedAt: .updated_at, attempt: .run_attempt} | tojson)';
 
 const PR_FIELDS =
   'number,headRefName,headRefOid,createdAt,mergedAt,mergeCommit,additions,deletions';
@@ -183,6 +191,7 @@ export function ghSource(o: {
         RUNS_JQ,
       ]);
       const totals = new Set<number>();
+      const ids = new Set<number>();
       const runs: WorkflowRun[] = [];
       for (const line of text.split('\n')) {
         if (!line.trim()) continue;
@@ -192,6 +201,14 @@ export function ghSource(o: {
           totals.add(num(v, 'total'));
           continue;
         }
+        // 읽는 동안 목록이 바뀌면 페이지 경계에서 한 실행이 두 번 오고 다른 실행이 빠질 수 있다.
+        // 그때도 받은 수는 total_count와 같으므로 실행 id로 가린다
+        const id = num(v, 'id');
+        if (ids.has(id))
+          throw new SourceError(
+            `${what}: 같은 실행이 중복으로 왔다. 읽는 동안 목록이 바뀌어 빠진 실행이 있을 수 있다. 다시 실행하라`,
+          );
+        ids.add(id);
         runs.push({
           path: str(v, 'path'),
           event: str(v, 'event'),
@@ -232,7 +249,7 @@ export function ghSource(o: {
             '--base',
             base,
             '--search',
-            `merged:>=${p.since}`,
+            `merged:${searchRange(p)}`,
             '--limit',
             String(LIMIT),
             '--json',
@@ -271,7 +288,7 @@ export function ghSource(o: {
             '--label',
             BUG_LABEL,
             '--search',
-            `created:>=${p.since}`,
+            `created:${searchRange(p)}`,
             '--limit',
             String(LIMIT),
             '--json',

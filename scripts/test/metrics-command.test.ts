@@ -1,7 +1,17 @@
 // metrics 명령(17.2절): 기간 검사 → 쓰기 전 조건 → 자료 읽기 → 계산 → 출력·쓰기. 계획 20261119-metrics step0.
 // 자료를 다 읽지 못했거나 쓰면 안 되는 곳에서는 문서를 바꾸지 않는 것, 읽은 자료가 출력까지 이어지는 것을 본다.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, renameSync } from 'node:fs';
+import {
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { emptyLedger, type Entry, type Ledger } from '../ci/ledger.ts';
@@ -266,7 +276,7 @@ test('자료가 상한에 닿은 ghSource로 --write하면 종료 코드 2이고
   const before = readFileSync(file, 'utf8');
   const lines = [
     JSON.stringify({ total: 1000 }),
-    ...Array.from({ length: 1000 }, () => JSON.stringify(run())),
+    ...Array.from({ length: 1000 }, (_, id) => JSON.stringify({ id, ...run() })),
   ].join('\n');
   const source = ghSource({
     cfg: loadConfig(work),
@@ -325,6 +335,103 @@ test('표식 구간이 없거나 문서가 없으면 --write는 종료 코드 1�
     assert.deepEqual(m.calls, []);
   } finally {
     renameSync(`${file}.bak`, file);
+    freshDoc(work);
+  }
+});
+
+// ── 쓰는 곳은 작업 worktree 안의 일반 파일뿐이다(R3) ──
+
+/** 문서 자리를 비운다(심볼릭 링크면 링크만 지운다) */
+function clearDoc(root: string): string {
+  const file = path.join(root, DOC);
+  rmSync(file, { force: true });
+  return file;
+}
+
+test('--write: 문서가 worktree 밖을 가리키는 심볼릭 링크면 종료 코드 1이고 자료를 읽지 않는다', () => {
+  const { fx, work } = repo();
+  const outside = path.join(fx.root, DOC);
+  const before = readFileSync(outside, 'utf8');
+  assert.notEqual(replaceBlock(before, 'x'), null, '바깥 문서에 표식 구간이 있어야 한다');
+  const file = clearDoc(work);
+  symlinkSync(outside, file);
+  try {
+    const m = mem(BASE);
+    const r = exec(work, m, { write: true });
+    assert.equal(r.code, 1);
+    assert.deepEqual(m.calls, []);
+    assert.match(r.err, /심볼릭 링크/);
+    assert.equal(readFileSync(outside, 'utf8'), before);
+    assert.ok(lstatSync(file).isSymbolicLink());
+  } finally {
+    clearDoc(work);
+    freshDoc(work);
+  }
+});
+
+test('--write: docs 폴더가 worktree 밖을 가리키는 심볼릭 링크면 종료 코드 1이고 자료를 읽지 않는다', () => {
+  const { fx, work } = repo();
+  const outside = path.join(fx.root, DOC);
+  const before = readFileSync(outside, 'utf8');
+  const docs = path.join(work, 'docs');
+  renameSync(docs, `${docs}.real`);
+  symlinkSync(path.join(fx.root, 'docs'), docs);
+  try {
+    const m = mem(BASE);
+    const r = exec(work, m, { write: true });
+    assert.equal(r.code, 1);
+    assert.deepEqual(m.calls, []);
+    assert.match(r.err, /worktree 밖/);
+    assert.equal(readFileSync(outside, 'utf8'), before);
+  } finally {
+    rmSync(docs, { force: true });
+    renameSync(`${docs}.real`, docs);
+    freshDoc(work);
+  }
+});
+
+test('--write: 자료를 읽는 동안 문서가 심볼릭 링크로 바뀌면 쓰지 않는다', () => {
+  const { fx, work } = repo();
+  const outside = path.join(fx.root, DOC);
+  const before = readFileSync(outside, 'utf8');
+  const file = freshDoc(work);
+  const m = mem(BASE);
+  const orig = m.source.bugIssues;
+  m.source.bugIssues = (p) => {
+    rmSync(file, { force: true });
+    symlinkSync(outside, file);
+    return orig(p);
+  };
+  try {
+    const r = exec(work, m, { write: true });
+    assert.equal(r.code, 1);
+    assert.match(r.err, /심볼릭 링크/);
+    assert.equal(readFileSync(outside, 'utf8'), before);
+  } finally {
+    clearDoc(work);
+    freshDoc(work);
+  }
+});
+
+test('--write: 문서가 worktree 밖 파일과 하드 링크로 묶여 있어도 바깥 파일은 바뀌지 않는다', () => {
+  const { fx, work } = repo();
+  const outside = path.join(fx.dir, 'outside.md');
+  writeFileSync(outside, docText('바깥 값'));
+  const file = clearDoc(work);
+  linkSync(outside, file);
+  try {
+    const r = exec(work, mem(BASE), { write: true });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(readFileSync(outside, 'utf8'), docText('바깥 값'));
+    assert.match(readFileSync(file, 'utf8'), /^집계 기간: 2026-11-11 ~ 2026-11-12\(UTC\)/m);
+    assert.ok(!readFileSync(file, 'utf8').includes('바깥 값'));
+    // 임시 파일을 남기지 않는다
+    assert.deepEqual(
+      readdirSync(path.dirname(file)).filter((f) => f.includes('.tmp')),
+      [],
+    );
+  } finally {
+    clearDoc(work);
     freshDoc(work);
   }
 });

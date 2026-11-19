@@ -151,7 +151,10 @@ interface Fake {
   gh: (args: string[]) => string;
 }
 
-const runLine = (over: Partial<WorkflowRun> = {}) => JSON.stringify(run(over));
+let runId = 1000;
+/** 실행 목록 응답의 한 줄. id는 줄마다 다르다(주면 그 값) */
+const runLine = (over: Partial<WorkflowRun> = {}, id = runId++) =>
+  JSON.stringify({ id, ...run(over) });
 
 /** 호출을 기록하고 고정 응답을 돌려주는 gh. runs는 날짜 → 응답 줄 */
 function fakeGh(o: { prs?: unknown; issues?: unknown; runs?: Record<string, string[]> }): Fake {
@@ -217,7 +220,8 @@ test('ghSource.mergedPrs: 기본 브랜치에 병합된 PR을 읽어 형을 바�
   assert.deepEqual(a.slice(0, 2), ['pr', 'list']);
   assert.equal(a[a.indexOf('--state') + 1], 'merged');
   assert.equal(a[a.indexOf('--base') + 1], CFG.github.defaultBranch);
-  assert.equal(a[a.indexOf('--search') + 1], 'merged:>=2026-11-11');
+  // 종료일 뒤의 PR이 쌓여도 상한에 닿지 않게 검색을 기간으로 좁힌다. 끝은 하루 넉넉히 잡고 받은 뒤에 다시 거른다
+  assert.equal(a[a.indexOf('--search') + 1], 'merged:2026-11-11..2026-11-13');
   assert.equal(a[a.indexOf('--limit') + 1], '1000');
 });
 
@@ -255,7 +259,7 @@ test('ghSource.workflowRuns: 진행 중인 실행의 빈 결론은 빈 문자열
     runs: {
       '2026-11-11': [
         JSON.stringify({ total: 1 }),
-        JSON.stringify({ ...run(), status: 'in_progress', conclusion: null }),
+        JSON.stringify({ id: 1, ...run(), status: 'in_progress', conclusion: null }),
       ],
     },
   });
@@ -290,6 +294,26 @@ test('ghSource.workflowRuns: 다 읽었는지 알 수 없으면 SourceError다',
     () => source(fakeGh({ runs: { '2026-11-11': [runLine()] } })).workflowRuns(day),
     SourceError,
   );
+  // 페이지 경계에서 한 실행이 두 번 오고 다른 실행이 빠졌다: 수는 total_count와 같아도 다 읽은 것이 아니다
+  const dup = [
+    JSON.stringify({ total: 3 }),
+    runLine({}, 1),
+    runLine({}, 2),
+    JSON.stringify({ total: 3 }),
+    runLine({ conclusion: 'failure' }, 2),
+  ];
+  assert.throws(
+    () => source(fakeGh({ runs: { '2026-11-11': dup } })).workflowRuns(day),
+    (e: unknown) => e instanceof SourceError && /중복/.test(e.message),
+  );
+  // 실행 id가 없는 줄은 읽지 못한 것이다
+  assert.throws(
+    () =>
+      source(
+        fakeGh({ runs: { '2026-11-11': [JSON.stringify({ total: 1 }), JSON.stringify(run())] } }),
+      ).workflowRuns(day),
+    SourceError,
+  );
   // 999건은 읽는다
   assert.equal(
     source(fakeGh({ runs: { '2026-11-11': lines(999, 999) } })).workflowRuns(day).length,
@@ -320,7 +344,7 @@ test('ghSource.bugIssues: bug 라벨 Issue를 읽고 기간 밖은 뺀다', () =
   assert.deepEqual(a.slice(0, 2), ['issue', 'list']);
   assert.equal(a[a.indexOf('--label') + 1], 'bug');
   assert.equal(a[a.indexOf('--state') + 1], 'all');
-  assert.equal(a[a.indexOf('--search') + 1], 'created:>=2026-11-11');
+  assert.equal(a[a.indexOf('--search') + 1], 'created:2026-11-11..2026-11-13');
 });
 
 test('ghSource: gh·ledger 함수의 예외와 읽지 못한 응답은 SourceError가 된다', () => {
