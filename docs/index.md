@@ -31,6 +31,7 @@ review_cycle: on-change
 - [하네스 코드 구조](harness/architecture.md) — 레이어·모듈·상태 위치
 - [하네스 변경 이력](harness/CHANGELOG.md)
 - [운영 전환 시험 결과](../lab/ops-transition/README.md) — 테스트 리포(체크리스트 5)와 하네스 리포(체크리스트 6, `results/target-repo.json`)에서 확인한 사례별 기록(`results/`)과 검사 명령
+- [파일럿 착수 준비 실물 확인](../lab/pilot-prep/README.md) — 웹 프로파일의 `test-effect` 설정을 실제 Vitest로 돌린 사례별 결과(`results/`)와 검사 명령
 
 ## 데이터 (지시가 아님)
 
