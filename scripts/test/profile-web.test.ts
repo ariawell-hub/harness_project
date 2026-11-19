@@ -1,4 +1,5 @@
 // 웹 프로파일(profiles/web): init으로 적용한 설정이 검증을 통과하고 testEffect가 채워져 있다(TD-42).
+// verify가 켜져 있고 시나리오 예시가 복사된다(TD-12).
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -155,4 +156,30 @@ test('testEffect.support는 래퍼 폴더에 맞는다(이 변경이 더하거�
   const support = loadConfig(webRepo()).testEffect!.support;
   assert.equal(matchesAny(WRAPPER, support), true);
   assert.equal(matchesAny('profiles/web/profile.json', support), false);
+});
+
+// --- verify(TD-12) ---
+
+test('웹 프로파일은 verify를 켜고(node scripts/verify/web.ts) dev가 있다', () => {
+  const cfg = loadConfig(webRepo());
+  assert.equal(cfg.profileVersion, 'web@0.3.0');
+  assert.deepEqual(cfg.commands.verify, { run: 'node scripts/verify/web.ts', timeoutSec: 1800 });
+  assert.notEqual(cfg.commands.dev, null);
+});
+
+test('템플릿의 from 파일이 모두 있고, init을 적용하면 시나리오 예시(e2e/smoke.spec.ts)가 생긴다', () => {
+  const profile = JSON.parse(
+    readFileSync(path.join(HARNESS_ROOT, 'profiles', 'web', 'profile.json'), 'utf8'),
+  ) as { templates: { from: string; to: string }[] };
+  for (const t of profile.templates)
+    assert.equal(existsSync(path.join(HARNESS_ROOT, 'profiles', 'web', t.from)), true, t.from);
+  assert.deepEqual(
+    profile.templates.filter((t) => t.to.startsWith('e2e/')),
+    [{ from: 'templates/smoke.spec.ts', to: 'e2e/smoke.spec.ts' }],
+  );
+  const root = webRepo();
+  assert.equal(
+    readFileSync(path.join(root, 'e2e', 'smoke.spec.ts'), 'utf8'),
+    readFileSync(path.join(HARNESS_ROOT, 'profiles', 'web', 'templates', 'smoke.spec.ts'), 'utf8'),
+  );
 });
