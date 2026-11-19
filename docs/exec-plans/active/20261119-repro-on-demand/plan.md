@@ -67,6 +67,10 @@ claimed_at: 2026-11-19T19:40:10+09:00 # new-task가 채운다
 - 2026-11-19: 계획 검증 1라운드(head `50943aa`). claude 승인(지적 없음), codex 수정 요청(P1 1, P2 1). 둘 다 받아들였다.
   - F1(P1): 제작자에게 요청하기 전에 패치와 새 구조 테스트를 함께 확인하는 단계가 step에 없었다. 패치에 출력 줄이 빠져 있어도 push 1의 `check`와 트리 비교는 통과하고, 누락은 제작자가 커밋한 뒤에야 드러난다. `docs/SECURITY.md`의 절차 1번이 요구하는 확인이기도 하다. step0의 2번에 넣었다: 구조 테스트를 먼저 고쳐 실패를 보고, 워크플로를 고쳐 AC가 통과하는 상태의 diff를 패치로 저장한다(패치는 통과를 확인한 그 트리에서 나온다).
   - F2(P2): 수용 기준 5가 어느 기록을 어느 PR의 결과로 고치는지 모호했다. 둘로 나눠 적었다(`docs/SECURITY.md`는 이 PR의 G1 중간 head, `lab/workflow-change/result.json`은 #139의 자동 병합).
+- 2026-11-19: 계획 검증 2라운드(head `5d4e0a0`). claude·codex 승인(지적 없음). 원장: `계획 검증(G1): 해시 3c99817ee7af · 승인: claude, codex`. 여기서부터 구현이다.
+- 2026-11-19: step0의 1번. `scripts/test/scan-output.test.ts`를 먼저 뒀다(접은 #136의 초안을 참고했다). `hasRepro`만 넣은 상태에서 9개 가운데 4개가 실패했다(두 명령의 `repro=true`·`repro=false` 경우: 기대한 `['repro=true']` 대신 `[]`). 읽지 못한 판정은 돌리는 쪽으로 내는 것을 시험할 수 있게 값 계산을 `reproOutputValue(verdict: unknown)`으로 `scripts/ci/repro.ts`에 두고 테스트를 더했다(실패 확인: export 없음). 명령에 출력을 넣은 뒤 `scan-output`·`repro`·`claude-scan`·`codex-scan` 테스트 36개가 통과했다.
+- 2026-11-19: step0의 2번. `scripts/test/ci.test.ts`의 재현 job 테스트를 먼저 고쳤다. 지금 워크플로에서 AC 명령이 78개 가운데 1개 실패했다("judge-\*.yml: 재현 job은 …": 새 조건의 정규식이 `if: needs.judge.outputs.verdict != ''`에 맞지 않는다). 워크플로 두 파일을 고친 트리에서 AC 78개가 통과했고, 그 트리의 `git diff -- .github/workflows`를 `lab/repro-on-demand/workflows.patch`로 저장했다(두 파일, 각각 3줄 추가 1줄 삭제). 같은 트리에서 `check`도 통과했다(`test` 153.0초. test-effect: `ci.test.ts`는 `effective(base에서 단언 실패)`, `scan-output.test.ts`는 `effective(base에서 실패(단언 실패 아님: 모듈 없음 등))`). 그다음 워크플로를 되돌리고(`git apply -R`) `ci.test.ts`의 변경은 리포 밖 파일로 옮겼다. 되돌린 트리에 패치가 그대로 적용되는 것을 확인했다(`git apply --check` 종료 코드 0).
+- 2026-11-19: step0의 3번. 설계서 v0.7.58(10.2절 (3), 10.4절 "재현 job이 도는 조건"), `CHANGELOG`, TD-49 ④, `lab/repro-on-demand/README.md`.
 
 ## 의사결정 로그
 
