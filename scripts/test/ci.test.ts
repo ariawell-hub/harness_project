@@ -711,6 +711,21 @@ test('judge-*.yml: 재현 job은 비밀·environment·쓰기 권한 없이 base 
   }
 });
 
+test('judge-*.yml: 머리 주석이 모든 job을 설명한다', () => {
+  for (const wf of [JUDGE_CLAUDE, JUDGE_CODEX]) {
+    // 머리 주석: 파일 맨 위에서 `name:` 앞까지의 `#` 줄
+    const head = wf.slice(0, wf.indexOf('\nname:'));
+    for (const job of jobs(wf).keys()) {
+      // `# repro:`처럼 한 job을 적은 줄, 또는 `# failed·ci-failure:`처럼 여러 job을 함께 적은 줄
+      assert.match(
+        head,
+        new RegExp(`^# (?:[a-z-]+·)*${job}(?:·[a-z-]+)*:`, 'm'),
+        `머리 주석에 ${job} job의 설명이 없다`,
+      );
+    }
+  }
+});
+
 test('reproJobViolations: 재현 job에 environment·비밀·쓰기 권한이 있거나 권한을 적지 않으면 잡는다', () => {
   const wf = (body: string) =>
     `name: x\njobs:\n  repro:\n${body}\n  other:\n    environment: recorder\n`;
