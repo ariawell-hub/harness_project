@@ -134,6 +134,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - `lab/pilot-prep/check-results.ts`의 테스트(`lab/pilot-prep/test/`)를 더했다(어긋난 결과 파일을 통과시키지 않는지 8개).
   - 남은 것: `CHANGELOG`·TD-42 행·설계서 0절 변경 이력(TD-53 병합 뒤 `origin/main`을 병합하고 더한다), `check` → `complete-step` → push → `pr-ready`.
 - 2026-11-19: TD-53 PR(#141)이 병합됐다(`bd18dd0`). `origin/main`을 병합하고(충돌 없음) `CHANGELOG` 한 줄, TD-42 행의 상태 칸, 설계서 0절 변경 이력(v0.7.58)을 더했다. 열린 다른 PR은 없다.
+- 2026-11-19T20:01:40+09:00 step0 재작업: 구현 판정 1라운드의 지적 F19·F20 대응(변경 전 코드에 래퍼가 없는 경우, 실물 확인의 Vitest 버전 고정)
 
 ## 의사결정 로그
 
