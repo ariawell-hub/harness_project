@@ -2,6 +2,7 @@
 // 자료를 다 읽지 못했거나 쓰면 안 되는 곳에서는 문서를 바꾸지 않는 것, 읽은 자료가 출력까지 이어지는 것을 본다.
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -32,6 +33,9 @@ import {
   type WorkflowRun,
 } from '../metrics/source.ts';
 import { HARNESS_ROOT, commitAll, makeFixture, sh, write, type Fixture } from './helpers.ts';
+
+// --write는 다른 사용자가 쓸 수 있는 폴더에서 거부한다. fixture 폴더의 권한이 실행 환경의 umask에 따라 달라지지 않게 한다
+process.umask(0o022);
 
 const DOC = 'docs/QUALITY_SCORE.md';
 const CHECK = '.github/workflows/check.yml';
@@ -570,34 +574,76 @@ test('--write: 쓰기가 도중에 실패하거나 진행되지 않으면 원본
   }
 });
 
-test('--write: 쓰는 동안 임시 파일 이름이 다른 파일로 바뀌면 그 파일로 원본을 덮지 않는다', () => {
+test('--write: 쓰는 동안 임시 파일 이름이 다른 파일로 바뀌면 원본을 덮지 않고 그 파일도 지우지 않는다', () => {
   const { work } = repo();
   const file = freshDoc(work);
   const before = readFileSync(file, 'utf8');
   const dir = path.dirname(file);
-  let swapped = false;
+  let theirs = '';
   const r = exec(work, mem(BASE), {
     write: true,
     writeBytes: (fd, buf, off, len) => {
-      if (!swapped) {
-        // 다른 프로세스가 임시 파일 이름을 빈 파일로 바꿔 놓는다
+      if (!theirs) {
+        // 다른 프로세스가 임시 파일 이름을 자기 파일로 바꿔 놓는다
         const [tmp] = readdirSync(dir).filter((f) => f.includes('.tmp'));
         assert.ok(tmp, '임시 파일이 없다');
-        rmSync(path.join(dir, tmp));
-        writeFileSync(path.join(dir, tmp), '');
-        swapped = true;
+        theirs = path.join(dir, tmp);
+        rmSync(theirs);
+        writeFileSync(theirs, '다른 프로세스의 내용\n');
       }
       return writeSync(fd, buf, off, len);
     },
   });
-  assert.ok(swapped);
-  assert.equal(r.code, 1);
-  assert.match(r.err, /임시 파일/);
-  assert.equal(readFileSync(file, 'utf8'), before);
-  assert.deepEqual(
-    readdirSync(dir).filter((f) => f.includes('.tmp')),
-    [],
-  );
+  try {
+    assert.ok(theirs);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /임시 파일/);
+    assert.equal(readFileSync(file, 'utf8'), before);
+    // 이번 실행이 만든 파일이 아니다. 지우지 않는다
+    assert.equal(readFileSync(theirs, 'utf8'), '다른 프로세스의 내용\n');
+  } finally {
+    if (theirs) rmSync(theirs, { force: true });
+  }
+});
+
+test('--write: 문서 폴더나 worktree 루트를 다른 사용자가 쓸 수 있으면 쓰지 않는다', () => {
+  const { work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  for (const dir of [path.dirname(file), work]) {
+    const m = mem(BASE);
+    chmodSync(dir, 0o775);
+    try {
+      const r = exec(work, m, { write: true });
+      assert.equal(r.code, 1, dir);
+      assert.match(r.err, /다른 사용자가 쓸 수 있다/, dir);
+      assert.match(r.err, /chmod go-w/, dir);
+      // 자료를 읽기 전에 멈춘다
+      assert.deepEqual(m.calls, [], dir);
+      assert.equal(readFileSync(file, 'utf8'), before, dir);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+  }
+  // 자료를 읽는 동안 권한이 바뀐 경우: 쓰기 직전에 다시 본다
+  const m = mem(BASE);
+  const orig = m.source.bugIssues;
+  m.source.bugIssues = (p) => {
+    chmodSync(path.dirname(file), 0o777);
+    return orig(p);
+  };
+  try {
+    const r = exec(work, m, { write: true });
+    assert.equal(r.code, 1);
+    assert.match(r.err, /다른 사용자가 쓸 수 있다/);
+    assert.equal(readFileSync(file, 'utf8'), before);
+    assert.deepEqual(
+      readdirSync(path.dirname(file)).filter((f) => f.includes('.tmp')),
+      [],
+    );
+  } finally {
+    chmodSync(path.dirname(file), 0o755);
+  }
 });
 
 test('--write: 쓰는 동안 문서 폴더가 worktree 밖으로 옮겨지면 그곳의 문서를 바꾸지 않는다', () => {
