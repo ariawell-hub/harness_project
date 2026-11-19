@@ -70,7 +70,12 @@ claimed_at: 2026-11-19T19:40:10+09:00 # new-task가 채운다
 - 2026-11-19: 계획 검증 2라운드(head `5d4e0a0`). claude·codex 승인(지적 없음). 원장: `계획 검증(G1): 해시 3c99817ee7af · 승인: claude, codex`. 여기서부터 구현이다.
 - 2026-11-19: step0의 1번. `scripts/test/scan-output.test.ts`를 먼저 뒀다(접은 #136의 초안을 참고했다). `hasRepro`만 넣은 상태에서 9개 가운데 4개가 실패했다(두 명령의 `repro=true`·`repro=false` 경우: 기대한 `['repro=true']` 대신 `[]`). 읽지 못한 판정은 돌리는 쪽으로 내는 것을 시험할 수 있게 값 계산을 `reproOutputValue(verdict: unknown)`으로 `scripts/ci/repro.ts`에 두고 테스트를 더했다(실패 확인: export 없음). 명령에 출력을 넣은 뒤 `scan-output`·`repro`·`claude-scan`·`codex-scan` 테스트 36개가 통과했다.
 - 2026-11-19: step0의 2번. `scripts/test/ci.test.ts`의 재현 job 테스트를 먼저 고쳤다. 지금 워크플로에서 AC 명령이 78개 가운데 1개 실패했다("judge-\*.yml: 재현 job은 …": 새 조건의 정규식이 `if: needs.judge.outputs.verdict != ''`에 맞지 않는다). 워크플로 두 파일을 고친 트리에서 AC 78개가 통과했고, 그 트리의 `git diff -- .github/workflows`를 `lab/repro-on-demand/workflows.patch`로 저장했다(두 파일, 각각 3줄 추가 1줄 삭제). 같은 트리에서 `check`도 통과했다(`test` 153.0초. test-effect: `ci.test.ts`는 `effective(base에서 단언 실패)`, `scan-output.test.ts`는 `effective(base에서 실패(단언 실패 아님: 모듈 없음 등))`). 그다음 워크플로를 되돌리고(`git apply -R`) `ci.test.ts`의 변경은 리포 밖 파일로 옮겼다. 되돌린 트리에 패치가 그대로 적용되는 것을 확인했다(`git apply --check` 종료 코드 0).
-- 2026-11-19: step0의 3번. 설계서 v0.7.58(10.2절 (3), 10.4절 "재현 job이 도는 조건"), `CHANGELOG`, TD-49 ④, `lab/repro-on-demand/README.md`.
+- 2026-11-19: step0의 3번. 설계서(10.2절 (3), 10.4절 "재현 job이 도는 조건"), `CHANGELOG`, TD-49 ④, `lab/repro-on-demand/README.md`.
+- 2026-11-19: step0의 4번(push 1, head `919ae32`). `check` 통과(`test` 158.1초). 판정: claude·codex 승인(지적 없음), `harness-guard` 통과(보호 경로 변경 5개, 자체 테스트 10개). Issue #143에 제작자 작업을 요청했다(기준 커밋 `919ae32`).
+- 2026-11-19: 제작자가 GitHub 웹에서 커밋 둘을 올렸다: `43187c6`(`judge-claude.yml`, 12:04:58Z), `35c2d94`(`judge-codex.yml`, 12:05:36Z). step0의 5번: 기준 커밋 `919ae32`에 패치를 적용한 트리와 받은 head의 트리가 같다(둘 다 `604a1a5660d1`). 받은 head에서 `ci.test.ts`는 34개 가운데 1개 실패했고(옛 조건 단언), 옮겨 둔 구조 테스트 변경을 적용하니 AC 78개가 통과했다.
+- 2026-11-19: 제작자 커밋만 올라간 head의 CI. 첫 커밋(`43187c6`)의 `check`와 `gates`는 둘째 커밋으로 취소됐다. 둘째 커밋(`35c2d94`)의 `check`(실행 44520682808)는 `test`에서 실패했다(12:06:02~12:15:45Z). 그 뒤 판정 워크플로의 CI 실패 기록이 원장에 한 줄을 남겼고(`CI 실패 기록: 35c2d944fb7f`), 검증자 판정은 돌지 않았다. `gates`는 돌았다(`harness-guard`: 보호 경로 변경 7개 통과, 자체 테스트 10개 통과). 무엇이 기록되는지 보려고 봇의 push를 `check`가 끝날 때까지 미뤘다.
+- 2026-11-19: 그사이 main에 #142가 병합돼(`bc224b7`) 세 파일이 충돌했다. `origin/main`을 병합해 풀었다: main의 설계서 v0.7.58(#142) 뒤에 이 PR의 항목을 v0.7.59로 두고, 기술 부채 표는 main의 표에 이 PR의 TD-49 행을 얹었다(공백을 빼면 main과 다른 줄은 TD-49 행뿐이다).
+- 2026-11-19: step0의 6번. 구조 테스트를 커밋했다. `docs/SECURITY.md` "워크플로 변경 절차"에 계획 검증을 받는 계획에서의 순서를 해 본 대로 적고("해 보지 않은 것"에서 뺐다), `lab/workflow-change/result.json`의 `bot-enables-auto-merge`를 #139의 결과로 채웠다.
 
 ## 의사결정 로그
 
