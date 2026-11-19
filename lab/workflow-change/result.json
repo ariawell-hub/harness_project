@@ -1,6 +1,6 @@
 {
   "item": "workflow-change-procedure",
-  "summary": "운영 단계(봇 토큰에 workflow 권한 없음)에서 워크플로 파일을 바꾸는 절차를 주석 한 줄로 해 본 결과다. 제작자가 봇의 브랜치에 워크플로 커밋을 GitHub 웹으로 먼저 올렸고, 봇이 그 위에 구조 테스트를 올린 push가 받아들여졌다. 자동 병합과 병합 뒤의 관찰은 PR이 병합된 뒤 Issue #139에 남긴다.",
+  "summary": "운영 단계(봇 토큰에 workflow 권한 없음)에서 워크플로 파일을 바꾸는 절차를 주석 한 줄로 해 본 결과다. 제작자가 봇의 브랜치에 워크플로 커밋을 GitHub 웹으로 먼저 올렸고, 봇이 그 위에 구조 테스트를 올린 push가 받아들여졌다. 그 PR(#141)은 봇이 켠 자동 병합으로 병합됐다.",
   "cases": [
     {
       "name": "owner-commit-first",
@@ -29,9 +29,12 @@
     {
       "name": "bot-enables-auto-merge",
       "expected": "워크플로 변경이 든 PR의 자동 병합을 봇이 켤 수 있다. 안 되면 제작자가 승인 뒤 Squash 병합한다",
-      "observed": "이 파일을 올리는 시점에는 아직 하지 않았다. PR이 병합된 뒤 Issue #139에 결과를 남긴다.",
-      "verdict": "n/a",
-      "evidence": []
+      "observed": "PR #141(워크플로 파일 1개의 변경 포함)에서 봇이 2026-11-19T10:02:39Z에 gh pr merge 141 --auto --squash를 실행했고 종료 코드 0이었다(자동 병합을 켠 계정 ariawell247). 제작자(ariawell-hub)가 10:34:11Z에 head e9fa1a4047d9를 승인했고, gates가 다시 돈 뒤 10:36:12Z에 병합됐다(병합 커밋 bd18dd082c5e, 병합 주체 ariawell247). 제작자의 수동 병합은 필요 없었다. 이 항목은 병합 뒤 Issue #143의 PR에서 채웠다.",
+      "verdict": "pass",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/pull/141",
+        "https://github.com/ariawell-hub/harness_project/issues/139#issuecomment-7006670919"
+      ]
     }
   ]
 }

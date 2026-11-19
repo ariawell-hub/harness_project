@@ -1,0 +1,11 @@
+{
+  "plan": "20261119-repro-on-demand",
+  "steps": [
+    {
+      "step": 0,
+      "name": "repro-on-demand",
+      "status": "completed",
+      "completed_at": "2026-11-19T21:21:23+09:00"
+    }
+  ]
+}

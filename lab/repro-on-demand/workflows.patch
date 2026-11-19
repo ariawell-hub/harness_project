@@ -1,0 +1,44 @@
+diff --git a/.github/workflows/judge-claude.yml b/.github/workflows/judge-claude.yml
+index f3f5066..e0b929f 100644
+--- a/.github/workflows/judge-claude.yml
++++ b/.github/workflows/judge-claude.yml
+@@ -115,6 +115,7 @@ jobs:
+       contents: read
+     outputs:
+       verdict: ${{ steps.scan.outputs.verdict }}
++      repro: ${{ steps.scan.outputs.repro }}
+     steps:
+       - name: main 정의 체크아웃 (프롬프트·스키마·스크립트, github.sha)
+         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+@@ -198,7 +199,8 @@ jobs:
+   repro:
+     name: repro
+     needs: [plan, judge]
+-    if: needs.judge.outputs.verdict != ''
++    # 재현 테스트가 붙은 지적이 있을 때만 돈다. judge의 유출 검사 단계가 repro 출력으로 정하고, 값이 없으면 돈다(Issue #143)
++    if: needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
+     # PR 코드를 실행한다: 비밀·environment·쓰기 권한이 없다(10.4절). 결과는 조작될 수 있는 값으로 다룬다
+diff --git a/.github/workflows/judge-codex.yml b/.github/workflows/judge-codex.yml
+index 8ea235f..2b0721d 100644
+--- a/.github/workflows/judge-codex.yml
++++ b/.github/workflows/judge-codex.yml
+@@ -145,6 +145,7 @@ jobs:
+       contents: read
+     outputs:
+       verdict: ${{ steps.scan.outputs.verdict }}
++      repro: ${{ steps.scan.outputs.repro }}
+       sealed: ${{ steps.seal.outputs.sealed }}
+       key_id: ${{ steps.seal.outputs.key_id }}
+     steps:
+@@ -305,7 +306,8 @@ jobs:
+   repro:
+     name: repro
+     needs: [plan, judge]
+-    if: needs.judge.outputs.verdict != ''
++    # 재현 테스트가 붙은 지적이 있을 때만 돈다. judge의 유출 검사 단계가 repro 출력으로 정하고, 값이 없으면 돈다(Issue #143)
++    if: needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
+     # PR 코드를 실행한다: 비밀·environment·쓰기 권한이 없다(10.4절). 결과는 조작될 수 있는 값으로 다룬다
