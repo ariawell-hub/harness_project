@@ -475,12 +475,13 @@ test('--write: 폴더를 확인한 뒤에 docs가 바깥을 가리키게 바뀌�
   const { fx, work } = repo();
   const outside = path.join(fx.root, DOC);
   const before = readFileSync(outside, 'utf8');
-  freshDoc(work);
+  const original = readFileSync(freshDoc(work), 'utf8');
   const docs = path.join(work, 'docs');
   const cwd = process.cwd();
   let swapped = false;
   try {
-    // 임시 파일을 연 직후(첫 쓰기 직전)에 경로를 바꿔치기한다. 작업은 확인한 폴더에 고정돼 있어야 한다
+    // 임시 파일을 연 직후(첫 쓰기 직전)에 경로를 바꿔치기한다. 쓰기는 확인한 폴더에 묶여 있어 바깥으로 가지 않고,
+    // 폴더가 바뀐 것을 알아채 어느 쪽 문서도 바꾸지 않는다
     const r = exec(work, mem(BASE), {
       write: true,
       writeBytes: (fd, buf, off, len) => {
@@ -493,17 +494,15 @@ test('--write: 폴더를 확인한 뒤에 docs가 바깥을 가리키게 바뀌�
       },
     });
     assert.ok(swapped);
-    assert.equal(r.code, 0, r.err);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /worktree 밖/);
     assert.equal(readFileSync(outside, 'utf8'), before);
-    assert.deepEqual(
-      readdirSync(path.join(fx.root, 'docs')).filter((f) => f.includes('.tmp')),
-      [],
-    );
-    // 쓴 곳은 확인했던 폴더(지금은 이름이 바뀌었다)다
-    assert.match(
-      readFileSync(path.join(`${docs}.real`, 'QUALITY_SCORE.md'), 'utf8'),
-      /^집계 기간: 2026-11-11 ~ 2026-11-12\(UTC\)/m,
-    );
+    assert.equal(readFileSync(path.join(`${docs}.real`, 'QUALITY_SCORE.md'), 'utf8'), original);
+    for (const d of [path.join(fx.root, 'docs'), `${docs}.real`])
+      assert.deepEqual(
+        readdirSync(d).filter((f) => f.includes('.tmp')),
+        [],
+      );
     assert.equal(process.cwd(), cwd, '작업 폴더를 되돌리지 않았다');
   } finally {
     if (swapped) {
@@ -568,6 +567,70 @@ test('--write: 쓰기가 도중에 실패하거나 진행되지 않으면 원본
       `사례 ${i}: 임시 파일이 남았다`,
     );
     assert.equal(process.cwd(), cwd);
+  }
+});
+
+test('--write: 쓰는 동안 임시 파일 이름이 다른 파일로 바뀌면 그 파일로 원본을 덮지 않는다', () => {
+  const { work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  const dir = path.dirname(file);
+  let swapped = false;
+  const r = exec(work, mem(BASE), {
+    write: true,
+    writeBytes: (fd, buf, off, len) => {
+      if (!swapped) {
+        // 다른 프로세스가 임시 파일 이름을 빈 파일로 바꿔 놓는다
+        const [tmp] = readdirSync(dir).filter((f) => f.includes('.tmp'));
+        assert.ok(tmp, '임시 파일이 없다');
+        rmSync(path.join(dir, tmp));
+        writeFileSync(path.join(dir, tmp), '');
+        swapped = true;
+      }
+      return writeSync(fd, buf, off, len);
+    },
+  });
+  assert.ok(swapped);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /임시 파일/);
+  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.deepEqual(
+    readdirSync(dir).filter((f) => f.includes('.tmp')),
+    [],
+  );
+});
+
+test('--write: 쓰는 동안 문서 폴더가 worktree 밖으로 옮겨지면 그곳의 문서를 바꾸지 않는다', () => {
+  const { fx, work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  const docs = path.join(work, 'docs');
+  const moved = path.join(fx.dir, 'moved-docs');
+  const cwd = process.cwd();
+  let swapped = false;
+  try {
+    const r = exec(work, mem(BASE), {
+      write: true,
+      writeBytes: (fd, buf, off, len) => {
+        if (!swapped) {
+          renameSync(docs, moved);
+          swapped = true;
+        }
+        return writeSync(fd, buf, off, len);
+      },
+    });
+    assert.ok(swapped);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /worktree 밖/);
+    assert.equal(readFileSync(path.join(moved, 'QUALITY_SCORE.md'), 'utf8'), before);
+    assert.deepEqual(
+      readdirSync(moved).filter((f) => f.includes('.tmp')),
+      [],
+    );
+    assert.equal(process.cwd(), cwd);
+  } finally {
+    if (swapped) renameSync(moved, docs);
+    freshDoc(work);
   }
 });
 

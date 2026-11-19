@@ -47,10 +47,13 @@ const first = (e: unknown) => (e instanceof Error ? e.message : String(e)).split
 
 /** 쓸 수 없는 문서. 메시지는 "무엇 + 고치는 법"이다 */
 class DocError extends Error {}
+/** 문서를 바꾼 직후의 확인이 어긋났다. 문서가 이미 바뀌었을 수 있다 */
+class AfterWriteError extends Error {}
 
 const DOC_DIR = path.dirname(METRICS_DOC);
 const DOC_NAME = path.basename(METRICS_DOC);
 const NO_DOC = `${METRICS_DOC}가 없다. 문서를 만들고 표식 구간을 넣은 뒤 다시 실행하라`;
+const OUTSIDE = `${DOC_DIR} 폴더가 작업 worktree 밖을 가리킨다(심볼릭 링크이거나 옮겨졌다). worktree 밖의 파일은 고치지 않는다(R3). 폴더를 실제 폴더로 되돌려라`;
 const DOC_IS_LINK = `${METRICS_DOC}가 심볼릭 링크다. 링크가 가리키는 곳은 고치지 않는다(R3). 일반 파일로 바꿔라`;
 // Windows에는 이 플래그들이 없다(undefined). 그때는 0이다
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
@@ -68,7 +71,7 @@ const samePath = (a: string, b: string) =>
  * 그래서 먼저 폴더로 들어가고, 들어온 폴더의 실제 경로(`process.cwd()`는 커널이 아는 경로를 돌려준다)가
  * worktree 안의 그 폴더인지 본다. 그 뒤의 상대 이름 작업은 경로가 아니라 들어온 폴더 자체에 묶인다
  */
-function inDocDir<T>(root: string, fn: () => T): T {
+function inDocDir<T>(root: string, fn: (inside: () => boolean) => T): T {
   const expected = path.join(realpathSync(root), DOC_DIR);
   const prev = process.cwd();
   try {
@@ -76,12 +79,15 @@ function inDocDir<T>(root: string, fn: () => T): T {
   } catch {
     throw new DocError(NO_DOC);
   }
+  // 지금 있는 폴더가 여전히 worktree 안의 그 폴더인가. Node는 process.cwd()를 기억해 두므로
+  // chdir('.')로 그 기억을 지우고 커널에 다시 묻는다(폴더가 통째로 옮겨졌으면 옮겨진 경로가 나온다)
+  const inside = () => {
+    process.chdir('.');
+    return samePath(process.cwd(), expected);
+  };
   try {
-    if (!samePath(process.cwd(), expected))
-      throw new DocError(
-        `${DOC_DIR} 폴더가 작업 worktree 밖을 가리킨다(심볼릭 링크). worktree 밖의 파일은 고치지 않는다(R3). 폴더를 실제 폴더로 되돌려라`,
-      );
-    return fn();
+    if (!inside()) throw new DocError(OUTSIDE);
+    return fn(inside);
   } finally {
     try {
       process.chdir(prev);
@@ -134,34 +140,50 @@ export function writeAll(fd: number, buf: Uint8Array, write: WriteBytes): void {
  * 임시 파일을 새로 만들어(`wx`) 끝까지 쓰고, 크기를 확인하고, 디스크에 내린 뒤에만 이름을 바꿔 덮는다.
  * - 그 자리의 것이 심볼릭 링크로 바뀌었거나 다른 파일과 하드 링크로 묶여 있어도 바뀌는 것은 이 폴더 안의 이름뿐이다
  * - 쓰기·닫기가 실패하거나 일부만 쓰였으면 원본은 그대로이고 임시 파일은 지운다
+ * - 이름을 바꾸기 직전에, 임시 파일 이름이 아직 방금 쓴 그 파일이고 이 폴더가 아직 worktree 안의 그 폴더인지 본다.
+ *   쓰는 동안 다른 프로세스가 이름이나 폴더를 바꿔 놓았으면 원본을 덮지 않는다.
+ *   확인과 이름 바꾸기 사이의 틈은 남는다(파일 디스크립터로 이름을 바꾸는 API가 없다). 그래서 직후에 한 번 더 보고 어긋나면 실패로 알린다
  */
-function replaceDocHere(text: string, mode: number, write: WriteBytes): void {
+function replaceDocHere(
+  text: string,
+  mode: number,
+  write: WriteBytes,
+  inside: () => boolean,
+): void {
   const buf = Buffer.from(text, 'utf8');
   const tmp = `.${DOC_NAME}.${process.pid}.tmp`;
   const fd = openSync(tmp, 'wx', mode);
   let renamed = false;
+  let failed = true;
   try {
-    let closed = false;
-    try {
-      writeAll(fd, buf, write);
-      const size = fstatSync(fd).size;
-      if (size !== buf.length)
-        throw new Error(`임시 파일의 크기가 다르다(${size}/${buf.length}바이트)`);
-      fsyncSync(fd);
-      closed = true;
-      closeSync(fd);
-    } finally {
-      if (!closed) {
-        try {
-          closeSync(fd);
-        } catch {
-          // 앞선 오류를 그대로 올린다
-        }
-      }
-    }
+    writeAll(fd, buf, write);
+    const mine = fstatSync(fd);
+    if (mine.size !== buf.length)
+      throw new Error(`임시 파일의 크기가 다르다(${mine.size}/${buf.length}바이트)`);
+    fsyncSync(fd);
+    const isMine = (name: string) => {
+      const st = lstatSync(name, { throwIfNoEntry: false });
+      return !!st && st.dev === mine.dev && st.ino === mine.ino;
+    };
+    if (!inside()) throw new DocError(OUTSIDE);
+    if (!isMine(tmp))
+      throw new Error(
+        '임시 파일이 방금 쓴 파일이 아니다(다른 프로세스가 같은 폴더를 고치고 있다). 그 프로세스를 멈추고 다시 실행하라',
+      );
     renameSync(tmp, DOC_NAME);
     renamed = true;
+    if (!isMine(DOC_NAME) || !inside())
+      throw new AfterWriteError(
+        `${METRICS_DOC}를 바꾼 직후에 보니 방금 쓴 파일이 아니거나 폴더가 옮겨졌다(다른 프로세스가 같은 폴더를 고치고 있다). 문서가 바뀌었을 수 있다. git diff로 확인하고 그 프로세스를 멈춘 뒤 다시 실행하라`,
+      );
+    failed = false;
   } finally {
+    try {
+      closeSync(fd);
+    } catch (e) {
+      // 쓴 내용은 이미 디스크에 내렸다(fsync). 앞선 오류가 없을 때만 닫기 오류를 올린다
+      if (!failed) throw e;
+    }
     if (!renamed) {
       try {
         unlinkSync(tmp);
@@ -220,7 +242,7 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
       return 1;
     }
     try {
-      if (replaceBlock(inDocDir(info.root, readDocHere).text, '') === null)
+      if (replaceBlock(inDocDir(info.root, () => readDocHere()).text, '') === null)
         throw new DocError(
           `${METRICS_DOC}에서 표식 구간을 찾지 못했다. "<!-- metrics:begin -->" 줄과 "<!-- metrics:end -->" 줄을 이 순서로 하나씩 넣어라`,
         );
@@ -265,15 +287,19 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
   if (o.write) {
     // 자료를 읽는 동안 문서가 바뀌었을 수 있다. 조건을 다시 보고 지금 내용에서 구간만 바꾼다
     try {
-      inDocDir(info.root, () => {
+      inDocDir(info.root, (inside) => {
         const doc = readDocHere();
         const next = replaceBlock(doc.text, block);
         if (next === null)
           throw new DocError(`자료를 읽는 동안 ${METRICS_DOC}의 표식 구간이 사라졌다`);
-        replaceDocHere(next, doc.mode, o.writeBytes ?? writeSync);
+        replaceDocHere(next, doc.mode, o.writeBytes ?? writeSync, inside);
       });
     } catch (e) {
-      err(`metrics: ${first(e)}. 문서를 쓰지 않았다`);
+      err(
+        e instanceof AfterWriteError
+          ? `metrics: ${first(e)}`
+          : `metrics: ${first(e)}. 문서를 쓰지 않았다`,
+      );
       return 1;
     }
     err(`metrics: ${METRICS_DOC}의 집계 결과를 바꿨다`);
