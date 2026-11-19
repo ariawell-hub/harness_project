@@ -140,6 +140,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - F20(P1): 실물 확인의 설치 명령이 Vitest 버전을 고정하지 않았다. README의 명령을 `vitest@5.1.0`으로 고치고, `check-results.ts`가 결과 파일의 `tool.vitest`를 `5.1.0`과 대 보게 했다(`VITEST_VERSION`).
   - 실물 확인을 새 임시 복제본에서 다시 돌렸다(Vitest 5.1.0). `trial-test-effect.ts`에 세 번째 실행 `first-adoption`(래퍼가 없는 기준 커밋과 비교, 사례 `adoption-pass`·`adoption-fail`)을 더했다. 세 실행의 종료 코드는 1·0·1이고 아홉 사례가 모두 기대대로 나왔다. `adoption-pass`는 `ineffective(base에서도 통과)`다.
   - step0 지시서와 달라진 값: `support`(지시서는 `["src/test/**"]`), 실물 확인의 실행 수(지시서는 둘)와 사례 수(지시서는 일곱), `tool.vitest` 검사(지시서는 "비어 있지 않다"). 모두 검사를 더 엄하게 하는 쪽이다. step 파일은 실행하는 PR이 고칠 수 없어 그대로 두고 여기와 의사결정 로그에 적는다. AC 명령은 그대로이고 모두 통과한다.
+- 2026-11-19T20:19:13+09:00 step0 재작업: 구현 판정 2라운드의 지적 F21 대응(결과 검사기가 문자열로 바꿀 수 없는 값에서 멈춘다)
 
 ## 의사결정 로그
 
