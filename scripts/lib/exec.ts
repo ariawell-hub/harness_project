@@ -23,7 +23,17 @@ export interface ExecOptions {
   stream?: boolean;
   /** 종료 후에도 남은 같은 그룹의 프로세스(dev 서버 등)를 정리한다. 기본 true */
   killGroupOnExit?: boolean;
+  /**
+   * 실행하는 동안 이 프로세스가 받은 SIGTERM·SIGINT·SIGHUP을 자식의 프로세스 그룹에 넘기고, 자식이 끝난 뒤 이 프로세스도
+   * 그 신호로 끝난다. 자식은 새 프로세스 그룹이라 부모에게 온 신호도 터미널의 Ctrl-C도 받지 못한다. 넘기지 않으면
+   * 부모만 끝나고 자식 트리(dev 서버, 브라우저)가 남는다. 표준 명령 실행에 쓴다. Windows에서는 아무것도 하지 않는다
+   */
+  forwardSignals?: boolean;
+  /** 신호를 넘긴 뒤 자식이 끝나기를 기다리는 시간. 지나면 SIGKILL을 보낸다. 기본 10초 */
+  forwardGraceMs?: number;
 }
+
+const FORWARDED: readonly NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP'];
 
 const MAX_KEEP = 2_000_000; // 출력은 끝부분 2MB만 보관한다
 const isWin = process.platform === 'win32';
@@ -61,12 +71,33 @@ export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promis
       stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    // 신호 전달(forwardSignals): 첫 신호는 자식 그룹에 그대로 넘기고 유예 시간 뒤 SIGKILL을 보낸다.
+    // 유예 시간 안에 신호를 또 받으면 기다리지 않고 SIGKILL을 보낸다
+    let received: NodeJS.Signals | null = null;
+    let forceTimer: NodeJS.Timeout | undefined;
+    const onSignal = (signal: NodeJS.Signals) => {
+      if (received) {
+        killTree(child.pid, 'SIGKILL');
+        return;
+      }
+      received = signal;
+      killTree(child.pid, signal);
+      forceTimer = setTimeout(() => killTree(child.pid, 'SIGKILL'), opts.forwardGraceMs ?? 10_000);
+    };
+    const forwarding = opts.forwardSignals === true && !isWin;
+    if (forwarding) for (const s of FORWARDED) process.on(s, onSignal);
     const finish = (code: number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(forceTimer);
       child.stdout?.destroy();
       child.stderr?.destroy();
+      if (forwarding) {
+        for (const s of FORWARDED) process.off(s, onSignal);
+        // 자식 트리가 끝났다. 받은 신호의 기본 동작(종료)으로 이어 간다. 이 프로세스에 다른 처리기가 있으면 그쪽이 받는다
+        if (received) process.kill(process.pid, received);
+      }
       resolve({ code, stdout, stderr, timedOut, durationMs: Date.now() - started });
     };
     child.stdout?.on('data', (d: Buffer) => {
