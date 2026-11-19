@@ -32,6 +32,7 @@ const CONFIG_KEYS = [
   'guard',
   'failure',
   'planReview',
+  'testInertPaths',
   'ci',
   'deps',
   'agents',

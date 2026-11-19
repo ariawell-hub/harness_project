@@ -168,6 +168,15 @@ test('신호: harness.config.json의 판정 관련 키 변경(TD-10), 깨진 JSO
     reasons(run({ 'harness.config.json': JSON.stringify({ ...c, stage: 'operation' }, null, 2) })),
     /stage/,
   );
+  // test 건너뛰기 목록(6절, Issue #129)은 검사 범위를 줄이는 키다
+  assert.match(
+    reasons(
+      run({
+        'harness.config.json': JSON.stringify({ ...c, testInertPaths: ['docs/**'] }, null, 2),
+      }),
+    ),
+    /testInertPaths/,
+  );
   assert.match(reasons(run({ 'harness.config.json': '{' })), /harness\.config\.json/);
   // 판정과 무관한 키(limits)는 신호가 아니다
   const lim = { ...c, limits: { ...(c.limits as object), pollSec: 5 } };

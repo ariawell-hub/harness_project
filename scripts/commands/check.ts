@@ -1,15 +1,22 @@
 // check (6절, R7): fmt --check + lint + test + test-effect + build + doc-lint + bypass-scan + secret-scan.
 // 결과는 캐시한다. 키 = 작업 트리 해시 + 프로파일 버전 + 런타임·도구 버전 + 플랫폼 + 명령 정의 해시 (+ base).
 // CI(--ci)는 항상 새로 실행한다. 하위 검사별 결과를 실패 기록(attempts)에 남긴다.
+// test 건너뛰기(6절): 바뀐 파일이 모두 설정 testInertPaths(테스트가 읽지 않는 경로) 안이면 test를 돌리지 않는다.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { recordAttempt } from '../lib/attempts.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import { runSync, tail } from '../lib/exec.ts';
-import { defaultBase, harnessStateDir, worktreeTreeHash, type RepoInfo } from '../lib/git.ts';
+import {
+  defaultBase,
+  gitTry,
+  harnessStateDir,
+  worktreeTreeHash,
+  type RepoInfo,
+} from '../lib/git.ts';
 import { parseBranch } from '../lib/plan.ts';
-import { formatProblem, type Problem } from '../lib/util.ts';
+import { formatProblem, matchesAny, type Problem } from '../lib/util.ts';
 import { bypassScan } from '../gates/bypass-scan.ts';
 import { codeownersProblems } from '../gates/codeowners.ts';
 import { docLint } from '../gates/doc-lint.ts';
@@ -51,6 +58,8 @@ export interface CheckOptions {
   quiet?: boolean;
   /** 실패 기록을 남기지 않는다(테스트용) */
   noRecord?: boolean;
+  /** test 건너뛰기 판정이 읽는 환경 변수(GITHUB_REF). 기본은 process.env(테스트용) */
+  env?: NodeJS.ProcessEnv;
 }
 
 function toolVersions(): string {
@@ -76,6 +85,57 @@ export function cacheKey(
     only: only ?? null,
   };
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32);
+}
+
+/** 이 파일의 변경이 test 결과를 바꿀 수 없는가: testInertPaths 안이고 보호 경로가 아니다 */
+export function testInert(file: string, cfg: HarnessConfig): boolean {
+  return matchesAny(file, cfg.testInertPaths) && !matchesAny(file, cfg.protectedPaths);
+}
+
+export interface TestSkip {
+  /** test를 돌리지 않아도 되는가 */
+  skippable: boolean;
+  reason: string;
+}
+
+/**
+ * test를 건너뛸 수 있는가(6절). 바뀐 파일이 1개 이상이고 모두 testInert일 때만이다.
+ * 그때 PR의 트리는 "기본 브랜치의 끝 + 테스트가 읽지 않는 변경"이라 test 결과가 기본 브랜치와 같다.
+ * 기본 브랜치의 check는 건너뛰지 않는다(분류가 틀렸을 때 거기서 잡는다).
+ */
+export function testSkip(
+  info: RepoInfo,
+  cfg: HarnessConfig,
+  o: { base: string | null; committedOnly: boolean; env?: NodeJS.ProcessEnv },
+): TestSkip {
+  const no = (reason: string): TestSkip => ({ skippable: false, reason });
+  if (cfg.testInertPaths.length === 0) return no('testInertPaths가 비어 있다');
+  if (!o.base) return no('비교 기준(base)이 없다');
+  const def = cfg.github.defaultBranch;
+  const env = o.env ?? process.env;
+  if (info.branch === def || env.GITHUB_REF === `refs/heads/${def}`)
+    return no(`기본 브랜치(${def})의 check는 건너뛰지 않는다`);
+  // 이름 바꾸기는 옛 경로와 새 경로가 모두 나오게 한다(--no-renames). 삭제도 센다
+  const diff = ['diff', '--no-renames', '--name-only', '-z', o.base];
+  // 목록을 구하지 못하면(없는 base 등) 멈추지 않고 test를 돌린다. 모를 때는 건너뛰지 않는다
+  const runs = o.committedOnly
+    ? [gitTry([...diff, 'HEAD'], info.root)]
+    : [
+        gitTry(diff, info.root),
+        gitTry(['ls-files', '--others', '--exclude-standard', '-z'], info.root),
+      ];
+  if (runs.some((r) => !r.ok)) return no('바뀐 파일을 구하지 못했다(base를 확인하라)');
+  const files = [...new Set(runs.flatMap((r) => r.stdout.split('\0').filter(Boolean)))];
+  if (files.length === 0) return no('바뀐 파일이 없다');
+  const outside = files.filter((f) => !testInert(f, cfg));
+  if (outside.length)
+    return no(
+      `testInertPaths 밖의 변경 ${outside.length}개: ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ' …' : ''}`,
+    );
+  return {
+    skippable: true,
+    reason: `바뀐 파일 ${files.length}개가 모두 설정 testInertPaths(테스트가 읽지 않는 경로) 안이다. 기본 브랜치의 check가 test를 전부 돌린다`,
+  };
 }
 
 function problemsText(list: Problem[]): string {
@@ -109,13 +169,31 @@ export async function runCheck(
   }
 
   const steps = opts.only ?? [...CHECK_STEPS];
+  // test 건너뛰기는 두 번 판정한다: 시작할 때(캐시 키를 만든 때)와 test 직전. 둘 다 "건너뛰어도 된다"일 때만 건너뛴다.
+  // 시작할 때는 검사 대상 변경을 본다(CI는 커밋된 변경만). test 직전에는 test가 실제로 보게 될 작업 트리 전체를 본다.
+  // 앞선 검사가 도중에 파일을 바꿔 판정이 달라지면 test를 돌리고, 그 실행은 캐시에 남기지 않는다
+  const judge = (committedOnly: boolean) =>
+    testSkip(info, cfg, { base, committedOnly, env: opts.env });
+  const atStart = steps.includes('test') && cfg.commands.test ? judge(!!opts.ci) : null;
+  let testSkipped = false;
+  let judgeChanged = false;
   const results: SubResult[] = [];
   for (const name of steps) {
     const started = Date.now();
     let ok = true;
     let skipped = false;
     let output = '';
-    if (name === 'fmt' || name === 'lint' || name === 'test' || name === 'build') {
+    let note = '';
+    const atStep = name === 'test' && atStart ? judge(false) : null;
+    if (atStart && atStep) {
+      judgeChanged = atStart.skippable !== atStep.skippable;
+      testSkipped = atStart.skippable && atStep.skippable;
+    }
+    if (atStep && testSkipped) {
+      skipped = true;
+      note = ' (건너뜀)';
+      output = atStep.reason;
+    } else if (name === 'fmt' || name === 'lint' || name === 'test' || name === 'build') {
       const r = await runStandard(name, root, cfg, { checkMode: name === 'fmt' });
       skipped = r.notApplicable;
       ok = r.ok;
@@ -156,9 +234,12 @@ export async function runCheck(
     results.push(sub);
     if (!opts.quiet) {
       const mark = skipped ? '–' : ok ? '✓' : '✗';
-      const note = skipped ? ' (해당 없음)' : '';
-      process.stdout.write(`${mark} ${name}${note} (${(sub.durationMs / 1000).toFixed(1)}s)\n`);
-      if (output && (!ok || name === 'doc-lint' || name === 'test-effect'))
+      const label = note || (skipped ? ' (해당 없음)' : '');
+      process.stdout.write(`${mark} ${name}${label} (${(sub.durationMs / 1000).toFixed(1)}s)\n`);
+      if (
+        output &&
+        (!ok || name === 'doc-lint' || name === 'test-effect' || (name === 'test' && testSkipped))
+      )
         process.stdout.write(tail(output, 80).replace(/^/gm, '    ') + '\n');
     }
   }
@@ -180,7 +261,10 @@ export async function runCheck(
     }
   }
   const result: CheckResult = { ok, cached: false, results };
-  if (useCache && ok) {
+  // test를 건너뛴 실행은 캐시에 남기지 않는다. 캐시에 있는 결과는 모두 test를 실제로 돌린 것이라,
+  // 같은 트리의 기본 브랜치 check가 건너뛴 결과를 재사용할 길이 없다.
+  // 판정이 도중에 바뀐 실행(작업 트리가 바뀌었다)도 남기지 않는다: 키는 시작할 때의 트리로 만들었다
+  if (useCache && ok && !testSkipped && !judgeChanged) {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(path.join(cacheDir, `${key}.json`), JSON.stringify(result));
   }

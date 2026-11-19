@@ -106,6 +106,7 @@ node scripts/harness.ts complete-step     # 계획 전용 커밋
 node scripts/harness.ts plan-gate         # PR 모드 확인
 ```
 
+- **계획 폴더와 `lab/`만 바꾼 변경에서는 `check`가 `test`를 건너뛴다**(설계서 6절 "`test` 건너뛰기"). 출력에 `– test (건너뜀)`과 이유가 나온다. 다른 하위 검사는 그대로 돌고, 병합 뒤 main의 `check`는 `test`를 전부 돌린다. 그 변경에도 테스트를 돌려 보려면 `node scripts/harness.ts test`를 쓴다. 건너뛰는 경로 목록(`harness.config.json`의 `testInertPaths`)에는 테스트가 읽지 않는 경로만 넣고, 넓히는 일은 검사 약화라 제작자 승인으로만 한다(R4).
 - **하네스 자체를 고쳤으면 자체 테스트도 본다.** 훅·게이트·`start`·`next`·`new-task`를 고친 PR은 `node scripts/harness.ts self-test`로 규칙이 여전히 막는지 확인한다(설계서 12.4절. `check`의 `test` 단계에도 들어 있다). 규칙을 새로 더했으면 `scripts/selftest/scenarios/`에 시나리오 파일을 더한다. 시나리오는 대상 하네스의 내부 모듈을 import하지 않고 `ctx.cli`·`ctx.hook`만 쓴다.
   - 실제 세션으로 확인하려면 `node scripts/harness.ts self-test --live`를 손으로 돌린다(구독 인증 필요. 시나리오 3개를 3번씩, 세션 9개). 통과 수만 내고 `check`·병합 판정에는 쓰지 않는다. 훅이나 무인 권한 프로필(`.claude/runner-settings.json`)을 고쳤을 때와 운영 전환 직전에 실행해 결과를 진행 로그에 적는다.
 - **`check` 결과는 종료 코드로 확인한다.** 출력을 줄이려고 파이프를 붙이면 `&&`가 실패를 보지 못한다. 파이프의 종료 코드는 마지막 명령의 것이기 때문이다. 실패한 채 push·`complete-step`이 이어진 사례가 있다(Issue #72, TD-29). L1 훅이 이 꼴을 R4로 막는다: 검사 명령 바로 뒤의 파이프(앞에 `set -o pipefail`이 있으면 허용), 검사 명령과 그 뒤 `complete-step`·`git push`·`gh pr create` 사이의 `;`·줄바꿈·`||`(앞에 `set -e`가 있으면 허용).

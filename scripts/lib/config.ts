@@ -103,6 +103,11 @@ export interface HarnessConfig {
   agents: Record<string, AgentDef>;
   /** 테스트 실효성 검사(R5, test-effect) 설정. null이면 검사하지 않는다 */
   testEffect: TestEffectConfig | null;
+  /**
+   * 테스트가 읽지 않는 경로(glob, 리포 루트 기준). 바뀐 파일이 모두 여기에 들면 check가 test를 건너뛴다(6절).
+   * 비어 있으면 건너뛰지 않는다. 보호 경로의 파일은 여기에 걸려도 건너뛰는 근거가 아니다
+   */
+  testInertPaths: string[];
 }
 
 export interface TestEffectConfig {
@@ -349,6 +354,19 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   }
   cfg.deps = { ...DEFAULT_DEPS, ...(cfg.deps ?? {}) };
   cfg.testEffect = resolveTestEffect(cfg.testEffect);
+  cfg.testInertPaths ??= [];
+  const inert: unknown = cfg.testInertPaths;
+  const okGlob = (g: unknown) =>
+    typeof g === 'string' &&
+    g !== '' &&
+    !g.includes('\\') &&
+    !path.posix.isAbsolute(g) &&
+    !/^[A-Za-z]:/.test(g) &&
+    !g.split('/').includes('..');
+  if (!Array.isArray(inert) || !inert.every(okGlob))
+    throw new ConfigError(
+      `${CONFIG_FILE} 검증 실패:\n- testInertPaths는 리포 안 상대 경로 glob의 배열(\`/\`로 구분, \`..\` 없음). 테스트가 읽지 않는 경로만 적는다(6절)`,
+    );
   return cfg;
 }
 
