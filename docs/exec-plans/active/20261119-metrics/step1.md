@@ -65,6 +65,8 @@ export interface MetricsSource {
   needsHumanEvents(p: Period): LabelEvent[];
   /** 기간에 봇 계정(`cfg.github.bot`)이 쓴 에스컬레이션 댓글 */
   escalationComments(p: Period): BotComment[];
+  /** 기본 브랜치가 아닌 base로 열린 적이 있는 PR(상태 무관)의 head 브랜치 이름 */
+  otherBaseHeads(): string[];
 }
 ```
 
@@ -100,10 +102,11 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
 
 - **PR 리드타임(계획 생성 → 병합)**: PR마다 `mergedAt − planClaimedAt`의 중앙값과 최댓값(분). 계획 생성 시각은 `new-task`가 계획 frontmatter에 적는 `claimed_at`이다. 둘째 step부터의 PR도 그 계획의 `claimed_at`부터 잰다(계획이 생긴 뒤 그 PR이 병합되기까지). `planClaimedAt`에 없는 PR, 시각을 읽지 못한 PR, 값이 음수인 PR은 빼고 "계획을 찾지 못한 PR" 수로 따로 낸다.
   - `planClaimedAt`은 새 파일 `scripts/metrics/plans.ts`의 `planClaimedAt(root: string, prs: MergedPr[]): Map<number, string>`이 만든다: PR의 `head`를 `parseBranch`로 읽어 계획 id를 얻고, `findPlan(root, id)`로 찾은 계획 파일(`active/`·`completed/`)의 frontmatter `claimed_at`을 읽는다. 브랜치 이름이 계획 형식이 아니거나(revert PR 등) 계획 파일이 없으면 넣지 않는다. `root`는 명령을 실행한 체크아웃이다.
-- **CI 첫 통과율**: 실행을 PR에 잇는 근거는 커밋 SHA다. PR마다 `runs` 가운데 `path`가 `.github/workflows/check.yml`, `event`가 `pull_request`, `sameRepo`가 참, `branch`가 그 PR의 `head`, `headSha`가 그 PR의 `commits`에 든 실행만 그 PR의 실행이다. 그중 `createdAt`이 가장 이른 실행이 `attempt` 1이고 `conclusion`이 `success`면 첫 통과다. 비율 = 첫 통과 PR 수 ÷ 실행을 찾은 PR 수.
-  - `crossRepo`가 참이거나 `commitsComplete`가 거짓인 PR은 실행을 확인해 이을 수 없으므로 분모에서 빼고 "실행을 이을 수 없는 PR" 수로 따로 낸다.
+- **CI 첫 통과율**: Actions 실행 목록은 병합된 PR의 번호를 주지 않는다(응답의 `pull_requests`가 비어 있다. 이 리포의 2026-11-12·18 실행에서 확인). 그래서 실행을 PR에 잇는 조건을 모두 채운 실행만 쓰고, 그 조건으로 가를 수 없는 PR은 지표에서 뺀다. PR마다 `runs` 가운데 `path`가 `.github/workflows/check.yml`, `event`가 `pull_request`, `sameRepo`가 참, `branch`가 그 PR의 `head`, `headSha`가 그 PR의 `commits`에 들고, `createdAt`이 그 PR의 `createdAt` 이상 `mergedAt` 이하인 실행만 그 PR의 실행이다. 그중 `createdAt`이 가장 이른 실행이 `attempt` 1이고 `conclusion`이 `success`면 첫 통과다. 비율 = 첫 통과 PR 수 ÷ 실행을 찾은 PR 수.
+  - `crossRepo`가 참인 PR, `commitsComplete`가 거짓인 PR, `head`가 `otherBaseHeads`에 든 PR은 실행을 확인해 이을 수 없으므로 분모에서 빼고 "실행을 이을 수 없는 PR" 수로 따로 낸다. 셋째 경우는 같은 head 브랜치에서 base가 다른 PR이 열린 적이 있어, 같은 커밋에서 돈 실행이 어느 PR의 것인지 가를 수 없다.
+  - `otherBaseHeads`: `gh pr list --state all --search "-base:<defaultBranch>" --limit 1000 --json headRefName,baseRefName`에서 `baseRefName`이 기본 브랜치가 아닌 것의 `headRefName`. 받은 수가 1000이면 `SourceError`.
   - 이을 수 있는데 실행을 찾지 못한 PR 수도 따로 낸다(분모에서 뺀다).
-  - 포크의 같은 이름 브랜치에서 돈 실행은 `sameRepo`로, 브랜치 이름을 다시 쓴 다른 PR의 실행은 커밋 SHA로 걸러진다. 대상 PR은 step0에서 기본 브랜치에 병합된 것으로 한정돼 있다.
+  - 포크의 같은 이름 브랜치에서 돈 실행은 `sameRepo`로, 브랜치 이름을 다시 쓴 다른 PR의 실행은 커밋 SHA와 시각으로 걸러진다(같은 head 브랜치에서 같은 base로 열린 PR은 한때에 하나뿐이다). 대상 PR은 step0에서 기본 브랜치에 병합된 것으로 한정돼 있다.
 - **PR당 리뷰 라운드 수**: PR마다 검증자별 판정 수(`roundsOf`) 중 큰 값. 원장이 없는 PR은 0. 중앙값, 최댓값, 3라운드를 넘은 PR의 번호(19절 4단계 완료 기준이 3라운드다).
 - **에스컬레이션 수와 사유**: 두 값을 따로 낸다. 서로 빼거나 맞추지 않는다(라벨과 댓글은 따로 기록돼 날짜 경계에서 다른 기간에 들 수 있고, 대화 세션이 댓글 없이 라벨만 붙이기도 한다).
   - `needs-human` 라벨이 붙은 횟수: `labels`의 수.
@@ -122,11 +125,11 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
 ### 4. 테스트 `scripts/test/metrics-steady.test.ts`(새 파일)
 
 - 댓글 분류 함수: 위 문구마다 한 사례(`scripts/runner/run.ts`의 실패 중단 보고와 갱신 충돌 보고 형식을 고정 입력으로 둔다. 충돌 보고는 `stop-conflict`이고 5회 중단 수에 들지 않는다), 봇이 아닌 작성자와 기간 밖 댓글은 버린다, 분류 결과에 본문이 없다.
-- `steadyMetrics`: 지표마다 고정 입력으로 값 단언(첫 실행이 재실행된 PR은 첫 통과가 아니다, 실행 없는 PR은 분모에서 빠진다, 검증 App이 아닌 계정이 쓴 `risk-gate` 기록은 쓰지 않는다, 같은 브랜치 이름을 다시 쓴 두 PR에서 첫 실행 결과가 PR마다 따로 집계된다, 포크의 같은 이름 브랜치에서 돈 실행(`sameRepo` 거짓)은 어느 PR에도 이어지지 않는다, 포크에서 온 PR과 커밋이 100개인 PR은 "실행을 이을 수 없는 PR"로 빠진다, PR의 커밋에 없는 SHA의 실행은 브랜치 이름이 같아도 이어지지 않는다, 라벨은 기간 마지막 날 23:59:59Z에 붙고 댓글은 다음 날 00:00:01Z에 달린 사건이 두 기간에서 라벨 수와 댓글 수로 각각 한 번씩 세어진다).
+- `steadyMetrics`: 지표마다 고정 입력으로 값 단언(첫 실행이 재실행된 PR은 첫 통과가 아니다, 실행 없는 PR은 분모에서 빠진다, 검증 App이 아닌 계정이 쓴 `risk-gate` 기록은 쓰지 않는다, 같은 브랜치 이름을 다시 쓴 두 PR에서 첫 실행 결과가 PR마다 따로 집계된다, 포크의 같은 이름 브랜치에서 돈 실행(`sameRepo` 거짓)은 어느 PR에도 이어지지 않는다, 포크에서 온 PR과 커밋이 100개인 PR은 "실행을 이을 수 없는 PR"로 빠진다, PR의 커밋에 없는 SHA의 실행은 브랜치 이름이 같아도 이어지지 않는다, 같은 head 브랜치에서 다른 base로 열린 PR이 있으면(그 PR의 첫 실행은 실패, 기본 브랜치 대상 PR의 첫 실행은 성공) 기본 브랜치 대상 PR은 "실행을 이을 수 없는 PR"로 빠지고 첫 통과율에 들지 않는다, PR이 열리기 전이나 병합된 뒤의 실행은 이어지지 않는다, 라벨은 기간 마지막 날 23:59:59Z에 붙고 댓글은 다음 날 00:00:01Z에 달린 사건이 두 기간에서 라벨 수와 댓글 수로 각각 한 번씩 세어진다).
 - `planClaimedAt`: 임시 폴더의 계획 파일(단일 파일, 폴더, `active/`·`completed/`)에서 `claimed_at`을 읽는다, 계획 형식이 아닌 브랜치와 계획 파일이 없는 PR은 빠진다. 계획이 없는 PR과 둘째 step PR이 섞인 입력에서 리드타임과 "계획을 찾지 못한 PR" 수가 맞다.
 - 실행 조회 범위를 넓혀도 step0의 Actions 실행 시간 값이 같다.
 - `renderBlock`이 `### 상시 지표` 절을 내고 제목 문자열을 담지 않는다.
-- `ghSource`: 더한 세 조회가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자가 step0의 "읽기 요청" 꼴이다.
+- `ghSource`: 더한 네 조회가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자가 step0의 "읽기 요청" 꼴이다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 `### 상시 지표` 제목이 있다.
 
 ## Acceptance Criteria
