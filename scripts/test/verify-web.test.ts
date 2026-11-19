@@ -378,8 +378,14 @@ if (mode === 'plant-fifo') {
   }
   writeFileSync('planted', String(planted));
 }
-if (mode === 'exit') process.exit(3);
-if (mode === 'never') setInterval(() => {}, 1000);
+if (mode === 'exit') {
+  console.error('fake dev: 시작 오류 E_FAKE_START');
+  process.exit(3);
+}
+if (mode === 'never') {
+  console.log('fake dev: 아직 준비 중 E_FAKE_WAITING');
+  setInterval(() => {}, 1000);
+}
 else if (mode === 'silent')
   // 접속은 받지만 응답하지 않는다
   net.createServer(() => {}).listen(Number(process.env.PORT), process.env.HOST);
@@ -687,6 +693,8 @@ posixTest('verifyWeb: dev가 준비되지 않거나 곧바로 끝나면 실패�
   });
   assert.equal(r1.ok, false);
   assert.match(problems(r1), /dev가 1초 안에 .*응답하지 않았다/);
+  // 실패 메시지에 dev가 낸 출력의 끝부분이 들어 있다
+  assert.match(problems(r1), /dev\.log 끝부분:\n.*E_FAKE_WAITING/);
   assert.equal(started(never.root).runner, false);
   assert.equal(alive(devPid(never.root)), false);
 
@@ -695,6 +703,7 @@ posixTest('verifyWeb: dev가 준비되지 않거나 곧바로 끝나면 실패�
   const r2 = await verifyWeb(exits.root, loadConfig(exits.root), { runner: exits.runner });
   assert.equal(r2.ok, false);
   assert.match(problems(r2), /dev가 준비되기 전에 끝났다\(종료 코드 3\)/);
+  assert.match(problems(r2), /dev\.log 끝부분:\n.*E_FAKE_START/);
   assert.ok(Date.now() - t0 < 30_000, '제한 시간(120초)까지 기다리지 않는다');
   assert.equal(started(exits.root).runner, false);
 });

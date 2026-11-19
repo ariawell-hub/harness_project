@@ -164,6 +164,9 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - F3(P1): `judge`가 suite의 `specs`·`suites`가 배열이 아닐 때 그 아래를 건너뛰고 문제로 적지 않아, 옆의 정상 spec 하나로 통과했다. 두 필드는 없어도 되지만 있으면 배열이어야 하고, 아니면 실패다.
   - 재현 테스트를 먼저 썼다(`scripts/test/verify-web.test.ts`). 고치기 전에는 넷이 실패했다(F3, 심볼릭 링크·큰 결과 파일, FIFO 결과 파일, 로그 자리의 FIFO). FIFO 둘은 고치기 전 코드에서 프로세스가 멈추므로 명령행(자식 프로세스)을 시간 제한과 SIGKILL로 돌려 본다.
 - 2026-11-19T22:45:16+09:00 step1 재작업: 구현 판정 2라운드의 지적 F4 대응(dev 준비 실패 때 로그 끝부분이 비어 있다)
+- 2026-11-19: step1 구현 판정 2라운드(head `a9c0cd2`). `review/claude` 승인, `review/codex` 수정 요청(P1 1건). F1~F3은 고쳐졌다고 판정됐다(열린 차단 지적 3건 → 1건). 받아들였다(반박 없음).
+  - F4(P1): 1라운드 대응에서 `dev.log`를 쓰기 전용(`wx`)으로 열고 같은 fd로 끝부분을 읽게 해서, 읽기가 EBADF로 실패하고 `logTail`의 `catch`가 빈 문자열을 돌려줬다. `dev`가 준비되지 못했을 때 실패 메시지에 로그 제목만 남았다. 내가 넣은 회귀다. 테스트가 실패 메시지에 `dev`의 출력이 들어 있는지를 단언하지 않아 놓쳤다.
+  - 단언을 먼저 더했다(가짜 `dev`가 낸 문구가 실패 메시지의 "dev.log 끝부분"에 있다. 준비 시간 초과와 곧바로 종료 두 경우. 고치기 전에는 실패). `dev.log`를 `wx+`로 연다. `logTail`은 읽지 못하면 빈 문자열 대신 "(로그를 읽지 못했다)"를 돌려준다.
 
 ## 의사결정 로그
 
@@ -233,6 +236,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - step0 재작업(2026-11-19, F22): AC 9개 모두 통과. 검사기 테스트는 12개다.
 - step1(2026-11-19): AC 8개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 3은 `scripts/test/standard-args.test.ts`(6개), 수용 기준 4·5는 `scripts/test/verify-web.test.ts`(37개: `judge` 13, `isScenarioPath` 1, `verifyWeb` 17, 명령행 6)로 확인했다. 실제 Playwright로 도는 것은 step3의 실물 확인에서 본다.
 - step1 재작업(2026-11-19, F1~F3): AC 8개 모두 통과. `scripts/test/verify-web.test.ts`는 43개다(`judge` 14, `isScenarioPath` 1, `unsupportedPlatform` 1, `verifyWeb` 19, 명령행 8).
+- step1 재작업(2026-11-19, F4): AC 8개 모두 통과. 테스트 수는 그대로다(43개, 단언 둘 추가).
 
 ## 다음 할 일
 

@@ -278,7 +278,8 @@ function logTail(fd: number): string {
     const size = fstatSync(fd).size;
     return tail(readFd(fd, Math.max(0, size - 16_384), size), 20);
   } catch {
-    return '';
+    // 조용히 비우지 않는다: 읽지 못한 것과 출력이 없는 것은 다르다
+    return '(로그를 읽지 못했다)';
   }
 }
 
@@ -332,10 +333,10 @@ export async function verifyWeb(
   let baseUrl = '';
   let verdict: Verdict;
   // 로그 파일 둘은 아무것도 띄우기 전에 새로 만들어 열어 둔다(wx: 이미 있으면 실패). dev가 실행기 로그 자리에
-  // FIFO나 링크를 미리 둘 수 없고, 로그 끝부분은 이 fd로 읽는다
+  // FIFO나 링크를 미리 둘 수 없고, 로그 끝부분은 이 fd로 읽는다(그래서 dev.log는 읽기도 되는 wx+로 연다)
   const logs: number[] = [];
   try {
-    const devLog = openSync(path.join(local, 'dev.log'), 'wx');
+    const devLog = openSync(path.join(local, 'dev.log'), 'wx+');
     logs.push(devLog);
     const runnerLog = openSync(path.join(local, 'runner.log'), 'wx');
     logs.push(runnerLog);
