@@ -8,7 +8,13 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { loadConfig } from '../lib/config.ts';
 import { FORWARDED } from '../lib/exec.ts';
-import { Descendants, listProcesses, parseProcessList, type ProcessRow } from '../verify/tree.ts';
+import {
+  Descendants,
+  listProcesses,
+  parseProcessList,
+  readProcessList,
+  type ProcessRow,
+} from '../verify/tree.ts';
 import { DEFAULT_RUNNER, STOP_SIGNALS, verifyWeb } from '../verify/web.ts';
 import { fixtureConfig, gitInit, HARNESS_ROOT, tmp, write } from './helpers.ts';
 
@@ -27,6 +33,11 @@ test('parseProcessList: pid·ppid·pgid·상태 네 칸을 읽고, 읽지 못한
       { pid: 9001, ppid: 812, pgid: 9001, zombie: true },
     ],
   );
+  // macOS의 ps는 막 생기거나 끝나는 중인 프로세스의 상태를 ?·?E로 적는다. 그 줄도 읽는다(좀비는 아니다)
+  assert.deepEqual(parseProcessList(' 6312  6204  6199 ?E  \n 6649  6204  6199 ?   \n'), [
+    { pid: 6312, ppid: 6204, pgid: 6199, zombie: false },
+    { pid: 6649, ppid: 6204, pgid: 6199, zombie: false },
+  ]);
   assert.equal(parseProcessList(''), null);
   assert.equal(parseProcessList('1 0 1 S\nPID PPID PGID STAT\n'), null);
   assert.equal(parseProcessList('1 0 S\n'), null);
@@ -40,6 +51,38 @@ test('listProcesses: 실제 목록에 이 프로세스가 있다', T, async () =
   assert.ok(me);
   assert.equal(me.ppid, process.ppid);
   assert.equal(me.zombie, false);
+});
+
+test('listProcesses: 프로세스가 계속 생기고 끝나는 동안에도 목록을 읽는다', T, async () => {
+  // 생기는 중·끝나는 중인 프로세스가 목록에 섞인다(상태 ?·?E)
+  const churn = setInterval(() => {
+    for (let i = 0; i < 4; i++) spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
+  }, 20);
+  try {
+    const until = Date.now() + 3000;
+    let reads = 0;
+    while (Date.now() < until) {
+      assert.ok(await listProcesses(), `${reads}번 읽은 뒤 목록을 읽지 못했다`);
+      reads++;
+    }
+    assert.ok(reads > 5);
+  } finally {
+    clearInterval(churn);
+  }
+});
+
+test('readProcessList: 읽지 못하면 정해진 횟수만큼 다시 읽고, 끝내 못 읽으면 null이다', async () => {
+  const rows = [row(1, 0, 1)];
+  let calls = 0;
+  const flaky = () => Promise.resolve(++calls < 3 ? null : rows);
+  assert.equal(await readProcessList(flaky, 3), rows);
+  assert.equal(calls, 3);
+  calls = 0;
+  assert.equal(await readProcessList(flaky, 2), null);
+  assert.equal(calls, 2);
+  calls = 0;
+  assert.equal(await readProcessList(() => Promise.resolve((calls++, rows)), 3), rows);
+  assert.equal(calls, 1);
 });
 
 const row = (pid: number, ppid: number, pgid: number, zombie = false): ProcessRow => ({

@@ -26,7 +26,9 @@ export function parseProcessList(text: string): ProcessRow[] | null {
   const rows: ProcessRow[] = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([A-Za-z<+]+)\s*$/.exec(line);
+    // 상태 칸은 빈칸 없는 글자열이면 받는다. macOS는 막 생기거나 끝나는 중인 프로세스를 ?·?E로 적는다
+    // (그런 프로세스가 하나만 있어도 목록 전체를 버리면 프로세스가 자주 바뀌는 동안에는 읽지 못한다)
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
     if (!m) return null;
     rows.push({
       pid: Number(m[1]),
@@ -39,9 +41,23 @@ export function parseProcessList(text: string): ProcessRow[] | null {
 }
 
 const LIST_TIMEOUT_MS = 1000;
+/** 목록을 읽는 횟수의 한도. 한 번의 실패(ps가 제때 끝나지 않음 등)로 "확인하지 못했다"고 하지 않는다 */
+export const LIST_ATTEMPTS = 3;
 
-/** ps로 읽는다(POSIX의 -A와 -o만 쓴다). ps가 없거나 실패하거나 제때 끝나지 않으면 null */
-export const listProcesses: ListProcesses = () =>
+/** `read`가 목록을 돌려줄 때까지 `attempts`번까지 읽는다. 끝내 읽지 못했으면 null */
+export async function readProcessList(
+  read: ListProcesses,
+  attempts: number,
+): Promise<ProcessRow[] | null> {
+  for (let i = 0; i < attempts; i++) {
+    const rows = await read();
+    if (rows) return rows;
+  }
+  return null;
+}
+
+/** ps를 한 번 돌려 읽는다(POSIX의 -A와 -o만 쓴다). ps가 없거나 실패하거나 제때 끝나지 않으면 null */
+const listOnce: ListProcesses = () =>
   new Promise((resolve) => {
     execFile(
       'ps',
@@ -50,6 +66,9 @@ export const listProcesses: ListProcesses = () =>
       (err, stdout) => resolve(err ? null : parseProcessList(stdout)),
     );
   });
+
+/** ps로 읽는다. 읽지 못하면 `LIST_ATTEMPTS`번까지 다시 읽는다 */
+export const listProcesses: ListProcesses = () => readProcessList(listOnce, LIST_ATTEMPTS);
 
 /**
  * 뿌리 프로세스들의 자손을 기억한다. 뿌리 자신은 넣지 않는다(뿌리와 그 그룹은 부르는 쪽이 따로 다룬다).
