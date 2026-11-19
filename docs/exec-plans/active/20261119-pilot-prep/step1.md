@@ -20,7 +20,7 @@
 
 2. 테스트 `scripts/test/standard-args.test.ts`(새 파일)
    - 임시 폴더에 받은 인자를 JSON 한 줄로 파일에 쓰는 Node 스크립트를 만들고, 그 스크립트를 실행하는 명령 정의로 `runStandard`를 부른다.
-   - 인자 `$(touch <표식 파일>)`, `` `touch <표식 파일>` ``, `a; touch <표식 파일>`, `a && touch <표식 파일>`, `$HOME`, `it's`, `say "hi"`, `a b`, `*.ts`, `e2e/[id].spec.ts`를 넘겼을 때 스크립트가 받은 인자가 글자 그대로이고 표식 파일이 생기지 않는다.
+   - 인자 `$(touch <표식 파일>)`, `` `touch <표식 파일>` ``, `a; touch <표식 파일>`, `a && touch <표식 파일>`, `$HOME`, `it's`, `say "hi"`, `a b`, `*.ts`, `e2e/[id].spec.ts`를 넘겼을 때 스크립트가 받은 인자가 글자 그대로이고 표식 파일이 생기지 않는다. 표준 명령 실행기는 어떤 인자든 그대로 넘긴다(`verify`가 받는 경로를 좁히는 것은 아래 3의 `isScenarioPath`다).
    - 명령행으로도 확인한다: 그 명령 정의를 `commands.verify`로 둔 픽스처 리포에서 `node scripts/harness.ts verify -- '$(touch <표식 파일>)'`를 실행하면 스크립트가 그 문자열을 그대로 받고 표식 파일이 없다.
    - 추가 인자가 없으면 실행된 명령 문자열이 명령 정의와 같다.
 
@@ -32,13 +32,14 @@
        version: 1;
        /** 콘솔의 error 메시지와 잡히지 않은 예외 */
        consoleErrors: { text: string }[];
-       /** 실패한 요청, 상태 코드 400 이상인 응답, 앱 출처 밖이라 막은 요청(blocked) */
+       /** 실패한 요청, 상태 코드 400 이상인 응답, 앱 주소 밖으로 가려던 요청(blocked) */
        failedRequests: { url: string; reason: string; blocked: boolean }[];
        /** 시나리오가 "의도한 실패"로 선언해 위 목록에서 뺀 건수 */
        allowed: { consoleErrors: number; failedRequests: number };
      }
      ```
-   - `judge(report: unknown, runnerCode: number): Verdict`. `report`는 Playwright JSON 리포터의 결과다(`suites[].specs[].tests[].results[]`, `suites[].suites[]` 중첩, 최상위 `errors[]`). 시나리오 하나 = spec의 test 하나.
+   - `export function isScenarioPath(p: string): boolean`: `e2e/`로 시작하고 `.spec.ts`로 끝나며, 영문자·숫자·`.`·`_`·`-`·`/`만으로 되어 있고, 빈 구간과 `..` 구간이 없는 상대 경로면 참이다. 명령행 인자 검사(아래 4)와 증거 요약의 경로 표시(step2)가 이 함수 하나를 쓴다.
+   - `judge(report: unknown, runnerCode: number, o: { root: string; scenarios?: string[] }): Verdict`. `report`는 Playwright JSON 리포터의 결과다(`config.rootDir`, `suites[].specs[].tests[].results[]`, `suites[].suites[]` 중첩, 최상위 `errors[]`). 시나리오 하나 = spec의 test 하나. `ScenarioVerdict.file`은 리포 루트 기준 상대 경로(`/` 구분)다: 보고서의 파일 경로는 `config.rootDir`(시나리오 폴더) 기준이므로 그것을 이어 붙인 뒤 `o.root` 기준으로 바꾼다.
      ```ts
      export interface ScenarioVerdict {
        file: string;
@@ -58,6 +59,8 @@
    - 판정 규칙(하나라도 걸리면 `ok: false`. 판단하지 못하면 실패다):
      - `report`가 객체가 아니거나 `suites`가 배열이 아니다. 최상위 `errors`가 비어 있지 않다.
      - 시나리오가 0개다.
+     - `config.rootDir`이 문자열이 아니거나 시나리오의 파일이 리포 루트 밖이다.
+     - `o.scenarios`가 있는데 시나리오들의 파일 집합이 그것과 같지 않다(지정하지 않은 파일의 시나리오가 있다, 지정한 파일의 시나리오가 없다).
      - 시나리오의 마지막 결과 상태가 `passed`가 아니다(`skipped` 포함).
      - 시나리오에 관찰 기록 첨부가 없거나, base64 본문을 JSON으로 읽지 못하거나, 위 형식이 아니다(`version`이 1이 아닌 것 포함).
      - 관찰 기록의 `consoleErrors`나 `failedRequests`가 비어 있지 않다.
@@ -70,7 +73,7 @@
    export const DEFAULT_RUNNER: string[]; // node node_modules/@playwright/test/cli.js test --config profiles/web/verify/playwright.config.ts
    export interface VerifyOptions {
      runner?: string[];
-     /** 실행기 끝에 붙일 시나리오 경로 */
+     /** 실행할 시나리오 파일(리포 기준 상대 경로). 없으면 전부 */
      scenarios?: string[];
      readyTimeoutSec?: number; // 기본 120
      runnerTimeoutSec?: number; // 기본 900
@@ -96,15 +99,18 @@
    - 포트: `127.0.0.1`의 0번 포트로 잠깐 listen해 받은 번호. `baseUrl`은 `http://127.0.0.1:<포트>`이고 다른 값을 받는 길이 없다.
    - `dev`: `cfg.commands.dev.run`을 셸로, 자기 프로세스 그룹으로 띄운다. 환경 변수 `PORT=<포트>`, `HOST=127.0.0.1`. 출력은 `local/dev.log`로 보낸다.
    - 준비 대기: `baseUrl`에 HTTP 응답(상태 코드 무관)이 올 때까지. 제한 시간을 넘거나 그 전에 `dev`가 끝나면 실패하고 `dev.log` 끝부분을 보인다.
-   - 실행기: `runner`(기본 `DEFAULT_RUNNER`) 뒤에 `scenarios`를 붙여 셸 없이, 자기 프로세스 그룹으로 띄운다(`cwd`는 `root`). 환경 변수 `HARNESS_VERIFY_BASE_URL=<baseUrl>`, `HARNESS_VERIFY_OUT=<출력 폴더>`. 실행기는 `<출력 폴더>/report.json`에 결과를 쓴다. 출력은 `local/runner.log`로 보낸다.
+   - 실행기: `runner`(기본 `DEFAULT_RUNNER`)를 인자를 더 붙이지 않고 셸 없이, 자기 프로세스 그룹으로 띄운다(`cwd`는 `root`). 환경 변수 `HARNESS_VERIFY_BASE_URL=<baseUrl>`, `HARNESS_VERIFY_OUT=<출력 폴더>`, 그리고 `scenarios`가 있으면 `HARNESS_VERIFY_SCENARIOS=<경로들의 JSON 배열>`(없으면 이 변수를 지운다. 바깥에서 물려받은 값을 쓰지 않는다). 실행기는 `<출력 폴더>/report.json`에 결과를 쓴다. 출력은 `local/runner.log`로 보낸다.
+   - `scenarios`의 경로가 `isScenarioPath`에 맞지 않거나 그 파일이 `root`에 없으면 아무것도 띄우지 않고 실패한다. 실행 뒤 `judge`에 `root`와 `scenarios`를 넘겨 결과의 파일 집합을 확인한다.
    - **정리 계약**: `dev`와 실행기 둘 다 실행 중인 자식의 핸들을 쥐고 있어야 한다(`scripts/lib/exec.ts`의 `run`은 핸들을 주지 않으므로 그대로는 쓸 수 없다). 정상 종료, 판정 실패, 예외, 실행기 시간 초과, 중단 신호 어느 경우에도 돌아가기 전에 실행기의 프로세스 트리와 `dev`의 프로세스 트리를 끝낸다: 그룹에 SIGTERM → 2초 안에 끝나지 않으면 SIGKILL → 두 트리가 끝난 것을 확인. 중단 신호를 받은 때부터 4초 안에 돌아간다. 이유: 표준 명령의 시간 제한은 SIGTERM 5초 뒤에 SIGKILL을 보낸다. 그 전에 정리를 마쳐야 한다.
    - 명령행 진입(`node scripts/verify/web.ts [시나리오 경로…]`): `repoInfo`·`loadConfig`로 설정을 읽고 `verifyWeb`을 부른다. 시나리오별 한 줄(`✓`/`✗`, 파일:줄, 제목, 문제)과 전체 문제, 출력 폴더를 stdout에 내고 종료 코드는 `ok ? 0 : 1`이다.
-     - 추가 인자는 `e2e/`로 시작하고 `.spec.ts`로 끝나며, 영문자·숫자·`.`·`_`·`-`·`/`만으로 되어 있고, `..` 구간이 없는 리포 안 상대 경로만 받는다. 그 밖의 인자가 하나라도 있으면 아무것도 띄우지 않고 종료 코드 1로 끝낸다. 이유: `--config` 같은 옵션으로 하네스의 Playwright 설정을 바꿔치지 못하게 한다.
+     - 추가 인자는 `isScenarioPath`에 맞는 경로만 받아 `scenarios`로 넘긴다. 그 밖의 인자가 하나라도 있으면 아무것도 띄우지 않고 종료 코드 1로 끝낸다. 이유: 옵션(`--config` 등)이나 정규식으로 해석될 문자가 실행기에 닿지 않게 한다.
      - SIGTERM·SIGINT를 받으면 중단 신호를 끊어 위 정리 계약대로 끝내고 종료 코드 1로 나간다.
 
 5. 테스트 `scripts/test/verify-web.test.ts`(새 파일). 가짜 `dev`(환경 변수 `PORT`로 뜨는 작은 Node HTTP 서버)와 가짜 실행기(`$HARNESS_VERIFY_OUT/report.json`을 쓰는 Node 스크립트)를 임시 폴더에 만든다.
    - `judge`: 통과 사례 하나와, 위 판정 규칙의 각 항목마다 실패 사례 하나. `allowed` 건수는 실패가 아니다.
    - `verifyWeb`: 통과하면 `ok`이고 실행기가 받은 `HARNESS_VERIFY_BASE_URL`이 `http://127.0.0.1:<포트>` 꼴이며 `HARNESS_VERIFY_OUT`이 출력 폴더다. 끝난 뒤 그 포트에 접속이 되지 않고 `dev`의 pid가 없다.
+   - 시나리오 지정: `scenarios: ['e2e/a.spec.ts']`로 부르면 가짜 실행기가 받은 명령행 인자는 `runner` 그대로이고(더 붙은 것이 없다) `HARNESS_VERIFY_SCENARIOS`가 그 배열이다. 지정하지 않으면 그 변수가 없다(테스트 프로세스의 환경에 그 변수가 있어도). 가짜 실행기가 다른 파일(`e2e/sub-e2e/a.spec.ts`)의 시나리오까지 담은 통과 결과를 쓰면 `ok: false`다. 지정한 파일의 시나리오가 결과에 없어도 `ok: false`다. 리포에 없는 파일을 지정하면 `dev`도 실행기도 띄우지 않고 실패한다.
+   - `isScenarioPath`: `e2e/a.spec.ts`, `e2e/sub/a-b_c.spec.ts`는 참. `e2e/[id].spec.ts`, `e2e/(shop)/a.spec.ts`, `e2e/a b.spec.ts`, `e2e/../a.spec.ts`, `e2e//a.spec.ts`, `/abs/e2e/a.spec.ts`, `src/a.spec.ts`, `e2e/a.spec.tsx`, `--config`는 거짓.
    - `dev`가 준비되지 않는 경우(제한 시간 1초), `dev`가 곧바로 끝나는 경우, 실행기가 결과 파일을 쓰지 않는 경우, 실행기가 깨진 JSON을 쓰는 경우: 모두 `ok: false`이고 `dev`가 남지 않는다.
    - 실행기 시간 초과: 가짜 실행기가 손자 프로세스를 하나 띄우고 두 pid를 파일에 적은 뒤 끝나지 않는다. `runnerTimeoutSec: 1`로 부르면 `ok: false`이고 실행기·손자·`dev`의 pid가 모두 없다.
    - `commands.dev`가 `null`이면 실패한다.
@@ -131,6 +137,7 @@ node scripts/harness.ts doc-lint
 ## 금지사항
 
 - 추가 인자를 큰따옴표로 인용하거나 인용 없이 셸 명령에 붙이지 마라. 이유: 셸이 `$(…)`를 실행한다(계획 검증 F4). 파일 이름은 PR 작성자가 정하는 데이터다.
+- 시나리오 경로를 실행기의 명령행 인자로 붙이지 마라. 이유: Playwright는 파일 인자를 정규식으로 해석해 경로가 겹치는 다른 파일까지 고른다(계획 검증 F15). 환경 변수로 넘기고 결과의 파일 집합을 확인한다.
 - 웹 프로파일의 `commands.verify`를 이 step에서 켜지 마라. 이유: `DEFAULT_RUNNER`가 가리키는 Playwright 설정 파일은 step3에서 생긴다. 그 전에 켜면 표준 `verify`가 돌지 못하는 상태로 병합된다(F7).
 - 신호·시간 초과에서 `dev`만 정리하고 실행기 트리를 남기지 마라. 이유: Playwright와 브라우저가 남는다(F8).
 - `scripts/verify/`에서 `@playwright/test`나 `playwright`를 import하지 마라. 이유: 이 리포에는 그 의존성이 없고 `lint`(tsc)가 실패한다. 코어 코드는 프로파일의 도구를 몰라도 된다(S5).
