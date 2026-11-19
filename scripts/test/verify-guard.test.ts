@@ -1,6 +1,7 @@
 // verify의 거부 프록시와 공개 증거 요약(계획 20261119-pilot-prep 수용 기준 5·6·8).
 // 실제 외부 주소로는 아무것도 보내지 않는다: 대상은 테스트가 띄운 로컬 서버나 example.test(프록시가 전달하지 않는다)다.
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -174,6 +175,9 @@ test(
         'CONNECT f.example.test HTTP/1.1\r\nHost: x\r\n\r\n',
         { kind: 'connect', host: 'f.example.test', port: 0 },
       ],
+      // 기본 포트를 모르는 스킴은 0이다(객체에서 물려받은 이름과 같은 스킴 포함)
+      ['GET constructor://g.example.test/ HTTP/1.1\r\nHost: x\r\n\r\n', hp('g.example.test', 0)],
+      ['GET ftp://g.example.test/ HTTP/1.1\r\nHost: x\r\n\r\n', hp('g.example.test', 0)],
       // 깨진 요청도 닿은 것으로 센다
       [`${MARK} garbage\r\n\r\n`, hp(UNKNOWN, 0)],
     ];
@@ -184,6 +188,10 @@ test(
         cases.map(([, want]) => want),
       );
       assert.equal(JSON.stringify(p.denied()).includes(MARK), false);
+      // 포트는 언제나 0~65535의 정수다. JSON으로 바꿔도 빠지는 칸이 없다
+      for (const d of p.denied())
+        assert.equal(Number.isInteger(d.port) && d.port >= 0 && d.port <= 65535, true);
+      assert.deepEqual(JSON.parse(JSON.stringify(p.denied())), p.denied());
       // 아무것도 보내지 않고 끊은 연결은 요청이 아니다
       await raw(port, '');
       const before = p.count();
@@ -597,6 +605,8 @@ interface RunnerCfg {
   plant?: 'file' | 'symlink';
   /** local/detail.json을 지우고 리포 밖을 가리키는 심볼릭 링크로 바꾼다 */
   swapDetail?: boolean;
+  /** SIGTERM을 받으면 got-term 파일을 쓰고 버티는 자식을 같은 그룹에 남긴다(정리가 SIGKILL까지 간다) */
+  leaveStubborn?: boolean;
 }
 
 const DEV = `import http from 'node:http';
@@ -641,6 +651,15 @@ function viaProxy(target) {
   if (CFG.swapDetail) {
     fs.unlinkSync(path.join(out, 'local', 'detail.json'));
     fs.symlinkSync(path.join(process.cwd(), 'outside-detail.json'), path.join(out, 'local', 'detail.json'));
+  }
+  if (CFG.leaveStubborn) {
+    const body =
+      "const fs = require('node:fs');" +
+      "process.on('SIGTERM', () => fs.writeFileSync('got-term', '1'));" +
+      "fs.writeFileSync('child-ready', '1'); setInterval(() => {}, 1000);";
+    require('node:child_process').spawn(process.execPath, ['-e', body], { stdio: 'ignore' }).unref();
+    // 자식이 신호 처리기를 단 뒤에 끝난다
+    while (!fs.existsSync('child-ready')) await new Promise((r) => setTimeout(r, 10));
   }
   if (CFG.report === 'none') return;
   const marked = CFG.report === 'marked';
@@ -918,6 +937,10 @@ posixTest(
     assert.equal(r1.ok, false);
     assert.equal(r1.evidence, null);
     assert.match(allProblems(r1), /증거 묶음을 만들지 못했다/);
+    // 진단 파일도 마지막 판정과 같다
+    const detail = JSON.parse(detailOf(r1)) as { ok: boolean; problems: string[] };
+    assert.equal(detail.ok, false);
+    assert.match(detail.problems.join('\n'), /증거 묶음을 만들지 못했다/);
 
     const linked = fx({ plant: 'symlink' });
     const r2 = await run(linked);
@@ -939,6 +962,46 @@ posixTest(
 );
 
 const WEB = path.join(HARNESS_ROOT, 'scripts/verify/web.ts');
+
+// 구현 판정 F2: 통과로 판정한 뒤 정리하는 동안 중단 신호가 오면 반환값·공개 요약·종료 코드가 모두 실패여야 한다.
+// 정리가 시작된 것은 남은 자식이 SIGTERM을 받고 쓰는 파일(got-term)로 안다
+posixTest(
+  'verifyWeb: 통과 판정 뒤 정리하는 동안 중단 신호가 오면 반환값과 공개 요약이 모두 실패다',
+  async () => {
+    const f = fx({ leaveStubborn: true });
+    const ac = new AbortController();
+    const pending = run(f, { signal: ac.signal });
+    await waitFor(() => existsSync(path.join(f.root, 'got-term')), 30_000, '정리 시작');
+    ac.abort();
+    const r = await pending;
+    assert.equal(r.ok, false);
+    assert.match(allProblems(r), /중단 신호를 받았다/);
+    // 시나리오 자신은 통과였다
+    assert.equal(r.verdict.scenarios[0].ok, true);
+    const e = evidenceOf(r);
+    assert.equal(e.summary.ok, false);
+    assert.deepEqual(e.summary.problems, [{ category: '중단 신호', count: 1 }]);
+    assert.match(e.text, /verify: 실패/);
+    assert.equal((JSON.parse(detailOf(r)) as { ok: boolean }).ok, false);
+  },
+);
+
+posixTest('명령행: 정리하는 동안 SIGTERM을 받으면 종료 코드 1이고 공개 요약도 실패다', async () => {
+  const f = fx({ leaveStubborn: true });
+  const child = spawn(process.execPath, [WEB], { cwd: f.root, stdio: 'ignore' });
+  const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
+  await waitFor(() => existsSync(path.join(f.root, 'got-term')), 30_000, '정리 시작');
+  child.kill('SIGTERM');
+  assert.equal(await exited, 1);
+  const base = path.join(f.root, '.harness-verify');
+  const runs = readdirSync(base);
+  assert.equal(runs.length, 1);
+  const summary = JSON.parse(
+    readFileSync(path.join(base, runs[0], 'evidence', 'summary.json'), 'utf8'),
+  ) as Summary;
+  assert.equal(summary.ok, false);
+  assert.deepEqual(summary.problems, [{ category: '중단 신호', count: 1 }]);
+});
 
 posixTest(
   '명령행: 증거 묶음과 진단 파일의 경로를 내고, 프록시에 닿은 요청이 있으면 종료 코드 1이다',

@@ -10,12 +10,13 @@ import {
   closeSync,
   constants,
   fstatSync,
+  ftruncateSync,
   lstatSync,
   mkdirSync,
   openSync,
   readSync,
   realpathSync,
-  writeFileSync,
+  writeSync,
 } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -69,6 +70,7 @@ export interface VerifyResult {
 
 const failed = (problem: string): Verdict => ({ ok: false, scenarios: [], problems: [problem] });
 const noDenied = (): VerifyResult['denied'] => ({ count: 0, requests: [] });
+const ABORTED = '중단 신호를 받았다';
 
 /** 문제 문구에 적는 대상 수 */
 const DENIED_SHOWN = 20;
@@ -344,28 +346,45 @@ export async function verifyWeb(
         problems: [...verdict.problems, problem],
       };
     };
+    // 판정은 여기서 한 번 정해지고 반환값·진단 파일·공개 요약·명령행의 종료 코드가 모두 이것을 쓴다.
+    // 이 함수는 기다리는 곳이 없어 도중에 중단 신호의 상태가 바뀌지 않는다.
+    // 통과로 판정한 뒤 정리하는 동안 온 중단 신호도 실패다(구현 판정 F2)
+    if (o.signal?.aborted && !verdict.problems.some((p) => p.startsWith(ABORTED))) fail(ABORTED);
     // 관찰 기록의 allowed와 무관하다: 프록시에 닿은 것은 시나리오 코드가 뺄 수 없다
     if (denied.count) fail(deniedProblem(denied));
-    try {
-      const detail = {
-        startedAt,
-        ok: verdict.ok,
-        baseUrl,
-        denied,
-        problems: verdict.problems,
-        scenarios: verdict.scenarios,
-      };
-      writeFileSync(detailFd, `${JSON.stringify(detail, null, 2)}\n`);
-    } catch {
-      fail('진단 파일(local/detail.json)을 쓰지 못했다');
-    } finally {
-      closeSync(detailFd);
-    }
+    /** 지금의 판정으로 진단 파일을 처음부터 다시 쓴다 */
+    const writeDetail = (): boolean => {
+      try {
+        const detail = {
+          startedAt,
+          ok: verdict.ok,
+          baseUrl,
+          denied,
+          problems: verdict.problems,
+          scenarios: verdict.scenarios,
+        };
+        const buf = Buffer.from(`${JSON.stringify(detail, null, 2)}\n`);
+        ftruncateSync(detailFd, 0);
+        let off = 0;
+        while (off < buf.length) off += writeSync(detailFd, buf, off, buf.length - off, off);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     let evidence: VerifyResult['evidence'] = null;
     try {
-      evidence = buildEvidence(outDir, verdict, { startedAt, deniedCount: denied.count });
-    } catch (e) {
-      fail(`증거 묶음을 만들지 못했다: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+      // 진단 파일을 쓰지 못한 것도 요약의 판정에 들어가게 요약보다 먼저 쓴다
+      if (!writeDetail()) fail('진단 파일(local/detail.json)을 쓰지 못했다');
+      try {
+        evidence = buildEvidence(outDir, verdict, { startedAt, deniedCount: denied.count });
+      } catch (e) {
+        fail(`증거 묶음을 만들지 못했다: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+        // 요약이 없으므로 판정이 어긋날 곳은 진단 파일뿐이다. 마지막 판정으로 다시 쓴다
+        writeDetail();
+      }
+    } finally {
+      closeSync(detailFd);
     }
     return { ok: verdict.ok, outDir, baseUrl, verdict, denied, evidence };
   };
@@ -536,7 +555,8 @@ async function main(argv: string[]): Promise<number> {
       signal: ac.signal,
     });
     report(r, out);
-    return r.ok && !ac.signal.aborted ? 0 : 1;
+    // 판정은 verifyWeb이 정한 하나다(중단 신호 포함). 여기서 다시 따지면 공개 요약과 종료 코드가 어긋난다
+    return r.ok ? 0 : 1;
   } finally {
     process.off('SIGTERM', onSignal);
     process.off('SIGINT', onSignal);

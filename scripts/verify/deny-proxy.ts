@@ -29,7 +29,13 @@ const UNKNOWN = { host: UNKNOWN_HOST, port: 0 };
 const ABSOLUTE = /^([A-Za-z][A-Za-z0-9+.-]{0,15}):\/\/([^/?#\\]*)/;
 /** 호스트 이름·IPv4·대괄호로 싼 IPv6와 포트. 그 밖의 글자가 있으면 호스트로 보지 않는다 */
 const AUTHORITY = /^(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9._-]{1,253})(?::([0-9]{1,5}))?$/;
-const DEFAULT_PORT: Record<string, number> = { http: 80, ws: 80, https: 443, wss: 443 };
+/** 스킴의 기본 포트. 일반 객체로 두면 `constructor` 같은 스킴이 물려받은 속성을 집는다(구현 판정 F1) */
+const DEFAULT_PORT = new Map<string, number>([
+  ['http', 80],
+  ['ws', 80],
+  ['https', 443],
+  ['wss', 443],
+]);
 
 /** `host[:port]`에서 호스트와 포트. 기록에 남는 글자는 여기서 걸러진 호스트 이름뿐이다 */
 function target(authority: string, scheme: string | null): { host: string; port: number } {
@@ -37,8 +43,9 @@ function target(authority: string, scheme: string | null): { host: string; port:
   const at = authority.lastIndexOf('@');
   const m = AUTHORITY.exec(at >= 0 ? authority.slice(at + 1) : authority);
   if (!m) return UNKNOWN;
-  const port = m[2] ? Number(m[2]) : scheme ? (DEFAULT_PORT[scheme] ?? 0) : 0;
-  if (port > 65535) return UNKNOWN;
+  // 포트가 없으면 스킴의 기본 포트, 모르는 스킴이면 0이다. 포트는 언제나 0~65535의 정수다
+  const port = m[2] ? Number(m[2]) : ((scheme ? DEFAULT_PORT.get(scheme) : undefined) ?? 0);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) return UNKNOWN;
   return { host: m[1].toLowerCase(), port };
 }
 
