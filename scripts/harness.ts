@@ -58,6 +58,7 @@ import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
+import { runMetrics } from './commands/metrics.ts';
 import { formatOps, opsCheck } from './commands/ops-check.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
 import { describeExcluded, describeTask, start } from './commands/start.ts';
@@ -165,6 +166,9 @@ CI(gates 워크플로, 10.4절):
                                            --write는 파일을 다시 만든다(손으로 고치지 않는다, 10.4절)
   ops-check                                운영 전환 체크리스트 1~3(10.4절)을 읽기만으로 확인한다: 필수 체크 등록·출처,
                                            CODEOWNERS, 이 머신 봇 토큰의 workflow 권한. 모두 맞을 때만 종료 코드 0
+  metrics [--since <날짜>] [--until <날짜>] [--write]
+                                           지표(17.2절)를 집계해 출력한다. 기간은 UTC 날짜(YYYY-MM-DD, 양끝 포함, 기본 최근 7일).
+                                           --write는 docs/QUALITY_SCORE.md의 집계 결과 구간을 바꾼다(작업 worktree에서만)
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
@@ -282,6 +286,8 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   'max-iterations': { type: 'string' },
   'no-wait': { type: 'boolean' },
   json: { type: 'boolean' },
+  since: { type: 'string' },
+  until: { type: 'string' },
   profile: { type: 'string' },
   bot: { type: 'string' },
 };
@@ -1223,6 +1229,12 @@ async function main(argv: string[]): Promise<number> {
       );
       return ok ? 0 : 1;
     }
+    case 'metrics':
+      return runMetrics(cwd, {
+        since: str('since'),
+        until: str('until'),
+        write: flag('write'),
+      });
     case 'init':
       return init(repoInfo(cwd).root, str('profile') ?? '', {
         owner: str('owner'),
