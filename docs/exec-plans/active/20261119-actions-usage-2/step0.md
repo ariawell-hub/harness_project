@@ -18,6 +18,7 @@
    - `scripts/harness.ts`의 `codex-scan`·`claude-scan`이 판정 파일을 쓴 뒤 환경 변수 `GITHUB_OUTPUT`이 있으면 그 파일에 `repro=true` 또는 `repro=false` 한 줄을 덧붙인다. 없으면 쓰지 않는다. 판정을 내보내지 못하고 끝나는 경로에서는 쓰지 않는다.
    - `runRepro`와 기록 쪽(`parseReproResults`, 원장)은 바꾸지 않는다.
    - 기록 쪽 테스트를 더한다(구현은 바꾸지 않는다. 지금 동작을 고정한다). `scripts/test/ci.test.ts`: 두 판정 워크플로의 기록 job 조건이 `${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}`이고 그 조건에 `needs.repro`가 나오지 않는다(재현 job이 건너뛰어져도 돈다). 이 단언은 패치 전의 워크플로에서도 통과하므로 봇의 커밋에 넣는다. `scripts/test/record.test.ts`: `record-review`에 빈 재현 결과(`--repro-results ''`)를 주면 종료 코드 0으로 판정 상태와 원장을 기록하고 원장 항목의 재현 칸이 비어 있다.
+   - 위 두 테스트 파일(봇의 커밋에 든 `ci.test.ts`와 `record.test.ts`)은 기존 동작을 고정하므로 변경 전 코드에서도 통과한다. `check`의 `test-effect`가 실패로 내는 예외 줄(파일과 blob)을 계획의 의사결정 로그에 사유와 함께 적는다(절차서 4절). 그 뒤에 파일을 더 고치면 blob이 바뀌므로 예외 줄을 다시 받는다. `scan-output.test.ts`에는 예외를 쓰지 않는다(구현 전 코드에서 실패해야 한다). 제작자의 패치 커밋 뒤에는 `ci.test.ts`의 blob이 바뀌는데, 그 판은 변경 전 워크플로에서 재현 job 조건 단언이 실패하므로 예외가 필요 없다. 패치를 적용한 임시 클론에서 `node scripts/harness.ts test-effect`로 확인한다.
    - 테스트 `scripts/test/scan-output.test.ts`: 두 명령을 `node scripts/harness.ts <명령>`으로 실제 실행한다. 명령마다 넷을 단언한다. ① 재현 테스트가 붙은 지적이 있는 판정이면 `GITHUB_OUTPUT` 파일에 `repro=true` 줄이 정확히 하나 있다. ② 재현 테스트가 없는 판정이면 `repro=false` 줄이 정확히 하나 있다. ③ 유출 검사가 실패하는 입력이면 종료 코드가 0이 아니고 `repro`로 시작하는 줄이 없다. ④ `GITHUB_OUTPUT` 없이 실행하면 종료 코드 0이고 판정 파일이 생긴다. `GITHUB_OUTPUT` 파일에 이미 있던 내용은 그대로 남는지도 본다.
 
 2. 워크플로 패치 `lab/actions-usage-2/workflows.patch` (`git diff` 형식. 봇은 대상 파일을 커밋하지 않는다)
