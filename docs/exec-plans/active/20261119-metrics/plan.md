@@ -67,6 +67,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 - 2026-11-19 23:32 계획 검증 4라운드(head `6c8cac2`): claude 승인. codex는 판정 없음(`error`)이다. 판정 job의 유출 검사가 `판정 형식 오류: resolutions[6].note가 문자열이 아니거나 너무 길다`로 끝났다(실행 44542064356). 인증·한도 문제가 아니라 검증자 출력의 형식 문제다. 이 기록을 올리는 push로 다시 판정받는다.
 - 2026-11-19 23:45 계획 검증 5라운드(head `0aeeec6`): claude 승인. codex는 F7을 다시 열어 두었다(닫았다 다시 연 PR과 base를 바꾼 다른 PR이 같은 head를 쓰는 경우). 경우를 하나씩 막지 않고, head 브랜치 이름으로 열린 PR이 그 PR 하나뿐일 때만 실행을 잇도록 바꿨다(`headPrCount`). `origin/main`(#145 병합, `72ef9b9`)을 함께 병합한다.
 - 2026-11-20 00:00 계획 검증 6라운드(head `fdd966e`): claude 승인. codex는 F7을 닫고 F12를 냈다(`steadyMetrics`의 입력에 head별 PR 수를 넘길 자리가 없다). `SteadyInput.headPrCounts`와 `runMetrics`가 넘기는 방법, 값만 1과 2로 바꾼 테스트를 step1에 적었다.
+- 2026-11-20 00:15 계획 검증 7라운드(head `205512b`): claude 승인. codex는 F12를 닫고 F13을 냈다(`runMetrics`가 `headPrCount` 결과를 넘기는지를 명령 경로에서 검증하지 않는다). 같은 꼴의 빈틈을 한 번에 막았다: step0~2 각각에 `runMetrics`를 메모리 자료로 불러 자료마다 출력이 바뀌는지 보는 연결 테스트를 적었다.
 
 ## 의사결정 로그
 

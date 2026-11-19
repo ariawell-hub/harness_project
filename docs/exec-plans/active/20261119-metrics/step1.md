@@ -131,6 +131,12 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
 - `steadyMetrics`: 지표마다 고정 입력으로 값 단언(첫 실행이 재실행된 PR은 첫 통과가 아니다, 실행 없는 PR은 분모에서 빠진다, 검증 App이 아닌 계정이 쓴 `risk-gate` 기록은 쓰지 않는다, 같은 head 브랜치 이름으로 열린 PR이 둘 이상이면(닫았다 새로 연 PR, base가 다르거나 base를 바꾼 PR) 그 PR은 "실행을 이을 수 없는 PR"로 빠진다: PR과 실행 자료는 같게 두고 `headPrCounts`의 값만 1과 2로 바꾼 두 입력에서, 1이면 첫 통과율에 들고 2이면 빠진다. 값이 없는 PR도 빠진다, 포크의 같은 이름 브랜치에서 돈 실행(`sameRepo` 거짓)은 어느 PR에도 이어지지 않는다, 포크에서 온 PR과 커밋이 100개인 PR은 "실행을 이을 수 없는 PR"로 빠진다, PR의 커밋에 없는 SHA의 실행은 브랜치 이름이 같아도 이어지지 않는다, PR이 열리기 전이나 병합된 뒤의 실행은 이어지지 않는다, 라벨은 기간 마지막 날 23:59:59Z에 붙고 댓글은 다음 날 00:00:01Z에 달린 사건이 두 기간에서 라벨 수와 댓글 수로 각각 한 번씩 세어진다).
 - `planClaimedAt`: 임시 폴더의 계획 파일(단일 파일, 폴더, `active/`·`completed/`)에서 `claimed_at`을 읽는다, 계획 형식이 아닌 브랜치와 계획 파일이 없는 PR은 빠진다. 계획이 없는 PR과 둘째 step PR이 섞인 입력에서 리드타임과 "계획을 찾지 못한 PR" 수가 맞다.
 - 실행 조회 범위를 넓혀도 step0의 Actions 실행 시간 값이 같다.
+- 명령 경로의 연결(`scripts/test/metrics-command.test.ts`에 더한다. 호출을 기록하는 메모리 `MetricsSource`를 끼워 `runMetrics`를 부르고 출력을 본다):
+  - 병합 PR과 성공한 첫 실행은 그대로 두고 `headPrCount`의 반환값만 1과 2로 바꾼 두 실행에서, 출력의 첫 통과율과 "실행을 이을 수 없는 PR" 수가 다르다(1이면 첫 통과에 들고 2이면 빠진다). `headPrCount`가 병합된 PR마다 그 PR의 `head`로 불린다.
+  - `headStatuses`가 병합된 PR마다 그 PR의 `headSha`로 불리고, 한 PR의 `risk-gate` 기록만 `위험도 높음`으로 바꾸면 출력의 위험도별 PR 수가 바뀐다.
+  - 임시 리포에 계획 파일을 두고 그 계획의 브랜치 이름을 `head`로 가진 PR을 주면 출력에 리드타임 값이 나오고, 계획 파일을 지우면 "계획을 찾지 못한 PR" 수가 1 늘어난다.
+  - `needsHumanEvents`·`escalationComments`의 반환값을 하나씩 늘리면 출력의 라벨 수와 그 사유의 댓글 수가 1씩 늘어난다.
+  - `workflowRuns`가 기간에 병합된 PR의 가장 이른 `createdAt` 날짜부터 불린다(기간 전에 열린 PR을 준다).
 - `renderBlock`이 `### 상시 지표` 절을 내고 제목 문자열을 담지 않는다.
 - `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자가 step0의 "읽기 요청" 꼴이다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 `### 상시 지표` 제목이 있다.

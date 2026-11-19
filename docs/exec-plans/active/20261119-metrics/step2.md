@@ -67,6 +67,7 @@ export function localMetrics(i: LocalInput): LocalMetrics;
 - 임시 폴더에 계획 파일과 runner 로그를 만들어 `localMetrics`의 값마다 단언한다: `judge-fail`의 세 갈래(AC 실패 확인, AC 결과 미확인, 꼴이 다른 `detail`)와 지표의 범위(최소·최대), 기간 밖 계획 제외, 방법 전환 줄 수, 처리 분포의 네 갈래와 우선순위, `exit` 없는 실행, 작업자가 둘인 로그, 깨진 줄, 로그 없음, 보고서 있음·없음.
 - `renderBlock`: 잴 수 없는 지표 넷이 이유와 TD 번호로 나오고, AC 실패 지표는 범위와 이유·TD 번호로 나온다. 17.2절 상시 지표 13항목 각각에 대응하는 줄이 있다(항목 이름 목록을 테스트에 고정한다).
 - `runMetrics`: `--self-test-report`가 없는 파일이면 종료 코드 1이고 자료를 읽지 않는다.
+- 명령 경로의 연결(`scripts/test/metrics-command.test.ts`에 더한다. 임시 리포와 메모리 `MetricsSource`로 `runMetrics`를 부르고 출력을 본다): 임시 리포의 공유 git-dir(`harnessStateDir(info, 'common')`)에 `runner.jsonl`을 두면 출력에 그 로그로 센 runner 실행 수가 나오고 파일이 없으면 "이 머신에 runner 로그 없음"이 나온다, 임시 리포의 계획 파일에 `- 방법 전환(` 줄을 하나 더하면 출력의 방법 전환 횟수가 1 늘어난다, `--self-test-report`로 준 보고서의 통과 수와 전체 수가 출력에 나온다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 17.2절 상시 지표 13항목 각각에 대응하는 줄이 있다.
 
 ## Acceptance Criteria
