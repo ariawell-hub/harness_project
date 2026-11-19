@@ -2,7 +2,7 @@
 id: 20261119-workflow-change-procedure
 issue: 139 # GitHub Issue 번호
 type: chore # 브랜치 접두어
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
