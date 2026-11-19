@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { runCheck, testInert, testSkip } from '../commands/check.ts';
+import { cacheKey, runCheck, testInert, testSkip } from '../commands/check.ts';
 import { ConfigError, loadConfig } from '../lib/config.ts';
 import { harnessStateDir, repoInfo } from '../lib/git.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
@@ -325,6 +325,33 @@ test('check 캐시: 캐시 폴더를 만들 수 없어도(같은 이름의 파�
   writeFileSync(path.join(state, 'check-cache'), '');
   const b = await fmtThenTest(blocked.root, blocked.base, PASSING_TEST);
   assert.deepEqual([b.ok, b.cached], [true, false]);
+});
+
+test('check 캐시: 깨진 캐시 파일은 없는 것으로 보고 다시 돌린다. 쓴 뒤에 임시 파일이 남지 않는다 (PR #134 F3)', async () => {
+  const { root, base } = repo(withFmt(nodeE('process.exit(0)')));
+  write(root, 'docs/x.md', '# x\n');
+  const only: ('fmt' | 'test')[] = ['fmt', 'test'];
+  const config = () => {
+    const cfg = loadConfig(root);
+    (cfg.commands as Record<string, unknown>).test = PASSING_TEST;
+    return cfg;
+  };
+  const run = () =>
+    runCheck(repoInfo(root), config(), { base, env: {}, only, noRecord: true, quiet: true });
+  const dir = path.join(harnessStateDir(repoInfo(root), 'common'), 'check-cache');
+  const file = path.join(dir, `${cacheKey(repoInfo(root), config(), base, only)}.json`);
+  mkdirSync(dir, { recursive: true });
+  // 쓰다가 끊긴 캐시(JSON 일부), 모양이 다른 캐시, 빈 파일이 최종 경로에 남아 있다
+  for (const broken of ['{"ok":true,"cached":false,"resul', '{"ok":true}', '[]', 'null', '']) {
+    writeFileSync(file, broken);
+    const r = await run();
+    // 캐시 적중이 아니라 실제로 돌았고, 통과했다
+    assert.deepEqual([r.ok, r.cached, r.results.length], [true, false, 2], broken);
+    // 온전한 결과로 다시 썼다: 다음 실행은 캐시 적중이다
+    assert.equal((await run()).cached, true, broken);
+  }
+  // 최종 파일 하나만 남는다(임시 파일 없음)
+  assert.deepEqual(readdirSync(dir), [path.basename(file)]);
 });
 
 test('testSkip: 판정과 이유를 돌려준다', () => {
