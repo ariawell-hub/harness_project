@@ -10,3 +10,6 @@ node_modules/
 
 # 검증 입력 폴더(판정 job의 base 스크립트가 만든다. 로컬에서 review-plan을 돌렸을 때 남는다)
 .harness-review/
+
+# verify의 출력 폴더(dev 로그, 실행기 보고서, 증거 묶음. 올리지 않는다)
+.harness-verify/
