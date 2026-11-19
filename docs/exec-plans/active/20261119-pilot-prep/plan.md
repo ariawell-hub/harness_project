@@ -158,6 +158,11 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 남은 것: `CHANGELOG`·설계서 0절 변경 이력(PR #144 병합 뒤 `origin/main`을 병합하고 더한다), `check` → `complete-step` → push.
 - 2026-11-19: 다른 세션의 PR #144가 병합됐다(설계서 v0.7.59). `origin/main`을 병합하고(충돌 없음) step1의 `CHANGELOG`·설계서 0절 변경 이력(v0.7.60)을 더했다. 열린 다른 PR은 없다.
 - 2026-11-19T22:14:53+09:00 step1 재작업: 구현 판정 1라운드의 지적 F1·F2·F3 대응(Windows의 프로세스 트리, 일반 파일이 아닌 결과 파일, 형식이 잘못된 중첩 suite)
+- 2026-11-19: step1 구현 판정 1라운드(PR #145, head `35384f1`). `review/claude` 승인, `review/codex` 수정 요청(P1 3건). 셋 다 받아들였다(반박 없음).
+  - F1(P1): Windows에서 실행기가 자식을 남기고 먼저 끝나면 `taskkill /T`와 pid 확인이 그 자식을 보지 못해, 프로세스가 남았는데도 정리됐다고 판정한다. 지적의 제안(Job Object)은 Node 표준 API에 없고(네이티브 모듈이 필요하다), libuv가 만드는 job은 손자가 빠져나가게 설정돼 있어 기댈 수 없다. 그래서 Windows에서는 `verify`가 아무것도 띄우지 않고 실패하게 했다(`unsupportedPlatform`, 아래 의사결정 로그). Windows 전용 분기와 step1에서 내보냈던 `platformShell`은 지웠다(`scripts/lib/exec.ts`는 main과 같다). macOS·Linux에서 같은 경우(실행기가 같은 그룹에 자식을 남기고 정상 종료)는 그룹 신호로 정리되는 것을 테스트로 확인했다.
+  - F2(P1): 실행기가 `report.json` 자리에 쓰는 쪽이 없는 FIFO를 남기면 `readFileSync`가 여는 단계에서 멈춰 신호 처리도 정리도 돌지 못했다. 결과 파일을 `O_NONBLOCK | O_NOFOLLOW`로 열고 연 파일이 일반 파일이고 64MB 이하일 때만 읽게 했다. 같은 꼴 둘을 함께 고쳤다: 로그 파일(`dev.log`, `runner.log`)은 아무것도 띄우기 전에 `wx`로 새로 만들어 열어 두고(`dev`가 실행기 로그 자리에 FIFO를 심으면 `openSync`가 멈췄다), `dev.log` 끝부분은 경로로 다시 열지 않고 그 fd로 읽는다.
+  - F3(P1): `judge`가 suite의 `specs`·`suites`가 배열이 아닐 때 그 아래를 건너뛰고 문제로 적지 않아, 옆의 정상 spec 하나로 통과했다. 두 필드는 없어도 되지만 있으면 배열이어야 하고, 아니면 실패다.
+  - 재현 테스트를 먼저 썼다(`scripts/test/verify-web.test.ts`). 고치기 전에는 넷이 실패했다(F3, 심볼릭 링크·큰 결과 파일, FIFO 결과 파일, 로그 자리의 FIFO). FIFO 둘은 고치기 전 코드에서 프로세스가 멈추므로 명령행(자식 프로세스)을 시간 제한과 SIGKILL로 돌려 본다.
 
 ## 의사결정 로그
 
@@ -182,6 +187,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 결정: Q10·Q13은 "열린 질문"에 올리되 step0~4는 답을 기다리지 않는다. / 이유: 어느 step도 DB·ORM이나 리포 소유 계정에 기대지 않는다. 답이 필요한 일(14.3절·18절, DB 차단 목록, 일회용 DB)은 비범위다.
 - 결정: step0의 설계서 버전은 v0.7.58이다(위 결정의 "v0.7.59부터"를 바꾼다). / 이유: TD-53 PR(#141)은 설계서를 고치지 않고 병합돼 v0.7.58을 쓰지 않았다. main의 마지막 버전은 v0.7.57이고 step0 지시서의 규칙은 "`origin/main`의 마지막 버전 다음 번호"다. 다른 세션의 남은 브랜치(`feat/20261119-actions-usage-2-s0`)도 v0.7.58·v0.7.59를 쓰지 않는 것을 확인했다(계획을 접은 상태다). 번호를 건너뛰면 변경 이력에 빈 번호가 남는다. / 버린 대안: 합의의 숫자대로 v0.7.59를 쓴다(겹치지 않게 하려던 합의의 목적은 v0.7.58로도 지켜진다).
 - 결정: 웹 프로파일의 `testEffect.support`에 래퍼 폴더(`profiles/web/test-effect/**`)를 넣는다(step0 지시서의 `["src/test/**"]`에 더한다). / 이유: 구현 판정 F19. 변경 전 코드에 래퍼가 없는 변경(웹 프로파일을 처음 적용, 래퍼 경로가 바뀐 판으로 올림)에서 래퍼가 변경 전 코드 위에 놓여야 테스트가 실제로 돈다. `support`는 "이 변경이 더하거나 고친 보조 파일을 변경 전 코드 위에 놓는다"는 기존 규칙이라 게이트 코드를 바꾸지 않아도 된다. / 대안: `scripts/gates/test-effect.ts`가 `command`의 스크립트를 스스로 옮기게 한다(판정 규칙 변경이라 이 step의 금지사항이다), 계획을 고쳐 계획 검증을 다시 받는다(값 하나를 더 엄하게 하는 변경에 코드를 되돌리고 다시 올리는 라운드가 든다. 구현 판정이 같은 변경을 본다). / 남는 한계: 래퍼를 고친 변경에서는 고친 판이 변경 전 코드 위에서 돈다. 래퍼를 고쳐 실패를 꾸며 낼 수 있지만, 래퍼는 보호 경로(`profiles/**`)라 그 변경은 제작자 승인 대상이다.
+- 결정: `verify` 웹 구현은 Windows(네이티브)를 지원하지 않는다. `verifyWeb`은 Windows에서 아무것도 띄우지 않고 이유와 함께 실패한다. / 이유: 구현 판정 F1. 정리 계약(수용 기준 5)은 프로세스 그룹에 기댄다. Windows에서는 부모가 먼저 끝난 뒤 남은 자식을 찾을 수단이 Node 표준 API에 없어, 남은 프로세스를 두고 통과로 판정할 수 있다. 판단하지 못하면 실패로 둔다는 원칙에 따른다. 파일럿은 macOS와 Linux(CI)에서 돈다. / 대안: 네이티브 모듈로 Job Object를 쓴다(새 의존성과 ADR이 필요하다), 지금처럼 `taskkill /T`로 최선만 한다(남은 프로세스를 놓치고 통과시킨다). / 되돌리는 법: Job Object 등 추적 수단이 생기면 `unsupportedPlatform`을 고친다. TD-12 행에 남은 일로 적는다(step4).
 
 ## 발견 사항
 
@@ -195,6 +201,8 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - `verify`의 브라우저에서는 서비스 워커가 돌지 않아 워커에 기대는 동작은 확인하지 못한다. → 처리: #140 (이 계획의 step3: `profiles/web/README.md`에 한계로 적는다)
 - 웹 프로파일에 `testEffect` 키가 없던 동안, `init --profile web`을 적용한 리포에는 core 프로파일의 `testEffect`(`scripts/test/*.test.ts`, `node --test`)가 그대로 남아 있었다(`init`은 프로파일에 있는 키만 덮어쓴다). 그래서 `src/`의 테스트는 검사 대상에 들지 않고 지나갔다. → 처리: TD-42 (step0에서 프로파일이 키를 채웠고, 행의 상태 칸에 이 내용을 적었다)
 - `test-effect`는 `command`가 가리키는 스크립트가 변경 전 코드에 없으면 실행 실패를 "변경 전 코드에서 실패"로 읽어 `effective`(단언 실패 아님)로 판정한다. 명령 스크립트를 리포 안에 두는 프로파일은 그 경로를 `support`에 넣어야 한다. core 프로파일은 `node --test`라 해당하지 않는다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (웹 프로파일은 `support`에 넣고 이유를 적었다)
+- `verify`는 Windows에서 돌지 않는다(위 의사결정 로그). 하네스의 다른 명령은 Windows 네이티브를 지원한다(ADR-0005). → 처리: TD-12 (step4에서 행을 갱신할 때 남은 일로 적고, 웹 프로파일 README와 스킬 문서에 한계로 적는다)
+- `verify`의 정리는 프로세스 그룹 단위다. `dev`나 실행기의 자손이 스스로 다른 그룹·세션으로 옮겨 가면(`setsid`) 보지 못한다. 표준 명령 실행기(`scripts/lib/exec.ts`)와 같은 한계다. 일반적인 `dev` 서버와 Playwright·브라우저는 그룹 안에 남는다. → 처리: TD-12 (step4에서 행을 갱신할 때 한계로 적는다)
 
 ## 열린 질문
 
@@ -223,6 +231,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - step0 재작업(2026-11-19, F21): AC 9개 모두 통과. 검사기 테스트는 10개다.
 - step0 재작업(2026-11-19, F22): AC 9개 모두 통과. 검사기 테스트는 12개다.
 - step1(2026-11-19): AC 8개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 3은 `scripts/test/standard-args.test.ts`(6개), 수용 기준 4·5는 `scripts/test/verify-web.test.ts`(37개: `judge` 13, `isScenarioPath` 1, `verifyWeb` 17, 명령행 6)로 확인했다. 실제 Playwright로 도는 것은 step3의 실물 확인에서 본다.
+- step1 재작업(2026-11-19, F1~F3): AC 8개 모두 통과. `scripts/test/verify-web.test.ts`는 43개다(`judge` 14, `isScenarioPath` 1, `unsupportedPlatform` 1, `verifyWeb` 19, 명령행 8).
 
 ## 다음 할 일
 

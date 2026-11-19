@@ -5,13 +5,22 @@
 // 실행기(Playwright)는 명령(인자 배열)으로만 다룬다. 이 파일은 실행기 패키지를 import하지 않는다.
 // 실행기 명령, 설정 파일 경로, 앱 주소는 환경 변수·명령행 인자·설정 파일로 바꿀 수 없다(검사를 약화시키는 길이 된다).
 import { spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { killTree, platformShell, tail, GIT_BASH_MISSING } from '../lib/exec.ts';
+import { killTree, tail } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { isScenarioPath, judge, type Verdict } from './judge.ts';
 
@@ -52,7 +61,18 @@ export interface VerifyResult {
 
 const failed = (problem: string): Verdict => ({ ok: false, scenarios: [], problems: [problem] });
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const isWin = process.platform === 'win32';
+
+/**
+ * 이 플랫폼에서 verify를 돌릴 수 없으면 이유를, 돌릴 수 있으면 null을 돌려준다.
+ * 정리 계약은 프로세스 그룹에 기댄다: dev와 실행기를 각자의 그룹으로 띄우고, 그룹에 신호를 보내고, 그룹이 빈 것을 확인한다.
+ * Windows에는 이것이 없다. 부모가 먼저 끝나면 남은 자식(브라우저 등)을 찾을 길이 없어(taskkill /T는 살아 있는 부모에서만
+ * 내려간다) 프로세스가 남았는데도 정리됐다고 판정하게 된다. 그래서 띄우지 않고 실패한다(구현 판정 F1)
+ */
+export function unsupportedPlatform(platform: NodeJS.Platform): string | null {
+  return platform === 'win32'
+    ? 'Windows에서는 verify를 지원하지 않는다: 띄운 프로세스 트리(dev, 실행기, 브라우저)가 모두 끝났는지 확인할 수단(프로세스 그룹)이 없다. macOS나 Linux(CI 포함)에서 실행하라'
+    : null;
+}
 
 function stamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
@@ -92,26 +112,19 @@ interface Proc {
   exited: Promise<void>;
 }
 
+/** 자기 프로세스 그룹으로 띄운다(정리할 때 그룹 전체에 신호를 보낸다). 출력은 `log`(열어 둔 파일)로 보낸다 */
 function start(
   cmd: string,
   args: string[],
-  o: { cwd: string; env: NodeJS.ProcessEnv; shell: boolean | string; log: string },
+  o: { cwd: string; env: NodeJS.ProcessEnv; shell: boolean; log: number },
 ): Proc {
-  const fd = openSync(o.log, 'a');
-  let child: ChildProcess;
-  try {
-    child = spawn(cmd, args, {
-      cwd: o.cwd,
-      env: o.env,
-      shell: o.shell,
-      // 자기 프로세스 그룹으로 띄운다. 정리할 때 그룹 전체에 신호를 보낸다
-      detached: !isWin,
-      stdio: ['ignore', fd, fd],
-      windowsHide: true,
-    });
-  } finally {
-    closeSync(fd);
-  }
+  const child = spawn(cmd, args, {
+    cwd: o.cwd,
+    env: o.env,
+    shell: o.shell,
+    detached: true,
+    stdio: ['ignore', o.log, o.log],
+  });
   const proc: Proc = { child, code: null, exited: Promise.resolve() };
   proc.exited = new Promise<void>((resolve) => {
     child.once('error', () => {
@@ -126,13 +139,15 @@ function start(
   return proc;
 }
 
-/** 프로세스 트리(그룹)에 남은 프로세스가 있는가 */
+/**
+ * 프로세스 그룹에 남은 프로세스가 있는가. 그룹의 첫 프로세스가 끝난 뒤에도 남은 자식을 본다.
+ * 스스로 다른 그룹·세션으로 옮겨 간 자손(setsid)은 보지 못한다(표준 명령 실행기 `lib/exec.ts`와 같은 한계)
+ */
 function treeAlive(p: Proc): boolean {
   const pid = p.child.pid;
   if (!pid) return false;
   try {
-    // Windows에는 프로세스 그룹 신호가 없다. killTree가 taskkill /T /F로 트리를 끝낸다
-    process.kill(isWin ? pid : -pid, 0);
+    process.kill(-pid, 0);
     return true;
   } catch (e) {
     // EPERM: 있지만 신호를 보낼 수 없다(남은 것으로 본다). ESRCH: 없다
@@ -209,12 +224,46 @@ function checkScenarios(
   return { scenarios: unique };
 }
 
+/** 결과 파일 크기 한도. 관찰 기록만 본문으로 붙으므로(스크린샷 등은 경로로 붙는다) 넉넉한 값이다 */
+const MAX_REPORT_BYTES = 64 * 1024 * 1024;
+
+/** 열어 둔 일반 파일을 `start`부터 끝까지 읽는다 */
+function readFd(fd: number, start: number, end: number): string {
+  const buf = Buffer.alloc(end - start);
+  let off = 0;
+  while (off < buf.length) {
+    const n = readSync(fd, buf, off, buf.length - off, start + off);
+    if (n === 0) break;
+    off += n;
+  }
+  return buf.subarray(0, off).toString('utf8');
+}
+
+/**
+ * 실행기가 쓴 결과 파일을 읽는다. 결과 파일은 PR의 코드가 만든 것이라 그냥 열지 않는다:
+ * 쓰는 쪽이 없는 FIFO를 열면 프로세스가 멈춰 시간 제한도 정리도 돌지 못한다(구현 판정 F2).
+ * 막히지 않게 열고(O_NONBLOCK), 심볼릭 링크는 따라가지 않고(O_NOFOLLOW), 연 파일이 일반 파일이고 한도보다 작을 때만 읽는다
+ */
 function readReport(file: string): { report: unknown } | { problem: string } {
+  let fd: number;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { problem: '실행기가 결과 파일(report.json)을 쓰지 않았다' }
+      : { problem: '결과 파일(report.json)을 열지 못했다(심볼릭 링크이거나 읽을 수 없다)' };
+  }
   let raw: string;
   try {
-    raw = readFileSync(file, 'utf8');
+    const st = fstatSync(fd);
+    if (!st.isFile()) return { problem: '결과 파일(report.json)이 일반 파일이 아니다' };
+    if (st.size > MAX_REPORT_BYTES)
+      return { problem: `결과 파일(report.json)이 너무 크다(${MAX_REPORT_BYTES}바이트 초과)` };
+    raw = readFd(fd, 0, st.size);
   } catch {
-    return { problem: '실행기가 결과 파일(report.json)을 쓰지 않았다' };
+    return { problem: '결과 파일(report.json)을 읽지 못했다' };
+  } finally {
+    closeSync(fd);
   }
   try {
     return { report: JSON.parse(raw) as unknown };
@@ -223,13 +272,15 @@ function readReport(file: string): { report: unknown } | { problem: string } {
   }
 }
 
-const logTail = (file: string): string => {
+/** 열어 둔 로그 파일의 끝부분. 경로로 다시 열지 않는다(그 자리의 파일이 바뀌었을 수 있다) */
+function logTail(fd: number): string {
   try {
-    return tail(readFileSync(file, 'utf8'), 20);
+    const size = fstatSync(fd).size;
+    return tail(readFd(fd, Math.max(0, size - 16_384), size), 20);
   } catch {
     return '';
   }
-};
+}
 
 /**
  * 앱을 띄워 시나리오를 돌리고 판정한다. 돌아가기 전에 띄운 것(dev와 실행기의 프로세스 트리)을 모두 끝낸다:
@@ -240,6 +291,8 @@ export async function verifyWeb(
   cfg: HarnessConfig,
   o: VerifyOptions = {},
 ): Promise<VerifyResult> {
+  const unsupported = unsupportedPlatform(process.platform);
+  if (unsupported) return { ok: false, outDir: '', baseUrl: '', verdict: failed(unsupported) };
   // 보고서의 config.rootDir는 실행기가 본 실제 경로다. 심볼릭 링크를 낀 경로를 그대로 쓰면 리포 기준 경로가 어긋난다
   root = realpathSync(root);
   const made = makeOutDir(root);
@@ -269,8 +322,6 @@ export async function verifyWeb(
         'commands.dev가 없다. verify는 dev로 앱을 띄운다. 고치는 법: harness.config.json의 commands.dev에 앱 실행 명령(run, timeoutSec)을 넣어라(PORT·HOST 환경 변수를 따라야 한다)',
       ),
     );
-  const shell = platformShell();
-  if (shell === null) return result('', failed(GIT_BASH_MISSING.trim()));
   const signal = o.signal;
   if (signal?.aborted) return result('', failed('중단 신호를 받았다'));
 
@@ -280,14 +331,20 @@ export async function verifyWeb(
   const procs: Proc[] = [];
   let baseUrl = '';
   let verdict: Verdict;
+  // 로그 파일 둘은 아무것도 띄우기 전에 새로 만들어 열어 둔다(wx: 이미 있으면 실패). dev가 실행기 로그 자리에
+  // FIFO나 링크를 미리 둘 수 없고, 로그 끝부분은 이 fd로 읽는다
+  const logs: number[] = [];
   try {
+    const devLog = openSync(path.join(local, 'dev.log'), 'wx');
+    logs.push(devLog);
+    const runnerLog = openSync(path.join(local, 'runner.log'), 'wx');
+    logs.push(runnerLog);
     const port = await freePort();
     baseUrl = `http://${HOST}:${port}`;
-    const devLog = path.join(local, 'dev.log');
     const devProc = start(dev.run, [], {
       cwd: root,
       env: { ...process.env, PORT: String(port), HOST },
-      shell,
+      shell: true,
       log: devLog,
     });
     procs.push(devProc);
@@ -324,7 +381,7 @@ export async function verifyWeb(
         cwd: root,
         env,
         shell: false,
-        log: path.join(local, 'runner.log'),
+        log: runnerLog,
       });
       procs.push(runnerProc);
       const timeoutSec = o.runnerTimeoutSec ?? 900;
@@ -342,7 +399,9 @@ export async function verifyWeb(
         verdict = failed(`실행기가 ${timeoutSec}초 안에 끝나지 않아 중단했다`);
       else if (ended === 'aborted') verdict = failed('중단 신호를 받았다');
       else {
-        const read = readReport(path.join(outDir, 'report.json'));
+        const read = signal?.aborted
+          ? { problem: '중단 신호를 받았다' }
+          : readReport(path.join(outDir, 'report.json'));
         verdict =
           'problem' in read
             ? failed(`${read.problem}(실행기 종료 코드 ${runnerProc.code})`)
@@ -359,6 +418,7 @@ export async function verifyWeb(
       // 남은 프로세스가 있으면 통과로 두지 않는다
       verdict = failed('띄운 프로세스를 끝내지 못했다(dev 또는 실행기의 프로세스가 남아 있다)');
     }
+    for (const fd of logs) closeSync(fd);
   }
   return result(baseUrl, verdict!);
 }

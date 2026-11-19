@@ -149,14 +149,16 @@ function collectSpecs(suites: unknown[]): { specs: Obj[]; problems: string[] } {
       problems.push('보고서의 suite가 객체가 아니다');
       continue;
     }
+    // specs·suites는 없어도 되지만 있으면 배열이어야 한다. 아니면 그 아래의 시나리오를 볼 수 없다
     if (Array.isArray(s.specs)) {
       for (const spec of s.specs) {
         if (isObj(spec)) specs.push(spec);
         else problems.push('보고서의 spec이 객체가 아니다');
       }
-    }
+    } else if (s.specs !== undefined) problems.push('보고서 suite의 specs가 배열이 아니다');
     if (Array.isArray(s.suites))
-      for (let i = s.suites.length - 1; i >= 0; i--) stack.push(s.suites[i]);
+      for (let k = s.suites.length - 1; k >= 0; k--) stack.push(s.suites[k]);
+    else if (s.suites !== undefined) problems.push('보고서 suite의 suites가 배열이 아니다');
   }
   return { specs, problems };
 }
