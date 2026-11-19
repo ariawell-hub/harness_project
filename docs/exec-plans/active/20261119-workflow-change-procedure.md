@@ -1,0 +1,55 @@
+---
+id: 20261119-workflow-change-procedure
+issue: 139 # GitHub Issue 번호
+type: chore # 브랜치 접두어
+status: active # draft | active | blocked | completed | abandoned
+size: small
+risk: high # low | normal | high
+author: claude-code
+owner: session
+claimed_at: 2026-11-19T18:02:04+09:00
+---
+
+# chore: 운영 단계의 워크플로 변경 절차를 정하고 작은 변경으로 한 번 해 본다 (TD-53)
+
+- 목표: 봇이 push할 수 없는 워크플로 파일을 바꾸는 절차를 정하고, 동작이 바뀌지 않는 작은 변경(`judge-codex.yml` 머리 주석에 빠진 재현 job 설명 한 줄)으로 처음부터 끝까지 해 본 뒤, 해 본 대로 문서에 적는다(Issue #139, TD-53).
+- 변경: ① 제작자가 올릴 패치와 적용 방법(`lab/workflow-change/`) ② 두 판정 워크플로의 머리 주석이 모든 job을 설명하는지 보는 구조 테스트(`scripts/test/ci.test.ts`. 워크플로 커밋이 없는 head에서는 실패한다) ③ 제작자의 워크플로 커밋(`.github/workflows/judge-codex.yml`, 주석 한 줄. 봇은 올리지 않는다) ④ 절차 문서(`docs/SECURITY.md`, 절차서 5절, `CHANGELOG`, 필요하면 설계서 0.1절 E1)와 시험 기록(`lab/workflow-change/result.json`), TD-53·TD-38 갱신.
+- 검증: node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts
+- 그 밖의 검증: `node scripts/harness.ts check`, `node scripts/harness.ts doc-lint`. 병합 뒤 Issue #139에 관찰(자동 병합을 누가 켰는지, main의 워크플로)을 남긴다.
+
+## 관련 파일·문서
+
+- `.github/workflows/judge-codex.yml`, `.github/workflows/judge-claude.yml`(머리 주석. 읽기만. 고치는 것은 제작자의 커밋이다)
+- `scripts/test/ci.test.ts`(`jobs()` 도우미, 재현 job 테스트 근처)
+- `docs/SECURITY.md`("전환 뒤에 달라지는 것"의 워크플로 파일 줄, 봇 토큰 표), `docs/harness/workflow.md` 5절, `docs/harness/CHANGELOG.md`, `docs/harness/design.md` 0.1절 E1
+- `docs/exec-plans/tech-debt-tracker.md`(TD-53, TD-38)
+- `lab/ops-transition/results/workflow-scope.json`(권한 회수 뒤 워크플로 push 거부를 관찰한 기록. 남은 확인 두 건)
+- Issue #135의 중단 보고, PR #136의 지적 원장(F4·F7~F12)
+
+## 절차(기본안)와 이번에 확인할 것
+
+1. 봇이 브랜치에 계획과 패치(`lab/workflow-change/*.patch`, 적용 방법 `README.md`)를 올린다. PR은 아직 열지 않는다.
+2. 제작자가 그 브랜치에 패치를 적용한 커밋을 올린다(워크플로 파일만 든 커밋).
+3. 봇이 브랜치를 받아(`git fetch origin <브랜치>`, `git merge --ff-only origin/<브랜치>`) 그 위에 워크플로의 새 구조를 단언하는 테스트와 나머지 변경을 올리고 PR을 연다. **워크플로 변경과 그것을 단언하는 테스트가 둘 다 있어야 `check`가 통과한다.** 워크플로 커밋이 빠진 head는 CI가 막는다.
+4. 판정 → 완료 처리 → `pr-ready` → 제작자 승인 → 병합.
+
+확인할 것(해 본 적이 없다):
+
+- (가) 워크플로 변경이 이미 올라가 있는 브랜치에, 봇이 워크플로를 건드리지 않는 커밋을 push할 수 있는가(3번). 거부되면 이 순서는 쓸 수 없다. 그때는 멈추고 제작자에게 알린 뒤 순서를 바꾼 안(봇이 먼저 전부 올리고 제작자가 패치 커밋을 마지막에 올린다)으로 다시 계획한다.
+- (나) 워크플로 변경이 든 PR의 자동 병합을 봇이 켤 수 있는가(4번). 거부되면 제작자가 승인 뒤 Squash 병합한다.
+- (다) 병합 뒤 main의 `check`와 판정 워크플로가 정상으로 도는가. 열려 있는 다른 PR이 있으면 그 PR의 `origin/main` 병합 push가 되는가(TD-38의 남은 확인. 기회가 있을 때만).
+
+## 진행 로그
+
+- 2026-11-19: 제작자 대화 지시("TD-53대로 워크플로 변경 절차를 먼저 따로 정한 뒤 새 Issue로 다시 시작해")로 봇이 Issue #139를 등록하고 시작했다.
+
+## 의사결정 로그
+
+- 결정: 제작자의 워크플로 커밋을 **먼저**, 봇의 테스트와 나머지를 그 뒤에 올린다. / 이유: Issue #135의 계획은 봇이 먼저 전부 올리고 제작자가 패치를 마지막에 올리는 순서였다. 그 순서에서는 패치 전의 head와 패치 뒤의 head가 둘 다 통과해야 해서, 새 구조의 단언을 패치 안에 넣어야 했고(패치가 빠져도 `check`가 통과한다), 기존 동작을 고정하는 테스트의 `test-effect` 예외, 패치가 실제로 들어갔는지의 수동 확인이 필요했다. 지적 12건 가운데 7건이 여기서 나왔다. 순서를 뒤집으면 봇이 올리는 head는 하나의 상태(워크플로 변경 포함)만 통과하면 되고, 패치가 빠진 것은 봇의 테스트가 잡는다. / 버린 대안: 봇이 먼저 올리고 제작자가 마지막에 올리기(위의 이유. (가)가 안 되면 이쪽으로 돌아간다), 제작자가 PR을 직접 열기(자기 PR은 승인할 수 없어 `risk-gate`를 통과하지 못한다), 봇 토큰에 `workflow` 권한을 잠시 주기(운영 전환에서 회수한 권한이다. `docs/SECURITY.md`가 금한다).
+- 결정: 시험할 변경은 `judge-codex.yml` 머리 주석의 재현 job 설명 한 줄로 한다. / 이유: 실제로 빠져 있는 줄이다(`judge-claude.yml`에는 있고 `judge-codex.yml`에는 없다. job은 둘 다 있다). 주석이라 동작이 바뀌지 않고, "머리 주석이 모든 job을 설명한다"는 테스트로 워크플로 커밋이 없을 때 실패하는 단언을 만들 수 있다. / 버린 대안: 뜻 없는 주석 한 줄(단언할 것이 없어 "둘 다 있어야 통과"를 시험하지 못한다), 재현 job 조건을 바로 바꾸기(절차와 기능을 다시 한 계획에 섞는다).
+- 결정: 규모는 소규모, 위험도는 높음으로 둔다. / 이유: 동작이 바뀌지 않는다(주석 한 줄, 테스트 단언 하나, 문서). 규칙 문서만 고친 선례(계획 20261118-actions-usage)가 소규모였다. 봇 권한과 워크플로에 관한 절차이고 보호 경로를 바꾸므로 위험도는 높음이다(제작자 승인 필요). 소규모라 계획 검증(G1)은 없고, PR의 판정은 두 검증자가 모두 한다. / 버린 대안: 중규모(동작 변경이 없다).
+- 결정: PR은 봇의 후속 push 뒤에 연다. / 이유: 제작자의 워크플로 커밋만 올라간 head는 일반적으로 기존 구조 테스트가 실패할 수 있는 중간 상태다. PR이 열려 있으면 그 head에서 `check`가 돌아 실패가 원장에 남는다.
+
+## 발견 사항
+
+- 없음
