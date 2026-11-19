@@ -1,0 +1,8 @@
+{
+  "plan": "20261119-metrics",
+  "steps": [
+    { "step": 0, "name": "pilot", "status": "pending" },
+    { "step": 1, "name": "steady-github", "status": "pending" },
+    { "step": 2, "name": "steady-local", "status": "pending" }
+  ]
+}
