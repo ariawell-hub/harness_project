@@ -17,7 +17,8 @@
     {
       "step": 2,
       "name": "verify-guard",
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-11-19T23:31:50+09:00"
     },
     {
       "step": 3,
