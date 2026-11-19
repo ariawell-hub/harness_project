@@ -377,6 +377,7 @@ export async function verifyWeb(
       // 진단 파일을 쓰지 못한 것도 요약의 판정에 들어가게 요약보다 먼저 쓴다
       if (!writeDetail()) fail('진단 파일(local/detail.json)을 쓰지 못했다');
       try {
+        // 마지막 단계다: 묶음은 다 쓰인 채로 한 번에 나타나거나 아예 생기지 않는다. 이 뒤로는 판정이 바뀌지 않는다
         evidence = buildEvidence(outDir, verdict, { startedAt, deniedCount: denied.count });
       } catch (e) {
         fail(`증거 묶음을 만들지 못했다: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
@@ -384,7 +385,12 @@ export async function verifyWeb(
         writeDetail();
       }
     } finally {
-      closeSync(detailFd);
+      // 요약이 나타난 뒤에는 판정을 바꿀 일이 없어야 한다. 닫기 실패는 판정에 넣지 않는다
+      try {
+        closeSync(detailFd);
+      } catch {
+        // 진단 파일은 이미 썼다
+      }
     }
     return { ok: verdict.ok, outDir, baseUrl, verdict, denied, evidence };
   };
@@ -533,6 +539,8 @@ function report(r: VerifyResult, write: (s: string) => void): void {
 
 async function main(argv: string[]): Promise<number> {
   const out = (s: string) => process.stdout.write(s);
+  // 출력을 받는 쪽이 먼저 닫혀도(EPIPE) 종료 코드는 판정을 따른다. 공개 요약과 어긋나지 않게 한다
+  process.stdout.on('error', () => {});
   // 시나리오 경로만 받는다. 옵션(--config 등)이나 정규식으로 읽힐 문자가 실행기에 닿지 않게 한다
   const bad = argv.filter((a) => !isScenarioPath(a));
   if (bad.length) {

@@ -3,7 +3,16 @@
 // 요약에는 실행 중에 만들어진 문자열을 넣지 않는다(콘솔 문구, URL, 시나리오 제목, 문제 문장, 거부된 요청의 호스트).
 // 그런 글자에는 토큰이 찍힐 수 있고 잘라도 남는다. 넣는 것은 정해 둔 낱말, 규칙에 맞는 시나리오 경로, 숫자뿐이다.
 // 올리는 쪽은 돌려준 `files`의 두 파일만 쓴다(`evidence/` 폴더를 통째로 올리지 않는다).
-import { lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import {
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { isScenarioPath, type ScenarioVerdict, type Verdict } from './judge.ts';
 
@@ -115,31 +124,36 @@ function markdown(
   return `${lines.join('\n')}\n`;
 }
 
+/** 파일 쓰기와 폴더 옮기기. 테스트가 실패를 끼워 넣을 수 있게 인자로 받는다 */
+export interface EvidenceIo {
+  writeFileSync(file: string, data: string, options: { flag: string }): void;
+  renameSync(from: string, to: string): void;
+}
+
 /**
  * `<outDir>/evidence/`를 새로 만들고 summary.json과 summary.md 둘만 쓴다. 다른 파일은 복사하지 않는다.
  * `evidence` 자리에 이미 무언가 있거나(실행기·`dev`가 미리 둔 파일이나 링크) 출력 폴더가 실제 폴더가 아니면
  * 만들지 않고 예외를 낸다: 남이 둔 것을 증거 묶음으로 내놓거나 링크를 따라 다른 곳에 쓰지 않는다.
+ * 묶음은 한 번에 나타난다: 임시 폴더에 둘을 다 쓴 뒤 `evidence`로 이름을 바꾼다. 쓰는 도중 실패하면 예외를 내고
+ * `evidence`는 생기지 않는다(판정이 통과인 요약 하나만 남는 일이 없다. 구현 판정 F3).
  * 띄운 프로세스를 모두 끝낸 뒤에 부른다
  */
 export function buildEvidence(
   outDir: string,
   verdict: Verdict,
   meta: { startedAt: string; deniedCount: number },
+  io: EvidenceIo = { writeFileSync, renameSync },
 ): { dir: string; files: string[] } {
   const st = lstatSync(outDir, { throwIfNoEntry: false });
   if (!st?.isDirectory() || realpathSync(outDir) !== outDir)
     throw new Error('출력 폴더가 실제 폴더가 아니다(심볼릭 링크이거나 없다)');
   const dir = path.join(outDir, 'evidence');
-  try {
-    mkdirSync(dir);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'EEXIST')
-      throw new Error('evidence 폴더를 만들지 못했다');
+  if (lstatSync(dir, { throwIfNoEntry: false }))
     throw new Error(
       'evidence 자리에 이미 무언가 있다(실행 중에 만들어진 것은 증거 묶음에 넣지 않는다)',
     );
-  }
 
+  // 쓸 내용을 먼저 다 만든다. 여기서 나는 예외는 아무것도 쓰기 전이다
   const scenarios = verdict.scenarios.map(summarize);
   const counts = new Map<string, number>();
   for (const p of verdict.problems) {
@@ -160,16 +174,31 @@ export function buildEvidence(
     scenarios,
     problems,
   };
-  // wx: 새로 만든 폴더라 겹칠 것이 없지만, 있으면 덮어쓰지 않고 실패한다
-  writeFileSync(path.join(dir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, {
-    flag: 'wx',
-  });
-  writeFileSync(
-    path.join(dir, 'summary.md'),
-    markdown(ok, startedAt, deniedCount, scenarios, problems),
-    {
-      flag: 'wx',
-    },
+  const contents: [string, string][] = [
+    ['summary.json', `${JSON.stringify(summary, null, 2)}\n`],
+    ['summary.md', markdown(ok, startedAt, deniedCount, scenarios, problems)],
+  ];
+
+  // 이름을 맞힐 수 없는 임시 폴더(새로 만든다. 이미 있으면 실패한다)
+  const staging = path.join(
+    outDir,
+    `evidence.tmp-${process.pid}-${randomBytes(6).toString('hex')}`,
   );
-  return { dir, files: ['summary.json', 'summary.md'] };
+  mkdirSync(staging);
+  try {
+    // wx: 새로 만든 폴더라 겹칠 것이 없지만, 있으면 덮어쓰지 않고 실패한다
+    for (const [name, text] of contents)
+      io.writeFileSync(path.join(staging, name), text, { flag: 'wx' });
+    io.renameSync(staging, dir);
+  } catch (e) {
+    // 쓰다 만 것을 치운다(우리가 만든 두 파일과 임시 폴더만. 폴더째로 지우지 않는다)
+    for (const [name] of contents) rmSync(path.join(staging, name), { force: true });
+    try {
+      rmdirSync(staging);
+    } catch {
+      // 치우지 못해도 공개 경로(evidence)에는 아무것도 없다
+    }
+    throw e;
+  }
+  return { dir, files: contents.map(([name]) => name) };
 }

@@ -8,7 +8,9 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -565,6 +567,30 @@ test('buildEvidence: evidence 자리에 이미 무언가 있으면 만들지 않
   assert.throws(() => buildEvidence(planted, PASS, META), /evidence/);
   assert.deepEqual(readdirSync(path.join(planted, 'evidence')), ['extra.png']);
   assert.throws(() => buildEvidence(path.join(planted, 'missing'), PASS, META), /출력 폴더/);
+});
+
+// 구현 판정 F3: 요약 둘 가운데 하나만 쓰고 실패하면 공개 경로에 아무것도 남지 않아야 한다
+test('buildEvidence: 쓰는 도중 실패하면 evidence/가 생기지 않고 쓰다 만 파일도 남지 않는다', () => {
+  for (const failAt of ['summary.json', 'summary.md', 'publish'] as const) {
+    const dir = outDir();
+    const io = {
+      writeFileSync: (file: string, data: string, o: { flag: string }) => {
+        if (path.basename(file) === failAt) throw new Error('ENOSPC(시험)');
+        writeFileSync(file, data, o);
+      },
+      renameSync: (from: string, to: string) => {
+        if (failAt === 'publish') throw new Error('EIO(시험)');
+        renameSync(from, to);
+      },
+    };
+    assert.throws(() => buildEvidence(dir, PASS, META, io), /시험/, failAt);
+    assert.deepEqual(readdirSync(dir), ['local'], failAt);
+  }
+  // 같은 io로 실패가 없으면 평소와 같다
+  const dir = outDir();
+  const e = buildEvidence(dir, PASS, META, { writeFileSync, renameSync });
+  assert.deepEqual(readdirSync(e.dir).sort(), ['summary.json', 'summary.md']);
+  assert.deepEqual(readdirSync(dir).sort(), ['evidence', 'local']);
 });
 
 // 심볼릭 링크를 만드는 테스트는 macOS·Linux에서만 돈다(Windows에서는 권한이 필요하고 verify도 돌지 않는다)
