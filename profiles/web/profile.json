@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "웹 프로파일(초안). pnpm + Prettier + ESLint + Vitest + 프로덕션 빌드. 제품의 실제 스크립트는 app:* 이름으로 둔다(하네스 별칭과 재귀를 피하려고)",
   "config": {
     "commands": {
@@ -56,7 +56,15 @@
       "fileMaxLines": 400,
       "naming": "파일은 kebab-case, React 컴포넌트는 PascalCase export"
     },
-    "architecture": "도메인마다 Types → Config → Repo → Service → Runtime → UI. 횡단 관심사(인증, 텔레메트리, 기능 플래그)는 Providers로만 들어온다"
+    "architecture": "도메인마다 Types → Config → Repo → Service → Runtime → UI. 횡단 관심사(인증, 텔레메트리, 기능 플래그)는 Providers로만 들어온다",
+    "testEffect": {
+      "files": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+      "support": ["src/test/**"],
+      "command": ["node", "profiles/web/test-effect/run-one.mjs"],
+      "timeoutSec": 300,
+      "link": ["node_modules"],
+      "assertPattern": "AssertionError"
+    }
   },
   "templates": [
     { "from": "templates/PRD.md", "to": "docs/product/TEMPLATE.md" },
