@@ -3,7 +3,7 @@
 // CI(--ci)는 항상 새로 실행한다. 하위 검사별 결과를 실패 기록(attempts)에 남긴다.
 // test 건너뛰기(6절): 바뀐 파일이 모두 설정 testInertPaths(테스트가 읽지 않는 경로) 안이면 test를 돌리지 않는다.
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { recordAttempt } from '../lib/attempts.ts';
 import type { HarnessConfig } from '../lib/config.ts';
@@ -47,6 +47,7 @@ export interface SubResult {
 export interface CheckResult {
   ok: boolean;
   cached: boolean;
+  /** 캐시 적중이면 비어 있다(캐시는 통과했다는 표시만 저장한다) */
   results: SubResult[];
 }
 
@@ -88,32 +89,18 @@ export function cacheKey(
 }
 
 /**
- * 저장된 통과 결과를 읽는다. 없거나, 읽지 못하거나, 쓰다가 끊겨 JSON이 깨졌거나, 모양이 다르면 null이다(캐시 미스).
- * 캐시에는 통과한 결과만 쓰므로 ok가 true가 아닌 것도 버린다
+ * 캐시 파일의 내용: 이 키의 check가 통과했다는 표시 한 줄이다. 결과 본문은 두지 않는다.
+ * 본문을 두면 읽을 때 모양을 검증해야 하고, 쓰다 끊긴 파일·손상된 항목을 하나씩 가려내야 한다(PR #134의 F3·F4).
+ * 표시는 내용이 정확히 같은지만 보면 된다
  */
-function readCache(file: string): CheckResult | null {
-  try {
-    const saved = JSON.parse(readFileSync(file, 'utf8')) as Partial<CheckResult> | null;
-    if (!saved || saved.ok !== true || !Array.isArray(saved.results)) return null;
-    return saved as CheckResult;
-  } catch {
-    return null;
-  }
-}
+const cacheMark = (key: string): string => `harness-check-pass ${key}\n`;
 
-/**
- * 결과를 캐시에 쓴다. 같은 폴더의 임시 파일에 전부 쓴 뒤 이름을 바꿔, 쓰다가 실패해도 최종 경로에 일부만 쓴 파일이 남지 않게 한다.
- * 실패하면 임시 파일을 지우고 예외를 다시 던진다(부르는 쪽이 캐시 쓰기 실패를 무시한다)
- */
-function writeCache(dir: string, key: string, result: CheckResult): void {
-  mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, `${key}.${process.pid}.tmp`);
+/** 이 키의 통과 표시가 온전히 있는가. 없거나, 읽지 못하거나, 내용이 한 글자라도 다르면(쓰다 끊김, 다른 키, 옛 형식, 손상) 캐시 미스다 */
+function cacheHit(file: string, key: string): boolean {
   try {
-    writeFileSync(tmp, JSON.stringify(result));
-    renameSync(tmp, path.join(dir, `${key}.json`));
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
+    return readFileSync(file, 'utf8') === cacheMark(key);
+  } catch {
+    return false;
   }
 }
 
@@ -187,13 +174,13 @@ export async function runCheck(
   let key = '';
   if (useCache) {
     key = cacheKey(info, cfg, base, opts.only);
-    const saved = readCache(path.join(cacheDir, `${key}.json`));
-    if (saved) {
+    if (cacheHit(path.join(cacheDir, `${key}.json`), key)) {
       if (!opts.quiet)
         process.stdout.write(
           `check: 캐시 적중(${key.slice(0, 12)}) — 같은 작업 트리·도구로 이미 통과했다\n`,
         );
-      return { ...saved, cached: true };
+      // 캐시에는 통과한 실행만 남는다. 단계별 결과(소요 시간, 출력)는 저장하지 않으므로 비어 있다
+      return { ok: true, cached: true, results: [] };
     }
   }
 
@@ -298,7 +285,11 @@ export async function runCheck(
   // 파일을 쓰지 못하면 쓰지 않을 뿐이고, 검사 결과는 그대로다
   if (useCache && ok && !testSkipped && !judgeChanged) {
     try {
-      if (cacheKey(info, cfg, base, opts.only) === key) writeCache(cacheDir, key, result);
+      if (cacheKey(info, cfg, base, opts.only) === key) {
+        mkdirSync(cacheDir, { recursive: true });
+        // 쓰다가 끊겨 일부만 남아도 표시와 달라 캐시 미스가 되고, 다음에 통과한 실행이 덮어쓴다
+        writeFileSync(path.join(cacheDir, `${key}.json`), cacheMark(key));
+      }
     } catch {
       // 캐시에 남기지 않는다
     }

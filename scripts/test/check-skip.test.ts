@@ -1,7 +1,7 @@
 // check의 test 건너뛰기(6절, Issue #129): 바뀐 파일이 모두 testInertPaths 안일 때만 test를 돌리지 않는다.
 // 픽스처의 test 명령은 항상 실패한다. 돌았으면 실패, 건너뛰었으면 통과로 구분된다.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { cacheKey, runCheck, testInert, testSkip } from '../commands/check.ts';
@@ -327,7 +327,7 @@ test('check 캐시: 캐시 폴더를 만들 수 없어도(같은 이름의 파�
   assert.deepEqual([b.ok, b.cached], [true, false]);
 });
 
-test('check 캐시: 깨진 캐시 파일은 없는 것으로 보고 다시 돌린다. 쓴 뒤에 임시 파일이 남지 않는다 (PR #134 F3)', async () => {
+test('check 캐시: 내용이 통과 표시와 정확히 같지 않은 캐시 파일은 없는 것으로 보고 다시 돌린다 (PR #134 F3·F4)', async () => {
   const { root, base } = repo(withFmt(nodeE('process.exit(0)')));
   write(root, 'docs/x.md', '# x\n');
   const only: ('fmt' | 'test')[] = ['fmt', 'test'];
@@ -341,8 +341,25 @@ test('check 캐시: 깨진 캐시 파일은 없는 것으로 보고 다시 돌�
   const dir = path.join(harnessStateDir(repoInfo(root), 'common'), 'check-cache');
   const file = path.join(dir, `${cacheKey(repoInfo(root), config(), base, only)}.json`);
   mkdirSync(dir, { recursive: true });
-  // 쓰다가 끊긴 캐시(JSON 일부), 모양이 다른 캐시, 빈 파일이 최종 경로에 남아 있다
-  for (const broken of ['{"ok":true,"cached":false,"resul', '{"ok":true}', '[]', 'null', '']) {
+  // 온전한 캐시의 내용을 먼저 얻는다
+  assert.equal((await run()).cached, false);
+  const good = readFileSync(file, 'utf8');
+  assert.equal((await run()).cached, true);
+  // 쓰다가 끊긴 캐시, 한 글자 다른 캐시, 다른 키의 캐시, 옛 형식(결과 본문 JSON. 항목이 손상된 것 포함), 빈 파일
+  const other = good.replace(/[0-9a-f]{32}/, 'f'.repeat(32));
+  assert.notEqual(other, good);
+  for (const broken of [
+    good.slice(0, -1),
+    good.slice(0, 10),
+    good + 'x',
+    other,
+    '{"ok":true,"cached":false,"results":[null]}',
+    '{"ok":true,"cached":false,"results":[{"name":"fmt","ok":true,"skipped":false,"durationMs":1,"output":""},{"name":"test","ok":true,"skipped":false,"durationMs":1,"output":""}]}',
+    '{"ok":true,"cached":false,"resul',
+    '[]',
+    'null',
+    '',
+  ]) {
     writeFileSync(file, broken);
     const r = await run();
     // 캐시 적중이 아니라 실제로 돌았고, 통과했다
