@@ -193,6 +193,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - `lab/pilot-prep/trial-verify.ts`가 29개 사례(지시서의 28개와 `node-request`)를 돌려 `results/verify-playwright.json`을 썼고 `check-results.ts verify-playwright`가 통과한다. 첫 전체 실행에서 지시서의 28개가 모두 기대대로 나왔다(설정·fixture·`scripts/verify/`를 고쳐 다시 돌린 사례는 없다. 위 두 문제는 사례를 쓰기 전의 탐색과 표 밖의 확인에서 나왔다). 모든 사례에서 통제된 대상 도달 0건, 남은 프로세스 0, 공개 요약에 표식과 거부된 호스트 없음.
   - 지시서에 없지만 넣은 것(모두 더 엄하게 보는 쪽): 사례 `node-request`. 계측 자기 점검(대상 서버 셋과 앱의 계수기가 실제로 세는지 먼저 확인한다, `selfCheck`). `signal` 사례의 `runningBeforeSignal`(남은 프로세스를 세는 방법이 신호 전의 프로세스들을 실제로 보는지). 사례별 `blocked`(fixture도 앱 주소 밖 요청을 적었는지)와 실패의 이유 확인(`console-error`는 콘솔 에러, `no-fixture`는 관찰 기록 없음, `skipped`는 상태). 거부를 기대하지 않는 사례의 거부 0건. `tool.playwright`를 "비어 있지 않다"가 아니라 `1.65.0`과 대 본다(step0의 F20과 같은 이유). `bypass`를 정해진 값과 대 본다. `marker` 사례의 시나리오를 실제로 실패시켜 표식이 오류 문구·trace·영상에도 들어가게 했다.
   - 검사기 테스트(`lab/pilot-prep/test/check-verify.test.ts`, 16개)는 검사기를 쓴 뒤에 썼다(어긋난 결과마다 그 문구가 나오는지 본다).
+- 2026-11-20T07:03:29+09:00 step3 재작업: 구현 판정 1라운드 지적 F1~F4 대응
 
 ## 의사결정 로그
 
