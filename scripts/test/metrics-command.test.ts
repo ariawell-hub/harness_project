@@ -11,11 +11,12 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { emptyLedger, type Entry, type Ledger } from '../ci/ledger.ts';
-import { runMetrics } from '../commands/metrics.ts';
+import { runMetrics, type MetricsOptions } from '../commands/metrics.ts';
 import { loadConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { BEGIN, END, replaceBlock } from '../metrics/render.ts';
@@ -173,7 +174,11 @@ interface Result {
   err: string;
 }
 
-function exec(cwd: string, m: Mem | MetricsSource, o: { write?: boolean; since?: string } = {}) {
+function exec(
+  cwd: string,
+  m: Mem | MetricsSource,
+  o: { write?: boolean; since?: string; writeBytes?: MetricsOptions['writeBytes'] } = {},
+) {
   const out: string[] = [];
   const err: string[] = [];
   const code = runMetrics(
@@ -182,6 +187,7 @@ function exec(cwd: string, m: Mem | MetricsSource, o: { write?: boolean; since?:
       since: o.since ?? SINCE,
       until: UNTIL,
       write: o.write ?? false,
+      writeBytes: o.writeBytes,
       out: (l) => out.push(l),
       err: (l) => err.push(l),
     },
@@ -433,6 +439,135 @@ test('--write: 문서가 worktree 밖 파일과 하드 링크로 묶여 있어�
   } finally {
     clearDoc(work);
     freshDoc(work);
+  }
+});
+
+test('--write: 자료를 읽는 동안 docs 폴더가 worktree 밖을 가리키게 바뀌면 쓰지 않는다', () => {
+  const { fx, work } = repo();
+  const outside = path.join(fx.root, DOC);
+  const before = readFileSync(outside, 'utf8');
+  freshDoc(work);
+  const docs = path.join(work, 'docs');
+  const m = mem(BASE);
+  const orig = m.source.bugIssues;
+  m.source.bugIssues = (p) => {
+    renameSync(docs, `${docs}.real`);
+    symlinkSync(path.join(fx.root, 'docs'), docs);
+    return orig(p);
+  };
+  try {
+    const r = exec(work, m, { write: true });
+    assert.equal(r.code, 1);
+    assert.match(r.err, /worktree 밖/);
+    assert.equal(readFileSync(outside, 'utf8'), before);
+    assert.deepEqual(
+      readdirSync(path.join(fx.root, 'docs')).filter((f) => f.includes('.tmp')),
+      [],
+    );
+  } finally {
+    rmSync(docs, { force: true });
+    renameSync(`${docs}.real`, docs);
+    freshDoc(work);
+  }
+});
+
+test('--write: 폴더를 확인한 뒤에 docs가 바깥을 가리키게 바뀌어도 바깥에는 쓰지 않는다', () => {
+  const { fx, work } = repo();
+  const outside = path.join(fx.root, DOC);
+  const before = readFileSync(outside, 'utf8');
+  freshDoc(work);
+  const docs = path.join(work, 'docs');
+  const cwd = process.cwd();
+  let swapped = false;
+  try {
+    // 임시 파일을 연 직후(첫 쓰기 직전)에 경로를 바꿔치기한다. 작업은 확인한 폴더에 고정돼 있어야 한다
+    const r = exec(work, mem(BASE), {
+      write: true,
+      writeBytes: (fd, buf, off, len) => {
+        if (!swapped) {
+          renameSync(docs, `${docs}.real`);
+          symlinkSync(path.join(fx.root, 'docs'), docs);
+          swapped = true;
+        }
+        return writeSync(fd, buf, off, len);
+      },
+    });
+    assert.ok(swapped);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(readFileSync(outside, 'utf8'), before);
+    assert.deepEqual(
+      readdirSync(path.join(fx.root, 'docs')).filter((f) => f.includes('.tmp')),
+      [],
+    );
+    // 쓴 곳은 확인했던 폴더(지금은 이름이 바뀌었다)다
+    assert.match(
+      readFileSync(path.join(`${docs}.real`, 'QUALITY_SCORE.md'), 'utf8'),
+      /^집계 기간: 2026-11-11 ~ 2026-11-12\(UTC\)/m,
+    );
+    assert.equal(process.cwd(), cwd, '작업 폴더를 되돌리지 않았다');
+  } finally {
+    if (swapped) {
+      rmSync(docs, { force: true });
+      renameSync(`${docs}.real`, docs);
+    }
+    freshDoc(work);
+  }
+});
+
+test('--write: 한 번에 다 쓰이지 않아도 끝까지 써서 문서가 온전하다', () => {
+  const { work } = repo();
+  const file = freshDoc(work);
+  let calls = 0;
+  const r = exec(work, mem(BASE), {
+    write: true,
+    writeBytes: (fd, buf, off, len) => {
+      calls++;
+      return writeSync(fd, buf, off, Math.min(len, 7));
+    },
+  });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(calls > 10, `쓰기 호출 ${calls}번`);
+  const text = readFileSync(file, 'utf8');
+  // 구간 밖(문서의 끝)까지 그대로 있다
+  assert.ok(text.endsWith('## 측정 정의\n\n뒤 문단.\n'));
+  assert.ok(text.startsWith('# 품질 점수\n\n앞 문단.\n'));
+  assert.ok(text.includes(r.out.trim()));
+  freshDoc(work);
+});
+
+test('--write: 쓰기가 도중에 실패하거나 진행되지 않으면 원본이 그대로이고 임시 파일이 남지 않는다', () => {
+  const { work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  const cwd = process.cwd();
+  const failing: Array<NonNullable<MetricsOptions['writeBytes']>> = [
+    // 조금 쓴 뒤 디스크가 찼다
+    (() => {
+      let n = 0;
+      return (fd, buf, off, len) => {
+        if (n++ > 0) throw new Error('ENOSPC: no space left on device, write');
+        return writeSync(fd, buf, off, Math.min(len, 10));
+      };
+    })(),
+    // 조금 쓴 뒤 0바이트만 돌려준다
+    (() => {
+      let n = 0;
+      return (fd, buf, off, len) => (n++ > 0 ? 0 : writeSync(fd, buf, off, Math.min(len, 10)));
+    })(),
+    // 썼다고 한 만큼 실제로 쓰이지 않았다
+    (_fd, _buf, _off, len) => len,
+  ];
+  for (const [i, writeBytes] of failing.entries()) {
+    const r = exec(work, mem(BASE), { write: true, writeBytes });
+    assert.equal(r.code, 1, `사례 ${i}`);
+    assert.match(r.err, /문서를 쓰지 않았다/, `사례 ${i}`);
+    assert.equal(readFileSync(file, 'utf8'), before, `사례 ${i}: 원본이 바뀌었다`);
+    assert.deepEqual(
+      readdirSync(path.dirname(file)).filter((f) => f.includes('.tmp')),
+      [],
+      `사례 ${i}: 임시 파일이 남았다`,
+    );
+    assert.equal(process.cwd(), cwd);
   }
 });
 
