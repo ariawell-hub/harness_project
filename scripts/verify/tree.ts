@@ -148,10 +148,15 @@ export const findMarked: FindMarked = async (needle) => {
  * - 뿌리와 남은 프로세스의 자식을 새로 더한다(부모가 끝나 다른 부모로 넘어간 프로세스도 이미 알고 있으면 계속 따라간다)
  * - 좀비는 뺀다
  * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다
+ * - 목록과 표식은 다른 시점에 읽는다. 표식에는 있는데 목록에는 없는 pid(목록을 읽은 뒤에 뜬 프로세스)는 버리지 않고
+ *   "아직 목록에서 확인하지 못한 것"으로 들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다.
+ *   다음에 읽을 때 목록에 나오면 알던 것으로 옮기고, 목록에도 표식에도 없으면 끝난 것으로 뺀다
  */
 export class Descendants {
   /** pid → 프로세스 그룹 */
   private known = new Map<number, number>();
+  /** 표식으로는 봤지만 목록에서는 아직 확인하지 못한 pid */
+  private unconfirmed = new Set<number>();
   private readonly list: ListProcesses;
   private readonly marked: (() => Promise<number[] | null>) | undefined;
 
@@ -170,18 +175,28 @@ export class Descendants {
   async refresh(roots: readonly number[] = [], byMark = false): Promise<boolean> {
     const rows = await this.list();
     if (!rows) return false;
-    const tagged = byMark && this.marked ? await this.marked() : [];
+    // undefined: 표식으로 찾지 않았다. null: 찾으려 했지만 읽지 못했다
+    const tagged = byMark && this.marked ? await this.marked() : undefined;
     const mine = new Set(tagged ?? []);
+    const skip = (pid: number) => pid === process.pid || roots.includes(pid);
+    // 표식을 이번에 읽었으면 그 결과만 믿는다(전에 표식으로 본 pid가 이번 표식에 없으면 다른 프로세스다).
+    // 읽지 않았거나 읽지 못했으면 전에 본 것을 그대로 믿는다
+    const pending = tagged ? mine : this.unconfirmed;
     const next = new Map<number, number>();
+    const listed = new Set<number>();
     const children = new Map<number, ProcessRow[]>();
     for (const r of rows) {
+      listed.add(r.pid);
       if (r.zombie) continue;
       const siblings = children.get(r.ppid);
       if (siblings) siblings.push(r);
       else children.set(r.ppid, [r]);
-      if (r.pid === process.pid || roots.includes(r.pid)) continue;
-      if (this.known.get(r.pid) === r.pgid || mine.has(r.pid)) next.set(r.pid, r.pgid);
+      if (skip(r.pid)) continue;
+      if (this.known.get(r.pid) === r.pgid || pending.has(r.pid)) next.set(r.pid, r.pgid);
     }
+    // 목록에 없는 것: 목록을 읽은 뒤에 떴을 수 있다. 버리지 않는다(구현 판정 3라운드 F2)
+    const unconfirmed = new Set<number>();
+    for (const pid of pending) if (!listed.has(pid) && !skip(pid)) unconfirmed.add(pid);
     const queue = [...next.keys(), ...roots];
     while (queue.length) {
       const parent = queue.pop()!;
@@ -193,11 +208,12 @@ export class Descendants {
       }
     }
     this.known = next;
+    this.unconfirmed = unconfirmed;
     return tagged !== null;
   }
 
-  /** 지금 알고 있는(마지막으로 읽은 목록에 있던) 자손의 pid */
+  /** 지금 알고 있는 자손의 pid: 마지막으로 읽은 목록에 있던 것과, 표식으로만 보고 목록에서는 아직 확인하지 못한 것 */
   pids(): number[] {
-    return [...this.known.keys()].sort((a, b) => a - b);
+    return [...this.known.keys(), ...this.unconfirmed].sort((a, b) => a - b);
   }
 }

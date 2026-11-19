@@ -223,6 +223,11 @@ function follow(tracker: Descendants, procs: readonly Proc[]): () => Promise<voi
 
 /** 정리하는 동안 그룹 밖의 자손이 남았는지 다시 보는 간격 */
 const RECHECK_MS = 50;
+/**
+ * 남은 것이 없다고 이어서 몇 번 봐야 끝났다고 하는가. 프로세스 목록과 표식 읽기는 순간 사진이 아니라(읽는 사이에
+ * 뜨고 그 부모가 끝난 프로세스는 한 번의 읽기에서 빠질 수 있다) 한 번 비어 보인 것으로는 끝났다고 하지 않는다
+ */
+const CLEAR_LOOKS = 2;
 
 /** clean: 모두 끝났다. left: 남은 것이 있다. unknown: 프로세스 목록을 읽지 못해 남은 것이 없는지 확인하지 못했다 */
 type Cleaned = 'clean' | 'left' | 'unknown';
@@ -253,12 +258,16 @@ async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
   };
   const goneWithin = async (ms: number): Promise<boolean> => {
     const until = Date.now() + ms;
+    let clear = 0;
     for (;;) {
-      if (!live.some(treeAlive)) {
-        // 그룹이 비었다. 그룹 밖의 자손이 남았는지는 프로세스 목록으로만 알 수 있다.
-        // 읽지 못했으면 끝났다고 보지 않고 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다)
+      if (live.some(treeAlive)) clear = 0;
+      else {
+        // 그룹이 비었다. 그룹 밖의 자손이 남았는지는 프로세스 목록과 표식으로만 알 수 있다.
+        // 읽지 못했으면 끝났다고 보지 않고 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다).
+        // 표식으로만 보이고 목록에는 아직 없는 프로세스도 남은 것이다(tracker.pids()에 들어 있다)
         await look();
-        if (seen && tracker.pids().length === 0) return true;
+        clear = seen && tracker.pids().length === 0 ? clear + 1 : 0;
+        if (clear >= CLEAR_LOOKS) return true;
       }
       if (Date.now() >= until) return false;
       await sleep(live.some(treeAlive) ? 25 : RECHECK_MS);

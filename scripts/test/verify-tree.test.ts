@@ -267,8 +267,53 @@ test('Descendants: 표식을 가진 프로세스는 부모가 누구든 더하�
   assert.equal(await d.refresh(), true);
   assert.deepEqual(d.pids(), []);
   assert.equal(await d.refresh([], true), true);
-  // 목록에 없는 pid(999)는 넣지 않는다
-  assert.deepEqual(d.pids(), [300, 301]);
+  // 목록에 없는 pid(999)도 버리지 않는다(목록을 읽은 뒤에 뜬 프로세스일 수 있다)
+  assert.deepEqual(d.pids(), [300, 301, 999]);
+});
+
+// 구현 판정 3라운드 F2: 목록과 표식은 다른 시점에 읽는다. 목록을 읽은 뒤에 뜬 프로세스는 표식에만 나온다.
+// 그것을 버리면 살아 있는 프로세스를 두고 "남은 것이 없다"고 하게 된다
+test('Descendants: 표식에는 있고 목록에는 없는 pid도 남은 것으로 세고, 다음에 목록에서 확인한다', async () => {
+  const lists = [
+    [row(1, 0, 1)],
+    [row(1, 0, 1), row(500, 1, 500), row(501, 500, 500)],
+    [row(1, 0, 1)],
+  ];
+  const marks = [[500], [500], []];
+  let i = 0;
+  let j = 0;
+  const d = new Descendants(
+    () => Promise.resolve(lists[Math.min(i++, lists.length - 1)]),
+    () => Promise.resolve(marks[Math.min(j++, marks.length - 1)]),
+  );
+  // 목록을 읽은 뒤에 뜬 프로세스: 표식 조회에만 나온다
+  assert.equal(await d.refresh([], true), true);
+  assert.deepEqual(d.pids(), [500]);
+  // 다음 읽기에서 목록에도 나온다. 그 자식도 따라간다
+  assert.equal(await d.refresh([], true), true);
+  assert.deepEqual(d.pids(), [500, 501]);
+  // 목록에도 표식에도 없으면 끝난 것이다
+  assert.equal(await d.refresh([], true), true);
+  assert.deepEqual(d.pids(), []);
+});
+
+test('Descendants: 표식으로만 본 pid는 표식을 쓰지 않는 읽기에서도 목록에 있으면 이어서 따라간다', async () => {
+  const lists = [
+    [row(1, 0, 1)],
+    [row(1, 0, 1), row(500, 1, 777)],
+    [row(1, 0, 1), row(500, 1, 777)],
+  ];
+  let i = 0;
+  const d = new Descendants(
+    () => Promise.resolve(lists[Math.min(i++, lists.length - 1)]),
+    () => Promise.resolve([500]),
+  );
+  await d.refresh([], true);
+  assert.deepEqual(d.pids(), [500]);
+  assert.equal(await d.refresh(), true);
+  assert.deepEqual(d.pids(), [500]);
+  assert.equal(await d.refresh(), true);
+  assert.deepEqual(d.pids(), [500]);
 });
 
 test('Descendants: 표식을 가졌어도 이 프로세스와 뿌리는 넣지 않고, 좀비도 넣지 않는다', async () => {
@@ -520,6 +565,58 @@ test(
       assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
       // 실행기가 떠 있는 동안 목록을 실제로 읽었다(가린 것이 쓰였다)
       assert.equal(sawRunner, true);
+    } finally {
+      reap(f.root);
+    }
+  },
+);
+
+// 구현 판정 3라운드 F2: 표식 조회가 찾은 프로세스가 프로세스 목록에는 (아직) 없을 때 정리가 끝났다고 하지 않는다.
+// 여기서는 목록에서 브라우저를 계속 가려, 표식으로만 보이게 한다
+test(
+  'verifyWeb: 표식으로는 보이는데 프로세스 목록에는 없는 프로세스를 두고 정리가 끝났다고 하지 않는다',
+  T,
+  async () => {
+    const f = fx({ browser: 'plain', crash: true });
+    const browser = () =>
+      existsSync(path.join(f.root, 'browser.pid')) ? pidIn(f.root, 'browser.pid') : -1;
+    const hidden = async () => (await listProcesses())?.filter((r) => r.pid !== browser()) ?? null;
+    try {
+      const r = await run(f, { listProcesses: hidden });
+      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+      assert.equal(r.ok, false);
+      assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
+    } finally {
+      reap(f.root);
+    }
+  },
+);
+
+// 목록과 표식 읽기는 순간 사진이 아니다(읽는 사이에 뜨고 부모가 끝난 프로세스는 한 번의 읽기에서 빠질 수 있다).
+// 한 번 비어 보인 것으로 끝났다고 하지 않고 다시 본다
+test(
+  'verifyWeb: 남은 것이 한 번 안 보였다고 정리가 끝났다고 하지 않는다(이어서 두 번 비어야 한다)',
+  T,
+  async () => {
+    const f = fx({ browser: 'stubborn', crash: true });
+    const has = (name: string) => existsSync(path.join(f.root, name));
+    const hidden = async () =>
+      (await listProcesses())?.filter(
+        (r) => !has('browser.pid') || r.pid !== pidIn(f.root, 'browser.pid'),
+      ) ?? null;
+    // 실행기가 죽은 뒤 두 번째 표식 읽기(SIGTERM을 보낸 뒤의 첫 확인)만 비어 보인다
+    let after = 0;
+    const blink: typeof findMarked = async (needle) => {
+      const runnerDead = has('runner.pid') && !alive(pidIn(f.root, 'runner.pid'));
+      if (runnerDead && ++after === 2) return [];
+      return findMarked(needle);
+    };
+    try {
+      const r = await run(f, { listProcesses: hidden, findMarked: blink });
+      assert.ok(after >= 3, '비어 보인 뒤에 다시 보지 않았다');
+      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+      assert.equal(r.ok, false);
+      assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
     } finally {
       reap(f.root);
     }
