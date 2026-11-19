@@ -55,13 +55,20 @@ const TEST_EFFECT_RUNS: readonly { id: string; exitCode: number }[] = [
   { id: 'first-adoption', exitCode: 1 },
 ];
 
+/**
+ * 결과 파일에서 읽은 값을 메시지에 넣을 글자로 바꾼다. 문자열은 그대로, 나머지는 JSON으로 적는다.
+ * String()과 템플릿 문자열은 쓰지 않는다. `{"toString":null}` 같은 값에서 TypeError가 나 검사가 멈춘다(F21)
+ */
+const show = (v: unknown): string =>
+  typeof v === 'string' ? v : (JSON.stringify(v) ?? 'undefined');
+
 /** 결과가 기대와 어긋난 점의 목록. 비어 있으면 통과다. profileCommand는 웹 프로파일의 testEffect.command */
 export function checkTestEffect(result: unknown, profileCommand: unknown): string[] {
   const bad: string[] = [];
   if (!isObj(result)) return ['결과가 객체가 아니다'];
   const tool = isObj(result.tool) ? result.tool : {};
   if (tool.vitest !== VITEST_VERSION)
-    bad.push(`tool.vitest: ${String(tool.vitest)}(기대 ${VITEST_VERSION})`);
+    bad.push(`tool.vitest: ${show(tool.vitest)}(기대 ${VITEST_VERSION})`);
   if (!Array.isArray(profileCommand) || !same(result.command, profileCommand))
     bad.push(
       `command가 프로파일의 testEffect.command와 다르다: ${JSON.stringify(result.command)} / ${JSON.stringify(profileCommand)}`,
@@ -72,7 +79,7 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
     const got = runs.filter((r) => r.id === want.id);
     if (got.length !== 1) bad.push(`runs에 ${want.id}가 ${got.length}개다(1개여야 한다)`);
     else if (got[0].exitCode !== want.exitCode)
-      bad.push(`runs.${want.id}의 종료 코드: ${String(got[0].exitCode)}(기대 ${want.exitCode})`);
+      bad.push(`runs.${want.id}의 종료 코드: ${show(got[0].exitCode)}(기대 ${want.exitCode})`);
   }
 
   const cases = Array.isArray(result.cases) ? result.cases.filter(isObj) : [];
@@ -80,8 +87,7 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
     bad.push('cases가 객체 배열이 아니다');
   const known = new Set(TEST_EFFECT_CASES.map((c) => c.id));
   for (const c of cases)
-    if (typeof c.id !== 'string' || !known.has(c.id))
-      bad.push(`모르는 사례가 있다: ${String(c.id)}`);
+    if (typeof c.id !== 'string' || !known.has(c.id)) bad.push(`모르는 사례가 있다: ${show(c.id)}`);
   for (const want of TEST_EFFECT_CASES) {
     const got = cases.filter((c) => c.id === want.id);
     if (got.length !== 1) {
@@ -90,9 +96,9 @@ export function checkTestEffect(result: unknown, profileCommand: unknown): strin
     }
     const c = got[0];
     const line = typeof c.line === 'string' ? c.line : '';
-    if (c.file !== want.file) bad.push(`${want.id}: file: ${String(c.file)}(기대 ${want.file})`);
+    if (c.file !== want.file) bad.push(`${want.id}: file: ${show(c.file)}(기대 ${want.file})`);
     if (c.outcome !== want.outcome)
-      bad.push(`${want.id}: outcome: ${String(c.outcome)}(기대 ${want.outcome})`);
+      bad.push(`${want.id}: outcome: ${show(c.outcome)}(기대 ${want.outcome})`);
     if (!line.startsWith(`${want.file}: ${want.outcome}(`))
       bad.push(`${want.id}: 판정 줄이 "${want.file}: ${want.outcome}("로 시작하지 않는다: ${line}`);
     if (want.phrase && !line.includes(want.phrase))

@@ -121,3 +121,25 @@ test('래퍼가 없는 기준 커밋과 비교한 실행에서 통과하는 테�
     /adoption-pass: outcome: effective\(기대 ineffective\)/,
   );
 });
+
+test('문자열로 바꿀 수 없는 값이 있어도 멈추지 않고 그 칸과 나머지 어긋난 점을 모두 낸다', () => {
+  // JSON.parse가 만들 수 있는 값이다: {"toString":null}은 String()과 템플릿 문자열에서 TypeError를 낸다
+  const weird = () => JSON.parse('{"toString":null}') as never;
+  const r = good() as unknown as {
+    tool: { vitest: unknown };
+    runs: { id: string; exitCode: unknown }[];
+    cases: { id: unknown; file: unknown; outcome: unknown; line: unknown }[];
+  };
+  r.tool.vitest = weird();
+  r.runs[0].exitCode = weird();
+  r.cases[0].file = weird();
+  r.cases[1].outcome = weird();
+  r.cases[2].id = weird();
+  const bad = checkTestEffect(r, COMMAND).join('\n');
+  assert.match(bad, /tool\.vitest: \{"toString":null\}\(기대 /);
+  assert.match(bad, /runs\.all의 종료 코드: \{"toString":null\}\(기대 1\)/);
+  assert.match(bad, /passes-on-base: file: \{"toString":null\}\(기대 /);
+  assert.match(bad, /assertion: outcome: \{"toString":null\}\(기대 effective\)/);
+  assert.match(bad, /모르는 사례가 있다: \{"toString":null\}/);
+  assert.match(bad, /사례 new-module가 0개다/);
+});

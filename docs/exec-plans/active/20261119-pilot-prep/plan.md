@@ -141,6 +141,8 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 실물 확인을 새 임시 복제본에서 다시 돌렸다(Vitest 5.1.0). `trial-test-effect.ts`에 세 번째 실행 `first-adoption`(래퍼가 없는 기준 커밋과 비교, 사례 `adoption-pass`·`adoption-fail`)을 더했다. 세 실행의 종료 코드는 1·0·1이고 아홉 사례가 모두 기대대로 나왔다. `adoption-pass`는 `ineffective(base에서도 통과)`다.
   - step0 지시서와 달라진 값: `support`(지시서는 `["src/test/**"]`), 실물 확인의 실행 수(지시서는 둘)와 사례 수(지시서는 일곱), `tool.vitest` 검사(지시서는 "비어 있지 않다"). 모두 검사를 더 엄하게 하는 쪽이다. step 파일은 실행하는 PR이 고칠 수 없어 그대로 두고 여기와 의사결정 로그에 적는다. AC 명령은 그대로이고 모두 통과한다.
 - 2026-11-19T20:19:13+09:00 step0 재작업: 구현 판정 2라운드의 지적 F21 대응(결과 검사기가 문자열로 바꿀 수 없는 값에서 멈춘다)
+- 2026-11-19: 구현 판정 2라운드(head `81c7a7f`). `review/claude` 승인, `review/codex` 수정 요청(P1 1건). F19·F20은 고쳐졌다고 판정됐다. 열린 차단 지적은 2건에서 1건으로 줄었다.
+  - F21(P1): `lab/pilot-prep/check-results.ts`가 결과 파일의 값을 `String()`으로 메시지에 넣어, `{"toString":null}` 같은 값에서 TypeError가 나고 "결과를 읽지 못했다"로 끝났다(종료 코드는 1이지만 어느 칸이 틀렸는지와 뒤의 검사가 사라진다). 1라운드 대응에서 더한 버전 검사 줄이 지적됐고, 같은 꼴이 종료 코드·사례 id·file·outcome 메시지에도 있어 다섯 곳을 함께 고쳤다(`show`: 문자열은 그대로, 나머지는 JSON). 재현 테스트를 먼저 썼다(`lab/pilot-prep/test/check-results.test.ts`, 고치기 전에는 TypeError). 바뀐 것은 `lab/`의 검사기와 그 테스트뿐이다.
 
 ## 의사결정 로그
 
@@ -203,11 +205,12 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 결과는 step을 진행하며 진행 로그에 적는다.
 - step0(2026-11-19): AC 9개 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 1은 `scripts/test/profile-web.test.ts`(6개), 수용 기준 2는 실제 Vitest 5.1.0의 실물 확인(`lab/pilot-prep/results/test-effect-vitest.json`, 일곱 사례와 두 실행의 종료 코드)과 `check-results.ts test-effect-vitest`로 확인했다. 이 리포의 `test-effect`는 새 테스트 파일을 `effective(base에서 단언 실패)`로 판정했다.
 - step0 재작업(2026-11-19, F19·F20): AC 9개 모두 통과. `scripts/test/profile-web.test.ts`는 8개(처음 적용하는 변경의 재현 테스트 포함), 실물 확인은 세 실행·아홉 사례(`check-results.ts test-effect-vitest` 통과, `tool.vitest` 5.1.0).
+- step0 재작업(2026-11-19, F21): AC 9개 모두 통과. 검사기 테스트는 10개다.
 
 ## 다음 할 일
 
 1. (끝남) 계획 검증(G1): 4라운드에서 두 검증자 승인.
 2. (끝남) step0의 로컬 구현과 실물 확인. push하지 않았다.
-3. 구현 판정 F19·F20 대응을 올렸다. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
+3. 구현 판정 F19·F20·F21 대응을 올렸다. 두 검증자가 승인하면 `pr-ready`로 한 번만 승인을 요청한다. 다른 세션의 PR이 제작자 승인 대기 중이면 기다린다.
 4. 병합 뒤 `new-task --plan 20261119-pilot-prep --step 1`.
 5. Q10·Q13의 답을 받으면 의사결정 로그에 적는다. 14.3절·18절 반영은 별도 Issue다.
