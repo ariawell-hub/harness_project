@@ -24,8 +24,9 @@
     {
       "step": 3,
       "name": "verify-playwright",
-      "status": "in_progress",
-      "started_at": "2026-11-20T06:11:56+09:00"
+      "status": "completed",
+      "started_at": "2026-11-20T06:11:56+09:00",
+      "completed_at": "2026-11-20T11:45:34+09:00"
     },
     {
       "step": 4,
