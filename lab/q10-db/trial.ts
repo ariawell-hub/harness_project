@@ -18,7 +18,13 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CASES, PACKAGES, readRepoPackageManager, RESULTS_DIR } from './check-results.ts';
+import {
+  CASES,
+  isOutsideDir,
+  PACKAGES,
+  readRepoPackageManager,
+  RESULTS_DIR,
+} from './check-results.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -231,10 +237,12 @@ async function main(): Promise<void> {
   if (argv.length !== 1 && !(argv.length === 3 && argv[1] === '--out' && argv[2])) fail(usage);
   const outFile =
     argv.length === 3 ? path.resolve(argv[2]) : path.join(RESULTS_DIR, `${NAME}.json`);
-  if (!existsSync(arg) || !statSync(arg).isDirectory()) fail('폴더가 없다(mktemp -d로 만든다)');
+  if (!existsSync(arg) || !statSync(arg).isDirectory())
+    fail('폴더가 없다(새 임시 폴더를 만들어 넘긴다. README의 절차)');
   const root = realpathSync(arg);
   if (readdirSync(root).length) fail('폴더가 비어 있지 않다');
-  if (!path.relative(REPO_ROOT, root).startsWith('..')) fail('리포 밖의 폴더를 쓴다');
+  // 리포 밖의 폴더만 쓴다(Windows에서 다른 드라이브의 임시 폴더도 리포 밖이다)
+  if (!isOutsideDir(REPO_ROOT, root)) fail('리포 밖의 폴더를 쓴다');
   const project = path.join(root, 'project');
   const probe = path.join(root, 'probe');
   mkdirSync(project);

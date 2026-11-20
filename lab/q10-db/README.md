@@ -15,6 +15,8 @@
 
 ## 절차
 
+리포의 루트에서 돌린다. macOS·Linux(Bash, zsh):
+
 ```bash
 T=$(mktemp -d)
 node lab/q10-db/trial.ts "$T"
@@ -23,10 +25,23 @@ node lab/q10-db/check-results.ts <platform>-<arch>
 node --test lab/q10-db/test/check-results.test.ts
 ```
 
+Windows 네이티브(PowerShell). 새 임시 폴더를 만들어 넘긴다. 임시 폴더가 리포와 다른 드라이브에 있어도 된다.
+
+```powershell
+$T = Join-Path ([System.IO.Path]::GetTempPath()) ("q10-" + [System.Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $T | Out-Null
+node lab/q10-db/trial.ts $T
+node scripts/harness.ts fmt
+node lab/q10-db/check-results.ts win32-x64
+node --test lab/q10-db/test/check-results.test.ts
+```
+
+- PowerShell 절차는 아직 Windows에서 돌려 보지 않았다(2026-11-20. 이 폴더의 결과는 macOS뿐이다). 처음 돌리는 세션이 어긋난 점을 고쳐 이 줄을 지운다. `win32-x64`는 예다. ARM 머신이면 `trial.ts`가 출력한 이름(`win32-arm64`)을 쓴다.
+
 - `<platform>-<arch>`는 그 머신의 `process.platform`과 `process.arch`다(`trial.ts`가 쓴 파일 이름을 출력한다). 예: `darwin-arm64`, `win32-x64`, `linux-x64`.
 - 필요한 것은 Node(22.18 이상), 이 리포가 고정한 버전의 pnpm, npm 레지스트리 접근이다. DB 서버, 컨테이너 런타임, 빌드 도구는 필요 없다.
 - `trial.ts`는 이 리포의 설치 정책(`pnpm-workspace.yaml`, R17: 게시 후 14일이 지난 버전만, 설치 스크립트 차단)을 시험 프로젝트에 그대로 복사한 뒤 설치한다. 정책에 걸리는 버전이면 설치가 거부되고 결과 파일을 쓰지 않는다.
-- 작업 트리를 바꾸지 않고 돌려만 보려면 결과를 리포 밖에 쓴다: `node lab/q10-db/trial.ts "$T" --out "$O/result.json"` 뒤 `node lab/q10-db/check-results.ts --file "$O/result.json"`(`O`도 `mktemp -d`).
+- 작업 트리를 바꾸지 않고 돌려만 보려면 결과를 리포 밖에 쓴다: `node lab/q10-db/trial.ts "$T" --out "$O/result.json"` 뒤 `node lab/q10-db/check-results.ts --file "$O/result.json"`(`O`도 `mktemp -d`. PowerShell에서는 위와 같은 방법으로 폴더를 하나 더 만든다).
 
 ## 확인하는 것
 

@@ -13,6 +13,7 @@ import {
   checkPnpm,
   checkQ10,
   confirmProblems,
+  isOutsideDir,
   PACKAGES,
   readRepoPackageManager,
   REQUIRED_PLATFORMS,
@@ -484,4 +485,97 @@ test('명령 --confirm: 세 환경의 결과가 모두 통과할 때만 종료 �
 
   assert.equal(run(path.join(dir, 'no-such-folder')).status, 1);
   assert.equal(run(dir, 'extra').status, 2);
+});
+
+// 개수 칸은 1 이상의 안전한 정수여야 한다. 소수와 무한대(JSON의 1e309)는 개수가 아니다
+const NOT_COUNTS: [string, unknown][] = [
+  ['소수', 1.5],
+  ['무한대', Number.POSITIVE_INFINITY],
+  ['NaN', Number.NaN],
+  ['안전한 정수 밖', 2 ** 60],
+  ['글자', '2'],
+];
+
+for (const [what, v] of NOT_COUNTS) {
+  test(`개수가 아닌 값이 걸린다: generate.sqlFiles가 ${what}`, () => {
+    const bad = checkQ10({ ...good(), generate: { exitCode: 0, sqlFiles: v, createTable: true } });
+    assert.ok(
+      bad.some((b) => /sqlFiles/.test(b)),
+      `통과시켰다: ${bad.join(' / ')}`,
+    );
+  });
+  test(`개수가 아닌 값이 걸린다: pglite.wasmFiles가 ${what}`, () => {
+    const bad = checkQ10({
+      ...good(),
+      pglite: { dependencies: 0, nativeFiles: 0, wasmFiles: v, os: null, cpu: null },
+    });
+    assert.ok(
+      bad.some((b) => /wasmFiles/.test(b)),
+      `통과시켰다: ${bad.join(' / ')}`,
+    );
+  });
+  test(`분 수가 아닌 값이 걸린다: policy.minimumReleaseAge가 ${what}`, () => {
+    const bad = checkQ10({
+      ...good(),
+      policy: { minimumReleaseAge: v, onlyBuiltDependencies: 0, enforced: true },
+    });
+    assert.ok(
+      bad.some((b) => /minimumReleaseAge/.test(b)),
+      `통과시켰다: ${bad.join(' / ')}`,
+    );
+  });
+}
+
+test('명령 --file: JSON의 1e309(읽으면 무한대)와 소수인 개수를 통과시키지 않는다', () => {
+  const run = (file: string) =>
+    spawnSync(process.execPath, [SCRIPT, '--file', file], { encoding: 'utf8', timeout: 60_000 });
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'q10-count-'));
+  const here = JSON.stringify({ ...repoGood(), platform: process.platform, arch: process.arch });
+  assert.ok(here.includes('"sqlFiles":1'), '테스트 준비가 어긋났다');
+
+  const ok = path.join(dir, 'ok.json');
+  writeFileSync(ok, here);
+  assert.equal(run(ok).status, 0);
+
+  const inf = path.join(dir, 'inf.json');
+  writeFileSync(inf, here.replace('"sqlFiles":1', '"sqlFiles":1e309'));
+  const r = run(inf);
+  assert.equal(r.status, 1, '무한대인 개수를 통과시켰다');
+  assert.match(r.stderr, /sqlFiles/);
+
+  const frac = path.join(dir, 'frac.json');
+  writeFileSync(frac, here.replace('"sqlFiles":1', '"sqlFiles":1.5'));
+  assert.equal(run(frac).status, 1, '소수인 개수를 통과시켰다');
+});
+
+test('리포 밖 폴더 판정: 같은 드라이브(POSIX)', () => {
+  const p = path.posix;
+  assert.equal(isOutsideDir('/work/repo', '/tmp/q10-abc', p), true);
+  assert.equal(isOutsideDir('/work/repo', '/work/repo2', p), true);
+  assert.equal(isOutsideDir('/work/repo', '/work', p), true);
+  assert.equal(isOutsideDir('/work/repo', '/work/repo', p), false, '리포 자신은 밖이 아니다');
+  assert.equal(isOutsideDir('/work/repo', '/work/repo/lab/q10-db/x', p), false);
+  assert.equal(
+    isOutsideDir('/work/repo', '/work/repo/..tmp', p),
+    false,
+    '이름이 ..으로 시작하는 리포 안의 폴더는 밖이 아니다',
+  );
+});
+
+test('리포 밖 폴더 판정: Windows에서 다른 드라이브의 임시 폴더는 리포 밖이다', () => {
+  const p = path.win32;
+  assert.equal(
+    isOutsideDir('D:\\work\\repo', 'C:\\Users\\dev\\AppData\\Local\\Temp\\q10-abc', p),
+    true,
+    '다른 드라이브의 폴더를 리포 안으로 판정했다',
+  );
+  assert.equal(isOutsideDir('D:\\work\\repo', 'D:\\tmp\\q10-abc', p), true);
+  assert.equal(isOutsideDir('D:\\work\\repo', 'D:\\work\\repo', p), false);
+  assert.equal(isOutsideDir('D:\\work\\repo', 'D:\\work\\repo\\lab\\x', p), false);
+  assert.equal(
+    isOutsideDir('D:\\work\\repo', 'd:\\WORK\\repo\\lab', p),
+    false,
+    '대소문자만 다른 같은 경로',
+  );
+  assert.equal(isOutsideDir('D:\\work\\repo', 'D:\\work\\repo\\..tmp', p), false);
 });

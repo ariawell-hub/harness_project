@@ -98,6 +98,11 @@ claimed_at: 2026-11-20T21:50:40+09:00 # new-task가 채운다
   - 결과(macOS arm64, Node 22.23.3): 패키지는 `drizzle-orm` 0.45.4, `drizzle-kit` 0.31.11, `@electric-sql/pglite` 0.5.15. PGlite는 런타임 의존성 0, `.node` 0, `os`·`cpu` 제한 없음. 설치 스크립트를 가진 패키지는 `esbuild`뿐. `drizzle-kit generate` 종료 코드 0. 사례 여섯이 기대대로다(1·1·2·1·1·1행).
   - `node lab/q10-db/check-results.ts --confirm`은 종료 코드 1이다(`win32`, `linux`의 결과가 없다). 확정 조건이 아직 채워지지 않았다는 뜻이고 이 step의 기대 상태다.
   - 문서: ADR-0007(잠정), `docs/decisions/index.md`, 설계서 v0.7.67(0절, 14.3절의 한 줄, 18절 Q10 행, 19절 "현재 위치"), CHANGELOG, 기술 부채 표의 TD-12 (3)·TD-14, `docs/index.md`. 14.3절에 넣은 줄은 계획에 고정한 글 그대로다.
+- 2026-11-20 step0 구현 검증 1라운드(head `9213851`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 셋: F7·F8·F9). 셋 다 받아들여 고쳤다. 테스트를 먼저 쓰고 실패를 확인했다(75개 가운데 새 11개가 실패 → 고친 뒤 75개 통과).
+  - F7(Windows에서 리포와 다른 드라이브의 임시 폴더가 거부된다): "리포 밖인가"의 판정을 함수(`isOutsideDir`)로 빼고, 상대 경로가 절대 경로로 나오는 경우(드라이브가 다르다)를 밖으로 본다. 첫 경로 구성 요소가 정확히 `..`인지 보므로 이름이 `..`으로 시작하는 리포 안의 폴더는 밖이 아니다. Windows 경로 규칙(`path.win32`)으로 테스트했다. 실제 Windows에서 돌린 것은 아니다.
+  - F8(개수 칸이 소수·무한대여도 통과한다. 재현됨): `generate.sqlFiles`, `pglite.wasmFiles`, `policy.minimumReleaseAge`를 안전한 정수로 본다. JSON의 `1e309`(읽으면 무한대)를 넣은 결과 파일이 명령에서 종료 코드 1인 것을 테스트한다.
+  - F9(절차가 Bash만 전제한다): `lab/q10-db/README.md`에 PowerShell 절차를 더했다. 그 절차는 Windows에서 돌려 보지 않았고 README에 그렇게 적었다.
+  - 결과 파일은 고친 스크립트로 다시 만들었고 내용이 같다(변경 없음).
 
 ## 의사결정 로그
 
@@ -131,6 +136,7 @@ claimed_at: 2026-11-20T21:50:40+09:00 # new-task가 채운다
 - 수용 기준 5: `node --test scripts/test/profile-web-db.test.ts`.
 - 결과는 step을 진행하며 진행 로그에 적는다.
 - step0(2026-11-20): AC 34줄 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 1·2는 검사 스크립트 테스트 57개, 실행 스크립트를 실제로 돌려 리포 밖에 쓴 결과의 검사(`--file`), 저장한 결과의 검사(`check-results.ts darwin-arm64`)로 확인했다. 수용 기준 3은 ADR의 절별 필수 내용과 `--confirm`의 종료 코드 1(없는 환경으로 `win32`·`linux`를 낸다)로, 수용 기준 4·7은 설계서·기술 부채 표의 해당 줄로, 수용 기준 8은 갈라진 지점의 14.3절에 고정한 한 줄을 넣은 기대 글과 지금의 14.3절 전체의 `diff`(차이 없음)로 확인했다.
+- step0 재작업(2026-11-20, F7~F9): AC 34줄 모두 통과. 검사 스크립트 테스트는 75개다(개수가 아닌 값 15, 명령에 무한대·소수 1, 리포 밖 폴더 판정 2가 늘었다).
 
 ## 다음 할 일
 

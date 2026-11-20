@@ -49,6 +49,9 @@ export const NAME_RE = /^[a-z0-9]+-[a-z0-9_]+$/;
 type Json = Record<string, unknown>;
 const isObj = (x: unknown): x is Json => !!x && typeof x === 'object' && !Array.isArray(x);
 
+/** 개수·분 수로 쓸 수 있는 값: 안전한 정수(소수, 무한대, NaN, 글자는 아니다) */
+const isCount = (x: unknown): x is number => typeof x === 'number' && Number.isSafeInteger(x);
+
 const SHOW_MAX = 80;
 /** 값을 메시지에 넣을 글자로 바꾼다. 어떤 값에도 예외를 내지 않는다(객체·배열 안으로 들어가지 않는다) */
 function show(v: unknown): string {
@@ -76,8 +79,8 @@ export function checkQ10(result: unknown): string[] {
   if (!isObj(policy)) bad.push(`policy가 객체가 아니다: ${show(policy)}`);
   else {
     const age = policy.minimumReleaseAge;
-    if (typeof age !== 'number' || !(age >= MIN_RELEASE_AGE))
-      bad.push(`policy.minimumReleaseAge가 ${MIN_RELEASE_AGE} 이상이 아니다: ${show(age)}`);
+    if (!isCount(age) || age < MIN_RELEASE_AGE)
+      bad.push(`policy.minimumReleaseAge가 ${MIN_RELEASE_AGE} 이상의 정수가 아니다: ${show(age)}`);
     if (policy.onlyBuiltDependencies !== 0)
       bad.push(
         `policy.onlyBuiltDependencies(설치 스크립트 허용 항목 수)가 0이 아니다: ${show(policy.onlyBuiltDependencies)}`,
@@ -102,8 +105,8 @@ export function checkQ10(result: unknown): string[] {
     if (pg.dependencies !== 0)
       bad.push(`pglite.dependencies가 0이 아니다: ${show(pg.dependencies)}`);
     if (pg.nativeFiles !== 0) bad.push(`pglite.nativeFiles가 0이 아니다: ${show(pg.nativeFiles)}`);
-    if (typeof pg.wasmFiles !== 'number' || !(pg.wasmFiles >= 1))
-      bad.push(`pglite.wasmFiles가 1 이상이 아니다: ${show(pg.wasmFiles)}`);
+    if (!isCount(pg.wasmFiles) || pg.wasmFiles < 1)
+      bad.push(`pglite.wasmFiles가 1 이상의 정수가 아니다: ${show(pg.wasmFiles)}`);
     if (pg.os !== null) bad.push(`pglite.os 제한이 있다: ${show(pg.os)}`);
     if (pg.cpu !== null) bad.push(`pglite.cpu 제한이 있다: ${show(pg.cpu)}`);
   }
@@ -119,8 +122,8 @@ export function checkQ10(result: unknown): string[] {
   if (!isObj(gen)) bad.push(`generate가 객체가 아니다: ${show(gen)}`);
   else {
     if (gen.exitCode !== 0) bad.push(`generate.exitCode가 0이 아니다: ${show(gen.exitCode)}`);
-    if (typeof gen.sqlFiles !== 'number' || !(gen.sqlFiles >= 1))
-      bad.push(`generate.sqlFiles가 1 이상이 아니다: ${show(gen.sqlFiles)}`);
+    if (!isCount(gen.sqlFiles) || gen.sqlFiles < 1)
+      bad.push(`generate.sqlFiles가 1 이상의 정수가 아니다: ${show(gen.sqlFiles)}`);
     if (gen.createTable !== true)
       bad.push(`generate.createTable이 true가 아니다: ${show(gen.createTable)}`);
   }
@@ -162,6 +165,22 @@ export function checkPlatform(result: unknown, name: string): string[] {
   return `${platform}-${arch}` === name
     ? []
     : [`파일 이름(${name})과 결과의 플랫폼(${show(platform)}-${show(arch)})이 다르다`];
+}
+
+/**
+ * target이 parent의 밖에 있는가. parent 자신과 그 아래는 밖이 아니다.
+ * Windows에서 드라이브가 다르면 상대 경로가 절대 경로로 나온다(그것도 밖이다).
+ * 이름이 ..으로 시작하는 하위 폴더(..tmp)는 밖이 아니므로 첫 구성 요소가 정확히 ..인지 본다.
+ */
+export function isOutsideDir(
+  parent: string,
+  target: string,
+  p: Pick<typeof path, 'relative' | 'isAbsolute' | 'sep'> = path,
+): boolean {
+  const rel = p.relative(parent, target);
+  if (rel === '') return false;
+  if (p.isAbsolute(rel)) return true;
+  return rel.split(p.sep)[0] === '..';
 }
 
 /** 이 리포가 고정한 패키지 관리자(package.json의 packageManager, 예: pnpm@10.34.5). 읽지 못하면 빈 글 */
