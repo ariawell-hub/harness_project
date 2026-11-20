@@ -71,6 +71,7 @@ export interface MetricsSource {
 ```
 
 - 워크플로 실행을 읽는 범위를 넓힌다: `runMetrics`가 `since`와 기간에 병합된 PR의 가장 이른 `createdAt` 날짜 가운데 이른 쪽부터 `until`까지 읽는다(기간 전에 열린 PR의 첫 `check` 실행을 보기 위해서다). step0의 사용량 계산은 `createdAt`이 기간 안인 실행만 세므로 값이 바뀌지 않는다. 이것을 테스트로 고정한다.
+- `headStatuses`: `gh api --paginate "repos/{owner}/{repo}/commits/<sha>/statuses?per_page=100"`으로 그 커밋의 상태를 끝까지 읽는다.
 - `needsHumanEvents`: `gh api --paginate "repos/{owner}/{repo}/issues/events?per_page=100"`에서 `event`가 `labeled`이고 라벨이 `cfg.github.needsHumanLabel`인 것. 기간 안인 것만 남긴다.
 - `escalationComments`: `gh api --paginate "repos/{owner}/{repo}/issues/comments?since=<since>T00:00:00Z&per_page=100"`에서 작성자가 `cfg.github.bot`이고 생성 시각이 기간 안인 댓글을 본문 문구로 분류한다. 본문은 분류에만 쓰고 결과에 담지 않는다. 분류(위에서부터 먼저 맞는 것):
   - 본문에 `## 중단 보고:`로 시작하는 줄이 있다 → 그 안에서 다시 가른다(`scripts/runner/run.ts`의 두 보고 형식). `- 추정 원인: `으로 시작하는 줄의 나머지가 `교착`으로 시작하면 `stop-deadlock`, `step 총량 상한`으로 시작하면 `stop-limit`, `실패 키 <키> <수>회` 꼴이면 `stop-failures`다. `- 원인: `으로 시작하는 줄에 `병합이 충돌한다`가 있으면 `stop-conflict`(PR 갱신 충돌 보고. 5회 실패 중단이 아니다). 어느 것도 아니면 `stop-other`
@@ -79,6 +80,13 @@ export interface MetricsSource {
   - `제작자 승인을 기다린다` → `approval`
   - `CI 대기가` → `ci-stall`
   - 어느 것도 아니면 버린다.
+
+- 읽기 요청 꼴(step0 1절의 목록에 더한다. 규칙은 같다: 인자 배열의 길이와 자리마다의 값이 맞아야 하고 다른 인자를 덧붙이지 않는다. `<SHA>`는 16진수 40자, `<브랜치>`는 한 자리의 문자열이다):
+  - 커밋 상태 조회(`headStatuses`): `api` `--paginate` `repos/{owner}/{repo}/commits/<SHA>/statuses?per_page=100` `--jq` `<jq>`
+  - 라벨 이벤트 조회(`needsHumanEvents`): `api` `--paginate` `repos/{owner}/{repo}/issues/events?per_page=100` `--jq` `<jq>`
+  - 리포 댓글 조회(`escalationComments`): `api` `--paginate` `repos/{owner}/{repo}/issues/comments?since=<날짜>T00:00:00Z&per_page=100` `--jq` `<jq>`
+  - head별 PR 조회(`headPrCount`): `pr` `list` `--state` `all` `--head` `<브랜치>` `--limit` `100` `--json` `number`
+  - step0의 PR 조회는 꼴이 그대로다(`--json`의 `<필드>`에 `commits` 등이 더해질 뿐이다). 이 step은 `git` 명령을 더하지 않는다(`planClaimedAt`은 파일만 읽는다).
 
 ### 2. 상시 지표 `scripts/metrics/steady.ts`
 
@@ -138,7 +146,12 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
   - `needsHumanEvents`·`escalationComments`의 반환값을 하나씩 늘리면 출력의 라벨 수와 그 사유의 댓글 수가 1씩 늘어난다.
   - `workflowRuns`가 기간에 병합된 PR의 가장 이른 `createdAt` 날짜부터 불린다(기간 전에 열린 PR을 준다).
 - `renderBlock`이 `### 상시 지표` 절을 내고 제목 문자열을 담지 않는다.
-- `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자가 step0의 "읽기 요청" 꼴이다.
+- `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자 배열이 1절에 더한 네 꼴 가운데 하나와 자리마다 맞는다.
+- 자식 프로세스 허용 목록과 기본 자료원 테스트를 넓힌다(`scripts/test/metrics-command.test.ts`, step0 5절):
+  - 허용 목록의 `gh`에 1절에 더한 네 꼴을 넣고, 기본 자료원 테스트의 고정 응답에 넷의 응답(PR head 커밋의 `risk-gate` 상태, 라벨 이벤트, 봇 댓글, head별 PR 목록)을 넣는다.
+  - 기본 자료원 테스트의 단언: 종료 코드 0, 막은 호출 0건, 관찰한 `gh` 호출에 step0의 넷과 이 step의 넷이 모두 있다(커밋 상태 조회와 head별 PR 조회는 병합된 PR마다 한 번씩). 출력의 `### 상시 지표` 값이 고정 응답과 맞는다(위험도별 PR 수, `needs-human` 라벨 수). `fs` 쓰기 시도는 0건이다.
+  - 목록 밖 호출이 여전히 막히는지: step0의 사례가 그대로 통과하고, 여기에 `gh pr list --state all --head x --limit 100 --json number --web`(인자를 덧붙인 것), `gh api --paginate repos/{owner}/{repo}/issues/events?per_page=100 --jq . --method=POST`, `gh api repos/{owner}/{repo}/issues/1/labels -f labels[]=x`(쓰기 요청)를 더해 모두 막히는 것을 단언한다.
+  - 메모리 자료 테스트(자식 프로세스가 허용 목록의 `git` 둘뿐)와 `fs` 쓰기 시도 감지, 실행 전후 비교는 이 step의 `runMetrics`에서도 그대로 통과한다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 `### 상시 지표` 제목이 있다.
 
 ## Acceptance Criteria

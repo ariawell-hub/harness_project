@@ -6,7 +6,7 @@
 - `docs/harness/design.md` 17.2절(상시 지표), 12.4절(자체 테스트), 7.2절("검토 필요" 문서)
 - `docs/QUALITY_SCORE.md`, `docs/exec-plans/tech-debt-tracker.md`
 - step0·step1이 만든 파일: `scripts/metrics/source.ts`, `scripts/metrics/pilot.ts`, `scripts/metrics/steady.ts`, `scripts/metrics/render.ts`, `scripts/commands/metrics.ts`, `scripts/test/metrics-*.test.ts`
-- `scripts/lib/plan.ts`(`parseDoc`, `section`, `PLANS_DIR`), `scripts/lib/git.ts`(`harnessStateDir`), `scripts/gates/doc-lint.ts`(`docLint`, 경고 `R8 검토 필요`), `scripts/runner/run.ts`(`event` 함수와 이벤트 이름, `StopReason`), `scripts/selftest/run.ts`(보고서 형식), `docs/harness/workflow.md` 4절(발견 사항 처리 표기)·6절(방법 전환 표기)
+- `scripts/lib/plan.ts`(`parseDoc`, `section`, `PLANS_DIR`), `scripts/lib/git.ts`(`repoInfo`의 `commonDir`. `harnessStateDir`는 폴더를 만들므로 명령에서 부르지 않는다), `scripts/gates/doc-lint.ts`(`docLint`, 경고 `R8 검토 필요`), `scripts/runner/run.ts`(`event` 함수와 이벤트 이름, `StopReason`), `scripts/selftest/run.ts`(보고서 형식), `docs/harness/workflow.md` 4절(발견 사항 처리 표기)·6절(방법 전환 표기)
 
 ## 작업
 
@@ -55,7 +55,10 @@ export function localMetrics(i: LocalInput): LocalMetrics;
 
 ### 3. 연결, 옵션, 문서
 
-- `runMetrics`가 `localMetrics`를 불러 `### 상시 지표` 절에 더한다. runner 로그 경로는 `harnessStateDir(info, 'common')`의 `runner.jsonl`이다.
+- `runMetrics`가 `localMetrics`를 불러 `### 상시 지표` 절에 더한다. runner 로그 경로는 `path.join(repoInfo(cwd).commonDir, 'harness', 'runner.jsonl')`이다. `harnessStateDir`를 부르지 않는다: 그 함수는 폴더를 만들고(`mkdirSync`), 명령은 파일을 쓰지 않는다(수용 기준 3).
+- 이 step이 더하는 자식 프로세스는 `docLint`(`scripts/gates/doc-lint.ts`)가 실행하는 `git` 읽기 명령 둘뿐이다. `gh` 조회는 더하지 않는다.
+  - `ls-files` `-z` `--cached` `--others` `--exclude-standard` `--` `*.md`
+  - `log` `-1` `--format=%ct` `--` `<경로>…`(`--` 뒤는 리포 상대 경로 하나 이상이다)
 - 자체 테스트 보고서 경로는 `metrics --self-test-report <파일>`로 받는다. `scripts/harness.ts`에는 `OPTIONS`의 `self-test-report`, `HELP` 한 줄, `case 'metrics'`의 인자 전달만 더한다. 파일이 없거나 형식이 다르면 종료 코드 1(GitHub을 읽기 전에 끝낸다).
 - `docs/QUALITY_SCORE.md`의 "측정 정의"에 이 step의 지표와 잴 수 없는 지표를 더하고, 이 리포에서 `self-test --out <임시 파일>` 뒤 `metrics --since 2026-11-11 --until <작업일(UTC)> --self-test-report <임시 파일>`을 실행하고 출력을 표식 구간에 그대로 붙여 넣어 기록한다.
 - 기술 부채 표: 위 "새 TD" 넷을 등록한다(번호는 push 직전 `origin/main`의 마지막 번호 다음부터). TD-11에 "주 1회 실행 때 `self-test --out`과 `metrics`를 함께 돌리고, 출력을 문서에 기록하는 수단을 그 정기 작업에서 만든다"를 적는다.
@@ -67,7 +70,8 @@ export function localMetrics(i: LocalInput): LocalMetrics;
 - 임시 폴더에 계획 파일과 runner 로그를 만들어 `localMetrics`의 값마다 단언한다: `judge-fail`의 세 갈래(AC 실패 확인, AC 결과 미확인, 꼴이 다른 `detail`)와 지표의 범위(최소·최대), 기간 밖 계획 제외, 방법 전환 줄 수, 처리 분포의 네 갈래와 우선순위, `exit` 없는 실행, 작업자가 둘인 로그, 깨진 줄, 로그 없음, 보고서 있음·없음.
 - `renderBlock`: 잴 수 없는 지표 넷이 이유와 TD 번호로 나오고, AC 실패 지표는 범위와 이유·TD 번호로 나온다. 17.2절 상시 지표 13항목 각각에 대응하는 줄이 있다(항목 이름 목록을 테스트에 고정한다).
 - `runMetrics`: `--self-test-report`가 없는 파일이면 종료 코드 1이고 자료를 읽지 않는다.
-- 명령 경로의 연결(`scripts/test/metrics-command.test.ts`에 더한다. 임시 리포와 메모리 `MetricsSource`로 `runMetrics`를 부르고 출력을 본다): 임시 리포의 공유 git-dir(`harnessStateDir(info, 'common')`)에 `runner.jsonl`을 두면 출력에 그 로그로 센 runner 실행 수가 나오고 파일이 없으면 "이 머신에 runner 로그 없음"이 나온다, 임시 리포의 계획 파일에 `- 방법 전환(` 줄을 하나 더하면 출력의 방법 전환 횟수가 1 늘어난다, `--self-test-report`로 준 보고서의 통과 수와 전체 수가 출력에 나온다.
+- 명령 경로의 연결(`scripts/test/metrics-command.test.ts`에 더한다. 임시 리포와 메모리 `MetricsSource`로 `runMetrics`를 부르고 출력을 본다): 임시 리포의 공유 git-dir 아래 `harness/runner.jsonl`(테스트가 폴더를 만들어 둔다)을 두면 출력에 그 로그로 센 runner 실행 수가 나오고 파일이 없으면 "이 머신에 runner 로그 없음"이 나온다, 임시 리포의 계획 파일에 `- 방법 전환(` 줄을 하나 더하면 출력의 방법 전환 횟수가 1 늘어난다, `--self-test-report`로 준 보고서의 통과 수와 전체 수가 출력에 나온다.
+- 자식 프로세스 허용 목록을 넓힌다(`scripts/test/metrics-command.test.ts`, step0 5절): 허용 목록의 `git`에 3절의 둘을 넣는다(`log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 허용한다). 메모리 자료 테스트는 "자식 프로세스가 허용 목록의 `git` 넷뿐"으로, 기본 자료원 테스트는 그대로 종료 코드 0·막은 호출 0건으로 통과한다. `fs` 쓰기 시도 감지와 실행 전후 비교도 이 step의 `runMetrics`에서 그대로 통과한다(runner 로그 폴더가 없는 임시 리포에서 실행해도 폴더가 생기지 않는다). 목록 밖 호출 사례에 `git log -1 --format=%ct --output=x -- a.md`와 `git ls-files -z --cached --others --exclude-standard -- *.md --error-unmatch`를 더해 막히는 것을 단언한다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 17.2절 상시 지표 13항목 각각에 대응하는 줄이 있다.
 
 ## Acceptance Criteria
@@ -82,6 +86,7 @@ grep -q "^집계 기간: 2026-11-11 ~ $(date -u +%Y-%m-%d)(UTC) · 병합 PR [0-
 ## 금지사항
 
 - L1 훅(`scripts/hooks/`), runner(`scripts/runner/`), 실패 기록(`scripts/lib/attempts.ts`)을 고쳐 기록을 더하지 마라. 이유: 이 계획의 비범위다. 잴 수 없는 지표는 TD로 남긴다.
+- `metrics` 명령에서 `harnessStateDir`를 부르지 마라. 이유: 폴더를 만든다. 명령은 파일을 쓰지 않는다(수용 기준 3).
 - `metrics` 명령 안에서 `self-test`를 실행하지 마라. 이유: 몇 분이 걸리고 샘플 리포를 만든다. 집계는 읽기만 한다. 보고서 파일을 받는다.
 - runner 로그의 `detail`·`reason` 같은 자유 문자열을 결과에 옮기지 마라(`exit`의 `reason`은 `StopReason`의 정해진 값일 때만 그 이름으로 세고, 아니면 "그 밖"으로 센다). 이유: 세션 출력이 섞인 문자열이다(14.6절).
 - 계획 파일의 발견 사항·의사결정 로그 문장을 결과에 옮기지 마라. 이유: 수와 계획 id만 적는다.

@@ -167,6 +167,7 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
   - 자식 프로세스의 허용 목록(아래 두 테스트가 함께 쓴다. 명령과 인자 배열 전체가 맞을 때만 허용한다. 금지할 옵션을 나열하지 않는다):
     - `git`: `repoInfo`(`scripts/lib/git.ts`)가 실행하는 둘. `rev-parse` `--show-toplevel` `--absolute-git-dir` `--git-common-dir`, 그리고 `symbolic-ref` `--short` `-q` `HEAD`. 둘 다 읽기만 한다.
     - `gh`: 1절의 "읽기 요청 꼴" 넷.
+    - 허용 목록과 고정 응답은 테스트 파일의 한곳에 둔다. 뒤 step이 조회나 읽기 명령을 더하면 그 step이 허용 목록, 고정 응답, 호출 단언을 함께 넓힌다(step1 4절, step2 4절에 넓힐 꼴이 적혀 있다). 목록 밖 호출이 막히는지 보는 사례는 그대로 두고 통과해야 한다.
   - 자식 프로세스(메모리 자료): 같은 방식으로 `child_process`의 `spawnSync`·`spawn`·`execSync`·`exec`·`execFileSync`·`execFile`·`fork`를 "기록하고 원래 함수를 부르는 함수"로 감싸, 메모리 `MetricsSource`로 `runMetrics`를 실행하는 동안 뜬 자식 프로세스가 허용 목록의 `git` 둘뿐이라고 단언한다(`gh`는 뜨지 않는다).
   - 기본 자료원 경로(명령행이 타는 경로): 유효한 기간으로 `runMetrics`를 `source` 인자 없이 부르는 테스트를 둔다. 네트워크와 실제 `gh` 없이 돈다.
     - 프로세스 실행 경계를 막는다: 위의 `child_process` 함수들을 바꿔 끼워, 허용 목록의 `git` 둘은 원래 함수로 실행하고, 허용 목록의 `gh` 넷에는 실행하지 않고 고정 응답(병합 PR 목록, 날짜별 실행 목록과 `total_count`, 버그 Issue 목록, PR의 댓글 목록)을 돌려준다. 허용 목록과 맞지 않는 호출은 고정 응답을 주기 전에 막는다: 실행하지 않고 "막은 호출"로 기록한 뒤 실패를 돌려준다.
