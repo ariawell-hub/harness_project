@@ -726,6 +726,17 @@ test(
       // 시나리오 자신은 통과였다
       assert.equal(r.verdict.scenarios.length, 1);
       assert.equal(r.verdict.scenarios[0].ok, true);
+      // 공개 요약에는 분류와 건수만 들어간다. 남은 프로세스의 번호를 적은 문장은 들어가지 않는다
+      const evidence = path.join(r.outDir, 'evidence');
+      const json = readFileSync(path.join(evidence, 'summary.json'), 'utf8');
+      const md = readFileSync(path.join(evidence, 'summary.md'), 'utf8');
+      const summary = JSON.parse(json) as {
+        ok: boolean;
+        problems: { category: string; count: number }[];
+      };
+      assert.equal(summary.ok, false);
+      assert.deepEqual(summary.problems, [{ category: '정리 실패', count: 1 }]);
+      assert.equal((json + md).includes('pid '), false);
     } finally {
       reap(f.root);
     }
