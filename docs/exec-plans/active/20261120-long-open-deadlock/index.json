@@ -1,0 +1,10 @@
+{
+  "plan": "20261120-long-open-deadlock",
+  "steps": [
+    {
+      "step": 0,
+      "name": "long-open",
+      "status": "pending"
+    }
+  ]
+}
