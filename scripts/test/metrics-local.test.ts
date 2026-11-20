@@ -1,7 +1,8 @@
 // metrics(17.2절 상시 지표 가운데 리포 파일과 로컬 로그로 재는 것): 계획 파일, runner 로그, 자체 테스트 보고서. 계획 20261119-metrics step2.
 // 기간 밖의 계획·이벤트를 세거나, 작업자가 다른 실행을 잘못 묶거나, 잴 수 없는 지표가 이유 없이 빠지는 것을 본다.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import fs, { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { runMetrics } from '../commands/metrics.ts';
@@ -11,7 +12,7 @@ import { pilotMetrics } from '../metrics/pilot.ts';
 import { BEGIN, END, renderBlock } from '../metrics/render.ts';
 import type { MetricsSource, Period } from '../metrics/source.ts';
 import { steadyMetrics } from '../metrics/steady.ts';
-import { HARNESS_ROOT, makeFixture, write, type Fixture } from './helpers.ts';
+import { HARNESS_ROOT, makeFixture, tmp, write, type Fixture } from './helpers.ts';
 
 const P: Period = { since: '2026-11-11', until: '2026-11-12' };
 
@@ -33,6 +34,18 @@ const local = (
     runnerLog: over.runnerLog ?? null,
     selfTestReport: over.selfTestReport ?? null,
   });
+
+/** 아무것도 없는 자료 */
+const EMPTY_SOURCE: MetricsSource = {
+  mergedPrs: () => [],
+  workflowRuns: () => [],
+  bugIssues: () => [],
+  ledger: () => null,
+  headStatuses: () => [],
+  needsHumanEvents: () => [],
+  escalationComments: () => [],
+  headPrCount: () => 1,
+};
 
 // ── 계획 파일 ──
 
@@ -297,6 +310,14 @@ test('localMetrics: 자체 테스트 통과율은 보고서의 pass 수 ÷ 전�
   assert.equal(local(fx).selfTest, null);
 });
 
+const RESULT = { id: 's0', covers: 'R1', state: 'pass', detail: '제목' };
+/** 맞는 보고서에서 최상위 필드 하나를 바꾼 것 */
+const withReport = (over: Record<string, unknown>) =>
+  JSON.stringify({ version: 1, headSha: '', results: [RESULT], ...over });
+/** 맞는 보고서에서 시나리오의 필드 하나를 바꾼 것 */
+const withResult = (over: Record<string, unknown>) =>
+  withReport({ results: [{ ...RESULT, ...over }] });
+
 /** 읽으면 그 이름을 적고 예외를 던지는 자료 */
 function untouchable(): { source: MetricsSource; calls: string[] } {
   const calls: string[] = [];
@@ -319,6 +340,21 @@ test('runMetrics: --self-test-report가 없는 파일이거나 형식이 다르�
     ['JSON이 아니다', writeLog(fx, 'bad1.json', 'not json')],
     ['results가 없다', writeLog(fx, 'bad2.json', JSON.stringify({ version: 1 }))],
     ['state가 정해진 값이 아니다', writeLog(fx, 'bad3.json', report(['pass', 'skipped']))],
+    // results와 state만 갖춘 JSON은 보고서가 아니다(F2): 버전, headSha, 시나리오의 id·covers·detail이 있어야 한다
+    [
+      '필수 필드가 없다',
+      writeLog(fx, 'bad5.json', JSON.stringify({ results: [{ state: 'pass' }] })),
+    ],
+    ['version이 1이 아니다', writeLog(fx, 'bad6.json', withReport({ version: 2 }))],
+    ['version이 없다', writeLog(fx, 'bad7.json', withReport({ version: undefined }))],
+    ['headSha가 문자열이 아니다', writeLog(fx, 'bad8.json', withReport({ headSha: 1 }))],
+    ['id가 없다', writeLog(fx, 'bad9.json', withResult({ id: undefined }))],
+    ['id가 비었다', writeLog(fx, 'bad10.json', withResult({ id: '' }))],
+    ['covers가 문자열이 아니다', writeLog(fx, 'bad11.json', withResult({ covers: null }))],
+    ['detail이 문자열이 아니다', writeLog(fx, 'bad12.json', withResult({ detail: 3 }))],
+    ['시나리오가 객체가 아니다', writeLog(fx, 'bad13.json', withReport({ results: ['pass'] }))],
+    ['같은 id가 두 번 있다', writeLog(fx, 'bad14.json', withReport({ results: [RESULT, RESULT] }))],
+    ['최상위가 배열이다', writeLog(fx, 'bad15.json', JSON.stringify([{ state: 'pass' }]))],
     // `self-test --live --out`의 보고서는 형식이 다르다(시나리오별 통과 횟수)
     [
       '실제 세션 보고서',
@@ -348,6 +384,68 @@ test('runMetrics: --self-test-report가 없는 파일이거나 형식이 다르�
     assert.deepEqual(calls, [], why);
     assert.deepEqual(out, [], why);
     assert.match(err.join('\n'), /metrics: .*--self-test-report/, why);
+  }
+});
+
+test('runMetrics: 보고서는 한 번만 읽는다. 검사한 그 값이 출력에 나온다(F2)', () => {
+  const fx = fixture();
+  const file = writeLog(fx, 'once.json', report(['pass', 'fail']));
+  // 읽을 때마다 보고서를 바꿔 둔다: 두 번 읽으면 검사한 값과 출력의 값이 달라진다
+  const reads: string[] = [];
+  const bag = fs as unknown as Record<string, unknown>;
+  const orig = fs.readFileSync;
+  bag.readFileSync = (...args: unknown[]) => {
+    const text = (orig as (...a: unknown[]) => unknown)(...args);
+    if (args[0] === file) {
+      reads.push(String(text));
+      writeFileSync(file, 'not json');
+    }
+    return text;
+  };
+  syncBuiltinESMExports();
+  const out: string[] = [];
+  const err: string[] = [];
+  let code: number;
+  try {
+    code = runMetrics(
+      fx.root,
+      {
+        since: P.since,
+        until: P.until,
+        selfTestReport: file,
+        out: (l) => out.push(l),
+        err: (l) => err.push(l),
+      },
+      EMPTY_SOURCE,
+    );
+  } finally {
+    bag.readFileSync = orig;
+    syncBuiltinESMExports();
+  }
+  assert.equal(code, 0, err.join('\n'));
+  assert.equal(reads.length, 1);
+  assert.match(out.join('\n'), /^- 하네스 자체 테스트 통과율: 1건 ÷ 2건 = 50\.0%$/m);
+});
+
+// ── 문서 조회 실패(F1) ──
+
+test('localMetrics: 문서 목록을 읽지 못하면 "검토 필요" 문서 수를 0으로 내지 않고 예외다', () => {
+  // git 리포가 아닌 폴더: `git ls-files`가 실패한다
+  const dir = tmp();
+  try {
+    assert.throws(
+      () =>
+        localMetrics({
+          root: dir,
+          cfg: loadConfig(fixture().root),
+          period: P,
+          runnerLog: null,
+          selfTestReport: null,
+        }),
+      /문서 목록을 읽지 못했다/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

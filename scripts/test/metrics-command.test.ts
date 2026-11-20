@@ -1519,6 +1519,55 @@ test('"검토 필요" 문서 수: related_code가 문서보다 나중에 커밋�
   }
 });
 
+test('문서 조회가 실패하면 "검토 필요" 문서 수를 0으로 내지 않는다: 종료 코드 2이고 표준 출력이 비어 있다(F1)', () => {
+  // 이 테스트만의 임시 리포다. `review_cycle: on-change` 문서가 있어야 커밋 시각을 읽는다
+  const fx = makeFixture();
+  try {
+    write(
+      fx.root,
+      'docs/a.md',
+      '---\nstatus: active\nrelated_code: [src/a.ts]\nreview_cycle: on-change\n---\n\n# A\n',
+    );
+    write(
+      fx.root,
+      'docs/b.md',
+      '---\nstatus: active\nrelated_code: [src/never-committed.ts]\nreview_cycle: on-change\n---\n\n# B\n',
+    );
+    write(fx.root, 'src/a.ts', 'export const a = 1;\n');
+    commitAll(fx.root, 'doc and code');
+    const failing = (name: string) => {
+      const guard = guardCp((c) =>
+        c.cmd === 'git' && matchShape(GIT_READ_SHAPES, c.args)?.name === name ? 'block' : 'run',
+      );
+      try {
+        return { r: exec(fx.root, mem(BASE)), blocked: guard.blocked.map(show) };
+      } finally {
+        guard.restore();
+      }
+    };
+    // 문서 목록(`git ls-files`)이 실패한다
+    const list = failing('ls-files');
+    assert.deepEqual(list.blocked, [
+      'git ls-files -z --cached --others --exclude-standard -- *.md',
+    ]);
+    assert.equal(list.r.code, 2);
+    assert.equal(list.r.out, '');
+    assert.match(list.r.err, /문서 목록을 읽지 못했다.*집계하지 않았다/);
+    // 커밋 시각(`git log`)이 실패한다
+    const log = failing('log');
+    assert.ok(log.blocked.length >= 1 && log.blocked.every((x) => x.startsWith('git log -1 ')));
+    assert.equal(log.r.code, 2);
+    assert.equal(log.r.out, '');
+    assert.match(log.r.err, /커밋 시각을 읽지 못했다.*집계하지 않았다/);
+    // 조회는 성공했지만 그 경로에 커밋 이력이 없는 것(docs/b.md의 related_code)은 실패가 아니다
+    const ok = exec(fx.root, mem(BASE));
+    assert.equal(ok.code, 0, ok.err);
+    assert.match(ok.out, /^- "검토 필요" 문서 수: 0개\(기간과 무관한 현재 값\)$/m);
+  } finally {
+    fx.cleanup();
+  }
+});
+
 // ── 등록과 문서 ──
 
 test('harness.ts에 등록돼 있다: 틀린 기간은 GitHub을 읽기 전에 종료 코드 1로 끝난다', () => {
