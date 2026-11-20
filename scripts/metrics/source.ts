@@ -562,6 +562,12 @@ export function ghSource(o: {
           throw new SourceError(
             `${what}이 조회 상한(${HEAD_PRS_LIMIT}건)에 닿아 다 읽었는지 알 수 없다`,
           );
+        // 항목 수가 곧 값이다. PR이 아닌 항목(번호가 양의 정수가 아니다)이나 같은 번호가 두 번 온 응답은 세지 않는다
+        for (const x of raw) {
+          const n = num(x, 'number');
+          if (!Number.isInteger(n) || n <= 0) throw new Error('number가 PR 번호가 아니다');
+        }
+        unique(what, raw);
         return raw.length;
       });
     },
