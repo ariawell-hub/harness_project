@@ -19,7 +19,7 @@ import { parseBranch } from '../lib/plan.ts';
 import { formatProblem, matchesAny, type Problem } from '../lib/util.ts';
 import { bypassScan } from '../gates/bypass-scan.ts';
 import { codeownersProblems } from '../gates/codeowners.ts';
-import { docLint } from '../gates/doc-lint.ts';
+import { docLintGate } from '../gates/doc-lint.ts';
 import { secretScan } from '../gates/secret-scan.ts';
 import { testEffect } from '../gates/test-effect.ts';
 import { describeFailure, runStandard } from './standard.ts';
@@ -169,11 +169,19 @@ export async function runCheck(
     opts.base !== undefined
       ? opts.base
       : defaultBase(root, cfg.github.remote, cfg.github.defaultBranch);
-  const useCache = !opts.ci && !opts.noCache;
+  let useCache = !opts.ci && !opts.noCache;
   const cacheDir = path.join(harnessStateDir(info, 'common'), 'check-cache');
   let key = '';
   if (useCache) {
-    key = cacheKey(info, cfg, base, opts.only);
+    try {
+      key = cacheKey(info, cfg, base, opts.only);
+    } catch {
+      // 키를 만들지 못하면(작업 트리 해시 계산 실패: 손상된 색인 등) 캐시 없이 실행한다.
+      // 검사 단계가 모두 실제로 돌고, 원인은 그 단계가 고치는 법과 함께 보고한다(doc-lint의 읽기 실패 등)
+      useCache = false;
+    }
+  }
+  if (useCache) {
     if (cacheHit(path.join(cacheDir, `${key}.json`), key)) {
       if (!opts.quiet)
         process.stdout.write(
@@ -227,7 +235,7 @@ export async function runCheck(
         .filter(Boolean)
         .join('\n');
     } else if (name === 'doc-lint') {
-      const r = docLint(root, cfg);
+      const r = docLintGate(root, cfg);
       // CODEOWNERS는 protectedPaths에서 만든 내용과 같아야 한다(10.4절). 운영 단계에 추가하는 파일이라(0.2절)
       // 구축 단계에서는 없어도 된다. 단계 이름을 늘리지 않으려고 이 단계 안에서 본다(실패 키·캐시가 이름에 묶여 있다)
       const owners = codeownersProblems(root, cfg, { missingOk: cfg.stage !== 'operation' });
