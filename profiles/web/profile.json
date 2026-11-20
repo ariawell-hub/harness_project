@@ -32,7 +32,7 @@
         "\\bsequelize\\s+db:drop\\b",
         "\\bknex\\s+migrate:rollback\\b.*--all",
         "\\bsupabase\\s+db\\s+reset\\b",
-        "\\bdrizzle-kit(?:[@/]\\S*)?(?:\\s+-{1,2}[\\w-]+(?:=\\S+)?(?:\\s+[^-\\s]\\S*)?)*\\s+(?:migrate|studio|introspect|pull|drop|push)(?![\\w-])"
+        "\\bdrizzle-kit(?:[@/]\\S*)?(?:\\s+-\\S*(?:\\s+[^-\\s]\\S*)?)*\\s+(?:migrate|studio|introspect|pull|drop|push)(?![\\w-])"
       ],
       "dbClients": ["supabase-db"],
       "mcp": {

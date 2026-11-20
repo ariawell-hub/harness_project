@@ -1,11 +1,13 @@
 // 웹 프로파일(profiles/web)의 DB 차단 목록: Drizzle(ADR-0007)의 명령 가운데 DB에 접속하는 것과
 // 마이그레이션 파일을 지우는 것을 L1 훅이 막는다(R13, 설계서 14.3절). 파일만 다루는 명령은 막지 않는다.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { cpSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { init } from '../commands/init.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
+import { parseShell } from '../hooks/shell.ts';
 import { loadConfig } from '../lib/config.ts';
 import { HARNESS_ROOT, tmp } from './helpers.ts';
 
@@ -145,4 +147,81 @@ test('웹 프로파일의 dbPatterns는 모두 정규식으로 컴파일되고, 
     'drizzle-kit 항목이 없다',
   );
   assert.deepEqual(dbClients, ['supabase-db']);
+});
+
+// 훅은 모든 Bash 호출에서 이 패턴을 돌린다. 플래그가 많은 긴 명령에서 역추적이 폭주하면 훅이 멈춘다.
+// 판정은 자식 프로세스에서 돌려 시간 제한을 건다(폭주하면 이 프로세스 안에서는 끊을 수 없다).
+// 입력은 표준 입력으로 넘긴다. 환경 변수나 인자로 넘기면 OS의 길이 한도에 걸린다
+// (Linux는 문자열 하나에 131072바이트, Windows는 환경 블록 전체에 32767자).
+const TIMING = `
+const { patterns, inputs } = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+let hits = 0;
+for (const p of patterns) { const re = new RegExp(p, 'i'); for (const s of inputs) if (re.test(s)) hits += 1; }
+process.stdout.write(String(hits));
+`;
+
+test('웹 프로파일의 dbPatterns는 플래그가 많은 긴 명령에서도 판정이 끝난다(역추적 폭주 없음)', () => {
+  const { dbPatterns } = loadConfig(webRepo()).guard;
+  const many = (unit: string, n: number) => unit.repeat(n);
+  const inputs = [
+    // 금지 하위 명령으로 끝나지 않는 긴 명령(맞지 않는 쪽이 역추적이 가장 많다)
+    `drizzle-kit ${many('--config ', 40)}generate`,
+    `drizzle-kit ${many('--config a ', 2000)}generate`,
+    `drizzle-kit ${many('--a-b-c=d ', 2000)}generate`,
+    `drizzle-kit ${many('-x ', 5000)}check`,
+    `drizzle-kit ${many('--config a ', 2000)}`,
+    `${many('drizzle-kit --verbose ', 2000)}up`,
+  ];
+  const r = spawnSync(process.execPath, ['-e', TIMING], {
+    encoding: 'utf8',
+    timeout: 20_000,
+    input: JSON.stringify({ patterns: dbPatterns, inputs }),
+  });
+  assert.equal(
+    r.error,
+    undefined,
+    `판정이 시간 안에 끝나지 않았거나 실행하지 못했다: ${r.error?.message}`,
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '0', '금지 하위 명령이 없는 명령이 패턴에 맞았다');
+});
+
+test('웹 프로파일: 플래그가 아주 많아도 끝의 금지 하위 명령을 막는다', () => {
+  const r = bash(`drizzle-kit ${'--config a '.repeat(500)}migrate`, webCtx());
+  assert.ok(r?.rule.startsWith('R13'), `막혀야 한다 → ${r?.rule}`);
+});
+
+// 한계(기술 부채 표의 TD-61): 훅은 따옴표를 푼 인자를 공백으로 이은 글 하나를 패턴에 넘긴다
+// (scripts/hooks/rules.ts의 dbRules). 인자가 다른 두 호출이 같은 글이 되면 어떤 패턴도 둘을 다르게
+// 판정할 수 없다. 그래서 플래그의 값에 공백이 든 호출은 프로파일의 패턴으로 가려내지 못한다.
+const SAME_TEXT: [allowed: string, forbidden: string][] = [
+  // 값에 든 낱말이 허용된 하위 명령의 이름과 같다: 금지 호출을 막으려면 허용 호출도 막아야 한다
+  [
+    'drizzle-kit --config a generate --name migrate',
+    'drizzle-kit --config "a generate" --name migrate',
+  ],
+  // 값에 든 낱말이 금지 하위 명령의 이름과 같다: 금지 호출을 막으면 허용 호출도 막힌다
+  [
+    'drizzle-kit --config "team migrate x.ts" generate',
+    'drizzle-kit --config team migrate x.ts generate',
+  ],
+];
+
+test('한계: 공백이 든 플래그 값은 패턴으로 가릴 수 없다(인자가 달라도 훅이 보는 글이 같다)', () => {
+  const c = webCtx();
+  const argv = (cmd: string) => parseShell(cmd).map((s) => s.argv);
+  for (const [allowed, forbidden] of SAME_TEXT) {
+    assert.notDeepEqual(argv(allowed), argv(forbidden), '두 호출은 인자가 다르다');
+    assert.deepEqual(
+      argv(allowed).map((a) => a.join(' ')),
+      argv(forbidden).map((a) => a.join(' ')),
+      '훅이 패턴에 넘기는 글은 같다',
+    );
+    assert.equal(bash(allowed, c)?.rule, bash(forbidden, c)?.rule, '같은 글이라 판정도 같다');
+  }
+  // 허용된 하위 명령 뒤의 인자는 보지 않는다(계획의 금지사항). 그래서 같은 글이 되는 금지 호출을 놓친다
+  assert.equal(bash(SAME_TEXT[0][0], c), null);
+  // 계획이 정한 범위(플래그 뒤의 값 하나)를 넘는 값은 건너뛰지 않는다. 그 대가로 아래 호출을 놓친다
+  assert.equal(bash('drizzle-kit --config "team config.ts" migrate', c), null);
+  assert.equal(bash('drizzle-kit --config "team local migrate config.ts" generate', c), null);
 });
