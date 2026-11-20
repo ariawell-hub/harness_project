@@ -79,6 +79,8 @@ claimed_at: 2026-11-20T21:18:07+09:00 # new-task가 채운다
 - 2026-11-20 22:35 PR #164 계획 검증 6라운드(head `32597f9`): 두 검증자 승인. F8은 반박이 받아들여져 닫혔다(rejected). 계획 승인(G1) 해시 `6682b17c669b`.
 - 2026-11-20 22:37 step0 테스트를 먼저 올렸다(`982f660`, 테스트 파일만). 구현 전 `node --test scripts/test/doc-lint-gate.test.ts`는 실패한다(종료 코드 1: `../gates/doc-lint.ts`에 `DocLintReadError`·`docLintGate`가 없다).
 - 2026-11-20 22:40 구현을 올렸다. 같은 명령이 통과한다(16건). `CHANGELOG`에 한 줄을 더하고 TD-60을 해결로 바꿨다.
+- 2026-11-20 23:05 PR #162가 병합돼 `origin/main`을 병합했다(`CHANGELOG`의 충돌은 main의 내용에 이 PR의 한 줄을 더해 풀었다). `check` 통과 뒤 구현을 push했다(head `276f1b8`).
+- 2026-11-20 23:21 PR #164 구현 판정 1라운드(head `276f1b8`): claude 승인(지적 없음), codex 수정 요청(P1 1). F9: 완료 기록에 새 테스트의 결과만 있고 AC가 요구하는 기존 테스트의 결과가 없다 → 수용. head `276f1b8`에서 step0의 AC 두 명령을 다시 실행해 결과를 "검증 방법과 결과"에 적었다. 코드는 바꾸지 않았다.
 
 ## 의사결정 로그
 
@@ -106,6 +108,13 @@ claimed_at: 2026-11-20T21:18:07+09:00 # new-task가 채운다
 - step0의 Acceptance Criteria(새 테스트와 `doc-lint`·`check`·`metrics`를 다루는 기존 테스트, 기술 부채 표의 TD-60 행).
 - `node scripts/harness.ts check`.
 
+결과(2026-11-20 23:21, head `276f1b8`. main `ba9107e`를 병합한 상태):
+
+- `node --test scripts/test/doc-lint-gate.test.ts scripts/test/gates.test.ts scripts/test/codeowners.test.ts scripts/test/check-skip.test.ts scripts/test/metrics-command.test.ts scripts/test/metrics-local.test.ts`: 종료 코드 0. 111건 가운데 111건 통과, 실패 0, 건너뜀 0. 새 테스트 파일이 16건이고 나머지 95건이 기존 테스트(게이트, CODEOWNERS, `check`의 캐시·단계 건너뛰기, 지표 집계 명령과 로컬 지표)다.
+- `grep -q "^| TD-60 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
+- `node scripts/harness.ts check`: 통과(push 직전, 같은 head). 같은 head의 CI `check`도 통과했다.
+- `complete-step`도 완료 처리 때 위 AC 두 명령을 실행해 통과를 확인했다(main 병합 전의 커밋에서).
+
 ## 다음 할 일
 
-- PR #162(같은 `CHANGELOG`·기술 부채 표를 고친다)가 병합되면 `origin/main`을 병합해 push하고 구현 판정을 받는다. 통과하면 `pr-ready`로 제작자 승인을 요청한다.
+- 구현 판정이 통과하면 `pr-ready`로 제작자 승인을 요청한다.
