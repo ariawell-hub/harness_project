@@ -19,10 +19,8 @@
 ```ts
 export interface MergedPr {
   /* step0의 필드에 더한다 */
-  /** PR에 든 커밋의 SHA(`gh pr list --json commits`의 `oid`) */
+  /** PR에 든 커밋의 SHA 전부(PR 커밋 조회의 `sha`). 다 받지 못하면 `mergedPrs`가 `SourceError`를 던지므로 일부만 든 목록은 없다 */
   commits: string[];
-  /** 커밋 목록을 다 받았는가. `gh`가 주는 목록은 100개까지라, 100개면 false다 */
-  commitsComplete: boolean;
   /** 다른 리포(포크)의 브랜치에서 온 PR인가(`isCrossRepository`) */
   crossRepo: boolean;
 }
@@ -71,6 +69,12 @@ export interface MetricsSource {
 ```
 
 - 워크플로 실행을 읽는 범위를 넓힌다: `runMetrics`가 `since`와 기간에 병합된 PR의 가장 이른 `createdAt` 날짜 가운데 이른 쪽부터 `until`까지 읽는다(기간 전에 열린 PR의 첫 `check` 실행을 보기 위해서다). step0의 사용량 계산은 `createdAt`이 기간 안인 실행만 세므로 값이 바뀌지 않는다. 이것을 테스트로 고정한다.
+- `mergedPrs`: step0의 PR 조회에 `isCrossRepository` 필드를 더해 `crossRepo`를 채우고, 기간 안의 PR마다 PR 커밋 조회(`gh api --paginate "repos/{owner}/{repo}/pulls/<번호>/commits?per_page=100"`)를 한 번씩 불러 `commits`를 채운다(기간 밖 PR에는 부르지 않는다).
+  - 출력 형식: `--jq`는 `.[].sha`다. `gh api --paginate --jq`는 쪽마다 jq를 적용한 결과를 이어서 내므로 표준 출력은 쪽의 경계 없이 한 줄에 SHA 하나다(이 리포의 PR #147을 `per_page=30`으로 읽어 두 쪽 34줄이 오는 것을 확인했다). 자료원은 출력의 빈 줄이 아닌 줄을 모두 받은 순서대로 `commits`에 담는다. 16진수 40자가 아닌 줄이 있으면 `SourceError`다.
+  - 상한: 이 조회는 PR 하나에 250개까지만 준다(GitHub REST 문서의 "List commits on a pull request"). 받은 SHA가 250개 이상이면 더 있는지 알 수 없으므로 PR 번호를 담은 `SourceError`를 던진다(수용 기준 4: 종료 코드 2, 집계 결과를 내지 않는다). 249개까지는 그대로 쓴다.
+  - 같은 SHA가 두 번 오면 `SourceError`다.
+  - 빈 응답: SHA가 하나도 없으면(`gh`가 성공으로 끝났지만 표준 출력이 비었거나 빈 줄뿐이다) PR 번호를 담은 `SourceError`를 던진다. 병합된 PR에는 커밋이 하나 이상 있으므로 빈 목록은 다 읽은 결과가 아니다.
+  - `gh pr list --json commits`는 쓰지 않는다: `--limit 1000`과 함께 쓰면 GraphQL 노드 한도를 넘어 조회가 실패한다(이 리포에서 2026-11-20에 확인).
 - `headStatuses`: `gh api --paginate "repos/{owner}/{repo}/commits/<sha>/statuses?per_page=100"`으로 그 커밋의 상태를 끝까지 읽는다.
 - `needsHumanEvents`: `gh api --paginate "repos/{owner}/{repo}/issues/events?per_page=100"`에서 `event`가 `labeled`이고 라벨이 `cfg.github.needsHumanLabel`인 것. 기간 안인 것만 남긴다.
 - `escalationComments`: `gh api --paginate "repos/{owner}/{repo}/issues/comments?since=<since>T00:00:00Z&per_page=100"`에서 작성자가 `cfg.github.bot`이고 생성 시각이 기간 안인 댓글을 본문 문구로 분류한다. 본문은 분류에만 쓰고 결과에 담지 않는다. 분류(위에서부터 먼저 맞는 것):
@@ -82,11 +86,12 @@ export interface MetricsSource {
   - 어느 것도 아니면 버린다.
 
 - 읽기 요청 꼴(step0 1절의 목록에 더한다. 규칙은 같다: 인자 배열의 길이와 자리마다의 값이 맞아야 하고 다른 인자를 덧붙이지 않는다. `<SHA>`는 16진수 40자, `<브랜치>`는 한 자리의 문자열이다):
+  - PR 커밋 조회(`mergedPrs`): `api` `--paginate` `repos/{owner}/{repo}/pulls/<번호>/commits?per_page=100` `--jq` `<jq>`
   - 커밋 상태 조회(`headStatuses`): `api` `--paginate` `repos/{owner}/{repo}/commits/<SHA>/statuses?per_page=100` `--jq` `<jq>`
   - 라벨 이벤트 조회(`needsHumanEvents`): `api` `--paginate` `repos/{owner}/{repo}/issues/events?per_page=100` `--jq` `<jq>`
   - 리포 댓글 조회(`escalationComments`): `api` `--paginate` `repos/{owner}/{repo}/issues/comments?since=<날짜>T00:00:00Z&per_page=100` `--jq` `<jq>`
   - head별 PR 조회(`headPrCount`): `pr` `list` `--state` `all` `--head` `<브랜치>` `--limit` `100` `--json` `number`
-  - step0의 PR 조회는 꼴이 그대로다(`--json`의 `<필드>`에 `commits` 등이 더해질 뿐이다). 이 step은 `git` 명령을 더하지 않는다(`planClaimedAt`은 파일만 읽는다).
+  - step0의 PR 조회는 꼴이 그대로다(`--json`의 `<필드>`에 `isCrossRepository`가 더해질 뿐이다). 이 step은 `git` 명령을 더하지 않는다(`planClaimedAt`은 파일만 읽는다).
 
 ### 2. 상시 지표 `scripts/metrics/steady.ts`
 
@@ -113,7 +118,7 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
 - **PR 리드타임(계획 생성 → 병합)**: PR마다 `mergedAt − planClaimedAt`의 중앙값과 최댓값(분). 계획 생성 시각은 `new-task`가 계획 frontmatter에 적는 `claimed_at`이다. 둘째 step부터의 PR도 그 계획의 `claimed_at`부터 잰다(계획이 생긴 뒤 그 PR이 병합되기까지). `planClaimedAt`에 없는 PR, 시각을 읽지 못한 PR, 값이 음수인 PR은 빼고 "계획을 찾지 못한 PR" 수로 따로 낸다.
   - `planClaimedAt`은 새 파일 `scripts/metrics/plans.ts`의 `planClaimedAt(root: string, prs: MergedPr[]): Map<number, string>`이 만든다: PR의 `head`를 `parseBranch`로 읽어 계획 id를 얻고, `findPlan(root, id)`로 찾은 계획 파일(`active/`·`completed/`)의 frontmatter `claimed_at`을 읽는다. 브랜치 이름이 계획 형식이 아니거나(revert PR 등) 계획 파일이 없으면 넣지 않는다. `root`는 명령을 실행한 체크아웃이다.
 - **CI 첫 통과율**: Actions 실행 목록은 병합된 PR의 번호를 주지 않는다(응답의 `pull_requests`가 비어 있다. 이 리포의 2026-11-12·18 실행에서 확인). 실행과 PR을 잇는 값은 head 브랜치 이름과 커밋 SHA뿐이라, **그 head 브랜치 이름으로 열린 PR이 그 PR 하나뿐일 때만** 실행을 잇는다. 같은 이름으로 열린 PR이 하나라도 더 있으면(닫힌 PR, base가 다른 PR, base를 바꾼 PR, 다시 연 PR과 겹친 PR, 포크의 PR) 어느 PR의 실행인지 가를 수 없으므로 그 PR은 지표에서 뺀다.
-  - 이을 수 있는 PR: `crossRepo`가 거짓이고 `commitsComplete`가 참이고 `headPrCounts`의 그 PR 값이 1인 PR. 값이 2 이상이거나 없는 PR을 포함해 나머지는 분모에서 빼고 "실행을 이을 수 없는 PR" 수로 따로 낸다.
+  - 이을 수 있는 PR: `crossRepo`가 거짓이고 `headPrCounts`의 그 PR 값이 1인 PR. 값이 2 이상이거나 없는 PR을 포함해 나머지는 분모에서 빼고 "실행을 이을 수 없는 PR" 수로 따로 낸다.
   - `headPrCount`: `gh pr list --state all --head <head> --limit 100 --json number`가 돌려준 수. 병합된 PR마다 한 번 읽는다.
   - 이을 수 있는 PR의 실행: `runs` 가운데 `path`가 `.github/workflows/check.yml`, `event`가 `pull_request`, `sameRepo`가 참, `branch`가 그 PR의 `head`, `headSha`가 그 PR의 `commits`에 들고, `createdAt`이 그 PR의 `createdAt` 이상 `mergedAt` 이하인 것.
   - 그중 `createdAt`이 가장 이른 실행이 `attempt` 1이고 `conclusion`이 `success`면 첫 통과다. 비율 = 첫 통과 PR 수 ÷ 실행을 찾은 PR 수. 이을 수 있는데 실행을 찾지 못한 PR 수도 따로 낸다(분모에서 뺀다).
@@ -136,7 +141,7 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
 ### 4. 테스트 `scripts/test/metrics-steady.test.ts`(새 파일)
 
 - 댓글 분류 함수: 위 문구마다 한 사례(`scripts/runner/run.ts`의 실패 중단 보고와 갱신 충돌 보고 형식을 고정 입력으로 둔다. 충돌 보고는 `stop-conflict`이고 5회 중단 수에 들지 않는다), 봇이 아닌 작성자와 기간 밖 댓글은 버린다, 분류 결과에 본문이 없다.
-- `steadyMetrics`: 지표마다 고정 입력으로 값 단언(첫 실행이 재실행된 PR은 첫 통과가 아니다, 실행 없는 PR은 분모에서 빠진다, 검증 App이 아닌 계정이 쓴 `risk-gate` 기록은 쓰지 않는다, 같은 head 브랜치 이름으로 열린 PR이 둘 이상이면(닫았다 새로 연 PR, base가 다르거나 base를 바꾼 PR) 그 PR은 "실행을 이을 수 없는 PR"로 빠진다: PR과 실행 자료는 같게 두고 `headPrCounts`의 값만 1과 2로 바꾼 두 입력에서, 1이면 첫 통과율에 들고 2이면 빠진다. 값이 없는 PR도 빠진다, 포크의 같은 이름 브랜치에서 돈 실행(`sameRepo` 거짓)은 어느 PR에도 이어지지 않는다, 포크에서 온 PR과 커밋이 100개인 PR은 "실행을 이을 수 없는 PR"로 빠진다, PR의 커밋에 없는 SHA의 실행은 브랜치 이름이 같아도 이어지지 않는다, PR이 열리기 전이나 병합된 뒤의 실행은 이어지지 않는다, 라벨은 기간 마지막 날 23:59:59Z에 붙고 댓글은 다음 날 00:00:01Z에 달린 사건이 두 기간에서 라벨 수와 댓글 수로 각각 한 번씩 세어진다).
+- `steadyMetrics`: 지표마다 고정 입력으로 값 단언(첫 실행이 재실행된 PR은 첫 통과가 아니다, 실행 없는 PR은 분모에서 빠진다, 검증 App이 아닌 계정이 쓴 `risk-gate` 기록은 쓰지 않는다, 같은 head 브랜치 이름으로 열린 PR이 둘 이상이면(닫았다 새로 연 PR, base가 다르거나 base를 바꾼 PR) 그 PR은 "실행을 이을 수 없는 PR"로 빠진다: PR과 실행 자료는 같게 두고 `headPrCounts`의 값만 1과 2로 바꾼 두 입력에서, 1이면 첫 통과율에 들고 2이면 빠진다. 값이 없는 PR도 빠진다, 포크의 같은 이름 브랜치에서 돈 실행(`sameRepo` 거짓)은 어느 PR에도 이어지지 않는다, 포크에서 온 PR은 "실행을 이을 수 없는 PR"로 빠진다, PR의 커밋에 없는 SHA의 실행은 브랜치 이름이 같아도 이어지지 않는다, PR이 열리기 전이나 병합된 뒤의 실행은 이어지지 않는다, 라벨은 기간 마지막 날 23:59:59Z에 붙고 댓글은 다음 날 00:00:01Z에 달린 사건이 두 기간에서 라벨 수와 댓글 수로 각각 한 번씩 세어진다).
 - `planClaimedAt`: 임시 폴더의 계획 파일(단일 파일, 폴더, `active/`·`completed/`)에서 `claimed_at`을 읽는다, 계획 형식이 아닌 브랜치와 계획 파일이 없는 PR은 빠진다. 계획이 없는 PR과 둘째 step PR이 섞인 입력에서 리드타임과 "계획을 찾지 못한 PR" 수가 맞다.
 - 실행 조회 범위를 넓혀도 step0의 Actions 실행 시간 값이 같다.
 - 명령 경로의 연결(`scripts/test/metrics-command.test.ts`에 더한다. 호출을 기록하는 메모리 `MetricsSource`를 끼워 `runMetrics`를 부르고 출력을 본다):
@@ -145,12 +150,19 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
   - 임시 리포에 계획 파일을 두고 그 계획의 브랜치 이름을 `head`로 가진 PR을 주면 출력에 리드타임 값이 나오고, 계획 파일을 지우면 "계획을 찾지 못한 PR" 수가 1 늘어난다.
   - `needsHumanEvents`·`escalationComments`의 반환값을 하나씩 늘리면 출력의 라벨 수와 그 사유의 댓글 수가 1씩 늘어난다.
   - `workflowRuns`가 기간에 병합된 PR의 가장 이른 `createdAt` 날짜부터 불린다(기간 전에 열린 PR을 준다).
+  - 둘째 쪽의 커밋이 집계에 쓰인다(기본 자료원 경로, 아래 허용 목록 테스트와 같은 장치): 커밋 조회의 고정 응답이 100줄 + 1줄인 PR에서, 가장 이른 `check` 실행의 `headSha`가 둘째 쪽의 SHA(101번째)이고 실패했으며 그 뒤의 실행은 첫 쪽의 SHA로 통과했다. 출력의 CI 첫 통과율이 0건 ÷ 1건이다(둘째 쪽을 잃으면 뒤 실행이 첫 실행이 되어 1건 ÷ 1건이 된다). 같은 자료에서 가장 이른 실행의 결론만 통과로 바꾸면 1건 ÷ 1건이다.
+  - 커밋 조회가 상한에 닿으면 값을 내지 않는다(기본 자료원 경로): 한 PR의 커밋 조회가 250줄을 돌려주면 종료 코드 2이고 표준 출력이 비어 있으며 표준 오류에 "집계하지 않았다"와 그 PR 번호가 있다.
+  - 커밋 조회가 빈 응답이면 값을 내지 않는다(기본 자료원 경로): 한 PR의 커밋 조회가 종료 코드 0과 빈 표준 출력을 돌려주면 종료 코드 2이고 표준 출력이 비어 있으며 표준 오류에 "집계하지 않았다"와 그 PR 번호가 있다(그 PR을 "실행을 찾지 못한 PR"로 세어 집계를 내지 않는다).
 - `renderBlock`이 `### 상시 지표` 절을 내고 제목 문자열을 담지 않는다.
-- `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자 배열이 1절에 더한 네 꼴 가운데 하나와 자리마다 맞는다.
+- `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자 배열이 1절에 더한 다섯 꼴 가운데 하나와 자리마다 맞는다.
+- `ghSource.mergedPrs`: PR 조회의 `--json` 필드에 `commits`가 없고 `isCrossRepository`가 있다. 기간 안의 PR마다 PR 커밋 조회를 그 번호로 한 번씩 부르고 기간 밖 PR에는 부르지 않는다. 응답의 SHA가 `commits`에 담긴다. 같은 SHA가 두 번 오면 `SourceError`다. 16진수 40자가 아닌 줄이 있으면 `SourceError`다. 커밋 조회가 실패하면 `SourceError`다.
+  - 쪽 넘김: 고정 응답을 실제 출력 형식대로 첫 쪽의 100줄과 둘째 쪽의 1줄을 이어 붙여 만든다(쪽마다 jq 결과가 줄바꿈으로 끝난다). `commits`가 101개이고 순서가 받은 대로이며 둘째 쪽의 SHA가 들어 있다. 기록된 호출에 `--paginate`가 있고 `--jq`의 식이 `.[].sha`다(`--paginate`를 뺀 호출은 읽기 요청 꼴과 맞지 않는다는 것도 단언한다).
+  - 상한: 249줄이 오면 `commits`가 249개다. 250줄이 오면 `SourceError`이고 메시지에 그 PR 번호가 있다.
+  - 빈 응답: 빈 문자열과 빈 줄뿐인 응답은 `SourceError`이고 메시지에 그 PR 번호가 있다.
 - 자식 프로세스 허용 목록과 기본 자료원 테스트를 넓힌다(`scripts/test/metrics-command.test.ts`, step0 5절):
-  - 허용 목록의 `gh`에 1절에 더한 네 꼴을 넣고, 기본 자료원 테스트의 고정 응답에 넷의 응답(PR head 커밋의 `risk-gate` 상태, 라벨 이벤트, 봇 댓글, head별 PR 목록)을 넣는다.
-  - 기본 자료원 테스트의 단언: 종료 코드 0, 막은 호출 0건, 관찰한 `gh` 호출에 step0의 넷과 이 step의 넷이 모두 있다(커밋 상태 조회와 head별 PR 조회는 병합된 PR마다 한 번씩). 출력의 `### 상시 지표` 값이 고정 응답과 맞는다(위험도별 PR 수, `needs-human` 라벨 수). `fs` 쓰기 시도는 0건이다.
-  - 목록 밖 호출이 여전히 막히는지: step0의 사례가 그대로 통과하고, 여기에 `gh pr list --state all --head x --limit 100 --json number --web`(인자를 덧붙인 것), `gh api --paginate repos/{owner}/{repo}/issues/events?per_page=100 --jq . --method=POST`, `gh api repos/{owner}/{repo}/issues/1/labels -f labels[]=x`(쓰기 요청)를 더해 모두 막히는 것을 단언한다.
+  - 허용 목록의 `gh`에 1절에 더한 다섯 꼴을 넣고, 기본 자료원 테스트의 고정 응답에 다섯의 응답(PR의 커밋 목록, PR head 커밋의 `risk-gate` 상태, 라벨 이벤트, 봇 댓글, head별 PR 목록)을 넣는다.
+  - 기본 자료원 테스트의 단언: 종료 코드 0, 막은 호출 0건, 관찰한 `gh` 호출에 step0의 넷과 이 step의 다섯이 모두 있다(PR 커밋 조회, 커밋 상태 조회, head별 PR 조회는 병합된 PR마다 한 번씩). 출력의 `### 상시 지표` 값이 고정 응답과 맞는다(위험도별 PR 수, `needs-human` 라벨 수). `fs` 쓰기 시도는 0건이다.
+  - 목록 밖 호출이 여전히 막히는지: step0의 사례가 그대로 통과하고, 여기에 `gh pr list --state all --head x --limit 100 --json number --web`(인자를 덧붙인 것), `gh api --paginate repos/{owner}/{repo}/issues/events?per_page=100 --jq . --method=POST`, `gh api repos/{owner}/{repo}/issues/1/labels -f labels[]=x`(쓰기 요청), `gh api --paginate repos/{owner}/{repo}/pulls/1/commits?per_page=100 --jq . -X POST`(PR 커밋 조회에 인자를 덧붙인 것), `gh api --paginate repos/{owner}/{repo}/pulls/1/merge?per_page=100 --jq .`(경로가 다른 것)를 더해 모두 막히는 것을 단언한다.
   - 메모리 자료 테스트(자식 프로세스가 허용 목록의 `git` 둘뿐)와 `fs` 쓰기 시도 감지, 실행 전후 비교는 이 step의 `runMetrics`에서도 그대로 통과한다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 `### 상시 지표` 제목이 있다.
 
