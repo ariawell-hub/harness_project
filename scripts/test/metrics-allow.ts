@@ -16,7 +16,10 @@ const REPO = String.raw`repos/\{owner\}/\{repo\}`;
 /** `--jq` 바로 뒤 한 자리의 식 */
 const JQ = /^[\s\S]+$/;
 
-/** `gh`의 읽기 요청 꼴 넷: PR 조회, Issue 조회, 실행 조회, 댓글 조회(원장) */
+/**
+ * `gh`의 읽기 요청 꼴. step0의 넷(PR 조회, Issue 조회, 실행 조회, 원장 댓글 조회)과
+ * step1의 다섯(PR 커밋 조회, 커밋 상태 조회, 라벨 이벤트 조회, 리포 댓글 조회, head별 PR 조회)
+ */
 export function ghReadShapes(defaultBranch: string): Shape[] {
   return [
     {
@@ -71,6 +74,56 @@ export function ghReadShapes(defaultBranch: string): Shape[] {
         new RegExp(`^${REPO}/issues/\\d+/comments\\?per_page=100$`),
         '--jq',
         JQ,
+      ],
+    },
+    {
+      name: 'prCommits',
+      args: [
+        'api',
+        '--paginate',
+        new RegExp(`^${REPO}/pulls/\\d+/commits\\?per_page=100$`),
+        '--jq',
+        JQ,
+      ],
+    },
+    {
+      name: 'statuses',
+      args: [
+        'api',
+        '--paginate',
+        new RegExp(`^${REPO}/commits/[0-9a-f]{40}/statuses\\?per_page=100$`),
+        '--jq',
+        JQ,
+      ],
+    },
+    {
+      name: 'events',
+      args: ['api', '--paginate', 'repos/{owner}/{repo}/issues/events?per_page=100', '--jq', JQ],
+    },
+    {
+      name: 'repoComments',
+      args: [
+        'api',
+        '--paginate',
+        new RegExp(`^${REPO}/issues/comments\\?since=${DAY}T00:00:00Z&per_page=100$`),
+        '--jq',
+        JQ,
+      ],
+    },
+    {
+      name: 'headPrs',
+      // `<브랜치>`는 한 자리의 문자열이다. 옵션으로 읽힐 값(-로 시작)은 자료원이 넘기지 않는다
+      args: [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--head',
+        /^[^-][\s\S]*$/,
+        '--limit',
+        '100',
+        '--json',
+        'number',
       ],
     },
   ];
