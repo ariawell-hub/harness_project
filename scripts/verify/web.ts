@@ -74,6 +74,15 @@ export interface VerifyOptions {
   findMarked?: FindMarked;
   /** 번호들의 지금 시작 시각을 읽는 수단(신호를 보내기 직전의 확인). 기본은 ps(Linux는 /proc). 테스트가 바꾼다 */
   identify?: Identify;
+  /** 프로세스 그룹을 보고 신호를 보내는 수단(정리). 기본은 kill(-pgid). 테스트가 바꾼다 */
+  group?: GroupOps;
+}
+
+/** 프로세스 그룹(번호 = 직접 띄운 프로세스의 pid)을 보고 신호를 보내는 수단 */
+export interface GroupOps {
+  /** 그룹에 남은 프로세스가 있는가. 신호를 보낼 수 없는 것(EPERM)도 남은 것이다 */
+  alive(pgid: number): boolean;
+  kill(pgid: number, signal: NodeJS.Signals): void;
 }
 
 export interface VerifyResult {
@@ -183,17 +192,18 @@ function start(
  * 프로세스 그룹에 남은 프로세스가 있는가. 그룹의 첫 프로세스가 끝난 뒤에도 남은 자식을 본다.
  * 스스로 다른 그룹·세션으로 옮겨 간 자손(setsid)은 보지 못한다(표준 명령 실행기 `lib/exec.ts`와 같은 한계)
  */
-function treeAlive(p: Proc): boolean {
-  const pid = p.child.pid;
-  if (!pid) return false;
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (e) {
-    // EPERM: 있지만 신호를 보낼 수 없다(남은 것으로 본다). ESRCH: 없다
-    return (e as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
+const GROUP: GroupOps = {
+  alive(pgid) {
+    try {
+      process.kill(-pgid, 0);
+      return true;
+    } catch (e) {
+      // EPERM: 있지만 신호를 보낼 수 없다(남은 것으로 본다). ESRCH: 없다
+      return (e as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  },
+  kill: (pgid, signal) => killTree(pgid, signal),
+};
 
 /** 아직 떠 있는 것의 pid. 끝난 것의 pid는 뿌리로 쓰지 않는다(다른 프로세스가 그 번호를 다시 쓸 수 있다) */
 const running = (procs: readonly Proc[]): number[] =>
@@ -246,8 +256,32 @@ type Cleaned = 'clean' | 'left' | 'unknown';
  * 모두에 SIGTERM → 2초 안에 끝나지 않으면 SIGKILL → 확인.
  * 신호를 보내기 전에, 아직 떠 있는 dev와 실행기의 자손을 마지막으로 한 번 더 찾는다
  */
-async function cleanup(procs: Proc[], tracker: Descendants, startedOf: Identify): Promise<Cleaned> {
+async function cleanup(
+  procs: Proc[],
+  tracker: Descendants,
+  startedOf: Identify,
+  group: GroupOps,
+): Promise<Cleaned> {
   const live = procs.filter((p) => p.child.pid);
+  /**
+   * 비어 있는 것을 한 번이라도 본 그룹의 번호. 빈 그룹은 다시 차지 않고, 그 번호는 무관한 프로세스 그룹에 다시
+   * 배정될 수 있다(구현 판정 F8). 그래서 그 뒤로는 그 번호에 신호를 보내지 않고, 살아 보여도 남은 것으로 세지 않는다
+   */
+  const gone = new Set<number>();
+  const treeAlive = (p: Proc): boolean => {
+    const pid = p.child.pid;
+    if (!pid || gone.has(pid)) return false;
+    if (group.alive(pid)) return true;
+    gone.add(pid);
+    return false;
+  };
+  /**
+   * 그룹에 신호를 보낸다. 보내기 바로 앞에서 그룹이 살아 있는지 다시 보고(사이에 기다림을 두지 않는다), 비었으면
+   * 보내지 않는다. 확인과 신호 사이에 그룹이 비고 그 번호가 다시 배정되는 틈은 남는다(번호로 보내는 신호의 한계다)
+   */
+  const signalGroups = (signal: NodeJS.Signals): void => {
+    for (const p of live) if (p.child.pid && treeAlive(p)) group.kill(p.child.pid, signal);
+  };
   /** 마지막으로 본 것이 온전한가(목록과 표식을 모두 읽었는가) */
   let seen = false;
   /** 그룹 밖의 자손을 다시 찾는다: 부모·자식 관계와 이번 실행의 표식 둘 다로 */
@@ -309,7 +343,7 @@ async function cleanup(procs: Proc[], tracker: Descendants, startedOf: Identify)
     // 목록을 읽지 못해도 멈추지 않는다: 그룹과, 마지막으로 목록에서 확인한 자손(시작 시각이 그대로인 것)에는
     // 보낸다(구현 판정 F5)
     await look();
-    for (const p of live) killTree(p.child.pid, signal);
+    signalGroups(signal);
     for (;;) {
       const newly = await signalNew(signal, sent);
       const groups = live.some(treeAlive);
@@ -657,7 +691,7 @@ export async function verifyWeb(
   } finally {
     try {
       await stopFollowing?.();
-      const cleaned = await cleanup(procs, tracker, o.identify ?? identify);
+      const cleaned = await cleanup(procs, tracker, o.identify ?? identify, o.group ?? GROUP);
       // 남은 프로세스가 있거나 남은 것이 없는지 확인하지 못했으면 통과로 두지 않는다.
       // 시나리오별 결과는 그대로 두고 전체 문제로 더한다
       const problem = {
