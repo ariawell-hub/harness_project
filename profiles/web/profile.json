@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "웹 프로파일(초안). pnpm + Prettier + ESLint + Vitest + 프로덕션 빌드. 제품의 실제 스크립트는 app:* 이름으로 둔다(하네스 별칭과 재귀를 피하려고)",
   "config": {
     "commands": {
@@ -31,7 +31,8 @@
         "\\btypeorm\\s+schema:(drop|sync)\\b",
         "\\bsequelize\\s+db:drop\\b",
         "\\bknex\\s+migrate:rollback\\b.*--all",
-        "\\bsupabase\\s+db\\s+reset\\b"
+        "\\bsupabase\\s+db\\s+reset\\b",
+        "\\bdrizzle-kit(?:[@/]\\S*)?(?:\\s+-{1,2}[\\w-]+(?:=\\S+)?(?:\\s+[^-\\s]\\S*)?)*\\s+(?:migrate|studio|introspect|pull|drop|push)(?![\\w-])"
       ],
       "dbClients": ["supabase-db"],
       "mcp": {
