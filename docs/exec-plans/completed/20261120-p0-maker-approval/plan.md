@@ -2,7 +2,7 @@
 id: 20261120-p0-maker-approval
 issue: 150 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -124,9 +124,9 @@ claimed_at: 2026-11-20T12:19:52+09:00 # new-task가 채운다
 - `review/*` 상태는 원장과 따로 계산된다(`verdictStatus`: 판정이 `approve`이고 그 판정의 `findings`에 P0·P1이 없어야 success). 원장에서 P0을 닫아도 검증자가 같은 문제를 계속 수정 요청으로 내면 `review/<검증자>`가 실패로 남는다. 그래서 수용 기준 6(판정 전에 원장에 반영해 검증자가 `accepted`를 보게 한다)이 필요하다. 그래도 검증자가 새 지적으로 다시 내는 것은 기계로 막지 않는다(B11). → 처리: 해당 없음(범위/비범위와 수용 기준 5·6에 반영했다)
 - 프롬프트는 PR의 1라운드 base 버전으로 고정된다(10.2절 (2)). 이 계획이 프롬프트에 더하는 줄은 병합 뒤에 열린 PR부터 적용된다. 이미 열린 PR(#149)의 검증자는 옛 프롬프트로 `accepted`를 본다. 옛 규칙도 다시 판정할 상태를 `open`·`fixed`·`rejected`로 한정하고 원장에 있는 지적을 다시 적지 말라고 하므로 같은 방향이다. → 처리: 해당 없음(동작을 바꿀 수 없는 제약이다. 원장의 처리 칸에 "제작자 승인"을 적어 옛 프롬프트의 검증자도 읽게 한다)
 - runner의 교착 보고(절차서 8절: 선택지 A 고친다 / B 범위를 줄인다 / C 포기)에는 P0의 "남은 위험을 받아들인다"가 없다. 대화 세션은 절차서를 보고 제작자에게 물을 수 있지만 무인 실행의 보고에는 나오지 않는다. → 처리: 해당 없음(이 계획의 범위 밖이고 지금 막는 일이 없다. 필요해지면 제작자가 Issue로 정한다)
-- 구현 판정 F1(codex, P1): 32비트 GraphQL 필드(`databaseId`)로 승인 댓글 번호를 읽는다. 측정: 지금 GitHub은 `databaseId`로도 70억대 번호를 그대로 준다(PR #149의 댓글에서 `databaseId`와 `fullDatabaseId`가 같은 값). 지금 실패하지는 않지만 스키마의 형식에 기대는 것이라 지적이 맞다. → 처리: 수정함(`fullDatabaseId`로 읽는다. `scripts/ci/accept-load.ts`, 테스트는 실제 응답 꼴과 32비트를 넘는 번호로 바꿨다)
-- 구현 판정 F2(codex, P1, 재현됨): 승인이 철회되는 실행에 그 지적을 낸 검증자의 `fixed` 판정이 함께 오면 지적이 닫혀 `review-ledger`가 통과한다. → 처리: 수정함(철회된 지적의 `resolutions`를 그 실행에서 적용하지 않는다. `scripts/ci/ledger-store.ts`, `scripts/test/accept-load.test.ts`)
-- 구현 판정 F3(codex, P2): 열린 차단 지적이 남아 실패할 때 상태 설명에 제작자 승인 수가 없다. → 처리: 수정함(`scripts/ci/ledger.ts`의 `ledgerStatus`, `scripts/test/ledger-accept.test.ts`)
+- 구현 판정 F1(codex, P1): 32비트 GraphQL 필드(`databaseId`)로 승인 댓글 번호를 읽는다. 측정: 지금 GitHub은 `databaseId`로도 70억대 번호를 그대로 준다(PR #149의 댓글에서 `databaseId`와 `fullDatabaseId`가 같은 값). 지금 실패하지는 않지만 스키마의 형식에 기대는 것이라 지적이 맞다. → 처리: 해당 없음(이 PR에서 고쳤다. `fullDatabaseId`로 읽는다. `scripts/ci/accept-load.ts`, 테스트는 실제 응답 꼴과 32비트를 넘는 번호로 바꿨다)
+- 구현 판정 F2(codex, P1, 재현됨): 승인이 철회되는 실행에 그 지적을 낸 검증자의 `fixed` 판정이 함께 오면 지적이 닫혀 `review-ledger`가 통과한다. → 처리: 해당 없음(이 PR에서 고쳤다. 철회된 지적의 `resolutions`를 그 실행에서 적용하지 않는다. `scripts/ci/ledger-store.ts`, `scripts/test/accept-load.test.ts`)
+- 구현 판정 F3(codex, P2): 열린 차단 지적이 남아 실패할 때 상태 설명에 제작자 승인 수가 없다. → 처리: 해당 없음(이 PR에서 고쳤다. `scripts/ci/ledger.ts`의 `ledgerStatus`, `scripts/test/ledger-accept.test.ts`)
 
 ## 열린 질문
 
