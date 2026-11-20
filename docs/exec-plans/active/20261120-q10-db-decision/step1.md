@@ -40,7 +40,7 @@
   - 명령: 허용(`generate`, `check`, `export`, `up`: 파일만 다룬다), 금지(`push`: 스키마 diff 자동 적용 / `migrate`·`studio`·`introspect`·`pull`: 설정이 가리키는 DB에 접속한다 / `drop`: 마이그레이션 파일을 지운다). 마이그레이션 적용은 표준 명령 안에서 앱의 마이그레이션 코드가 한다.
   - 훅이 보지 못하는 것: 패키지 스크립트(`pnpm db:migrate` 같은 이름) 안에 든 명령. 그런 스크립트를 더하는 변경은 리뷰에서 본다(절차 수준). 훅은 명령 전체의 글에서 찾으므로 금지 명령이 커밋 메시지에 글자로 들어 있어도 막히고, 플래그의 값이 금지 명령의 이름이어도 막힌다.
   - 한계: ADR-0007의 "알려진 한계"를 가리킨다.
-- `docs/harness/design.md` 14.3절의 "예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 줄: 웹 프로파일이 채운 것(DB에 접속하는 `drizzle-kit` 명령과 `drop`, 플래그가 앞에 오는 형태 포함)을 덧붙인다. 금지 분류 표는 고치지 않는다.
+- `docs/harness/design.md` 14.3절의 "예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 줄: 있던 문장은 그대로 두고 그 뒤에 웹 프로파일이 채운 것(DB에 접속하는 `drizzle-kit` 명령과 `drop`, 플래그가 앞에 오는 형태 포함)을 덧붙인다. 금지 분류 표는 고치지 않는다.
 - 0절 버전 이력과 문서 머리의 버전, `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄(검사를 약화하지 않는다는 것, 프로파일 버전). 번호는 push할 때 main의 다음 번호다.
 - `docs/harness/architecture.md`의 파일 표에 테스트 파일을 적는 칸이 있으면 더한다(없으면 고치지 않는다).
 - `docs/exec-plans/tech-debt-tracker.md`에 새 행 하나(번호는 push할 때 main의 다음 번호): 코어 DB 패턴(`scripts/hooks/rules.ts`의 `DB_PATTERNS`)은 도구 이름 바로 뒤의 하위 명령만 본다. 플래그가 앞에 오는 호출(`drizzle-kit --config x push`, 다른 도구의 같은 형태)을 놓친다. 웹 프로파일은 `drizzle-kit`에 대해 프로파일 패턴으로 막는다. 다른 행은 고치지 않는다.
@@ -56,12 +56,14 @@ grep -q '"version": "0.4.0"' profiles/web/profile.json
 grep -q "^## DB" profiles/web/README.md
 grep -q "ADR-0007" profiles/web/README.md
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "프로파일이 채운다" | grep -q "drizzle-kit"
-sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -q "drizzle-kit[ ]push"
+O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | grep . | grep -v "프로파일이 채운다" > "$O/base.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep . > "$O/now.txt" && test -s "$O/base.txt" && test -z "$(grep -Fxvf "$O/now.txt" "$O/base.txt")"
 grep -q "DB_PATTERNS" docs/exec-plans/tech-debt-tracker.md
 node scripts/harness.ts lint
 node scripts/harness.ts doc-lint
 node scripts/harness.ts fmt --check
 ```
+
+- `git merge-base`가 든 줄은 14.3절의 규칙이 빠지지 않았는지 본다. PR이 갈라진 지점의 14.3절에 있던 줄 가운데 이 step이 고치는 한 줄("프로파일이 채운다")을 뺀 모든 줄이 지금의 14.3절에 글자 그대로 있어야 한다. 그 한 줄은 바로 위 줄이 본다(뒤에 덧붙이기만 한다). `origin/main`이 필요하다(`git fetch origin`).
 
 ## 금지사항
 
