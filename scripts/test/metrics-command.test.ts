@@ -1542,10 +1542,8 @@ test('harness.ts에 등록돼 있다: 틀린 기간은 GitHub을 읽기 전에 �
   assert.equal(w.code, 1, w.stderr);
   assert.match(w.stderr, /metrics: --write 옵션은 없다/);
   assert.equal(w.stdout, '');
-  assert.match(
-    help.stdout,
-    /^ {2}metrics \[--since <날짜>\] \[--until <날짜>\] \[--self-test-report <파일>\]$/m,
-  );
+  assert.match(help.stdout, /^ {2}metrics \[--since <날짜>\] \[--until <날짜>\]$/m);
+  assert.match(help.stdout, /^ +--self-test-report <파일>: self-test --out이 쓴 보고서/m);
   // --self-test-report가 명령까지 전달된다: 없는 파일이면 GitHub을 읽기 전에 종료 코드 1로 끝난다
   const missing = path.join(HARNESS_ROOT, 'no-such-dir', 'selftest.json');
   const s = runSync(

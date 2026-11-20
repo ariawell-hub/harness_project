@@ -158,10 +158,10 @@ CI(gates 워크플로, 10.4절):
                                            --write는 파일을 다시 만든다(손으로 고치지 않는다, 10.4절)
   ops-check                                운영 전환 체크리스트 1~3(10.4절)을 읽기만으로 확인한다: 필수 체크 등록·출처,
                                            CODEOWNERS, 이 머신 봇 토큰의 workflow 권한. 모두 맞을 때만 종료 코드 0
-  metrics [--since <날짜>] [--until <날짜>] [--self-test-report <파일>]
+  metrics [--since <날짜>] [--until <날짜>]
                                            지표(17.2절)를 집계해 출력한다. 기간은 UTC 날짜(YYYY-MM-DD, 양끝 포함, 기본 최근 7일).
-                                           --self-test-report는 self-test --out이 쓴 보고서(자체 테스트 통과율).
                                            파일을 쓰지 않는다. 출력을 docs/QUALITY_SCORE.md의 집계 결과 구간에 붙여 넣는다
+                                           --self-test-report <파일>: self-test --out이 쓴 보고서로 자체 테스트 통과율을 낸다
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
