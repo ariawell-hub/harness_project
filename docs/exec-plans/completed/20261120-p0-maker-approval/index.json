@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "accept-wire",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-20T14:01:49+09:00"
     }
   ]
 }
