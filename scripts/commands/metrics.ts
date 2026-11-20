@@ -6,15 +6,19 @@ import type { Ledger } from '../ci/ledger.ts';
 import { loadConfig } from '../lib/config.ts';
 import { repoInfo } from '../lib/git.ts';
 import { isMainCheck, pilotMetrics, runOrder } from '../metrics/pilot.ts';
+import { planClaimedAt } from '../metrics/plans.ts';
 import { renderBlock } from '../metrics/render.ts';
 import {
   daysBefore,
   defaultSource,
   parsePeriod,
+  type HeadStatus,
+  type MergedPr,
   type MetricsSource,
   type Period,
   type WorkflowRun,
 } from '../metrics/source.ts';
+import { steadyMetrics } from '../metrics/steady.ts';
 
 /** 기간 직전의 main `check` 결론을 찾으러 거슬러 올라가는 날 수 */
 const PRIOR_DAYS = 7;
@@ -53,6 +57,21 @@ function priorMainCheck(
   return null;
 }
 
+/**
+ * 실행을 읽기 시작할 날: `since`와 기간에 병합된 PR이 열린 날 가운데 가장 이른 날.
+ * 기간 전에 열린 PR의 첫 `check` 실행을 보기 위해서다(CI 첫 통과율). 파일럿 지표는 기간 안의 실행만 센다
+ */
+function runsSince(p: Period, prs: MergedPr[]): string {
+  let since = p.since;
+  for (const pr of prs) {
+    const t = Date.parse(pr.createdAt);
+    if (Number.isNaN(t)) continue;
+    const day = new Date(t).toISOString().slice(0, 10);
+    if (day < since) since = day;
+  }
+  return since;
+}
+
 export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSource): number {
   const out = o.out ?? ((l: string) => process.stdout.write(`${l}\n`));
   const err = o.err ?? ((l: string) => process.stderr.write(`${l}\n`));
@@ -73,11 +92,19 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
     const cfg = loadConfig(info.root);
     const src = source ?? defaultSource(info.root, cfg);
     const prs = src.mergedPrs(period);
-    const runs = src.workflowRuns(period);
+    const runs = src.workflowRuns({ since: runsSince(period, prs), until: period.until });
     const bugs = src.bugIssues(period);
     const ledgers = new Map<number, Ledger | null>();
     for (const p of prs) ledgers.set(p.number, src.ledger(p.number));
     const prior = priorMainCheck(src, period, cfg.github.defaultBranch);
+    const statuses = new Map<number, HeadStatus[]>();
+    const headPrCounts = new Map<number, number>();
+    for (const p of prs) {
+      statuses.set(p.number, src.headStatuses(p.headSha));
+      headPrCounts.set(p.number, src.headPrCount(p.head));
+    }
+    const labels = src.needsHumanEvents(period);
+    const comments = src.escalationComments(period);
     // ③ 계산·렌더
     block = renderBlock(
       period,
@@ -89,6 +116,18 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
         runs,
         bugs,
         ledgers,
+      }),
+      steadyMetrics({
+        period,
+        prs,
+        runs,
+        ledgers,
+        statuses,
+        recorderBot: cfg.ci.recorderBot ?? '',
+        planClaimedAt: planClaimedAt(info.root, prs),
+        headPrCounts,
+        labels,
+        comments,
       }),
     );
   } catch (e) {
