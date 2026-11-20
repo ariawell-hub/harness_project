@@ -2,7 +2,7 @@
 id: 20261119-pilot-prep
 issue: 140 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -272,6 +272,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 실패 확인: `scripts/test/verify-skill.test.ts`(5개)는 스킬 파일과 절차서 4절의 항목이 없어 모두 실패했다. 스킬·절차서·README를 고친 뒤 5개 통과.
   - 실물 확인을 마지막 코드로 다시 돌렸다(step3의 F8 수정 뒤에는 돌리지 않았었다): Playwright 1.65.0과 Chromium 158(macOS)로 31개 사례를 돌려 `check-results.ts verify-playwright`가 통과했다(모든 사례에서 통제된 대상 도달 0건, 남은 프로세스 0). 결과 파일을 갱신했다.
   - 설계서는 v0.7.65다(main은 v0.7.64).
+- 2026-11-20T18:26:48+09:00 step4 재작업: 구현 판정 1라운드(codex) F1 대응: 설계서 11.1절 절차 6의 첫 문장
 
 ## 의사결정 로그
 

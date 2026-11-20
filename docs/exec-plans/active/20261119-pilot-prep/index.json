@@ -31,8 +31,7 @@
     {
       "step": 4,
       "name": "web-verify-skill",
-      "status": "completed",
-      "completed_at": "2026-11-20T18:10:18+09:00"
+      "status": "in_progress"
     }
   ]
 }
