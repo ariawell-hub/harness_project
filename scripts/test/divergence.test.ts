@@ -189,3 +189,23 @@ test('divergence: 신호가 여럿이면 모두 적는다', () => {
   assert.equal(d.diverged, true);
   assert.equal(d.signals.length, 3);
 });
+
+test('divergence: 제작자 승인(accepted)으로 닫힌 지적은 해소로 센다', () => {
+  // 대응 뒤: F1·F2는 검증자가 그대로라고 했고 새 차단 지적 F3이 다른 곳에 열렸다
+  const judgedAfter = judged(
+    start(),
+    'codex',
+    H1,
+    [finding('P1', 'src/c.ts', 9, '셋째')],
+    [open('F1'), open('F2')],
+  );
+  assert.equal(divergence(before, judgedAfter).diverged, true);
+  // 같은 원장에서 F1이 제작자 승인으로 닫혔다: 새 차단 지적 1건, 해소 1건
+  const after = {
+    ...judgedAfter,
+    findings: judgedAfter.findings.map((e) =>
+      e.id === 'F1' ? { ...e, status: 'accepted' as const } : e,
+    ),
+  };
+  assert.deepEqual(divergence(before, after), { diverged: false, signals: [] });
+});

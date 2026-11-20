@@ -1,6 +1,8 @@
 // 지적 원장 댓글의 읽기·쓰기와 기록 job 연결(10.2절 (4)). 기록 job만 쓴다(recorder environment, 검증 App 토큰).
 // 원장으로 인정하는 댓글은 작성자가 검증 App 봇(ci.recorderBot)인 것뿐이다. 봇 PAT과 PR 작성자도 같은 표식의 댓글을 쓸 수 있다(ADR-0003).
 // 읽지 못하거나 깨졌으면 예외를 던지고, 기록 쪽은 review-ledger를 error로 남긴다(fail-closed).
+// 제작자 승인(accepted)은 기록 job이 댓글의 편집 이력을 읽어 반영한다(accept-load.ts). 읽지 못하면 원장을 쓰지 않고 error다.
+import { acceptErrorText, loadAccepted, type Graphql } from './accept-load.ts';
 import {
   LEDGER_MARKER,
   applyPlanReview,
@@ -20,6 +22,8 @@ import {
   cleanDescription,
   type StatusPayload,
 } from './results.ts';
+import { applyOwnerAccepts, type AcceptOutcome } from './owner-accept.ts';
+import { githubGraphql } from './pr.ts';
 import type { Verdict } from './verdict.ts';
 
 /** GitHub 댓글 본문 상한 */
@@ -33,11 +37,16 @@ const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 export interface LedgerApi {
   get: (path: string) => Promise<unknown>;
   send: (method: 'POST' | 'PATCH', path: string, body: unknown) => Promise<unknown>;
+  /** 댓글의 편집 이력을 읽는 GraphQL 요청(제작자 승인 확인). 없으면 승인을 보지 않는다 */
+  graphql?: Graphql;
 }
 
 export interface StoredLedger {
   commentId: number | null;
+  /** 게시 시각(openedAt)을 채운 원장. 댓글에 저장된 것과 다를 수 있다(stamped) */
   ledger: Ledger | null;
+  /** 이번에 읽으면서 게시 시각을 채운 지적 수. 채운 것이 없으면 이 필드도 없다 */
+  stamped?: number;
 }
 
 interface Where {
@@ -46,6 +55,27 @@ interface Where {
   /** PR 번호 */
   number: number;
   recorderBot: string;
+}
+
+/** 원장 댓글의 저장 시각으로 쓸 수 있는 값인가(원장 형식의 openedAt 조건과 같다) */
+const validTime = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v));
+
+/**
+ * 게시 시각 채우기: open인데 openedAt이 없는 지적에 원장 댓글의 마지막 저장 시각(GitHub이 정한 updated_at)을 적는다.
+ * 원장 댓글에 들어 있는 열린 지적은 그 시각이나 그 전에 게시됐으므로, 이 값은 실제 게시 시각보다 앞설 수 없다.
+ * 한 번 채워진 값은 바꾸지 않는다(원장을 저장하는 경로가 채워진 원장을 저장하므로 뒤의 수정으로 늦춰지지 않는다).
+ * 러너의 시계는 쓰지 않는다: 그 시각과 실제 게시 사이에 단 승인 댓글이 아직 보이지 않는 지적을 닫게 된다
+ */
+function stampOpened(l: Ledger, updatedAt: unknown): { ledger: Ledger; stamped: number } {
+  if (!validTime(updatedAt)) return { ledger: l, stamped: 0 };
+  let stamped = 0;
+  const findings = l.findings.map((e) => {
+    if (e.status !== 'open' || e.openedAt !== undefined) return e;
+    stamped++;
+    return { ...e, openedAt: updatedAt };
+  });
+  return stamped ? { ledger: { ...l, findings }, stamped } : { ledger: l, stamped: 0 };
 }
 
 export function checkWhere(o: Where): void {
@@ -58,6 +88,8 @@ export interface IssueComment {
   id?: unknown;
   user?: { login?: unknown } | null;
   body?: unknown;
+  /** REST의 마지막 수정 시각. 원장 댓글의 게시 시각을 얻는 데에만 쓴다(승인 댓글의 편집 여부는 이 값으로 보지 않는다) */
+  updated_at?: unknown;
 }
 
 /** PR의 댓글을 시간순으로 모두 읽는다. 끝을 확인하지 못하면 예외 */
@@ -78,7 +110,10 @@ export async function listComments(o: {
   throw new Error(`댓글이 ${MAX_PAGES * PER_PAGE}개를 넘어 원장 유무를 알 수 없다`);
 }
 
-/** 댓글 목록에서 검증 App 봇이 쓴 원장 댓글 중 가장 오래된 것을 고른다. 없으면 둘 다 null, 깨졌으면 예외 */
+/**
+ * 댓글 목록에서 검증 App 봇이 쓴 원장 댓글 중 가장 오래된 것을 고른다. 없으면 둘 다 null, 깨졌으면 예외.
+ * 열린 지적의 게시 시각을 채워 돌려준다(stampOpened)
+ */
 export function ledgerFromComments(
   comments: readonly IssueComment[],
   recorderBot: string,
@@ -89,7 +124,8 @@ export function ledgerFromComments(
     if (typeof c.id !== 'number') throw new Error('원장 댓글에 id가 없다');
     const ledger = parseLedger(c.body);
     if (!ledger) throw new Error(`원장 댓글(${c.id})이 깨졌다`);
-    return { commentId: c.id, ledger };
+    const s = stampOpened(ledger, c.updated_at);
+    return { commentId: c.id, ledger: s.ledger, ...(s.stamped ? { stamped: s.stamped } : {}) };
   }
   return { commentId: null, ledger: null };
 }
@@ -117,6 +153,10 @@ export async function saveLedger(o: {
 }
 
 export interface RecordLedgerOptions extends Where {
+  /** 제작자 계정(github.owner). 주면 제작자 승인 댓글을 원장에 반영한다. 없거나 비면 승인을 보지 않는다 */
+  owner?: string;
+  /** 제작자 승인을 반영한 결과(로그용). 승인을 본 실행에서만 부른다 */
+  onAccepts?: (o: AcceptOutcome) => void;
   reviewer: Reviewer;
   /** 형식 검사와 시크릿 스캔을 통과한 판정. 판정이 없으면(해당 없음, 이어받음, error) null */
   verdict: Verdict | null;
@@ -140,6 +180,9 @@ export interface RecordLedgerOptions extends Where {
 /**
  * 판정을 원장에 반영해 댓글을 쓰고 review-ledger 상태를 head에 기록한다.
  * 판정이 없어도 지금 원장으로 판정한다. 원장이 없고 지적도 계획 승인도 없으면 댓글을 만들지 않는다.
+ * 제작자 승인: 읽은 원장에 반영하고, 판정을 적용한 뒤 같은 승인 목록으로 한 번 더 반영한다(GraphQL은 한 번).
+ * 편집 이력을 읽지 못하면 원장을 쓰지 않고 error다. 이번 판정으로 등록되거나 다시 열린 지적은 게시 시각이 없어
+ * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다
  */
 export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayload> {
   const done = async (state: StatusPayload['state'], description: string) => {
@@ -155,14 +198,40 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
     // 계획 승인은 둘 곳이 원장뿐이라 지적이 없어도 원장을 만든다
     const planApproved = o.plan?.approved === true;
     const before = ledger ? JSON.stringify(ledger) : '';
+    // 게시 시각을 채운 것만 달라도 저장한다(before는 채운 뒤의 값이다)
+    const stamped = !!stored.stamped;
+    let accepted: Awaited<ReturnType<typeof loadAccepted>> | null = null;
+    if (ledger && o.owner && o.api.graphql) {
+      try {
+        accepted = await loadAccepted({
+          ledger,
+          owner: o.owner,
+          graphql: o.api.graphql,
+          repo: o.repo,
+          number: o.number,
+        });
+      } catch (e) {
+        // 확인하지 못한 승인을 유지하거나 새로 반영하지 않는다. 원래 예외의 문구(응답 본문일 수 있다)는 버린다
+        throw new Error(acceptErrorText(e));
+      }
+      ledger = accepted.ledger;
+    }
     const checkBase = () => {
       if (!SHA_RE.test(o.promptBase)) throw new Error('프롬프트 버전 SHA 형식 오류');
     };
-    if (v && (ledger || v.findings.length > 0 || planApproved)) {
+    // 이 실행에서 승인이 철회돼 다시 열린 지적: 같은 실행의 판정(resolutions)으로 바꾸지 않는다.
+    // 저장된 원장에서 accepted였던 지적이라 판정이 건드릴 수 없었던 것이고, 철회는 open으로 저장돼 review-ledger를 막아야 한다.
+    // 다음 판정부터는 열린 지적으로 평소처럼 판정된다
+    const reopened = new Set(accepted?.outcome?.reopened ?? []);
+    const verdict =
+      v && reopened.size
+        ? { ...v, resolutions: v.resolutions.filter((r) => !reopened.has(r.id)) }
+        : v;
+    if (v && verdict && (ledger || v.findings.length > 0 || planApproved)) {
       checkBase();
       ledger = applyVerdict(ledger ?? emptyLedger(o.promptBase), {
         reviewer: o.reviewer,
-        verdict: v,
+        verdict,
         headSha: o.headSha,
         changedSinceLastRound: o.changedSinceLastRound,
         repro: o.repro,
@@ -178,7 +247,13 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         approved: o.plan.approved,
       });
     }
-    if (ledger && JSON.stringify(ledger) !== before)
+    if (ledger && accepted?.outcome) {
+      const again = applyOwnerAccepts(ledger, accepted.accepts);
+      ledger = again.ledger;
+      // 로그에는 읽은 원장 기준의 결과를 낸다(다시 적용한 결과는 같은 승인 목록이라 반영·무시가 같다)
+      o.onAccepts?.({ ...accepted.outcome, ledger });
+    }
+    if (ledger && (stamped || JSON.stringify(ledger) !== before))
       await saveLedger({ ...o, send: o.api.send, commentId: stored.commentId, ledger });
     if (!ledger) return done('success', '원장 없음(등록된 지적이 없다)');
     const s = ledgerStatus(ledger);
@@ -224,5 +299,9 @@ export function githubLedgerApi(token: string, apiUrl?: string): LedgerApi {
     if (!res.ok) throw new Error(`GitHub ${method} 실패: HTTP ${res.status}`);
     return res.json();
   };
-  return { get: (p) => call('GET', p), send: (m, p, b) => call(m, p, b) };
+  return {
+    get: (p) => call('GET', p),
+    send: (m, p, b) => call(m, p, b),
+    graphql: githubGraphql(token, apiUrl),
+  };
 }

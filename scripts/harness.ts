@@ -19,25 +19,17 @@ import {
   type AuthSnapshot,
 } from './ci/codex-auth.ts';
 import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
-import { githubGet, resolvePr } from './ci/pr.ts';
+import { githubGet, githubGraphql, resolvePr } from './ci/pr.ts';
 import { RevertError, actRevert, parseRevertAction, planRevert } from './ci/revert.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
+import { readRoundLedger } from './ci/accept-load.ts';
 import { REVIEWERS, ledgerData, parseLedgerData, type Ledger, type Reviewer } from './ci/ledger.ts';
-import {
-  checkWhere,
-  githubLedgerApi,
-  ledgerFromComments,
-  listComments,
-  loadLedger,
-  recordCiFailure,
-  recordLedger,
-} from './ci/ledger-store.ts';
+import { githubLedgerApi, loadLedger, recordCiFailure, recordLedger } from './ci/ledger-store.ts';
 import { planHashes, planMode } from './ci/plan-hash.ts';
 import { PLAN_HASH_RE } from './ci/results.ts';
 import {
   parseRebuttalData,
-  parseRebuttals,
   rebuttalData,
   writeRebuttalInput,
   type Rebuttal,
@@ -524,6 +516,15 @@ async function main(argv: string[]): Promise<number> {
           repo,
           number: Number(str('pr-number')),
           recorderBot: cfg.ci.recorderBot ?? '',
+          // 제작자 승인(10.2절 (4) accepted): 지적 ID, 댓글 id, 고정된 이유만 로그에 낸다(댓글 본문은 내지 않는다)
+          owner: cfg.github.owner,
+          onAccepts: (a) => {
+            for (const x of a.applied)
+              log(`record-review: 제작자 승인 ${x.id}(댓글 ${x.commentId})`);
+            for (const x of a.ignored)
+              log(`record-review: 제작자 승인 무시 ${x.id}(댓글 ${x.commentId}): ${x.reason}`);
+            for (const id of a.reopened) log(`record-review: 제작자 승인 철회 ${id}`);
+          },
           promptBase: str('prompt-base') ?? '',
           changedSinceLastRound: changed,
           repro: reproMap,
@@ -613,18 +614,27 @@ async function main(argv: string[]): Promise<number> {
           const repoSlug = process.env.GITHUB_REPOSITORY ?? '';
           const recorderBot = cfg.ci.recorderBot ?? '';
           try {
-            const get = githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL);
-            checkWhere({ repo: repoSlug, number, recorderBot });
-            const comments = await listComments({ get, repo: repoSlug, number });
-            ledger = ledgerFromComments(comments, recorderBot).ledger;
-            if (ledger) {
-              // 반박(10.2절 (4)): PR 작성자의 댓글에서 형식에 맞는 것만 넘긴다
-              const pr = (await get(`repos/${repoSlug}/pulls/${number}`)) as {
-                user?: { login?: unknown };
-              };
-              const author = typeof pr?.user?.login === 'string' ? pr.user.login : '';
-              rebuttals = parseRebuttals({ comments, ledger, author, recorderBot, repo: repoSlug });
-            }
+            // 원장에 제작자 승인(10.2절 (4) accepted)을 반영해 넘긴다. 기록 job과 같은 함수로 판별한다
+            const token = process.env.GH_TOKEN ?? '';
+            const r = await readRoundLedger({
+              get: githubGet(token, process.env.GITHUB_API_URL),
+              graphql: githubGraphql(token, process.env.GITHUB_API_URL),
+              repo: repoSlug,
+              number,
+              recorderBot,
+              owner: cfg.github.owner,
+            });
+            ledger = r.ledger;
+            rebuttals = r.rebuttals;
+            if (r.outcome?.applied.length)
+              log(
+                `review-plan: 제작자 승인 ${r.outcome.applied.length}건(${r.outcome.applied.map((a) => a.id).join(', ')})`,
+              );
+            // 편집 이력을 읽지 못했다: 검증자는 저장된 원장을 본다. 관문은 기록 job이 다시 계산해 정한다
+            if (r.acceptError)
+              log(
+                `review-plan: 제작자 승인을 확인하지 못했다(저장된 원장을 그대로 쓴다) — ${r.acceptError}`,
+              );
           } catch (e) {
             // 원장이 있는데 읽지 못한 채 판정하면 프롬프트 버전 고정과 라운드 규칙이 조용히 풀린다. 판정 없이 실패한다(fail-closed)
             process.stderr.write(
