@@ -355,6 +355,8 @@ test('runMetrics: --self-test-report가 없는 파일이거나 형식이 다르�
     ['시나리오가 객체가 아니다', writeLog(fx, 'bad13.json', withReport({ results: ['pass'] }))],
     ['같은 id가 두 번 있다', writeLog(fx, 'bad14.json', withReport({ results: [RESULT, RESULT] }))],
     ['최상위가 배열이다', writeLog(fx, 'bad15.json', JSON.stringify([{ state: 'pass' }]))],
+    // `self-test`는 시나리오가 0개면 보고서를 만들기 전에 실패한다. 빈 results는 그 명령이 쓴 보고서가 아니다
+    ['시나리오가 0개다', writeLog(fx, 'bad16.json', withReport({ results: [] }))],
     // `self-test --live --out`의 보고서는 형식이 다르다(시나리오별 통과 횟수)
     [
       '실제 세션 보고서',
