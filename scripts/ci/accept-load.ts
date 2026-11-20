@@ -31,14 +31,15 @@ const PER_PAGE = 100;
 /** ledger-store.ts의 댓글 목록 상한과 같다. 넘으면 끝을 확인하지 못한 것이다 */
 const MAX_PAGES = 30;
 
-// 편집 여부를 가리는 세 필드(lastEditedAt, editor, userContentEdits)를 함께 읽는다. 편집 기록은 수만 본다
+// 편집 여부를 가리는 세 필드(lastEditedAt, editor, userContentEdits)를 함께 읽는다. 편집 기록은 수만 본다.
+// 댓글 번호는 fullDatabaseId(BigInt, 문자열)로 읽는다. databaseId는 스키마에서 32비트 Int인데 실제 댓글 번호는 그 범위를 넘는다
 const COMMENTS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       comments(first: ${PER_PAGE}, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          databaseId author { login } body createdAt lastEditedAt editor { login }
+          fullDatabaseId author { login } body createdAt lastEditedAt editor { login }
           userContentEdits(first: 1) { totalCount }
         }
       }
@@ -48,6 +49,20 @@ const COMMENTS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $a
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
+
+const FULL_ID_RE = /^[1-9]\d{0,15}$/;
+/**
+ * GraphQL 댓글을 판별 함수의 입력 꼴로 바꾼다. 댓글 번호는 fullDatabaseId에서만 얻는다(응답에 databaseId가 있어도 쓰지 않는다).
+ * 번호가 숫자 문자열이 아니거나 안전한 정수 범위를 넘으면 번호 없는 댓글이 되고, ownerAccepts가 버린다
+ */
+function toAcceptComment(n: Record<string, unknown>): AcceptComment {
+  const { fullDatabaseId, databaseId: _int32, ...rest } = n;
+  const id =
+    typeof fullDatabaseId === 'string' && FULL_ID_RE.test(fullDatabaseId)
+      ? Number(fullDatabaseId)
+      : NaN;
+  return Number.isSafeInteger(id) ? { ...rest, databaseId: id } : rest;
+}
 
 /** PR의 댓글을 편집 이력 필드와 함께 모두 읽는다. 끝을 확인하지 못하거나 응답 꼴이 다르면 예외(일부만 돌려주지 않는다) */
 export async function listAcceptComments(o: {
@@ -76,7 +91,7 @@ export async function listAcceptComments(o: {
     if (!isObj(info) || typeof info.hasNextPage !== 'boolean' || !Array.isArray(nodes))
       throw new AcceptError(`댓글 편집 이력 응답 형식 오류(${page}쪽)`);
     // 지워진 댓글 자리는 null일 수 있다. 꼴이 다른 항목은 ownerAccepts가 버린다
-    for (const n of nodes) if (isObj(n)) out.push(n as AcceptComment);
+    for (const n of nodes) if (isObj(n)) out.push(toAcceptComment(n));
     if (!info.hasNextPage) return out;
     if (typeof info.endCursor !== 'string' || info.endCursor === '')
       throw new AcceptError(`댓글 편집 이력 응답 형식 오류(${page}쪽)`);

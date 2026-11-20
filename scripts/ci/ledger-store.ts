@@ -182,7 +182,7 @@ export interface RecordLedgerOptions extends Where {
  * 판정이 없어도 지금 원장으로 판정한다. 원장이 없고 지적도 계획 승인도 없으면 댓글을 만들지 않는다.
  * 제작자 승인: 읽은 원장에 반영하고, 판정을 적용한 뒤 같은 승인 목록으로 한 번 더 반영한다(GraphQL은 한 번).
  * 편집 이력을 읽지 못하면 원장을 쓰지 않고 error다. 이번 판정으로 등록되거나 다시 열린 지적은 게시 시각이 없어
- * 이 실행에서는 승인되지 않는다
+ * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다
  */
 export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayload> {
   const done = async (state: StatusPayload['state'], description: string) => {
@@ -219,11 +219,19 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
     const checkBase = () => {
       if (!SHA_RE.test(o.promptBase)) throw new Error('프롬프트 버전 SHA 형식 오류');
     };
-    if (v && (ledger || v.findings.length > 0 || planApproved)) {
+    // 이 실행에서 승인이 철회돼 다시 열린 지적: 같은 실행의 판정(resolutions)으로 바꾸지 않는다.
+    // 저장된 원장에서 accepted였던 지적이라 판정이 건드릴 수 없었던 것이고, 철회는 open으로 저장돼 review-ledger를 막아야 한다.
+    // 다음 판정부터는 열린 지적으로 평소처럼 판정된다
+    const reopened = new Set(accepted?.outcome?.reopened ?? []);
+    const verdict =
+      v && reopened.size
+        ? { ...v, resolutions: v.resolutions.filter((r) => !reopened.has(r.id)) }
+        : v;
+    if (v && verdict && (ledger || v.findings.length > 0 || planApproved)) {
       checkBase();
       ledger = applyVerdict(ledger ?? emptyLedger(o.promptBase), {
         reviewer: o.reviewer,
-        verdict: v,
+        verdict,
         headSha: o.headSha,
         changedSinceLastRound: o.changedSinceLastRound,
         repro: o.repro,

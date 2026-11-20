@@ -46,8 +46,10 @@ const ledger = (): Ledger => ({
     },
   ],
 });
+/** 실제 댓글 번호는 32비트를 넘고, GraphQL은 fullDatabaseId(문자열)로 준다 */
+const CID = '7027568658';
 const acceptNode = (over: Record<string, unknown> = {}) => ({
-  databaseId: 900,
+  fullDatabaseId: CID,
   author: { login: OWNER },
   body: '/harness accept F1',
   createdAt: T_ACCEPT,
@@ -106,7 +108,12 @@ before(async () => {
         return json(200, [
           { id: 500, user: { login: BOT }, body: state.ledgerBody, updated_at: T_LEDGER },
           // REST 목록에도 승인 댓글이 보인다(판별에는 쓰지 않는다)
-          { id: 900, user: { login: OWNER }, body: '/harness accept F1', updated_at: T_ACCEPT },
+          {
+            id: Number(CID),
+            user: { login: OWNER },
+            body: '/harness accept F1',
+            updated_at: T_ACCEPT,
+          },
         ]);
       if (req.method === 'PATCH' && url === '/repos/o/r/issues/comments/500') {
         state.ledgerBody = JSON.parse(body).body;
@@ -286,7 +293,7 @@ test('record-review: 승인을 원장 댓글에 저장하고 review-ledger가 �
   const e = parseLedger(state.patches[0])?.findings[0];
   assert.deepEqual(
     [e?.status, e?.note, e?.openedAt],
-    ['accepted', '제작자 승인(댓글 900)', T_LEDGER],
+    ['accepted', `제작자 승인(댓글 ${CID})`, T_LEDGER],
   );
   assert.deepEqual(
     state.statuses.map((s) => [s.context, s.state]),
@@ -296,17 +303,17 @@ test('record-review: 승인을 원장 댓글에 저장하고 review-ledger가 �
     ],
   );
   assert.match(ledgerStatus()?.description ?? '', /제작자 승인 1/);
-  assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 900\)/);
+  assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 7027568658\)/);
   // 로그에 댓글 본문은 없다
   assert.doesNotMatch(r.out, /\/harness accept/);
 });
 
 test('record-review: 반영하지 않은 승인과 철회를 로그에 남긴다', async () => {
   // P0이 아닌 지적과 없는 지적을 함께 승인한 댓글
-  reset([acceptNode(), acceptNode({ databaseId: 901, body: '/harness accept F9' })]);
+  reset([acceptNode(), acceptNode({ fullDatabaseId: '7027568659', body: '/harness accept F9' })]);
   const r = await recordReview(OWNER);
-  assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 900\)/);
-  assert.match(r.out, /record-review: 제작자 승인 무시 F9\(댓글 901\): 원장에 없는 지적/);
+  assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 7027568658\)/);
+  assert.match(r.out, /record-review: 제작자 승인 무시 F9\(댓글 7027568659\): 원장에 없는 지적/);
   // 승인 댓글이 사라졌다: 다시 열리고 review-ledger가 실패한다
   state.gql = [];
   state.statuses = [];

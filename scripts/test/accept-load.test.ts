@@ -65,9 +65,12 @@ const verdict = (findings: Finding[] = [], resolutions: Resolution[] = []): Verd
   findings,
   resolutions,
 });
+/** GraphQL이 주는 댓글. 번호는 fullDatabaseId(BigInt라 문자열)로 온다. 실제 댓글 번호는 32비트를 넘는다 */
+type Node = Omit<AcceptComment, 'databaseId'> & { fullDatabaseId?: unknown; databaseId?: unknown };
+const CID = 7_000_000_000;
 /** 고쳐지지 않은 제작자의 승인 댓글(GraphQL 꼴) */
-const accept = (id: string, sec: number, over: Partial<AcceptComment> = {}): AcceptComment => ({
-  databaseId: 900 + sec,
+const accept = (id: string, sec: number, over: Partial<Node> = {}): Node => ({
+  fullDatabaseId: String(CID + sec),
   author: { login: OWNER },
   body: `/harness accept ${id}`,
   createdAt: at(sec),
@@ -84,7 +87,7 @@ interface Rest extends IssueComment {
   updated_at?: string;
 }
 /** 가짜 GitHub: REST 댓글, GraphQL 댓글(편집 이력), 저장 시각을 정하는 시계 */
-function world(init: { ledger?: Ledger; ledgerAt?: string; gql?: AcceptComment[] } = {}) {
+function world(init: { ledger?: Ledger; ledgerAt?: string; gql?: Node[] } = {}) {
   const w = {
     rest: [] as Rest[],
     gql: [...(init.gql ?? [])],
@@ -274,7 +277,7 @@ test('F5: 한 번 채워진 게시 시각은 뒤의 원장 수정으로 늦춰�
     const e = w.stored().findings[0];
     assert.deepEqual(
       [e.status, e.openedAt, e.note],
-      ['accepted', at(10), `제작자 승인(댓글 ${900 + acceptSec})`],
+      ['accepted', at(10), `제작자 승인(댓글 ${CID + acceptSec})`],
     );
     assert.equal(w.status()?.state, 'success');
     assert.match(w.status()?.description ?? '', /제작자 승인 1/);
@@ -325,7 +328,7 @@ test('recordLedger: 판정 없이도 승인을 저장하고, 같은 실행의 �
   });
   assert.equal(w.stored().findings[0].status, 'accepted');
   assert.equal(w.status()?.state, 'success');
-  assert.deepEqual(seen, ['applied=F1:905 reopened=']);
+  assert.deepEqual(seen, ['applied=F1:7000000005 reopened=']);
   assert.equal(w.gqlCalls, 1);
   // 판정 없는 기록(이어받음)에서도 유지되고, 달라진 것이 없으면 다시 저장하지 않는다
   const sends = w.sends;
@@ -353,8 +356,66 @@ test('recordLedger: 승인 댓글이 사라지면 open으로 저장되고 review
   });
 });
 
+test('listAcceptComments: 댓글 번호를 fullDatabaseId로 읽는다(32비트 필드 databaseId를 요청하지 않는다)', async () => {
+  const w = world({ gql: [accept('F1', 5)] });
+  let query = '';
+  const graphql: Graphql = (q, v) => {
+    query = q;
+    return w.graphql(q, v);
+  };
+  const got = await listAcceptComments({ graphql, ...where });
+  assert.equal(got[0].databaseId, 7_000_000_005);
+  assert.ok(got[0].databaseId > 2 ** 31);
+  assert.match(query, /\bfullDatabaseId\b/);
+  assert.doesNotMatch(query, /\bdatabaseId\b/);
+});
+
+test('F2(구현 판정): 승인이 철회된 실행의 판정은 그 지적을 닫지 못한다. 다음 판정은 닫을 수 있다', async () => {
+  for (const status of ['fixed', 'rejected', 'open'] as const) {
+    const w = world({
+      ledger: ledgerOf(
+        entry({ status: 'accepted', openedAt: at(1), note: '제작자 승인(댓글 7000000005)' }),
+      ),
+      ledgerAt: at(1),
+      // 승인 댓글이 지워졌다
+      gql: [],
+    });
+    const seen: string[] = [];
+    w.now = at(10);
+    const run = (sec: number) => {
+      w.now = at(sec);
+      return recordLedger({
+        // F1을 낸 검증자가 같은 실행에서 판정을 낸다
+        reviewer: 'codex',
+        verdict: verdict([], [{ id: 'F1', status, note: '판정' }]),
+        headSha: H1,
+        promptBase: BASE,
+        changedSinceLastRound: [],
+        ...where,
+        recorderBot: BOT,
+        owner: OWNER,
+        api: w.api,
+        post: async (p) => void w.statuses.push(p),
+        onAccepts: (o) => seen.push(`reopened=${o.reopened}`),
+      });
+    };
+    await run(10);
+    const e = w.stored().findings[0];
+    assert.deepEqual([e.status, e.note], ['open', '제작자 승인이 없어져 다시 열림'], status);
+    assert.equal(w.status()?.state, 'failure', status);
+    assert.deepEqual(seen, ['reopened=F1'], status);
+    // 판정 라운드는 기록된다
+    assert.equal(w.stored().rounds.length, 2, status);
+    // 다음 판정: 다시 열린 지적을 평소 규칙으로 처리한다
+    await run(20);
+    const next = w.stored().findings[0];
+    assert.equal(next.status, status === 'fixed' ? 'fixed' : 'open', status);
+    assert.equal(w.status()?.state, status === 'fixed' ? 'success' : 'failure', status);
+  }
+});
+
 test('recordLedger: 고쳐진 댓글·다른 계정의 댓글·다른 제작자 설정은 반영되지 않는다', async () => {
-  const cases: [string, AcceptComment, string][] = [
+  const cases: [string, Node, string][] = [
     // 작성 시각과 수정 시각이 같지만 편집 이력이 있다
     [
       '같은 초의 편집',
@@ -367,6 +428,11 @@ test('recordLedger: 고쳐진 댓글·다른 계정의 댓글·다른 제작자 
     ['검증 App', accept('F1', 5, { author: { login: 'harness-recorder' } }), OWNER],
     ['설명이 붙은 댓글', accept('F1', 5, { body: '받아들인다.\n\n/harness accept F1' }), OWNER],
     ['다른 제작자 설정', accept('F1', 5), 'someone-else'],
+    // 댓글 번호를 확인하지 못한 댓글: 32비트 필드(databaseId)만 있거나 번호가 숫자 문자열이 아니다
+    ['32비트 번호 필드만', accept('F1', 5, { fullDatabaseId: undefined, databaseId: 905 }), OWNER],
+    ['번호가 숫자 문자열이 아님', accept('F1', 5, { fullDatabaseId: '7000000005n' }), OWNER],
+    ['번호가 안전한 정수 범위 밖', accept('F1', 5, { fullDatabaseId: '9007199254740993' }), OWNER],
+    ['번호가 0', accept('F1', 5, { fullDatabaseId: '0' }), OWNER],
   ];
   for (const [name, comment, owner] of cases) {
     const w = world({
@@ -496,7 +562,7 @@ test('loadAccepted: 볼 지적이 없거나 제작자가 비면 GraphQL을 부�
   const got = await loadAccepted({ ledger: p0, owner: OWNER, graphql: w.graphql, ...where });
   assert.equal(w.gqlCalls, 1);
   assert.equal(got.ledger.findings[0].status, 'accepted');
-  assert.deepEqual(got.outcome?.applied, [{ id: 'F1', commentId: 905, at: at(5) }]);
+  assert.deepEqual(got.outcome?.applied, [{ id: 'F1', commentId: CID + 5, at: at(5) }]);
   // 입력은 바꾸지 않는다
   assert.equal(p0.findings[0].status, 'open');
 });

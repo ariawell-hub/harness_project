@@ -2,7 +2,7 @@
 id: 20261120-p0-maker-approval
 issue: 150 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -95,6 +95,9 @@ claimed_at: 2026-11-20T12:19:52+09:00 # new-task가 채운다
   - 구현 뒤: `accept-load.test.ts` 16개, `accept-cli.test.ts` 7개, `divergence.test.ts` 8개 통과. 기존 `record.test.ts` 12개·`ledger-store.test.ts` 12개는 고치지 않고 통과한다.
   - 설계서는 v0.7.63이다(main은 v0.7.62). PR #149가 쓰려던 번호라 그 PR은 이 PR 병합 뒤 `origin/main`을 병합하면서 v0.7.64로 옮긴다.
 - 2026-11-20T14:18:16+09:00 step1 재작업: 구현 판정 1라운드(codex)의 지적 F1·F2·F3 대응
+- 2026-11-20 step1 구현 판정 1라운드(PR #157, head `3e0b1ae`): claude 승인(지적 없음), codex 수정 요청(F1·F2 P1, F3 P2). 셋 다 고쳤다.
+  - 실패 확인: 고치기 전에 `accept-load.test.ts`의 새 경우 둘(`fullDatabaseId`로 읽는다, 철회된 실행의 판정은 닫지 못한다)과 가짜 응답을 실제 꼴(`fullDatabaseId` 문자열, 32비트를 넘는 번호)로 바꾼 기존 경우들이 실패했다(18개 중 10개). `accept-cli.test.ts`는 7개 중 3개, `ledger-accept.test.ts`의 새 경우 1개가 실패했다.
+  - 고친 뒤: `accept-load.test.ts` 18개, `accept-cli.test.ts` 7개, `ledger-accept.test.ts` 9개 통과.
 
 ## 의사결정 로그
 
@@ -112,12 +115,18 @@ claimed_at: 2026-11-20T12:19:52+09:00 # new-task가 채운다
 - 결정(step1): `loadAccepted`가 돌려주는 값에 인정된 승인 목록(`accepts`)을 더했다. / 이유: 기록 job이 판정을 적용한 뒤 같은 목록으로 한 번 더 반영해야 하는데 GraphQL은 한 번만 불러야 한다.
 - 결정(step1): 승인을 읽다 난 예외는 이 코드가 만든 것(`AcceptError`, `GraphqlError`)의 문구만 밖에 내고, 그 밖의 예외는 `편집 이력을 읽지 못했다`로 바꾼다. / 이유: 모르는 예외의 문구에 응답 본문이 섞였는지 알 수 없다.
 - 결정(step1): 절차서 8절 "교착"의 runner 보고 선택지(A·B·C) 문장은 고치지 않고 "제작자 승인(P0)" 항목을 따로 더했다. / 이유: 그 문장은 runner가 실제로 올리는 보고의 형식이라 문서만 바꾸면 코드와 어긋난다. runner의 보고에 이 선택지를 넣는 일은 이 계획의 범위 밖이다.
+- 결정(구현 판정 F1): GraphQL 질의에서 댓글 번호를 `databaseId`가 아니라 `fullDatabaseId`로 읽는다. step1 "작업" 2의 질의 문구(`databaseId`)와 다르다. / 이유: `databaseId`는 스키마에서 32비트 `Int`이고 `fullDatabaseId`(`BigInt`)가 그 대체 필드다. 이 리포의 댓글 번호는 이미 70억대다. 판별 함수(`owner-accept.ts`)의 입력 꼴은 그대로 두고 `accept-load.ts`에서 숫자로 바꿔 넘긴다. step 파일은 고치지 않았다(실행 중인 step의 "작업"은 바꿀 수 없다). / 버린 대안: 두 필드를 함께 요청한다(`databaseId`가 범위 오류를 내면 질의 전체가 실패한다).
+- 결정(구현 판정 F2): 이 실행에서 승인이 철회돼 다시 열린 지적에 대한 `resolutions`는 판정을 적용하기 전에 뺀다(`ledger-store.ts`). / 이유: 저장된 원장에서 `accepted`였던 지적은 판정으로 바뀌지 않는다는 규칙을 철회가 겹친 실행에도 지킨다. 철회는 `open`으로 저장되고 다음 판정에서 평소처럼 판정된다. `applyVerdict`(`ledger.ts`)는 고치지 않았다.
+- 결정(구현 판정 F3): `ledgerStatus`의 실패 설명에도 제작자 승인 수를 적는다(`ledger.ts`, step0의 파일). / 이유: 수용 기준 2("상태 설명에 그 수가 나온다")가 성공일 때로 한정되지 않는다. 이 때문에 step0의 기존 단언 하나(`ledger-accept.test.ts`: 승인 1건과 열린 P0 1건)의 기대 문구가 `열린 차단 지적 1건: F2`에서 `열린 차단 지적 1건: F2, 제작자 승인 1`로 바뀌었다. 단언은 그대로 정확히 일치를 본다(약하게 하지 않았다). 승인이 없으면 문구는 전과 같다.
 
 ## 발견 사항
 
 - `review/*` 상태는 원장과 따로 계산된다(`verdictStatus`: 판정이 `approve`이고 그 판정의 `findings`에 P0·P1이 없어야 success). 원장에서 P0을 닫아도 검증자가 같은 문제를 계속 수정 요청으로 내면 `review/<검증자>`가 실패로 남는다. 그래서 수용 기준 6(판정 전에 원장에 반영해 검증자가 `accepted`를 보게 한다)이 필요하다. 그래도 검증자가 새 지적으로 다시 내는 것은 기계로 막지 않는다(B11). → 처리: 해당 없음(범위/비범위와 수용 기준 5·6에 반영했다)
 - 프롬프트는 PR의 1라운드 base 버전으로 고정된다(10.2절 (2)). 이 계획이 프롬프트에 더하는 줄은 병합 뒤에 열린 PR부터 적용된다. 이미 열린 PR(#149)의 검증자는 옛 프롬프트로 `accepted`를 본다. 옛 규칙도 다시 판정할 상태를 `open`·`fixed`·`rejected`로 한정하고 원장에 있는 지적을 다시 적지 말라고 하므로 같은 방향이다. → 처리: 해당 없음(동작을 바꿀 수 없는 제약이다. 원장의 처리 칸에 "제작자 승인"을 적어 옛 프롬프트의 검증자도 읽게 한다)
 - runner의 교착 보고(절차서 8절: 선택지 A 고친다 / B 범위를 줄인다 / C 포기)에는 P0의 "남은 위험을 받아들인다"가 없다. 대화 세션은 절차서를 보고 제작자에게 물을 수 있지만 무인 실행의 보고에는 나오지 않는다. → 처리: 해당 없음(이 계획의 범위 밖이고 지금 막는 일이 없다. 필요해지면 제작자가 Issue로 정한다)
+- 구현 판정 F1(codex, P1): 32비트 GraphQL 필드(`databaseId`)로 승인 댓글 번호를 읽는다. 측정: 지금 GitHub은 `databaseId`로도 70억대 번호를 그대로 준다(PR #149의 댓글에서 `databaseId`와 `fullDatabaseId`가 같은 값). 지금 실패하지는 않지만 스키마의 형식에 기대는 것이라 지적이 맞다. → 처리: 수정함(`fullDatabaseId`로 읽는다. `scripts/ci/accept-load.ts`, 테스트는 실제 응답 꼴과 32비트를 넘는 번호로 바꿨다)
+- 구현 판정 F2(codex, P1, 재현됨): 승인이 철회되는 실행에 그 지적을 낸 검증자의 `fixed` 판정이 함께 오면 지적이 닫혀 `review-ledger`가 통과한다. → 처리: 수정함(철회된 지적의 `resolutions`를 그 실행에서 적용하지 않는다. `scripts/ci/ledger-store.ts`, `scripts/test/accept-load.test.ts`)
+- 구현 판정 F3(codex, P2): 열린 차단 지적이 남아 실패할 때 상태 설명에 제작자 승인 수가 없다. → 처리: 수정함(`scripts/ci/ledger.ts`의 `ledgerStatus`, `scripts/test/ledger-accept.test.ts`)
 
 ## 열린 질문
 
