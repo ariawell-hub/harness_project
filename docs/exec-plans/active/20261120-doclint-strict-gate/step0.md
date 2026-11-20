@@ -39,7 +39,7 @@ export function docLintGate(root: string, cfg: HarnessConfig): DocLintResult;
   2. 커밋이 없는 리포면 `docLint(root, cfg, { noHistory: true })`, 그 밖에는 `docLint(root, cfg)`의 결과를 그대로 돌려준다. 손상된 ref, 없는 객체를 가리키는 ref, `git` 리포가 아닌 폴더는 모두 뒤의 경로로 가서 `git ls-files`나 `git log`의 실패로 드러난다.
   3. 커밋이 없는 리포가 아니면, 2가 예외 없이 끝난 뒤 HEAD가 커밋을 가리키는지 확인한다. 하나라도 실패하면 `DocLintReadError`로 다룬다.
      - `git show-ref --verify --hash HEAD`가 종료 코드 0이고 해시(16진수 40자 또는 64자) 한 줄을 출력한다. 아니면 메시지에 `git show-ref`가 들어 있다(HEAD를 읽지 못했다는 뜻). 이 명령은 정확한 이름 `HEAD`만 읽는다. `git rev-parse HEAD`처럼 축약 이름을 해석하는 명령은 쓰지 않는다(현재 브랜치의 ref가 손상됐을 때 `refs/tags/HEAD` 같은 같은 이름의 ref로 대신 풀려 성공한다).
-     - 그 해시에 `git cat-file -e <해시>^{commit}`이 종료 코드 0이다. 아니면 메시지에 `git cat-file`이 들어 있다(HEAD가 커밋을 가리키지 않는다는 뜻). ref가 blob 같은 다른 객체를 가리키면 `show-ref`도 `git log`도 성공하기 때문에 따로 본다.
+     - 그 해시에 `git cat-file -e <해시>^{commit}`이 종료 코드 0이다. 아니면 메시지에 `git cat-file`이 들어 있다(HEAD가 커밋을 가리키지 않는다는 뜻). ref가 blob 같은 다른 객체를 가리키면 `show-ref`도 `git log`도 성공하기 때문에 따로 본다. `^{commit}`은 주석 태그를 벗겨 커밋을 찾는다. 커밋으로 풀리면 통과다(수용 기준 3: 그 경우 `git`은 커밋 시각을 정확히 읽는다). 객체의 종류가 정확히 commit인지는 보지 않는다.
      - 커밋 시각이 필요한 문서가 하나도 없어 2에서 `git log`가 불리지 않은 리포의 손상된 ref가 여기서 드러난다.
   4. 2·3의 `DocLintReadError`는 오류 한 건으로 바꿔 `{ errors: [그 오류], warnings: [] }`를 돌려준다. 오류는 `rule: 'R8 문서 읽기 실패'`, `what`은 `DocLintReadError`의 메시지(실패한 조회의 이름 `git ls-files`, `git log`, `git show-ref`, `git cat-file` 가운데 하나가 들어 있다), `how`는 고치는 법이고 `git status`라는 글자가 들어 있다(이 폴더에서 `git status`가 도는지 확인하고 다시 실행한다는 뜻), `doc`은 이 파일의 다른 오류와 같은 값이다.
   5. `DocLintReadError`가 아닌 예외는 잡지 않는다.
@@ -76,6 +76,8 @@ export function docLintGate(root: string, cfg: HarnessConfig): DocLintResult;
 - **HEAD가 커밋이 아닌 객체를 가리킨다**: 커밋한 리포에서 현재 브랜치의 ref 파일을 리포에 있는 blob의 해시(커밋한 파일에 `git hash-object`를 실행한 값)로 바꾼다. `git ls-files`, `git show-ref --verify HEAD`, `git log`가 모두 성공하는 경우다. 문서의 `related_code`가 비지 않은 리포와 모두 빈 리포를 각각 본다.
   - 둘 다 `docLintGate`의 결과는 오류가 정확히 한 건이고 `rule`이 `R8 문서 읽기 실패`, `what`에 `git cat-file`이 있다. 경고는 없다.
   - 둘 다 위 CLI 단언(조회 이름은 `git cat-file`).
+- **브랜치 ref가 커밋을 가리키는 주석 태그 객체를 담고 있다**(읽기 실패가 아니다): 서로 다른 커밋 시각으로 문서 커밋과 코드 커밋을 차례로 만든 리포(아래 "정상 리포"와 같은 방법)에서 `git tag -a`로 주석 태그를 만들고 현재 브랜치의 ref 파일을 그 태그 객체의 해시(`git rev-parse refs/tags/<이름>`)로 바꾼다.
+  - `docLintGate`의 결과에 `R8 문서 읽기 실패`가 없고, ref 파일을 바꾸기 전의 `docLintGate` 결과와 같다(깊은 비교. "검토 필요" 경고가 그대로 있다: 커밋 시각을 태그를 거쳐 읽는다).
 - **커밋이 없는 리포**: `git init`만 하고 커밋하지 않은 리포(파일은 작업 트리에 있다). 문서 하나는 `review_cycle: on-change`이고 `related_code`가 비지 않다.
   - 문서가 모두 정상이면 `docLintGate`의 오류와 경고가 없고, `node scripts/harness.ts doc-lint`는 종료 코드 0이다.
   - 깨진 링크가 든 문서를 더하면 `docLintGate`의 오류에 `R8 깨진 링크`가 있고 `R8 문서 읽기 실패`는 없다.
