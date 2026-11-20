@@ -1201,6 +1201,20 @@ test('기본 자료원 경로: 커밋 조회가 상한에 닿거나 빈 응답�
   assert.match(under.r.out, /^### 상시 지표$/m);
 });
 
+test('기본 자료원 경로: head별 PR 조회의 항목이 PR이 아니거나 번호가 겹치면 종료 코드 2이고 표준 출력이 비어 있다', () => {
+  const { work } = repo();
+  // 번호 없는 항목 하나를 PR 하나로 세면 그 PR의 실행이 이어져 첫 통과율에 든다.
+  // 같은 번호 둘을 PR 둘로 세면 "실행을 이을 수 없는 PR"로 빠진다. 둘 다 다 읽은 결과가 아니다
+  for (const items of [[{}], [{ number: 1 }, { number: 1 }]]) {
+    const { r, blocked } = execDefault(work, { ...FIXED, headPrs: () => JSON.stringify(items) });
+    assert.equal(r.code, 2, JSON.stringify(items));
+    assert.equal(r.out, '');
+    assert.match(r.err, /집계하지 않았다/);
+    assert.match(r.err, /로 열린 PR 목록/);
+    assert.deepEqual(blocked, []);
+  }
+});
+
 test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 않고 막는다', () => {
   const { fx, work } = repo();
   const made = path.join(fx.dir, 'made-by-sh.txt');

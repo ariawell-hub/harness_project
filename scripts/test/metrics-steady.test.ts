@@ -483,6 +483,24 @@ test('ghSource.headPrCount: 그 head 브랜치 이름으로 열린 PR의 수다'
   // 상한에 닿으면 더 있는지 알 수 없다
   const full = JSON.stringify(Array.from({ length: 100 }, (_, i) => ({ number: i + 1 })));
   assert.throws(() => source(fakeGh({ headPrs: () => full })).headPrCount('feat/x'), SourceError);
+  // 항목이 PR이 아니면(번호가 없거나 양의 정수가 아니다) 수로 세지 않는다. 같은 번호가 두 번 와도 다 읽은 결과가 아니다
+  const broken: Array<[string, unknown[]]> = [
+    ['번호 없는 항목', [{}]],
+    ['문자열 번호', [{ number: '7' }]],
+    ['0', [{ number: 0 }]],
+    ['음수', [{ number: -1 }]],
+    ['소수', [{ number: 1.5 }]],
+    ['null', [{ number: null }]],
+    ['번호 없는 항목이 섞임', [{ number: 7 }, {}]],
+    ['같은 번호 중복', [{ number: 7 }, { number: 7 }]],
+  ];
+  for (const [why, items] of broken) {
+    assert.throws(
+      () => source(fakeGh({ headPrs: () => JSON.stringify(items) })).headPrCount('feat/x'),
+      SourceError,
+      why,
+    );
+  }
   // 옵션으로 읽힐 이름과 빈 이름으로는 조회하지 않는다
   const g = fakeGh({ headPrs: () => '[]' });
   assert.throws(() => source(g).headPrCount('--web'), SourceError);
