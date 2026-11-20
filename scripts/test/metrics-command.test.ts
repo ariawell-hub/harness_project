@@ -181,7 +181,12 @@ interface Result {
 function exec(
   cwd: string,
   m: Mem | MetricsSource,
-  o: { write?: boolean; since?: string; writeBytes?: MetricsOptions['writeBytes'] } = {},
+  o: {
+    write?: boolean;
+    since?: string;
+    writeBytes?: MetricsOptions['writeBytes'];
+    getuid?: MetricsOptions['getuid'];
+  } = {},
 ) {
   const out: string[] = [];
   const err: string[] = [];
@@ -192,6 +197,7 @@ function exec(
       until: UNTIL,
       write: o.write ?? false,
       writeBytes: o.writeBytes,
+      getuid: o.getuid,
       out: (l) => out.push(l),
       err: (l) => err.push(l),
     },
@@ -644,6 +650,63 @@ test('--write: 문서 폴더나 worktree 루트를 다른 사용자가 쓸 수 �
   } finally {
     chmodSync(path.dirname(file), 0o755);
   }
+});
+
+test('--write: worktree 위의 폴더를 다른 사용자가 쓸 수 있으면 쓰지 않는다. 남의 것을 옮길 수 없는 폴더(sticky)는 된다', () => {
+  const { fx, work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  try {
+    // worktree의 부모 폴더에 그룹 쓰기 권한이 있으면 worktree를 통째로 옮길 수 있다
+    chmodSync(fx.dir, 0o775);
+    const m = mem(BASE);
+    const r = exec(work, m, { write: true });
+    assert.equal(r.code, 1);
+    assert.match(r.err, /다른 사용자가 쓸 수 있다/);
+    assert.ok(r.err.includes(path.basename(fx.dir)), r.err);
+    assert.deepEqual(m.calls, []);
+    assert.equal(readFileSync(file, 'utf8'), before);
+
+    // /tmp처럼 누구나 쓰지만 남의 항목은 옮기지 못하는 폴더
+    chmodSync(fx.dir, 0o1777);
+    const ok = exec(work, mem(BASE), { write: true });
+    assert.equal(ok.code, 0, ok.err);
+    assert.notEqual(readFileSync(file, 'utf8'), before);
+  } finally {
+    chmodSync(fx.dir, 0o755);
+    freshDoc(work);
+  }
+});
+
+test('--write: 폴더의 소유자가 다른 사용자면 쓰지 않는다', () => {
+  const { work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  const me = process.getuid?.();
+  assert.notEqual(me, undefined);
+  const m = mem(BASE);
+  // 이 프로세스가 다른 사용자인 것처럼 본다(폴더의 소유자를 바꾸려면 root가 필요하다)
+  const r = exec(work, m, { write: true, getuid: () => (me as number) + 1 });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /다른 사용자가 쓸 수 있다/);
+  assert.deepEqual(m.calls, []);
+  assert.equal(readFileSync(file, 'utf8'), before);
+});
+
+test('--write: 폴더 권한을 확인할 수 없는 환경(Windows)에서는 쓰지 않는다', () => {
+  const { work } = repo();
+  const file = freshDoc(work);
+  const before = readFileSync(file, 'utf8');
+  const m = mem(BASE);
+  const r = exec(work, m, { write: true, getuid: () => undefined });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /확인할 수 없다/);
+  assert.match(r.err, /--write 없이/);
+  assert.deepEqual(m.calls, []);
+  assert.equal(readFileSync(file, 'utf8'), before);
+  // 출력만 하는 것은 된다
+  const plain = exec(work, mem(BASE), { getuid: () => undefined });
+  assert.equal(plain.code, 0, plain.err);
 });
 
 test('--write: 쓰는 동안 문서 폴더가 worktree 밖으로 옮겨지면 그곳의 문서를 바꾸지 않는다', () => {

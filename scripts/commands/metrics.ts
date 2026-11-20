@@ -43,6 +43,8 @@ export interface MetricsOptions {
   err?: (line: string) => void;
   /** 파일에 바이트를 쓰는 함수(기본 `writeSync`). 쓴 바이트 수를 돌려준다. 테스트가 짧은 쓰기와 실패를 끼운다 */
   writeBytes?: (fd: number, buf: Uint8Array, offset: number, length: number) => number;
+  /** 이 프로세스의 사용자 번호(기본 `process.getuid`). 알 수 없는 환경(Windows)에서는 undefined다. 테스트가 끼운다 */
+  getuid?: () => number | undefined;
 }
 
 const first = (e: unknown) => (e instanceof Error ? e.message : String(e)).split('\n')[0];
@@ -58,6 +60,8 @@ const NO_DOC = `${METRICS_DOC}가 없다. 문서를 만들고 표식 구간을 �
 const OUTSIDE = `${DOC_DIR} 폴더가 작업 worktree 밖을 가리킨다(심볼릭 링크이거나 옮겨졌다). worktree 밖의 파일은 고치지 않는다(R3). 폴더를 실제 폴더로 되돌려라`;
 const SHARED = (dir: string) =>
   `${dir} 폴더를 다른 사용자가 쓸 수 있다(소유자가 다르거나 그룹·기타 쓰기 권한이 있다). 쓰는 동안 문서나 폴더가 바꿔치기될 수 있어 쓰지 않는다. chmod go-w로 그 폴더의 권한을 줄인 뒤 다시 실행하라`;
+const NO_UID =
+  '이 환경에서는 폴더를 누가 쓸 수 있는지 확인할 수 없다(Windows). --write 없이 실행해 출력을 문서의 표식 구간에 붙여 넣어라';
 const DOC_IS_LINK = `${METRICS_DOC}가 심볼릭 링크다. 링크가 가리키는 곳은 고치지 않는다(R3). 일반 파일로 바꿔라`;
 // Windows에는 이 플래그들이 없다(undefined). 그때는 0이다
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
@@ -101,24 +105,46 @@ function inDocDir<T>(root: string, fn: (inside: () => boolean) => T): T {
   }
 }
 
+type GetUid = NonNullable<MetricsOptions['getuid']>;
+const processUid: GetUid = () => process.getuid?.();
+// 파일시스템 루트까지 올라가는 단계의 상한. 경로 길이 제한 안에서는 닿지 않는다
+const MAX_DEPTH = 256;
+
 /**
- * 문서 폴더에서 worktree 루트까지를 이 사용자만 쓸 수 있는지 본다(`inDocDir` 안에서 부른다). 아니면 쓰지 않는다.
+ * 문서 폴더에서 파일시스템 루트까지, 다른 사용자가 이 경로의 폴더를 바꿔치기할 수 없는지 본다(`inDocDir` 안에서 부른다).
+ * 아니면 쓰지 않는다.
  *
  * 문서는 임시 파일을 써서 이름을 바꾸는 것으로 교체한다. 이름을 바꾸기 직전에 임시 파일과 폴더를 다시 확인하지만,
  * 그 확인과 이름 바꾸기 사이의 틈은 닫을 수 없다(파일·폴더 디스크립터 기준으로 이름을 바꾸는 API가 Node에 없다).
- * 그 틈에 임시 파일 이름을 바꿔치기하려면 문서 폴더에, 문서 폴더를 옮기려면 그 위 폴더에 쓸 수 있어야 한다.
- * 두 폴더를 이 사용자만 쓸 수 있으면 그럴 수 있는 것은 이 사용자의 프로세스(와 root)뿐이고, 그들은 문서를 직접 쓸 수 있다.
- * Windows에는 이 권한 모형이 없어 확인하지 않는다
+ * 그 틈에 임시 파일 이름을 바꿔치기하려면 문서 폴더에, 어떤 폴더를 옮기려면 그 부모 폴더에 쓸 수 있어야 한다.
+ * - 문서 폴더에서 worktree 루트까지: 소유자가 이 사용자이고 그룹·기타 쓰기 권한이 없어야 한다
+ * - 그 위의 폴더: 소유자가 이 사용자나 root이고, 그룹·기타 쓰기 권한이 없거나 sticky여야 한다
+ *   (sticky 폴더에서는 항목의 소유자만 그 항목을 옮기거나 지운다. `/tmp`가 그렇다)
+ * 그러면 그럴 수 있는 것은 이 사용자의 프로세스와 root뿐이고, 그들은 문서를 직접 쓸 수 있다.
+ * 위로는 `..`로 올라간다. 경로 문자열이 아니라 지금 있는 폴더의 실제 부모를 본다.
+ * 사용자 번호를 알 수 없는 환경(Windows)에서는 이 보장을 줄 수 없어 쓰지 않는다
  */
-function assertPrivateDirs(): void {
-  const uid = process.getuid?.();
-  if (uid === undefined) return;
-  const parts = DOC_DIR.split('/');
-  for (let up = 0; up <= parts.length; up++) {
-    const st = statSync(up === 0 ? '.' : Array(up).fill('..').join('/'));
-    if (st.uid !== uid || (st.mode & 0o022) !== 0)
-      throw new DocError(SHARED(parts.slice(0, parts.length - up).join('/') || 'worktree 루트'));
+function assertPrivateDirs(getuid: GetUid): void {
+  const uid = getuid();
+  if (uid === undefined) throw new DocError(NO_UID);
+  const inWorktree = DOC_DIR.split('/').length;
+  let rel = '.';
+  let st = statSync(rel);
+  for (let up = 0; up < MAX_DEPTH; up++) {
+    const writable = (st.mode & 0o022) !== 0;
+    const ok =
+      up <= inWorktree
+        ? st.uid === uid && !writable
+        : (st.uid === uid || st.uid === 0) && (!writable || (st.mode & 0o1000) !== 0);
+    if (!ok) throw new DocError(SHARED(path.resolve(rel)));
+    const parentRel = rel === '.' ? '..' : `${rel}/..`;
+    const parent = statSync(parentRel);
+    // 루트의 부모는 루트 자신이다
+    if (parent.dev === st.dev && parent.ino === st.ino) return;
+    rel = parentRel;
+    st = parent;
   }
+  throw new DocError(`${DOC_DIR} 폴더의 상위 폴더를 끝까지 확인하지 못했다(${MAX_DEPTH}단계)`);
 }
 
 /** 현재 폴더의 문서를 읽는다. 일반 파일일 때만 읽는다(`inDocDir` 안에서 부른다) */
@@ -174,8 +200,9 @@ function replaceDocHere(
   mode: number,
   write: WriteBytes,
   inside: () => boolean,
+  getuid: GetUid,
 ): void {
-  assertPrivateDirs();
+  assertPrivateDirs(getuid);
   const buf = Buffer.from(text, 'utf8');
   const tmp = `.${DOC_NAME}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   const fd = openSync(tmp, 'wx', mode);
@@ -272,7 +299,7 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
     }
     try {
       const doc = inDocDir(info.root, () => {
-        assertPrivateDirs();
+        assertPrivateDirs(o.getuid ?? processUid);
         return readDocHere();
       });
       if (replaceBlock(doc.text, '') === null)
@@ -325,7 +352,7 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
         const next = replaceBlock(doc.text, block);
         if (next === null)
           throw new DocError(`자료를 읽는 동안 ${METRICS_DOC}의 표식 구간이 사라졌다`);
-        replaceDocHere(next, doc.mode, o.writeBytes ?? writeSync, inside);
+        replaceDocHere(next, doc.mode, o.writeBytes ?? writeSync, inside, o.getuid ?? processUid);
       });
     } catch (e) {
       err(
