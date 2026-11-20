@@ -112,3 +112,4 @@ review_cycle: on-change
 - 검증: 이 템플릿을 만든 Claude Code 세션 자신이 훅에 막혔다(R3 main 체크아웃 수정, R14 변수 경로 재귀 삭제, R2 main push). 실제 `claude -p` 세션에서 권한이 `Bash(gh:*)`로 열린 상태에서도 `gh pr review --approve`가 R20으로 차단됨을 확인했다.
 - 스모크 테스트(실제 `claude -p`, sonnet, 로컬 bare 원격 + 가짜 GitHub): runner가 Issue 하나를 선점 → 계획(step 2개) → step0 PR 병합 → step1 PR 병합(`Closes`) → Issue 종료 → claim 해제 → worktree 정리까지 사람 개입 없이 약 1분 30초에 마쳤다. 새 세션이 `AGENTS.md`만 읽고 `start`와 같은 다음 Issue를 골랐다(S1).
 - 1단계에서 미룬 항목은 `docs/exec-plans/tech-debt-tracker.md` TD-1~TD-12.
+- 제작자 승인으로 P0 지적을 닫는 경로의 순수 함수(Issue #150 step0, PR #152): `scripts/ci/owner-accept.ts`가 제작자 계정의 승인 댓글(`/harness accept F<번호>`, 본문이 승인 줄뿐이고 편집 이력으로 고쳐지지 않은 것이 확인된 댓글)을 가려 원장의 열린 P0을 새 상태 `accepted`로 바꾼다. `scripts/ci/ledger.ts`에 상태 `accepted`(`review-ledger`를 막지 않고 검증자의 판정으로 바뀌지 않는다)와 선택 필드 `openedAt`(게시 시각)을 더했다. 아직 원장을 읽고 쓰는 경로에 잇지 않아 CI의 동작은 그대로다(연결과 설계서 10.2절 갱신은 step1). 검사를 약화하지 않는다.

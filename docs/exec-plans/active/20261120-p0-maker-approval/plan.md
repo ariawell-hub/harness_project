@@ -86,6 +86,7 @@ claimed_at: 2026-11-20T12:19:52+09:00 # new-task가 채운다
   - 구현 뒤: `owner-accept.test.ts` 14개, `ledger-accept.test.ts` 8개 통과. 기존 `ledger.test.ts` 18개, `ledger-store.test.ts` 12개는 고치지 않고 통과한다.
   - 테스트를 한 곳 고쳤다(구현이 아니라 테스트가 틀렸다): 원장 표의 셀은 괄호를 문자 참조(`&#40;`)로 바꾸는데 단언이 괄호 그대로를 기대했다.
 - 2026-11-20T13:05:31+09:00 step0 재작업: harness-guard 실패: CHANGELOG 한 줄과 PR 본문의 보호 경로 체크 줄이 빠졌다
+  - 구현 판정(head `d2b5c8b`): 두 검증자 승인(지적 없음). `harness-guard`는 실패했다: 보호 경로를 바꿨는데 `docs/harness/CHANGELOG.md`가 그대로이고 PR 본문에 보호 경로 체크 줄이 없었다(내가 빠뜨렸다. 로컬 `check`는 이 둘을 보지 않는다). `CHANGELOG`에 한 줄을 더하고 PR 본문에 체크 줄을 넣었다. 설계서는 step1에서 고치므로 이 줄에는 설계서 버전을 적지 않았다.
 
 ## 의사결정 로그
 
