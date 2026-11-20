@@ -22,7 +22,7 @@ claimed_at: 2026-11-20T21:31:57+09:00 # new-task가 채운다
 
 1. 원장에서 `open`인 P0·P1 지적의 재판정 수가 3 이상이면 오래 열린 지적이다. 미룬 지적(`deferred`), 닫힌 지적(`fixed`·`rejected`), 제작자가 받아들인 지적(`accepted`), P2·P3은 대상이 아니다. 다른 검증자의 판정은 세지 않는다.
 2. `pr-state`는 그 PR의 원장에 오래 열린 지적이 있으면 지적마다 한 줄(ID, 등급, 검증자, 재판정 수, 대화 세션은 제작자에게 묻는다는 안내)을 `분류:` 줄 앞에 낸다. 필수 체크가 빈 리포(`ci.requiredChecks`가 비어 분류 줄이 없다)에서도 원장을 가릴 수 있으면(`ci.recorderBot`이 있다) 체크 요약 줄 뒤에 같은 줄을 낸다. 없으면 줄이 없고 출력은 지금과 같다. 읽기만 하고 종료 코드는 그대로다.
-3. 절차서 8절에 대화 세션의 규칙이 적혀 있다: 계획 검증이든 구현 판정이든 새 판정이 끝나면 열린 지적에 대응하기 전에 `pr-state`를 실행하고, 이 줄이 보이는 지적은 더 고쳐 올리거나 반박하기 전에 제작자에게 묻는다(지적, 지금까지의 대응, 선택지 A 방향을 정해 한 번 더 고친다 / B 범위를 줄인다 / C 포기. 남은 위험을 받아들이는 승인은 P0에만 있다). 절차서 2절의 계획 검증 순서에서도 그 확인을 가리킨다. 설계서 9.1절에 같은 뜻이 적혀 있고, runner는 이 기준을 쓰지 않고 실패 횟수 사다리로 다룬다는 것이 적혀 있다.
+3. 절차서 8절에 대화 세션의 규칙이 적혀 있다: 계획 검증이든 구현 판정이든 새 판정이 끝나면 열린 지적에 대응하기 전에 `pr-state`를 실행하고, 이 줄이 보이는 지적은 더 고쳐 올리거나 반박하기 전에 제작자에게 묻는다(지적, 지금까지의 대응, 선택지 A 방향을 정해 한 번 더 고친다 / B 범위를 줄인다 / C 포기. 남은 위험을 받아들이는 승인은 P0에만 있다). 절차서 2절의 계획 검증 순서에서도 그 확인을 가리키고, 절차서 7절과 설계서 9.1절의 "반드시 묻는다"에 이 경우가 들어 있다. 설계서 9.1절에 같은 뜻이 적혀 있고, runner는 이 기준을 쓰지 않고 실패 횟수 사다리로 다룬다는 것이 적혀 있다.
 4. runner의 동작은 바뀌지 않는다(지적 대응, 실패 키 `F<번호>`의 3회 방법 전환·5회 중단, 반박 교착).
 5. 기술 부채 표의 TD-54가 해결로 바뀐다.
 
@@ -48,7 +48,7 @@ claimed_at: 2026-11-20T21:31:57+09:00 # new-task가 채운다
 - `scripts/runner/review.ts`
 - `scripts/commands/pr-state.ts`
 - `scripts/test/runner-review.test.ts`, `scripts/test/pr-state.test.ts`
-- `docs/harness/design.md`(문서 머리의 버전과 변경 이력, 9.1절, `pr-state`를 설명하는 10.3절), `docs/harness/workflow.md`(2절 "계획 검증"의 3번, 8절), `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`(TD-54 행)
+- `docs/harness/design.md`(문서 머리의 버전과 변경 이력, 9.1절, `pr-state`를 설명하는 10.3절), `docs/harness/workflow.md`(2절 "계획 검증"의 3번, 7절의 "반드시 묻는다" 줄, 8절), `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`(TD-54 행)
 - 읽기만: `scripts/ci/ledger.ts`(`Ledger`, `Entry`, `roundsOf`), `scripts/runner/ledger-read.ts`(`readPrLedger`), `scripts/lib/github-fake.ts`
 
 ## step 목록
@@ -64,6 +64,7 @@ claimed_at: 2026-11-20T21:31:57+09:00 # new-task가 채운다
   - F2 P1에는 없는 제작자 승인 길을 안내한다 → 남은 위험을 받아들이는 승인은 P0에만 안내한다(절차서 8절 "제작자 승인(P0)", `scripts/ci/owner-accept.ts`).
   - F3 `ci.requiredChecks`가 빈 리포에서는 원장을 읽지 않아 수용 기준 2와 어긋난다 → 그 리포에서도 `ci.recorderBot`이 있으면 줄을 낸다. 테스트를 더했다.
   - F4 AC의 `grep`이 글자만 본다 → 절차서 8절의 항목(확인 시점, 선택지, runner의 기준)과 2절의 가리킴, 설계서 9.1절·10.3절을 각각 확인하는 명령으로 바꿨다.
+- 2026-11-20 22:47 PR #168 계획 검증 2라운드(head `0ded77d`): claude 승인(지적 없음), codex 수정 요청. F1·F2·F3은 닫혔고(fixed) F4가 열려 있다: AC의 `awk`가 낱말이 함께 있는지만 보아, 순서나 조건을 반대로 적은 문장도 통과한다 → 수용. 문서에 넣을 문장을 step0에 글자 그대로 적고 AC가 그 줄 전체를 견주게 했다(`grep -qxF`). 절차서 7절의 "반드시 묻는다" 줄에도 이 경우를 더한다(설계서 9.1절의 목록과 맞춘다).
 
 ## 의사결정 로그
 
