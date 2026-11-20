@@ -103,6 +103,9 @@ claimed_at: 2026-11-20T21:50:40+09:00 # new-task가 채운다
   - F8(개수 칸이 소수·무한대여도 통과한다. 재현됨): `generate.sqlFiles`, `pglite.wasmFiles`, `policy.minimumReleaseAge`를 안전한 정수로 본다. JSON의 `1e309`(읽으면 무한대)를 넣은 결과 파일이 명령에서 종료 코드 1인 것을 테스트한다.
   - F9(절차가 Bash만 전제한다): `lab/q10-db/README.md`에 PowerShell 절차를 더했다. 그 절차는 Windows에서 돌려 보지 않았고 README에 그렇게 적었다.
   - 결과 파일은 고친 스크립트로 다시 만들었고 내용이 같다(변경 없음).
+- 2026-11-20 main 병합: PR #162가 먼저 병합되어 `docs/harness/CHANGELOG.md`가 충돌했다. `origin/main`을 병합하고 병합 순서대로 정리했다(rebase하지 않는다). main의 설계서는 바뀌지 않아 버전은 v0.7.67 그대로다. 충돌한 head(`fbbdc3b`)에서는 CI의 `check`가 돌지 않아 판정이 나오지 않았다.
+- 2026-11-20 step0 구현 검증 2라운드(head `18d17e2`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청. F7~F9는 `fixed`, F10(P1)이 새로 나왔다.
+  - F10(PowerShell 절차가 `trial.ts`의 실패 뒤에도 이어져, 남아 있던 이전 결과 파일이 통과로 보일 수 있다): `lab/q10-db/README.md`의 두 절차를 실패한 자리에서 멈추게 고쳤다. Bash는 명령을 `&&`로 잇고, PowerShell은 블록 안에서 명령마다 `$LASTEXITCODE`를 보고 멈춘다. 같은 틈이 Bash 절차에도 있었다(줄마다 따로 돌렸다). 결과 이름은 손으로 적지 않고 `node -p`로 만든다. Bash 절차는 README의 글자 그대로 돌려 통과를 확인했고, 비어 있지 않은 폴더를 넘긴 실패 경로에서 검사가 돌지 않는 것도 확인했다. PowerShell 절차는 돌려 보지 못했다(이 Mac에 PowerShell이 없다. README에 적었다).
 
 ## 의사결정 로그
 
@@ -137,6 +140,7 @@ claimed_at: 2026-11-20T21:50:40+09:00 # new-task가 채운다
 - 결과는 step을 진행하며 진행 로그에 적는다.
 - step0(2026-11-20): AC 34줄 모두 통과, `node scripts/harness.ts check` 통과. 수용 기준 1·2는 검사 스크립트 테스트 57개, 실행 스크립트를 실제로 돌려 리포 밖에 쓴 결과의 검사(`--file`), 저장한 결과의 검사(`check-results.ts darwin-arm64`)로 확인했다. 수용 기준 3은 ADR의 절별 필수 내용과 `--confirm`의 종료 코드 1(없는 환경으로 `win32`·`linux`를 낸다)로, 수용 기준 4·7은 설계서·기술 부채 표의 해당 줄로, 수용 기준 8은 갈라진 지점의 14.3절에 고정한 한 줄을 넣은 기대 글과 지금의 14.3절 전체의 `diff`(차이 없음)로 확인했다.
 - step0 재작업(2026-11-20, F7~F9): AC 34줄 모두 통과. 검사 스크립트 테스트는 75개다(개수가 아닌 값 15, 명령에 무한대·소수 1, 리포 밖 폴더 판정 2가 늘었다).
+- step0 재작업(2026-11-20, F10): 문서(README의 절차)만 고쳤다. README의 Bash 절차를 그대로 돌린 결과: 실행·`fmt`·결과 검사·테스트 75개 통과. `doc-lint`, `fmt --check` 통과.
 
 ## 다음 할 일
 

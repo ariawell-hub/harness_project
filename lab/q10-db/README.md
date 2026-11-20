@@ -15,33 +15,42 @@
 
 ## 절차
 
-리포의 루트에서 돌린다. macOS·Linux(Bash, zsh):
+리포의 루트에서 돌린다. **앞 명령이 실패하면 뒤 명령을 돌리지 않는다.** `trial.ts`는 실패하면 결과 파일을 새로 쓰지 않는다. 그때 `results/`에 남아 있는 파일은 이전 실행의 것이라, 이어서 검사를 돌리면 이전 결과가 통과로 보인다. 아래 두 절차는 실패한 자리에서 멈춘다.
+
+macOS·Linux(Bash, zsh). 명령을 `&&`로 잇는다:
 
 ```bash
-T=$(mktemp -d)
-node lab/q10-db/trial.ts "$T"
-node scripts/harness.ts fmt
-node lab/q10-db/check-results.ts <platform>-<arch>
-node --test lab/q10-db/test/check-results.test.ts
+T=$(mktemp -d) &&
+  node lab/q10-db/trial.ts "$T" &&
+  node scripts/harness.ts fmt &&
+  node lab/q10-db/check-results.ts "$(node -p 'process.platform + "-" + process.arch')" &&
+  node --test lab/q10-db/test/check-results.test.ts
 ```
 
-Windows 네이티브(PowerShell). 새 임시 폴더를 만들어 넘긴다. 임시 폴더가 리포와 다른 드라이브에 있어도 된다.
+Windows 네이티브(PowerShell). 새 임시 폴더를 만들어 넘긴다(리포와 다른 드라이브여도 된다). PowerShell은 명령이 실패해도 다음 줄을 돌리므로, 명령마다 종료 코드(`$LASTEXITCODE`)를 보고 멈춘다. 블록(`& { … }`) 전체를 한 번에 붙여 넣는다:
 
 ```powershell
-$T = Join-Path ([System.IO.Path]::GetTempPath()) ("q10-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $T | Out-Null
-node lab/q10-db/trial.ts $T
-node scripts/harness.ts fmt
-node lab/q10-db/check-results.ts win32-x64
-node --test lab/q10-db/test/check-results.test.ts
+& {
+  $T = Join-Path ([System.IO.Path]::GetTempPath()) ("q10-" + [System.Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $T | Out-Null
+  node lab/q10-db/trial.ts $T
+  if ($LASTEXITCODE -ne 0) { throw "trial.ts가 실패했다. 결과 파일은 새로 쓰이지 않았다(남아 있는 파일은 이전 실행의 것이다)" }
+  node scripts/harness.ts fmt
+  if ($LASTEXITCODE -ne 0) { throw "fmt가 실패했다" }
+  $N = node -p "process.platform + '-' + process.arch"
+  node lab/q10-db/check-results.ts $N
+  if ($LASTEXITCODE -ne 0) { throw "결과 검사가 통과하지 않았다" }
+  node --test lab/q10-db/test/check-results.test.ts
+  if ($LASTEXITCODE -ne 0) { throw "검사 스크립트의 테스트가 실패했다" }
+}
 ```
 
-- PowerShell 절차는 아직 Windows에서 돌려 보지 않았다(2026-11-20. 이 폴더의 결과는 macOS뿐이다). 처음 돌리는 세션이 어긋난 점을 고쳐 이 줄을 지운다. `win32-x64`는 예다. ARM 머신이면 `trial.ts`가 출력한 이름(`win32-arm64`)을 쓴다.
-
-- `<platform>-<arch>`는 그 머신의 `process.platform`과 `process.arch`다(`trial.ts`가 쓴 파일 이름을 출력한다). 예: `darwin-arm64`, `win32-x64`, `linux-x64`.
+- PowerShell 절차는 아직 Windows에서 돌려 보지 않았다(2026-11-20. 이 폴더의 결과는 macOS뿐이다). 처음 돌리는 세션이 어긋난 점을 고쳐 이 줄을 지운다.
+- 통과한 결과 파일만 커밋한다. 절차가 중간에 멈췄으면 `git status`로 결과 파일이 이번 실행에서 바뀌었는지 본다.
+- 결과 파일의 이름(`<platform>-<arch>`)은 그 머신의 `process.platform`과 `process.arch`다(`trial.ts`가 쓴 파일 이름을 출력한다). 예: `darwin-arm64`, `win32-x64`, `linux-x64`. 위 절차는 그 이름을 `node -p`로 만들어 검사에 넘긴다.
 - 필요한 것은 Node(22.18 이상), 이 리포가 고정한 버전의 pnpm, npm 레지스트리 접근이다. DB 서버, 컨테이너 런타임, 빌드 도구는 필요 없다.
 - `trial.ts`는 이 리포의 설치 정책(`pnpm-workspace.yaml`, R17: 게시 후 14일이 지난 버전만, 설치 스크립트 차단)을 시험 프로젝트에 그대로 복사한 뒤 설치한다. 정책에 걸리는 버전이면 설치가 거부되고 결과 파일을 쓰지 않는다.
-- 작업 트리를 바꾸지 않고 돌려만 보려면 결과를 리포 밖에 쓴다: `node lab/q10-db/trial.ts "$T" --out "$O/result.json"` 뒤 `node lab/q10-db/check-results.ts --file "$O/result.json"`(`O`도 `mktemp -d`. PowerShell에서는 위와 같은 방법으로 폴더를 하나 더 만든다).
+- 작업 트리를 바꾸지 않고 돌려만 보려면 결과를 리포 밖에 쓴다: `node lab/q10-db/trial.ts "$T" --out "$O/result.json" && node lab/q10-db/check-results.ts --file "$O/result.json"`(`O`도 `mktemp -d`로 만든 새 폴더라 이전 결과가 없다. PowerShell에서는 위와 같은 방법으로 폴더를 하나 더 만들고 `trial.ts` 뒤에 `$LASTEXITCODE`를 본다).
 
 ## 확인하는 것
 
