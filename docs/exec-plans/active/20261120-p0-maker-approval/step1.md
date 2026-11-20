@@ -20,6 +20,8 @@
 - `IssueComment`에 선택 필드 `updated_at?: unknown`을 더한다.
 - `ledgerFromComments`: 고른 원장 댓글의 `updated_at`이 `Date.parse`가 되는 문자열이면, 그 원장에서 상태가 `open`이고 `openedAt`이 없는 지적에 그 값을 `openedAt`으로 채워 돌려준다. `updated_at`을 읽을 수 없으면 채우지 않는다. 이미 있는 `openedAt`은 바꾸지 않는다. 인자와 그 밖의 동작은 그대로다(부르는 곳 모두에 적용된다).
   - 근거: 원장 댓글에 들어 있는 열린 지적은 그 댓글이 마지막으로 저장된 시각(GitHub이 정한 `updated_at`)이나 그 전에 게시됐다. 그래서 이 값은 실제 게시 시각보다 앞설 수 없다.
+- **한 번 채워진 `openedAt`은 그 지적이 열려 있는 동안 바뀌지 않는다.** 원장을 저장하는 모든 경로(`recordLedger`, `recordCiFailure`)는 `ledgerFromComments`가 돌려준(채워진) 원장을 고쳐 저장하므로, 채워진 값이 함께 저장된다. 그래서 뒤의 원장 수정이 `updated_at`을 늦춰도 이미 게시된 지적의 기준 시각은 늦춰지지 않는다. 채워진 원장을 버리고 댓글 본문에서 다시 읽어 저장하는 경로를 만들지 않는다.
+- 남는 보수적 경우: 지적이 등록된 실행과 그다음에 원장을 읽는 실행 사이에는 그 지적에 `openedAt`이 없다. 그 지적의 승인은 `openedAt`이 채워지는 실행(다음에 원장을 읽는 기록 job)부터 반영된다. 원장 댓글의 `updated_at`을 읽을 수 없으면 채우지 않으므로 그동안은 승인이 반영되지 않는다.
 - 채워진 값은 그 뒤 원장을 저장하는 실행(`recordLedger`, `recordCiFailure`)이 함께 저장한다. `recordLedger`의 저장 여부는 지금처럼 "댓글에 저장된 본문에서 읽은 원장과 달라졌는가"로 정하되, 비교의 기준은 **채우기 전**의 원장이어야 한다(채운 것만 달라도 저장한다).
 - 기록 job의 시계(`Date.now`, `new Date()`)로 `openedAt`을 적지 않는다. 이번 실행의 판정으로 등록되거나 다시 열린 지적은 `openedAt` 없이 저장된다.
 
@@ -58,7 +60,8 @@ export function loadAccepted(o: {
 }): Promise<Accepted>;
 ```
 
-- `githubGraphql`: `POST <apiUrl>/graphql`(기본 `https://api.github.com`), `githubGet`과 같은 헤더와 시간 제한. 오류 메시지에 응답 본문을 300자 넘게 넣지 않는다.
+- `githubGraphql`: `POST <apiUrl>/graphql`(기본 `https://api.github.com`), `githubGet`과 같은 헤더와 시간 제한. **예외 메시지에 응답 본문과 GitHub이 준 오류 문구를 넣지 않는다.** 메시지는 고정된 문구와 수뿐이다: `GraphQL 요청 실패: HTTP <상태 코드>`, `GraphQL 요청 실패: 응답 없음`(네트워크 오류·시간 초과. 원래 예외의 메시지를 붙이지 않는다), `GraphQL 응답에 오류가 있다(<errors의 수>건)`, `GraphQL 응답 형식 오류`. 오류와 데이터가 함께 온 응답(`errors`가 있는 200)은 데이터를 쓰지 않고 예외다.
+- `listAcceptComments`와 `loadAccepted`·`readRoundLedger`가 내는 예외와 `acceptError`도 같은 규칙을 따른다(고정된 문구, 수, 쪽 번호만). 댓글의 본문·작성자 이름을 넣지 않는다.
 - `listAcceptComments`: `repository(owner, name) { pullRequest(number) { comments(first: 100, after) { pageInfo { hasNextPage endCursor } nodes { databaseId author { login } body createdAt lastEditedAt editor { login } userContentEdits(first: 1) { totalCount } } } } }`. 쪽 수 상한(`ledger-store.ts`의 `MAX_PAGES`와 같은 값)을 넘거나 응답 꼴이 다르면 예외다. 일부만 읽은 목록을 돌려주지 않는다.
 - `loadAccepted`: `owner`가 빈 문자열이거나 `needsAccepts(ledger)`가 거짓이면 `{ ledger, outcome: null }`을 그대로 돌려준다(요청 없음). 아니면 `applyOwnerAccepts(ledger, ownerAccepts(await listAcceptComments(…), owner))`. 예외는 잡지 않고 올린다.
 
@@ -121,14 +124,17 @@ export function loadAccepted(o: {
 
 - `scripts/test/accept-load.test.ts`(가짜 `get`·`graphql`·`send`)
   - 게시 시각: 원장 댓글의 `updated_at`이 `openedAt`이 없는 열린 지적에만 채워지고 이미 있는 값과 닫힌 지적은 그대로다. `updated_at`이 없으면 채우지 않는다.
+  - **계획 검증 F5의 순서**: 게시(지적이 `openedAt` 없이 저장됨, 시각 T1) → 다른 검증자의 기록 job이 원장을 읽고 저장(T2. 이때 `openedAt`이 T1로 채워져 저장된다) → 제작자의 승인 댓글(T3) → `recordCiFailure`가 원장을 다시 저장(T4) → 다음 `recordLedger`에서 그 지적이 `accepted`다(저장된 `openedAt`은 여전히 T1이다). 승인 댓글이 T2보다 앞(T1과 T2 사이)이어도 `accepted`다. 반대로 지적이 게시된 뒤 아무도 원장을 읽기 전에 `openedAt` 없이 남아 있는 동안에는, 그 실행에서 `updated_at`(T1)으로 채워지고 T1보다 뒤의 댓글이 반영된다.
   - **계획 검증 F3의 두 경우**: (가) 지적이 등록된 실행이 저장하기 전에 단 댓글(그 지적은 `openedAt` 없이 저장되고, 다음 실행이 원장 댓글의 `updated_at`을 채운다. 댓글 시각이 그보다 앞이거나 같다) → 무시된다. (나) 원장이 게시된 뒤에 단 댓글 → 다음 실행에서 `accepted`. 같은 실행의 판정으로 새로 등록된 P0은 그 실행에서 뒤 시각의 댓글이 있어도 `accepted`가 되지 않는다.
   - `listAcceptComments`: 여러 쪽, 끝을 확인하지 못함(예외), 응답 꼴이 다름(예외).
+  - `githubGraphql`(로컬 HTTP 서버): 500 응답, `errors`가 있는 200 응답(데이터가 함께 와도 예외), JSON이 아닌 응답. 서버가 응답에 넣은 식별 문구(예: `SECRET-COMMENT-TEXT`)가 예외 메시지에 없다.
   - `loadAccepted`: 볼 지적이 없으면 `graphql`을 부르지 않는다. `owner`가 빈 문자열이면 부르지 않는다.
   - `recordLedger`: 판정 없이도(이어받음) 승인을 저장하고 `review-ledger`가 success / 같은 실행의 판정이 그 지적을 `open`으로 답해도 저장된 상태는 `accepted` / 승인 댓글이 사라진 뒤 다시 기록하면 `open`으로 저장되고 failure / **작성 시각과 수정 시각이 같지만 편집 이력이 있는 댓글**은 반영되지 않는다 / 봇 계정·PR 작성자·검증 App이 단 같은 본문은 반영되지 않는다 / `graphql`이 예외를 내면 저장하지 않고(`send` 호출 0회) `review-ledger`가 error / 원장이 없으면 승인 댓글만으로 댓글을 만들지 않는다.
   - `readRoundLedger`: 승인이 반영된 원장을 돌려준다 / `graphql`이 예외를 내면 저장된 원장과 `acceptError`를 돌려준다 / `accepted`인 지적에 대한 반박은 버려진다.
 - `scripts/test/accept-cli.test.ts`: 실제 명령을 자식 프로세스로 띄우고 `GITHUB_API_URL`을 로컬 HTTP 서버로 돌린다(`scripts/test/record.test.ts`의 방식). 서버는 REST 댓글 목록, `POST /graphql`, PR 조회, 댓글 PATCH, 커밋 상태 POST에 답하고 받은 요청을 기록한다.
   - `review-plan --pr-number <N> --reviewer codex …`: 제작자의 유효한 승인 댓글이 있을 때 job 출력(`GITHUB_OUTPUT` 파일)의 `ledger=` 값을 `parseLedgerData`로 읽으면 그 ID가 `accepted`다. 같은 서버에서 그 댓글의 편집 이력만 "고쳐짐"으로 바꾸면 `open`이다. `/graphql`이 500이면 명령은 성공하고 `ledger=`의 그 지적은 저장된 상태(`open`)이며 출력에 `제작자 승인을 확인하지 못했다`가 있다.
   - `record-review … --pr-number <N>`: 서버가 받은 원장 댓글 PATCH 본문에서 그 ID가 `accepted`이고, 받은 `review-ledger` 상태가 success다. `/graphql`이 500이면 PATCH가 없고 `review-ledger`가 error다.
+  - **본문 비노출(계획 검증 F6)**: `/graphql`이 식별 문구가 든 응답을 줄 때(500의 본문, `errors[].message`, `errors`와 함께 온 댓글 `body`) `review-plan`과 `record-review`의 표준 출력·표준 오류, 서버가 받은 커밋 상태의 `description`, 원장 댓글 요청 어디에도 그 문구가 없다.
   - 두 명령 모두 설정(`--config-root`)의 `github.owner`를 쓰는 것을 확인한다: 설정의 제작자 계정을 다른 이름으로 바꾼 설정 폴더로 돌리면 같은 댓글이 반영되지 않는다.
 - `scripts/test/divergence.test.ts`: `accepted`가 해소로 세지는 경우를 더한다(새 `test(...)`로).
 
@@ -159,6 +165,6 @@ node scripts/harness.ts doc-lint
 - REST 댓글 목록의 `created_at`·`updated_at`으로 승인 댓글의 편집 여부를 판단하지 마라. 이유: 초 단위라 같은 초의 편집이 보이지 않는다. REST의 `updated_at`은 원장 댓글의 게시 시각을 얻는 데에만 쓴다.
 - 기록 job이 편집 이력을 읽지 못했을 때 승인을 유지하거나 새로 반영하지 마라. 이유: 확인하지 못한 승인으로 관문이 열린다. 그때는 원장을 쓰지 않고 `error`다.
 - `openedAt`을 러너의 시계로 적지 마라. 이유: 그 시각과 실제 게시 사이에 단 댓글이 아직 보이지 않는 지적을 닫는다(계획 검증 F3).
-- 댓글 본문이나 토큰을 로그·상태 설명에 넣지 마라. 이유: 댓글은 외부 입력이고(14.6절), 러너의 워크플로 명령 줄을 만들 수 있다. 로그에는 지적 ID, 댓글 id, 고정된 이유 문자열만 쓴다.
+- 댓글 본문, GraphQL 응답 본문, GitHub이 준 오류 문구, 토큰을 로그·상태 설명·예외 메시지에 넣지 마라. 이유: 댓글은 외부 입력이고(14.6절), 오류 응답에 댓글 데이터가 함께 올 수 있으며, 러너의 워크플로 명령 줄을 만들 수 있다. 지적 ID, 댓글 id, HTTP 상태 코드, 수, 고정된 문구만 쓴다.
 - `scripts/metrics/`를 고치지 마라. 이유: 다른 계획(Issue #146)의 범위다.
 - 기존 테스트의 단언을 지우거나 약하게 하지 마라. 이유: R4.
