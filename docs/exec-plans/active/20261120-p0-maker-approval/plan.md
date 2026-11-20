@@ -2,7 +2,7 @@
 id: 20261120-p0-maker-approval
 issue: 150 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -94,6 +94,7 @@ claimed_at: 2026-11-20T12:19:52+09:00 # new-task가 채운다
   - 실패 확인: `scripts/test/accept-load.test.ts`는 모듈(`accept-load.ts`, `githubGraphql`)이 없어 실패했다. `scripts/test/accept-cli.test.ts`는 `harness.ts`에 잇기 전 7개 중 5개가 실패했다(`review-plan`이 넘기는 원장이 `open`, `record-review`가 승인을 저장하지 않음, 편집 이력 실패에도 원장을 씀). 통과한 둘은 "반영하지 않는다"를 보는 것이라 연결 전에도 통과한다. `divergence.test.ts`의 새 경우는 구현 전에 실패했다.
   - 구현 뒤: `accept-load.test.ts` 16개, `accept-cli.test.ts` 7개, `divergence.test.ts` 8개 통과. 기존 `record.test.ts` 12개·`ledger-store.test.ts` 12개는 고치지 않고 통과한다.
   - 설계서는 v0.7.63이다(main은 v0.7.62). PR #149가 쓰려던 번호라 그 PR은 이 PR 병합 뒤 `origin/main`을 병합하면서 v0.7.64로 옮긴다.
+- 2026-11-20T14:18:16+09:00 step1 재작업: 구현 판정 1라운드(codex)의 지적 F1·F2·F3 대응
 
 ## 의사결정 로그
 
