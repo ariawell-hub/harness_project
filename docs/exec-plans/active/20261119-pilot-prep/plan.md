@@ -2,7 +2,7 @@
 id: 20261119-pilot-prep
 issue: 140 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -276,6 +276,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - 2026-11-20 step4 구현 판정 1라운드(PR #159, head `ba979db`): CI `check` 통과. `review/claude` 승인(지적 없음), `review/codex` 수정 요청(F1 P1, F2 P2).
   - F1을 고쳤다: 설계서 11.1절 절차 6의 첫 문장이 스크린샷·영상·trace를 PR에 붙이라고 하고, 그 아래에 더한 항목은 올리지 않는다고 해 서로 어긋났다. 첫 문장을 "글 요약을 PR 본문에 옮긴다"로 바꾸고, 올리기 전 자격증명 제거와 보관 기간은 증거 필수 상태 체크를 만들 때의 요건으로 적었다(그 전에는 올리지 않는다). AC 9개와 `check`를 다시 돌려 통과했다.
 - 2026-11-20 step4의 F1 수정 push(head `20e2208`) 직후 다른 세션의 PR #158·#160이 병합돼 이 PR이 main과 충돌했다. 충돌한 PR에는 `check` 워크플로가 돌지 않아 2라운드 판정이 시작되지 않았다. `origin/main`을 두 번 병합했다(충돌: `CHANGELOG`, 설계서 0절, 기술 부채 표의 TD-11·TD-12 행). PR #160이 v0.7.65를 썼으므로 이 PR의 항목을 v0.7.66으로 옮겼다. 기술 부채 표는 TD-11은 main의 것, TD-12는 이 PR의 것이다.
+- 2026-11-20T21:02:40+09:00 step4 재작업: 구현 판정 2라운드(codex) F3 대응: 11절 Tier 1 표의 증거 안내
 
 ## 의사결정 로그
 
