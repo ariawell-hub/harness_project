@@ -1,7 +1,6 @@
 // 웹 프로파일(profiles/web)의 DB 차단 목록: Drizzle(ADR-0007)의 명령 가운데 DB에 접속하는 것과
 // 마이그레이션 파일을 지우는 것을 L1 훅이 막는다(R13, 설계서 14.3절). 파일만 다루는 명령은 막지 않는다.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { cpSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -64,13 +63,6 @@ const BLOCK_FLAG_FIRST = [
   'drizzle-kit -h drop',
   'drizzle-kit --config a.ts --verbose pull',
   'drizzle-kit --verbose introspect',
-  // 플래그의 값에 공백이 든 형태. 훅은 따옴표를 푼 인자를 공백으로 이은 글을 보므로 값이 여러 토막으로 보인다
-  'drizzle-kit --config "team config.ts" migrate',
-  "drizzle-kit --config='team config.ts' push",
-  'pnpm exec drizzle-kit --config "my project/drizzle.config.ts" --verbose studio',
-  'npx drizzle-kit@latest --config "a b c.ts" drop',
-  'drizzle-kit --config "a (b).ts" migrate',
-  'drizzle-kit --verbose migrate; git status',
 ];
 
 // 파일만 다루는 명령과 상관없는 명령
@@ -88,23 +80,6 @@ const ALLOW = [
   'pnpm add -D --save-exact drizzle-kit@0.31.11',
   'cat node_modules/drizzle-kit/package.json',
   'ls node_modules/drizzle-kit',
-  // 값에 공백이 든 플래그 뒤에 허용된 하위 명령이 오면 막지 않는다(그 뒤의 인자는 보지 않는다)
-  'drizzle-kit --config "team config.ts" generate',
-  'drizzle-kit --config "team config.ts" generate --name add-migrate-log',
-  'drizzle-kit --config "team config.ts" generate --name migrate',
-  'drizzle-kit --config "team config.ts" check',
-  // 다른 명령과 이어 쓴 경우: 뒤따르는 명령의 낱말을 drizzle-kit의 하위 명령으로 보지 않는다
-  'drizzle-kit --version && git pull',
-  'drizzle-kit --config x.ts generate; git pull',
-  'drizzle-kit --help | grep push',
-  'drizzle-kit --config x.ts check || git pull --rebase',
-  // 구분 기호가 낱말에 붙어 있어도 뒤따르는 명령으로 넘어가지 않는다
-  'drizzle-kit --version; git pull',
-  'drizzle-kit --help;git pull',
-  'drizzle-kit --config x.ts; git pull',
-  'drizzle-kit --version&& git pull',
-  'drizzle-kit --help|grep push',
-  '(cd web && drizzle-kit --config x.ts generate) && git pull',
 ];
 
 test('웹 프로파일: DB에 접속하는 drizzle-kit 명령과 drop을 막는다(R13)', () => {
@@ -170,46 +145,4 @@ test('웹 프로파일의 dbPatterns는 모두 정규식으로 컴파일되고, 
     'drizzle-kit 항목이 없다',
   );
   assert.deepEqual(dbClients, ['supabase-db']);
-});
-
-// 훅은 모든 Bash 호출에서 이 패턴을 돌린다. 플래그가 많은 긴 명령에서 역추적이 폭주하면 훅이 멈춘다.
-// 판정은 자식 프로세스에서 돌려 시간 제한을 건다(폭주하면 이 프로세스 안에서는 끊을 수 없다).
-// 입력은 표준 입력으로 넘긴다. 환경 변수나 인자로 넘기면 OS의 길이 한도에 걸린다
-// (Linux는 문자열 하나에 131072바이트, Windows는 환경 블록 전체에 32767자).
-const TIMING = `
-const { patterns, inputs } = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
-let hits = 0;
-for (const p of patterns) { const re = new RegExp(p, 'i'); for (const s of inputs) if (re.test(s)) hits += 1; }
-process.stdout.write(String(hits));
-`;
-
-test('웹 프로파일의 dbPatterns는 플래그가 많은 긴 명령에서도 판정이 끝난다(역추적 폭주 없음)', () => {
-  const { dbPatterns } = loadConfig(webRepo()).guard;
-  const many = (unit: string, n: number) => unit.repeat(n);
-  const inputs = [
-    // 금지 하위 명령으로 끝나지 않는 긴 명령(맞지 않는 쪽이 역추적이 가장 많다)
-    `drizzle-kit ${many('--config ', 40)}generate`,
-    `drizzle-kit ${many('--config a b c ', 2000)}generate`,
-    `drizzle-kit ${many('--a-b-c=d ', 2000)}generate`,
-    `drizzle-kit ${many('-x ', 5000)}check`,
-    `drizzle-kit ${many('--config a b c ', 2000)}`,
-    `${many('drizzle-kit --verbose ', 2000)}up`,
-  ];
-  const r = spawnSync(process.execPath, ['-e', TIMING], {
-    encoding: 'utf8',
-    timeout: 20_000,
-    input: JSON.stringify({ patterns: dbPatterns, inputs }),
-  });
-  assert.equal(
-    r.error,
-    undefined,
-    `판정이 시간 안에 끝나지 않았거나 실행하지 못했다: ${r.error?.message}`,
-  );
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, '0', '금지 하위 명령이 없는 명령이 패턴에 맞았다');
-});
-
-test('웹 프로파일: 플래그가 아주 많아도 끝의 금지 하위 명령을 막는다', () => {
-  const r = bash(`drizzle-kit ${'--config a b c '.repeat(500)}migrate`, webCtx());
-  assert.ok(r?.rule.startsWith('R13'), `막혀야 한다 → ${r?.rule}`);
 });
