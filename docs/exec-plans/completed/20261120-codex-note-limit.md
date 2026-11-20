@@ -2,7 +2,7 @@
 id: 20261120-codex-note-limit
 issue: 161 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: draft # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: normal # low | normal | high
 author: claude-code
