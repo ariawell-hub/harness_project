@@ -65,6 +65,7 @@ export interface LocalMetrics {
   /** `docLint`의 `R8 검토 필요` 경고 수. 기간과 무관한 현재 값 */
   reviewNeeded: number;
   runner: RunnerMetrics | null;
+  /** 보고서의 통과 수와 전체 수. `total`은 1 이상이다(`readSelfTestReport`가 빈 보고서를 거부한다) */
   selfTest: { passed: number; total: number } | null;
 }
 
@@ -270,7 +271,7 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 /**
  * `self-test --out <파일>`이 쓴 보고서(`SelfTestReport`, scripts/selftest/run.ts)의 통과 수와 전체 수.
  * 파일을 한 번 읽는다. 없거나 형식이 다르면(`self-test --live`의 보고서 포함) `SelfTestReportError`다.
- * 형식: `version`이 1, `headSha`가 문자열, `results`의 항목마다 `id`(비지 않은 문자열, 겹치지 않는다)·
+ * 형식: `version`이 1, `headSha`가 문자열, `results`가 하나 이상이고 항목마다 `id`(비지 않은 문자열, 겹치지 않는다)·
  * `covers`·`detail`(문자열)·`state`(`pass`·`fail`·`error`)
  */
 export function readSelfTestReport(file: string): { passed: number; total: number } {
@@ -290,6 +291,8 @@ export function readSelfTestReport(file: string): { passed: number; total: numbe
   if (v.version !== 1) throw bad('version이 1이 아니다');
   if (typeof v.headSha !== 'string') throw bad('headSha가 문자열이 아니다');
   if (!Array.isArray(v.results)) throw bad('results 배열이 없다');
+  // `self-test`는 실행할 시나리오가 없으면 보고서를 쓰기 전에 실패한다(scripts/selftest/run.ts)
+  if (!v.results.length) throw bad('시나리오가 0개다');
   const ids = new Set<string>();
   let passed = 0;
   for (const r of v.results as unknown[]) {

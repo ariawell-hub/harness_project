@@ -563,12 +563,10 @@ test('renderBlock: runner 로그와 보고서가 없으면 값 대신 이유를 
       sessions: { median: null, max: null, retries: 0 },
       broken: 0,
     },
-    selfTest: { passed: 0, total: 0 },
   });
   assert.match(quiet, /^ {2}- 실행: 0회$/m);
   assert.match(quiet, /^ {2}- 멈춘 이유: 없음$/m);
   assert.match(quiet, /^- step당 세션 수·재시도 수: —\(기간 안의 세션 없음\)$/m);
-  assert.match(quiet, /^- 하네스 자체 테스트 통과율: —\(보고서에 시나리오가 없다\)$/m);
 });
 
 test('renderBlock: 잴 수 없는 지표 넷은 값 대신 이유와 TD 번호로 나온다', () => {

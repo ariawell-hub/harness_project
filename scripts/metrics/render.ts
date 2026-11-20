@@ -114,9 +114,7 @@ function localLines(l: LocalMetrics): string[] {
     `- "검토 필요" 문서 수: ${l.reviewNeeded}개(기간과 무관한 현재 값)`,
     st === null
       ? `- 하네스 자체 테스트 통과율: ${DASH}(보고서 없음. \`self-test --out\`으로 만든다)`
-      : st.total === 0
-        ? `- 하네스 자체 테스트 통과율: ${DASH}(보고서에 시나리오가 없다)`
-        : `- 하네스 자체 테스트 통과율: ${st.passed}건 ÷ ${st.total}건 = ${one((st.passed / st.total) * 100)}%`,
+      : `- 하네스 자체 테스트 통과율: ${st.passed}건 ÷ ${st.total}건 = ${one((st.passed / st.total) * 100)}%`,
   ];
   if (!r) {
     lines.push(
