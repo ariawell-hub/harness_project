@@ -42,3 +42,14 @@ test('prompt-codex.md의 길이 제한 안내에 판정 형식의 제한이 모�
   );
   assert.match(line, /넘으면 판정 전체가 버려진다\.$/);
 });
+
+test('공통 프롬프트(prompt.md)의 재현 테스트 개수도 판정 형식의 제한과 같다', () => {
+  // 두 프롬프트는 같은 판정에 함께 쓰인다. 한쪽만 고치면 서로 다른 상한을 전하게 된다(PR #162의 F1)
+  const text = readFileSync(path.join(HARNESS_ROOT, 'scripts/cross-review/prompt.md'), 'utf8');
+  const lines = text.split('\n').filter((l) => l.includes('판정 하나에 재현 테스트는'));
+  assert.equal(lines.length, 1, '재현 테스트 개수 줄이 하나가 아니다');
+  assert.ok(
+    lines[0].includes(`판정 하나에 재현 테스트는 ${LIMITS.repros}개까지다`),
+    `prompt.md의 재현 테스트 개수가 ${LIMITS.repros}개가 아니다`,
+  );
+});

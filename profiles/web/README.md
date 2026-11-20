@@ -1,4 +1,4 @@
-# 웹 프로파일 (초안)
+# 웹 프로파일
 
 `node scripts/harness.ts init --profile web`이 `profile.json`의 설정을 `harness.config.json`에 병합하고 템플릿을 복사한다.
 

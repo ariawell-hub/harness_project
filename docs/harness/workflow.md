@@ -119,6 +119,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
   node scripts/harness.ts check > check.log 2>&1 && git push
   ```
 
+- **웹 프로파일 리포에서 버그 수정이나 화면 변경을 했으면 앱 수준에서 확인한다.** `node scripts/harness.ts verify`(시나리오 하나만 돌리려면 `node scripts/harness.ts verify -- e2e/<시나리오>.spec.ts`)로 확인하고, 출력 폴더의 `evidence/summary.md`를 PR 본문에 옮긴다. `local/`의 파일(스크린샷, trace, 로그, `detail.json`)은 PR·Issue·댓글에 올리지 않는다. 버그 수정이면 고치기 전에 먼저 재현하고, 재현 시나리오를 `e2e/`에 남긴다. 준비와 절차는 [profiles/web/README.md](../../profiles/web/README.md)의 "verify" 절이다. core 프로파일 리포에서는 `verify`가 "해당 없음"이다. Claude Code에서는 `web-verify` 스킬이 같은 명령과 문서를 안내한다.
 - 자체 리뷰는 [검증 체크리스트](../../scripts/cross-review/checklist.md)로 하고 결과를 PR에 남긴다.
 - **발견 사항 처리**: `complete-step` 전에 "발견 사항"의 각 항목 끝에 처리를 적는다. 셋 중 하나다.
   - `→ 처리: [반영한 문서](경로)`: 다음 에이전트가 알아야 할 것은 문서로 옮긴다
