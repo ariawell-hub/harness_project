@@ -3,12 +3,14 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { worktreeOfBranch } from '../lib/approval.ts';
-import { loadConfig } from '../lib/config.ts';
+import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { gitTry, isBehind, repoInfo, showFile } from '../lib/git.ts';
-import { getGitHub, type PullRequest } from '../lib/github.ts';
+import { getGitHub, type GitHubPort, type PullRequest } from '../lib/github.ts';
 import { findPlan, findPlanAt, parseBranch, parseDoc, parseIndex, readIndex } from '../lib/plan.ts';
 import { log } from '../lib/util.ts';
+import { readPrLedger } from '../runner/ledger-read.ts';
 import { classifyPr, describeVerdict, requiredStates } from '../runner/pr-state.ts';
+import { longOpen } from '../runner/review.ts';
 
 /**
  * 커밋 `rev`의 트리에서 그 브랜치가 맡은 step이 completed인가. 커밋이나 계획을 읽지 못하면 null.
@@ -68,6 +70,23 @@ export function behindOf(
   return isBehind(cwd, remote, branch, headSha);
 }
 
+/**
+ * 오래 열린 지적(9.1절)을 한 줄씩 낸다. 대화 세션이 제작자에게 물을 신호다. 읽기만 한다.
+ * 지적의 제목·위치(검증자 출력)는 내지 않는다. 원장을 가릴 수 없으면(ci.recorderBot 없음) 아무것도 내지 않는다
+ */
+function logLongOpen(gh: GitHubPort, cfg: HarnessConfig, pr: number): void {
+  if (!cfg.ci.recorderBot) return;
+  try {
+    const ledger = readPrLedger(gh, cfg, pr);
+    for (const x of ledger ? longOpen(ledger) : [])
+      log(
+        `- 오래 열린 지적: ${x.entry.id} [${x.entry.severity}, ${x.entry.reviewer}] 재판정 ${x.rejudged}회 뒤에도 열려 있다 — 대화 세션은 더 고쳐 올리기 전에 제작자에게 묻는다(절차서 8절)`,
+      );
+  } catch (e) {
+    log(`- 오래 열린 지적 확인: 원장을 읽지 못했다(${(e as Error).message.split('\n')[0]})`);
+  }
+}
+
 export function prState(cwd: string, prNumber: number | null): number {
   const info = repoInfo(cwd);
   const cfg = loadConfig(info.root);
@@ -90,12 +109,14 @@ export function prState(cwd: string, prNumber: number | null): number {
     log(
       `ci.requiredChecks가 비어 있어 출처별 판정을 하지 않는다. 체크 요약: ${pr.checks}${pr.failingChecks.length ? ` (실패: ${pr.failingChecks.join(', ')})` : ''}`,
     );
+    logLongOpen(gh, cfg, pr.number);
     return 0;
   }
   const required = requiredStates(pr.headSha ? gh.commitChecks(pr.headSha) : [], cfg.ci);
   for (const r of required) {
     log(`- ${r.context} [${r.source}]: ${r.state}${r.description ? ` — ${r.description}` : ''}`);
   }
+  logLongOpen(gh, cfg, pr.number);
   const { remote, defaultBranch } = cfg.github;
   const behind = behindOf(info.root, remote, defaultBranch, pr.headSha);
   const stepCompleted = stepCompletedOf(info.root, pr.head, pr.headSha);
