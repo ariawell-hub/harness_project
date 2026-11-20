@@ -36,10 +36,12 @@
   - 결과에 담는 것: `platform`, `arch`, `node`(버전), `pnpm`(버전), `packageManager`(시험 프로젝트에 적은 값), `policy`(시험 프로젝트에 놓인 정책 파일에서 읽은 `minimumReleaseAge` 값과 `onlyBuiltDependencies`의 항목 수, 위 동작 확인이 통과했는지 `enforced`), `packages`(셋의 설치된 버전), `installScripts`(설치된 패키지 가운데 `preinstall`·`install`·`postinstall` 스크립트를 가진 패키지 이름의 정렬된 중복 없는 목록), `pglite`(`dependencies` 수, `.node` 파일 수, `.wasm` 파일 수, `os`·`cpu` 필드), `generate`(종료 코드, 만든 `.sql` 파일 수, `CREATE TABLE`이 있는지), `cases`(아래 사례별 종료 코드와 행 수), `server`(`select version()`의 앞 40자).
   - 사례(`cases`의 `name`): `folder-a`(새 폴더, 1행), `folder-b`(다른 새 폴더, 1행), `folder-a-again`(첫 폴더를 다시 연다, 2행), `memory`(메모리 DB, 1행), `concurrent-c`·`concurrent-d`(서로 다른 새 폴더 둘을 동시에 띄운다, 각 1행).
   - 결과에 절대 경로, 사용자 이름, 환경 변수 값, 걸린 시간을 담지 않는다(머신마다 달라 비교할 수 없고 개인 정보가 섞인다).
-- `lab/q10-db/check-results.ts <결과 이름>` 또는 `--file <결과 파일>`: 결과를 읽어 기대값과 대 보고, 어긋난 것을 한 줄씩 출력하고 종료 코드 1. 모두 맞으면 0. `<결과 이름>`은 `results/<결과 이름>.json`을 읽고 그 이름과 결과의 `platform`·`arch`를 대 본다. `--file`은 그 파일을 읽고 실행 중인 머신의 `platform`·`arch`와 대 본다. 검사 함수(`checkQ10(result: unknown): string[]`, `checkPlatform(result: unknown, name: string): string[]`)와 버전 상수를 내보낸다.
-  - 기대값: `packages`가 상수와 같다 / `packageManager`가 `pnpm@`에 결과의 `pnpm` 버전을 붙인 값과 같다 / `policy.minimumReleaseAge`가 20160 이상이고 `policy.onlyBuiltDependencies`가 0이고 `policy.enforced`가 `true`다 / `pglite.dependencies` 0, `.node` 0, `.wasm` 1 이상, `os`·`cpu`가 없다 / `installScripts`가 `['esbuild']`의 부분집합이다(이름 기준) / `generate` 종료 코드 0, `.sql` 1개 이상, `CREATE TABLE` 있음 / 사례 여섯이 모두 한 번씩 있고 종료 코드 0이며 행 수가 위와 같다(모르는 사례가 없다) / `server`가 `PostgreSQL`로 시작한다 / `platform`·`arch`가 맞다.
+- `lab/q10-db/check-results.ts <결과 이름>` 또는 `--file <결과 파일>`: 결과를 읽어 기대값과 대 보고, 어긋난 것을 한 줄씩 출력하고 종료 코드 1. 모두 맞으면 0. `<결과 이름>`은 `results/<결과 이름>.json`을 읽고 그 이름과 결과의 `platform`·`arch`를 대 본다. `--file`은 그 파일을 읽고 실행 중인 머신의 `platform`·`arch`와 대 본다. 검사 함수(`checkQ10(result: unknown): string[]`, `checkPlatform(result: unknown, name: string): string[]`, `checkPnpm(result: unknown, repoPackageManager: string): string[]`)와 버전 상수를 내보낸다.
+  - **pnpm 버전은 이 리포의 `package.json`에 적힌 `packageManager`를 직접 기준으로 본다.** 검사 스크립트가 그 값을 읽어, 결과의 `packageManager`가 그 값과 같고 결과의 `pnpm`이 그 버전과 같아야 한다. 결과 안의 두 칸이 서로 같기만 한 것(둘 다 같은 구버전)은 통과가 아니다. 리포의 고정 버전이 바뀌면 저장된 결과는 통과하지 않는다(다시 잰다).
+  - **확정 조건의 판정 `--confirm [<결과 폴더>]`**(기본 `results/`): 그 폴더의 결과 파일(`<platform>-<arch>.json`)을 모두 위와 같이 검사하고, macOS(`darwin-`), Windows 네이티브(`win32-`), Linux(`linux-`) **세 환경 모두**에 통과한 결과가 하나 이상 있을 때만 종료 코드 0이다. 결과가 없는 환경과 통과하지 못한 파일을 한 줄씩 내고 종료 코드 1이다. 환경 하나만 더 통과한 상태는 1이다. 판정 함수(`confirmProblems(checked: { name: string; bad: string[] }[]): string[]`)와 필요한 환경의 목록을 내보낸다.
+  - 기대값: `packages`가 상수와 같다 / `packageManager`가 `pnpm@`에 결과의 `pnpm` 버전을 붙인 값과 같고, 이 리포의 `packageManager`와 같다 / `policy.minimumReleaseAge`가 20160 이상이고 `policy.onlyBuiltDependencies`가 0이고 `policy.enforced`가 `true`다 / `pglite.dependencies` 0, `.node` 0, `.wasm` 1 이상, `os`·`cpu`가 없다 / `installScripts`가 `['esbuild']`의 부분집합이다(이름 기준) / `generate` 종료 코드 0, `.sql` 1개 이상, `CREATE TABLE` 있음 / 사례 여섯이 모두 한 번씩 있고 종료 코드 0이며 행 수가 위와 같다(모르는 사례가 없다) / `server`가 `PostgreSQL`로 시작한다 / `platform`·`arch`가 맞다.
   - 꼴이 다른 입력(객체가 아님, 필드 없음, 사례가 빠짐)은 예외가 아니라 어긋남으로 보고한다.
-- `lab/q10-db/test/check-results.test.ts`: 맞는 결과는 어긋남 0건. 어긋난 결과 각각이 걸린다(패키지 버전 다름, 정책이 느슨함(최소 기간이 짧다, 설치 스크립트 허용 항목이 있다, `policy`가 없다), 정책의 적용을 확인하지 못함(`enforced`가 `true`가 아니다), 쓴 pnpm이 `packageManager`와 다름, PGlite에 의존성이 생김, `.node` 파일이 생김, `esbuild`가 아닌 설치 스크립트, `generate` 실패, 격리가 깨짐(`folder-b` 2행), 다시 열었는데 1행, 사례가 빠짐·겹침, 플랫폼이 다름, 객체가 아닌 입력).
+- `lab/q10-db/test/check-results.test.ts`: 맞는 결과는 어긋남 0건. 어긋난 결과 각각이 걸린다(패키지 버전 다름, 정책이 느슨함(최소 기간이 짧다, 설치 스크립트 허용 항목이 있다, `policy`가 없다), 정책의 적용을 확인하지 못함(`enforced`가 `true`가 아니다), 쓴 pnpm이 `packageManager`와 다름, 결과의 두 칸은 서로 같지만 리포의 고정 버전과 다름, PGlite에 의존성이 생김, `.node` 파일이 생김, `esbuild`가 아닌 설치 스크립트, `generate` 실패, 격리가 깨짐(`folder-b` 2행), 다시 열었는데 1행, 사례가 빠짐·겹침, 플랫폼이 다름, 객체가 아닌 입력). 확정 조건의 판정: macOS만 있으면 Windows와 Linux가 없다고 낸다 / macOS와 Windows만 있으면 Linux가 없다고 낸다 / macOS와 Linux만 있으면 Windows가 없다고 낸다 / 셋이 모두 통과하면 문제가 없다 / 셋이 있어도 하나가 검사를 통과하지 못하면 그 파일을 낸다 / 명령(`--confirm <폴더>`)의 종료 코드가 이와 같다.
 - `lab/q10-db/results/darwin-arm64.json`: 이 Mac에서 `trial.ts`를 실제로 돌려 만든다. 손으로 쓰지 않는다.
 
 ### 2. ADR `docs/decisions/ADR-0007-db-postgres-drizzle.md`
@@ -53,7 +55,7 @@ ADR-0006의 형식(frontmatter, 날짜·상태·관련)을 따른다. `related_c
   2. 일회용 DB(14.3절)는 내장 PostgreSQL(PGlite)이다. worktree 안의 폴더 하나가 DB 하나이고, 테스트는 메모리 DB를 쓴다. PC에 PostgreSQL 서버나 컨테이너 런타임을 요구하지 않는다.
   3. 운영 DB는 서버형 PostgreSQL이고 에이전트는 닿지 않는다(E4, 14.3절 그대로).
 - `## 실측`: `lab/q10-db/`의 절차와 결과(macOS arm64). 무엇을 쟀는지 요약. 설치 정책(R17, `pnpm-workspace.yaml`)을 적용한 상태에서 쟀다는 것과 그 정책 아래의 버전(PGlite `0.5.15` 포함).
-- `## 확정 조건`: 기준은 여러 실행 환경을 묻는데 잰 것은 하나다. Windows 네이티브(`win32-*`)와 Linux(`linux-*`)에서 `lab/q10-db`의 절차를 돌린 결과 파일이 `results/`에 있고 검사(`check-results.ts`)를 통과하면(이 조건은 한 문장으로 적는다) 상태를 채택으로 바꾸고, 설계서 18절 Q10 행과 19절 "현재 위치"를 확정으로 고친다(그 변경은 별도 PR). 그 전까지 Q10은 3단계 착수 전에 끝낼 것으로 남는다.
+- `## 확정 조건`: 기준은 여러 실행 환경을 묻는데 잰 것은 하나다. 확정 조건은 `node lab/q10-db/check-results.ts --confirm`이 종료 코드 0으로 끝나는 것이다. 이 명령은 `lab/q10-db/results/`에 macOS(`darwin-*`), Windows 네이티브(`win32-*`), Linux(`linux-*`)의 결과 파일이 모두 있고 모두 검사를 통과할 때만 0이다. 이어서 이 문장을 그대로 적는다: "하나라도 없거나 통과하지 못하면 확정하지 않는다." 조건이 채워지면 상태를 채택으로 바꾸고, 설계서 18절 Q10 행과 19절 "현재 위치"를 확정으로 고친다(그 변경은 별도 PR). 그 전까지 Q10은 3단계 착수 전에 끝낼 것으로 남는다. Windows는 그 PC의 세션이, Linux는 제작자가 정한 수단으로 절차를 돌린다.
 - `## 알려진 한계`:
   - PGlite는 한 프로세스가 연결 하나로 쓴다. 같은 폴더를 두 프로세스가 함께 열 수 없으므로 `dev`와 테스트는 서로 다른 DB를 쓴다.
   - 개발·테스트(PGlite)와 운영(서버형 PostgreSQL)은 드라이버가 다르다. 연결 풀, 동시성, 확장 기능의 차이는 로컬에서 드러나지 않는다.
@@ -70,7 +72,7 @@ ADR-0006의 형식(frontmatter, 날짜·상태·관련)을 따른다. `related_c
 
 - 18절 Q10 행: "잠정 결정: …(ADR-0007)". 내용: PostgreSQL + Drizzle, 일회용 DB는 PGlite, macOS에서 쟀고 Windows 네이티브와 Linux의 결과가 통과하면 확정한다(TD-14), 차단 목록은 웹 프로파일이 채운다(14.3절).
 - 19절 "현재 위치" 줄: Q10을 착수 전에 정할 것에서 빼지 않는다. Q10은 잠정 결정이고 Windows 네이티브·Linux 실측이 남았다는 것(ADR-0007)과 Q13이 열려 있다는 것을 적는다. "단계별 선행 결정" 줄은 그대로 둔다.
-- 14.3절 "DB 환경 구분" 표 아래에 항목 하나: 웹 프로파일의 일회용 DB는 worktree 안의 PGlite 폴더(테스트는 메모리)이고 PC에 DB 서버를 두지 않는다(ADR-0007, 잠정). 표준 명령에 잇는 일은 파일럿 리포에서 한다(TD-12).
+- 14.3절 "DB 환경 구분" 표 아래에 항목 하나("- 웹 프로파일의 일회용 DB는 "으로 시작하는 한 줄. 앞뒤에 빈 줄): 웹 프로파일의 일회용 DB는 worktree 안의 PGlite 폴더(테스트는 메모리)이고 PC에 DB 서버를 두지 않는다(ADR-0007, 잠정). 표준 명령에 잇는 일은 파일럿 리포에서 한다(TD-12).
 - 14.3절의 금지 분류 표, "코드·마이그레이션에 들어가는 것", 강제 장치 표는 고치지 않는다.
 - 0절 버전 이력에 한 줄, 문서 머리의 버전. `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄. 번호는 push할 때 main의 다음 번호다. 다른 PR이 먼저 병합되면 `origin/main`을 병합하고 다시 잡는다.
 
@@ -97,7 +99,12 @@ grep -q "^- 상태: 잠정" docs/decisions/ADR-0007-db-postgres-drizzle.md
 sed -n '/^## 실측/,/^## 확정 조건/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -q "pnpm-workspace.yaml"
 sed -n '/^## 실측/,/^## 확정 조건/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -q "lab/q10-db"
 sed -n '/^## 실측/,/^## 확정 조건/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -q "0.5.15"
-sed -n '/^## 확정 조건/,/^## 알려진 한계/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep "win32" | grep "linux" | grep -q "check-results"
+sed -n '/^## 확정 조건/,/^## 알려진 한계/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -qF "check-results.ts --confirm"
+sed -n '/^## 확정 조건/,/^## 알려진 한계/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep "darwin" | grep "win32" | grep -q "linux"
+sed -n '/^## 확정 조건/,/^## 알려진 한계/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -qF "하나라도 없거나 통과하지 못하면 확정하지 않는다"
+node lab/q10-db/check-results.ts --confirm; test $? -eq 1
+node lab/q10-db/check-results.ts --confirm 2>&1 | grep -q "win32"
+node lab/q10-db/check-results.ts --confirm 2>&1 | grep -q "linux"
 sed -n '/^## 확정 조건/,/^## 알려진 한계/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -q "착수 전"
 sed -n '/^## 알려진 한계/,/^## 되돌리는 조건/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -q "연결 하나"
 sed -n '/^## 알려진 한계/,/^## 되돌리는 조건/p' docs/decisions/ADR-0007-db-postgres-drizzle.md | grep -q "드라이버"
@@ -109,7 +116,8 @@ grep "ADR-0007" docs/decisions/index.md | grep -q "잠정"
 grep "^| Q10 " docs/harness/design.md | grep "ADR-0007" | grep "PGlite" | grep -q "잠정"
 grep "현재 위치" docs/harness/design.md | grep "Q10" | grep "잠정" | grep -q "Q13"
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "PGlite" | grep -q "ADR-0007"
-O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | grep . > "$O/base.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep . > "$O/now.txt" && test -s "$O/base.txt" && test -z "$(grep -Fxvf "$O/now.txt" "$O/base.txt")"
+test "$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -c "^- 웹 프로파일의 일회용 DB는 ")" = 1
+O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | cat -s > "$O/base.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -v "^- 웹 프로파일의 일회용 DB는 " | cat -s > "$O/now.txt" && test -s "$O/base.txt" && diff "$O/base.txt" "$O/now.txt"
 grep "^| TD-12 " docs/exec-plans/tech-debt-tracker.md | grep -q "ADR-0007"
 grep "^| TD-14 " docs/exec-plans/tech-debt-tracker.md | grep "lab/q10-db" | grep -q "ADR-0007"
 grep -q "lab/q10-db/README.md" docs/index.md
@@ -119,7 +127,8 @@ node scripts/harness.ts fmt --check
 
 - 다섯째 줄은 실물 확인을 실제로 돌린다(패키지 설치에 네트워크가 필요하고 1~2분 걸린다). 결과는 리포 밖 임시 폴더에 쓴다. 이 줄이 실행한 머신에서 통과하지 않으면 그 머신에서는 기준이 충족되지 않은 것이다(ADR-0007의 "되돌리는 조건").
 - ADR을 보는 줄들은 절 제목 사이를 잘라 그 절의 본문에 필수 내용이 있는지 본다. 절이 없거나 비어 있으면 실패한다.
-- `git merge-base`가 든 줄은 14.3절의 규칙이 빠지지 않았는지 본다. PR이 갈라진 지점의 14.3절에 있던 모든 줄(표 셋과 "코드·마이그레이션에 들어가는 것"의 항목 포함)이 지금의 14.3절에 글자 그대로 있어야 한다. 이 step은 14.3절에 줄을 더하기만 한다. `origin/main`이 필요하다(`git fetch origin`).
+- `--confirm`을 돌리는 세 줄은 확정 조건이 아직 채워지지 않았음을 본다(이 step에서는 macOS 결과뿐이라 종료 코드 1이고, 없는 환경으로 Windows와 Linux를 낸다). 두 환경이 모두 있어야 한다는 것은 검사 스크립트의 테스트가 본다.
+- `git merge-base`가 든 줄은 14.3절이 그대로인지 본다. 이 step이 14.3절에 더하는 것은 "- 웹 프로파일의 일회용 DB는 "으로 시작하는 한 줄뿐이다(바로 윗줄이 한 줄인지 본다). 그 한 줄을 빼고 이어진 빈 줄을 하나로 줄이면, PR이 갈라진 지점의 14.3절과 줄 순서·빈 줄까지 같아야 한다(`diff`). 표 안에 빈 줄이 끼거나 줄이 빠지거나 바뀌면 실패한다. `origin/main`이 필요하다(`git fetch origin`).
 
 ## 금지사항
 

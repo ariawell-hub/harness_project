@@ -56,14 +56,16 @@ grep -q '"version": "0.4.0"' profiles/web/profile.json
 grep -q "^## DB" profiles/web/README.md
 grep -q "ADR-0007" profiles/web/README.md
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "프로파일이 채운다" | grep -q "drizzle-kit"
-O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | grep . | grep -v "프로파일이 채운다" > "$O/base.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep . > "$O/now.txt" && test -s "$O/base.txt" && test -z "$(grep -Fxvf "$O/now.txt" "$O/base.txt")"
+test "$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -c "프로파일이 채운다")" = 1
+sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -q "^- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)\. "
+O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | grep -v "프로파일이 채운다" > "$O/base.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -v "프로파일이 채운다" > "$O/now.txt" && test -s "$O/base.txt" && diff "$O/base.txt" "$O/now.txt"
 grep -q "DB_PATTERNS" docs/exec-plans/tech-debt-tracker.md
 node scripts/harness.ts lint
 node scripts/harness.ts doc-lint
 node scripts/harness.ts fmt --check
 ```
 
-- `git merge-base`가 든 줄은 14.3절의 규칙이 빠지지 않았는지 본다. PR이 갈라진 지점의 14.3절에 있던 줄 가운데 이 step이 고치는 한 줄("프로파일이 채운다")을 뺀 모든 줄이 지금의 14.3절에 글자 그대로 있어야 한다. 그 한 줄은 바로 위 줄이 본다(뒤에 덧붙이기만 한다). `origin/main`이 필요하다(`git fetch origin`).
+- `git merge-base`가 든 줄은 14.3절이 그대로인지 본다. 이 step이 14.3절에서 고치는 것은 "프로파일이 채운다"가 든 한 줄뿐이고, 그 줄은 있던 문장으로 시작해야 한다(위의 두 줄이 본다). 그 한 줄을 뺀 나머지는 PR이 갈라진 지점의 14.3절과 줄 순서·빈 줄까지 같아야 한다(`diff`). `origin/main`이 필요하다(`git fetch origin`).
 
 ## 금지사항
 
