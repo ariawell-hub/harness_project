@@ -34,6 +34,8 @@ function pr(number: number, over: Partial<MergedPr> = {}): MergedPr {
     mergeSha: `m${number}`,
     additions: 10,
     deletions: 2,
+    commits: [],
+    crossRepo: false,
     ...over,
   };
 }
@@ -51,6 +53,7 @@ function run(over: Partial<WorkflowRun> = {}): WorkflowRun {
     updatedAt: '2026-11-11T03:10:00Z',
     attempt: 1,
     runNumber: 1,
+    sameRepo: true,
     ...over,
   };
 }
@@ -166,6 +169,8 @@ function fakeGh(o: { prs?: unknown; issues?: unknown; runs?: Record<string, stri
     gh(args) {
       calls.push(args);
       if (args[0] === 'pr') return JSON.stringify(o.prs ?? []);
+      // PR 커밋 조회(step1). 이 파일의 테스트는 커밋을 보지 않는다
+      if (/\/pulls\/\d+\/commits\?/.test(args[2] ?? '')) return `${'c'.repeat(40)}\n`;
       if (args[0] === 'issue') return JSON.stringify(o.issues ?? []);
       const day = /created=(\d{4}-\d{2}-\d{2})/.exec(args.join(' '))?.[1] ?? '';
       const lines = o.runs?.[day] ?? [JSON.stringify({ total: 0 })];
@@ -186,6 +191,7 @@ const rawPr = (number: number, mergedAt: string) => ({
   mergeCommit: { oid: `m${number}` },
   additions: 7,
   deletions: 3,
+  isCrossRepository: false,
 });
 
 test('ghSource.mergedPrs: 기본 브랜치에 병합된 PR을 읽어 형을 바꾸고 기간 밖은 뺀다', () => {
@@ -206,6 +212,8 @@ test('ghSource.mergedPrs: 기본 브랜치에 병합된 PR을 읽어 형을 바�
       mergeSha: 'm1',
       additions: 7,
       deletions: 3,
+      crossRepo: false,
+      commits: ['c'.repeat(40)],
     },
     {
       number: 3,
@@ -216,6 +224,8 @@ test('ghSource.mergedPrs: 기본 브랜치에 병합된 PR을 읽어 형을 바�
       mergeSha: '',
       additions: 7,
       deletions: 3,
+      crossRepo: false,
+      commits: ['c'.repeat(40)],
     },
   ]);
   const a = f.calls[0];
@@ -425,8 +435,9 @@ test('ghSource.ledger: 받은 함수를 PR 번호로 부른다', () => {
 });
 
 test('ghSource: 모든 호출의 인자 배열이 읽기 요청 꼴과 자리마다 맞는다', () => {
-  // ghSource가 보내는 것은 PR·Issue·실행 조회 셋이다(댓글 조회는 원장을 읽는 쪽이 보낸다)
-  const shapes = ghReadShapes('main').filter((x) => x.name !== 'comments');
+  // 파일럿 지표의 조회 가운데 ghSource가 보내는 것은 PR·Issue·실행 조회 셋이다(댓글 조회는 원장을 읽는 쪽이 보낸다).
+  // 상시 지표가 더한 조회의 꼴은 metrics-steady.test.ts가 본다
+  const shapes = ghReadShapes('main').filter((x) => ['prs', 'issues', 'runs'].includes(x.name));
   const f = fakeGh({});
   const s = source(f);
   s.mergedPrs(P);
