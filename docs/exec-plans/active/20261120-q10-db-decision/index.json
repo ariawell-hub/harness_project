@@ -1,0 +1,7 @@
+{
+  "plan": "20261120-q10-db-decision",
+  "steps": [
+    { "step": 0, "name": "decision-record", "status": "pending" },
+    { "step": 1, "name": "drizzle-guard", "status": "pending" }
+  ]
+}
