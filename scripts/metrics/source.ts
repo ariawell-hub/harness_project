@@ -521,6 +521,8 @@ export function ghSource(o: {
         const text = o.gh([
           'api',
           '--paginate',
+          // since는 경계를 포함한다: 갱신 시각이 since와 같은 댓글도 온다(2026-11-20에 이 리포에서 확인.
+          // 같은 시각이면 오고 1초 뒤로 주면 오지 않는다). 시작일 00:00:00Z에 쓰인 댓글을 받는다
           `repos/{owner}/{repo}/issues/comments?since=${p.since}T00:00:00Z&per_page=100`,
           '--jq',
           COMMENTS_JQ,

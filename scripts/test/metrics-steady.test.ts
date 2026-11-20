@@ -434,14 +434,26 @@ test('ghSource.escalationComments: 봇이 기간 안에 쓴 댓글만 분류하�
         c(6, BOT, '2026-11-11T06:00:00Z', 'PR을 열었다'),
         c(7, BOT, '2026-11-12T06:00:00Z', '@maker PR #8이 제작자 승인을 기다린다.', 8),
         c(8, BOT, '2026-11-12T07:00:00Z', null),
+        // 집계 시작일 00:00:00Z에 쓰인 댓글은 기간 안이다
+        c(
+          9,
+          BOT,
+          '2026-11-11T00:00:00Z',
+          '@maker PR #9의 CI 대기가 5시간을 넘었다(기준 4시간).',
+          9,
+        ),
       ),
   });
   const got = source(f).escalationComments(P);
   assert.deepEqual(got, [
     { issue: 7, at: '2026-11-11T05:00:00Z', kind: 'stop-failures' },
     { issue: 8, at: '2026-11-12T06:00:00Z', kind: 'approval' },
+    { issue: 9, at: '2026-11-11T00:00:00Z', kind: 'ci-stall' },
   ]);
   assert.ok(!JSON.stringify(got).includes('중단 보고'), '본문이 결과에 남았다');
+  // 조회의 since는 집계 시작일 00:00:00Z다. GitHub은 갱신 시각이 since와 같은 댓글도 준다(경계 포함.
+  // 2026-11-20에 이 리포에서 확인). 받은 뒤에는 생성 시각으로 거른다: 시작일 00:00:00Z(위 9번)는 들고
+  // 직전 초(위 5번)는 빠진다
   assert.equal(
     f.calls[0][2],
     'repos/{owner}/{repo}/issues/comments?since=2026-11-11T00:00:00Z&per_page=100',
