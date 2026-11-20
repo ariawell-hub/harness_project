@@ -1,7 +1,16 @@
 {
   "plan": "20261120-p0-maker-approval",
   "steps": [
-    { "step": 0, "name": "accept-ledger", "status": "pending" },
-    { "step": 1, "name": "accept-wire", "status": "pending" }
+    {
+      "step": 0,
+      "name": "accept-ledger",
+      "status": "completed",
+      "completed_at": "2026-11-20T12:52:27+09:00"
+    },
+    {
+      "step": 1,
+      "name": "accept-wire",
+      "status": "pending"
+    }
   ]
 }
