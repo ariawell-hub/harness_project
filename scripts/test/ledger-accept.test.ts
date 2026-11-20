@@ -104,6 +104,23 @@ test('깨진 openedAt과 모르는 키가 든 원장은 읽지 않는다', () =>
   assert.equal(parseLedger(bodyOf(status)), null);
 });
 
+test('ledgerStatus: 열린 차단 지적이 남아 실패할 때도 설명에 제작자 승인 수가 나온다', () => {
+  const l = ledger(
+    entry({ status: 'accepted' }),
+    entry({ id: 'F2', severity: 'P1', title: 'b' }),
+    entry({ id: 'F3', title: 'c', status: 'accepted' }),
+  );
+  assert.deepEqual(ledgerStatus(l), {
+    state: 'failure',
+    description: '열린 차단 지적 1건: F2, 제작자 승인 2',
+  });
+  // 승인이 없으면 문구는 전과 같다
+  assert.deepEqual(ledgerStatus(ledger(entry())), {
+    state: 'failure',
+    description: '열린 차단 지적 1건: F1',
+  });
+});
+
 test('ledgerStatus: accepted는 막지 않고 설명에 수가 나온다', () => {
   const l = ledger(
     entry({ status: 'accepted' }),
@@ -119,11 +136,11 @@ test('ledgerStatus: accepted는 막지 않고 설명에 수가 나온다', () =>
     state: 'success',
     description: '차단 지적 없음 (전체 1, 미룸 0)',
   });
-  // 다른 열린 지적은 여전히 막는다
+  // 다른 열린 지적은 여전히 막는다(설명에는 승인 수가 함께 나온다)
   const blocked = ledger(entry({ status: 'accepted' }), entry({ id: 'F2', title: '다른 P0' }));
   assert.deepEqual(ledgerStatus(blocked), {
     state: 'failure',
-    description: '열린 차단 지적 1건: F2',
+    description: '열린 차단 지적 1건: F2, 제작자 승인 1',
   });
 });
 

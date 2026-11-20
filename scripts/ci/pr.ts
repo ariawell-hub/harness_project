@@ -85,3 +85,51 @@ export function githubGet(token: string, apiUrl?: string): (path: string) => Pro
     return res.json();
   };
 }
+
+/** GraphQL 요청의 실패. 메시지는 고정된 문구와 수뿐이다(응답 본문·GitHub의 오류 문구를 넣지 않는다) */
+export class GraphqlError extends Error {}
+
+/**
+ * GitHub GraphQL 요청 함수. data를 돌려준다. 200이 아니거나 응답에 errors가 있으면(데이터가 함께 와도) 예외다.
+ * 오류 응답에는 댓글 본문 같은 데이터가 섞일 수 있어, 예외 메시지에는 상태 코드와 수만 쓴다
+ */
+export function githubGraphql(
+  token: string,
+  apiUrl?: string,
+): (query: string, variables: Record<string, unknown>) => Promise<unknown> {
+  const api = (apiUrl ?? 'https://api.github.com').replace(/\/$/, '');
+  return async (query, variables) => {
+    let res: Response;
+    try {
+      res = await fetch(`${api}/graphql`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      throw new GraphqlError('GraphQL 요청 실패: 응답 없음');
+    }
+    if (!res.ok) throw new GraphqlError(`GraphQL 요청 실패: HTTP ${res.status}`);
+    let raw: unknown;
+    try {
+      raw = await res.json();
+    } catch {
+      throw new GraphqlError('GraphQL 응답 형식 오류');
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+      throw new GraphqlError('GraphQL 응답 형식 오류');
+    const { errors, data } = raw as { errors?: unknown; data?: unknown };
+    if (Array.isArray(errors) ? errors.length > 0 : errors !== undefined && errors !== null)
+      throw new GraphqlError(
+        `GraphQL 응답에 오류가 있다(${Array.isArray(errors) ? errors.length : 1}건)`,
+      );
+    if (!data || typeof data !== 'object') throw new GraphqlError('GraphQL 응답 형식 오류');
+    return data;
+  };
+}

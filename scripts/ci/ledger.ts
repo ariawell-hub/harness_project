@@ -254,7 +254,12 @@ export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; descrip
   }
   let ids = open.map((e) => e.id).join(', ');
   if (ids.length > 100) ids = `${ids.slice(0, 100).replace(/,[^,]*$/, '')} 외`;
-  return { state: 'failure', description: `열린 차단 지적 ${open.length}건: ${ids}` };
+  // 제작자 승인 수는 실패할 때도 적는다(무엇이 승인으로 닫혀 있는지 상태만 보고 알 수 있게)
+  const accepted = l.findings.filter((e) => e.status === 'accepted').length;
+  return {
+    state: 'failure',
+    description: `열린 차단 지적 ${open.length}건: ${ids}${accepted ? `, 제작자 승인 ${accepted}` : ''}`,
+  };
 }
 
 export const LEDGER_MARKER = '<!-- harness-ledger:v1 -->';
