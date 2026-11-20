@@ -76,16 +76,25 @@ const max = (values: number[]) => (values.length ? Math.max(...values) : null);
 
 /**
  * 그 PR의 `check` 실행. 실행 목록은 PR 번호를 주지 않으므로 head 브랜치 이름과 커밋 SHA, 시각으로 잇는다.
- * 조건이 하나라도 어긋나면 그 PR의 실행이 아니다
+ * `own`: 조건이 모두 맞는 실행. `replaced`: SHA만 어긋난 실행이 있다(커밋이 교체된 PR).
+ * 커밋 목록은 병합 때의 것이라, 목록에서 빠진 커밋에서 돈 실행을 버리고 첫 실행을 고르면
+ * 실패한 첫 실행이 빠지고 뒤의 통과가 첫 통과로 세어질 수 있다
  */
-function runsOfPr(p: MergedPr, opened: number, merged: number, runs: WorkflowRun[]): WorkflowRun[] {
+function runsOfPr(
+  p: MergedPr,
+  opened: number,
+  merged: number,
+  runs: WorkflowRun[],
+): { own: WorkflowRun[]; replaced: boolean } {
   const commits = new Set(p.commits);
-  return runs.filter((r) => {
+  const candidates = runs.filter((r) => {
     if (r.path !== CHECK_WORKFLOW || r.event !== 'pull_request') return false;
-    if (!r.sameRepo || r.branch !== p.head || !commits.has(r.headSha)) return false;
+    if (!r.sameRepo || r.branch !== p.head) return false;
     const t = Date.parse(r.createdAt);
     return !Number.isNaN(t) && t >= opened && t <= merged;
   });
+  const own = candidates.filter((r) => commits.has(r.headSha));
+  return { own, replaced: own.length !== candidates.length };
 }
 
 function firstPass(i: SteadyInput): SteadyMetrics['firstPass'] {
@@ -106,7 +115,12 @@ function firstPass(i: SteadyInput): SteadyMetrics['firstPass'] {
       unlinkable++;
       continue;
     }
-    const own = runsOfPr(p, opened, merged, i.runs).sort(runOrder);
+    const { own, replaced } = runsOfPr(p, opened, merged, i.runs);
+    if (replaced) {
+      unlinkable++;
+      continue;
+    }
+    own.sort(runOrder);
     if (!own.length) {
       noRuns++;
       continue;

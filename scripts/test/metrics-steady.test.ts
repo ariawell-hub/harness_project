@@ -611,7 +611,6 @@ test('steadyMetrics: 포크에서 온 PR과 시각을 읽지 못한 PR은 실행
 test('steadyMetrics: 조건이 하나라도 어긋난 실행은 그 PR의 실행이 아니다', () => {
   const others: Array<[string, Partial<WorkflowRun>]> = [
     ['포크의 같은 이름 브랜치에서 돈 실행', { sameRepo: false }],
-    ['PR의 커밋에 없는 SHA', { headSha: sha('f') }],
     ['PR이 열리기 전', { createdAt: '2026-11-11T00:59:59Z' }],
     ['병합된 뒤', { createdAt: '2026-11-11T05:00:01Z' }],
     ['다른 브랜치', { branch: 'feat/20261111-x-s9' }],
@@ -642,6 +641,70 @@ test('steadyMetrics: 조건이 하나라도 어긋난 실행은 그 PR의 실행
     );
     assert.equal(m.firstPass.withRuns, 1, at);
     assert.equal(m.firstPass.passed, 0, at);
+  }
+});
+
+test('steadyMetrics: 커밋이 교체된 PR은 실행을 이을 수 없는 PR로 빠진다', () => {
+  // 가장 이른 실행은 PR의 커밋 목록에 없는 SHA에서 실패했고, 그 뒤의 실행은 목록의 SHA에서 첫 시도에 통과했다.
+  // 커밋 목록은 병합 때의 것이라, 앞선 실행을 버리고 고르면 뒤의 통과가 첫 통과로 세어진다
+  const replaced = run({
+    createdAt: '2026-11-11T01:30:00Z',
+    conclusion: 'failure',
+    headSha: sha('f'),
+  });
+  const later = run({ createdAt: '2026-11-11T04:00:00Z', runNumber: 2 });
+  const out = { passed: 0, withRuns: 0, rate: null, unlinkable: 1, noRuns: 0 };
+  const firstPassed = { passed: 1, withRuns: 1, rate: 1, unlinkable: 0, noRuns: 0 };
+  assert.deepEqual(
+    steadyMetrics(input({ prs: [pr(1)], runs: [replaced, later] })).firstPass,
+    out,
+    '첫 통과로도 실행을 찾은 PR로도 세지 않는다',
+  );
+  // 그 앞선 실행을 입력에서 빼면 첫 통과다
+  assert.deepEqual(steadyMetrics(input({ prs: [pr(1)], runs: [later] })).firstPass, firstPassed);
+  // 목록에 없는 SHA의 실행이 뒤에 있거나 그것뿐이어도 빠진다(통과한 실행이어도 같다)
+  assert.deepEqual(
+    steadyMetrics(
+      input({
+        prs: [pr(1)],
+        runs: [
+          run({ createdAt: '2026-11-11T01:30:00Z' }),
+          run({ createdAt: '2026-11-11T04:00:00Z', runNumber: 2, headSha: sha('f') }),
+        ],
+      }),
+    ).firstPass,
+    out,
+  );
+  assert.deepEqual(
+    steadyMetrics(input({ prs: [pr(1)], runs: [{ ...replaced, conclusion: 'success' }] }))
+      .firstPass,
+    out,
+  );
+  // 다른 PR은 그대로 센다
+  assert.deepEqual(
+    steadyMetrics(
+      input({
+        prs: [pr(1), pr(2)],
+        runs: [replaced, later, run({ branch: 'feat/20261111-x-s2', runNumber: 3 })],
+      }),
+    ).firstPass,
+    { passed: 1, withRuns: 1, rate: 1, unlinkable: 1, noRuns: 0 },
+  );
+  // 그 PR의 실행일 수 없는 것은 SHA가 목록에 없어도 PR을 빼지 않는다
+  const notOwn: Array<[string, Partial<WorkflowRun>]> = [
+    ['다른 브랜치', { branch: 'feat/20261111-x-s9' }],
+    ['PR이 열리기 전', { createdAt: '2026-11-11T00:59:59Z' }],
+    ['병합된 뒤', { createdAt: '2026-11-11T05:00:01Z' }],
+    ['포크의 같은 이름 브랜치', { sameRepo: false }],
+    ['push로 돈 실행', { event: 'push' }],
+    ['다른 워크플로', { path: '.github/workflows/gates.yml' }],
+  ];
+  for (const [why, over] of notOwn) {
+    assert.deepEqual(
+      steadyMetrics(input({ prs: [pr(1)], runs: [{ ...replaced, ...over }, later] })).firstPass,
+      firstPassed,
+      why,
+    );
   }
 });
 
