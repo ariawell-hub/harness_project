@@ -37,8 +37,9 @@ export function docLintGate(root: string, cfg: HarnessConfig): DocLintResult;
      - 그 ref에 `git show-ref --verify -q <ref>`가 종료 코드 1이다(ref를 찾지 못한다).
      - `git rev-parse --git-path <ref>`가 종료 코드 0이고 그 경로(`root` 기준)에 파일이 없다(ref 파일이 있으면 내용이 손상된 것이다).
   2. 커밋이 없는 리포면 `docLint(root, cfg, { noHistory: true })`, 그 밖에는 `docLint(root, cfg)`의 결과를 그대로 돌려준다. 손상된 ref, 없는 객체를 가리키는 ref, `git` 리포가 아닌 폴더는 모두 뒤의 경로로 가서 `git ls-files`나 `git log`의 실패로 드러난다.
-  3. 2의 `DocLintReadError`는 오류 한 건으로 바꿔 `{ errors: [그 오류], warnings: [] }`를 돌려준다. 오류는 `rule: 'R8 문서 읽기 실패'`, `what`은 `DocLintReadError`의 메시지(실패한 조회의 이름 `git ls-files` 또는 `git log`가 들어 있다), `how`는 고치는 법이고 `git status`라는 글자가 들어 있다(이 폴더에서 `git status`가 도는지 확인하고 다시 실행한다는 뜻), `doc`은 이 파일의 다른 오류와 같은 값이다.
-  4. `DocLintReadError`가 아닌 예외는 잡지 않는다.
+  3. 커밋이 없는 리포가 아니면, 2가 예외 없이 끝난 뒤 `git rev-parse --verify -q HEAD^{commit}`을 실행한다. 종료 코드가 0이 아니면 `DocLintReadError`(메시지에 `git rev-parse`가 들어 있다. HEAD의 커밋을 읽지 못했다는 뜻)로 다룬다. 커밋 시각이 필요한 문서가 하나도 없어 2에서 `git log`가 불리지 않은 리포의 손상된 ref가 여기서 드러난다.
+  4. 2·3의 `DocLintReadError`는 오류 한 건으로 바꿔 `{ errors: [그 오류], warnings: [] }`를 돌려준다. 오류는 `rule: 'R8 문서 읽기 실패'`, `what`은 `DocLintReadError`의 메시지(실패한 조회의 이름 `git ls-files`, `git log`, `git rev-parse` 가운데 하나가 들어 있다), `how`는 고치는 법이고 `git status`라는 글자가 들어 있다(이 폴더에서 `git status`가 도는지 확인하고 다시 실행한다는 뜻), `doc`은 이 파일의 다른 오류와 같은 값이다.
+  5. `DocLintReadError`가 아닌 예외는 잡지 않는다.
 
 ### 2. 호출처
 
@@ -50,10 +51,10 @@ export function docLintGate(root: string, cfg: HarnessConfig): DocLintResult;
 
 실제 `git` 리포를 임시 폴더에 만들어 쓴다(`scripts/test/helpers.ts`). 리포마다 `harness.config.json`, `AGENTS.md`, 색인 `docs/index.md`, 문서가 있다. `git` 읽기 실패는 리포를 실제로 깨뜨려 만든다(가짜 `git`을 끼우지 않는다).
 
-읽기 실패 사례의 CLI 단언은 공통이다. 아래 세 실행 모두에서 종료 코드가 1이고, 출력(표준 출력과 표준 오류를 합친 것)에 `R8 문서 읽기 실패`, 그 사례에서 실패한 조회의 이름(`git ls-files` 또는 `git log`), `git status`(고치는 법)가 있다. `check`의 두 실행은 출력에 `✗ doc-lint`도 있다.
+읽기 실패 사례의 CLI 단언은 공통이다. 아래 세 실행 모두에서 종료 코드가 1이고, 출력(표준 출력과 표준 오류를 합친 것)에 `R8 문서 읽기 실패`, 그 사례에서 실패한 조회의 이름(`git ls-files`, `git log`, `git rev-parse` 가운데 하나), `git status`(고치는 법)가 있다. `check`의 두 실행은 출력에 `✗ doc-lint`도 있다.
 
 - `node scripts/harness.ts doc-lint`
-- `node scripts/harness.ts check --only doc-lint`(기본 실행. 캐시를 쓴다)
+- `node scripts/harness.ts check --only doc-lint`(기본 실행. 캐시를 쓴다. 이 리포들은 통과한 적이 없어 캐시가 적중하지 않는다)
 - `node scripts/harness.ts check --only doc-lint --no-cache`
 
 사례:
@@ -65,6 +66,9 @@ export function docLintGate(root: string, cfg: HarnessConfig): DocLintResult;
 - **커밋 시각 읽기 실패**: `review_cycle: on-change`이고 `related_code`가 비지 않은 문서를 커밋한 리포에서 현재 브랜치의 ref 파일(`git rev-parse --git-path <ref>`)을 바꾼다. 세 가지를 각각 본다: 없는 객체의 해시(`1`을 40번), 해시가 아닌 내용, 빈 파일. 셋 다 `git log`가 실패하고 `git ls-files`는 성공한다. 뒤의 둘은 `git rev-parse --verify -q HEAD`가 커밋 없는 리포와 같은 종료 코드 1로 끝나는 경우다.
   - 세 가지 모두 `docLintGate`의 결과는 오류가 정확히 한 건이고 `rule`이 `R8 문서 읽기 실패`, `what`에 `git log`가 있다. 경고는 없다.
   - 세 가지 모두 위 CLI 단언(조회 이름은 `git log`).
+- **HEAD 커밋 읽기 실패(커밋 시각이 필요한 문서가 없다)**: 모든 문서의 `related_code`가 빈 리포를 커밋한 뒤 현재 브랜치의 ref 파일을 위와 같은 세 가지로 바꾼다. `git log`는 불리지 않는다.
+  - 세 가지 모두 `docLintGate`의 결과는 오류가 정확히 한 건이고 `rule`이 `R8 문서 읽기 실패`, `what`에 `git rev-parse`가 있다. 경고는 없다.
+  - 세 가지 모두 위 CLI 단언(조회 이름은 `git rev-parse`).
 - **커밋이 없는 리포**: `git init`만 하고 커밋하지 않은 리포(파일은 작업 트리에 있다). 문서 하나는 `review_cycle: on-change`이고 `related_code`가 비지 않다.
   - 문서가 모두 정상이면 `docLintGate`의 오류와 경고가 없고, `node scripts/harness.ts doc-lint`는 종료 코드 0이다.
   - 깨진 링크가 든 문서를 더하면 `docLintGate`의 오류에 `R8 깨진 링크`가 있고 `R8 문서 읽기 실패`는 없다.
