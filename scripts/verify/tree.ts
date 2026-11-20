@@ -1,8 +1,13 @@
 // verify가 띄운 것(dev, 실행기)의 자손을 프로세스 그룹과 무관하게 따라간다(설계서 11.1절, 계획 20261119-pilot-prep
 // 수용 기준 4). verify의 정리는 dev와 실행기의 프로세스 그룹에 신호를 보내고 그룹이 빈 것을 확인한다. Playwright는
-// 브라우저를 새 프로세스 그룹으로 띄우므로 그것만으로는 브라우저가 끝났는지 알 수 없다(실행기를 SIGKILL로 끝내면
-// 브라우저를 닫아 줄 것이 없다). 그래서 도는 동안 프로세스 목록에서 자손을 찾아 기억하고, 정리할 때 그 프로세스들에도
-// 신호를 보내고 모두 사라진 것을 확인한다.
+// 브라우저를 새 프로세스 그룹으로 띄우므로 그것만으로는 브라우저가 끝났는지 알 수 없다. 그래서 도는 동안 프로세스
+// 목록에서 자손을 찾아 기억하고, 정리할 때 그 프로세스들이 모두 사라진 것을 확인한다.
+//
+// **여기서 찾은 프로세스에는 신호를 보내지 않는다. 남았는지 세기만 한다**(구현 판정 F6). 직접 띄우지 않은 프로세스는
+// 번호(pid)로만 가리킬 수 있는데, 번호는 그 프로세스가 끝나면 무관한 프로세스가 다시 받을 수 있다. 번호가 아직 그
+// 프로세스의 것인지 확인하는 것과 신호를 보내는 것을 한 동작으로 묶는 수단이 Node에는 없다. 브라우저는 실행기와 이은
+// 파이프가 닫히면(실행기가 어떻게 끝나든) 스스로 끝나므로, 실행기를 끝내고 기다리면 된다. 기한까지 남아 있으면
+// 부르는 쪽(web.ts)이 남은 번호와 함께 실패로 알린다.
 //
 // 찾는 방법은 둘이다.
 // 1. 부모·자식 관계: 프로세스 목록에서 뿌리(dev, 실행기)와 이미 아는 프로세스의 자식을 따라간다. 주기적으로 읽는다.
@@ -11,11 +16,8 @@
 //    물려지므로, 부모가 누구든 그 표식을 가진 프로세스는 이번 실행이 띄운 것이다. 한 번도 보지 못한 채 부모를 잃은
 //    프로세스(목록을 읽는 사이에 브라우저가 뜨고 실행기가 죽은 경우)도 이것으로 찾는다. 정리할 때 읽는다.
 //
-// 프로세스는 번호(pid)가 아니라 **인스턴스(pid와 시작 시각)**로 기억한다. 번호는 프로세스가 끝나면 다른 프로세스가
-// 다시 받을 수 있다. 시작 시각은 그 프로세스가 사는 동안 바뀌지 않는다. 목록의 한 줄이 번호·부모·그룹·시작 시각을
-// 함께 주고(한 프로세스에 대해 한 번에 읽은 값이다), 신호를 보내는 쪽(web.ts)은 보내기 직전에 그 번호의 시작 시각을
-// 다시 읽어 같을 때만 보낸다(`identify`). 표식으로만 보고 목록에서는 아직 못 본 번호는 인스턴스를 모르므로 신호 대상이
-// 아니다(남은 것으로만 센다).
+// 목록에서 본 프로세스는 번호와 시작 시각으로 기억한다. 같은 번호를 무관한 프로세스가 다시 받았으면(시작 시각이
+// 다르다) 남은 것으로 세지 않는다. 틀리게 세어도 생기는 일은 "남았다"는 잘못된 실패뿐이다(신호는 가지 않는다).
 //
 // 읽는 수단은 운영체제마다 하나로 맞춘다(시작 시각의 표현이 서로 달라 섞으면 견줄 수 없다).
 // - Linux: /proc. 목록·시작 시각은 `/proc/<pid>/stat`(시작 시각은 부팅 뒤의 틱 수다), 표식은 `/proc/<pid>/environ`.
@@ -25,9 +27,7 @@
 // 한계
 // - 환경을 읽을 수 없거나(Linux에서 다른 사용자나 덤프가 막힌 프로세스) 표식을 지운 프로세스가, 목록을 읽는
 //   사이(주기는 web.ts)에 띄워지고 그 부모가 곧바로 끝나면 놓칠 수 있다.
-// - 시작 시각을 다시 읽는 것과 신호를 보내는 것은 한 동작이 아니다(Node에는 프로세스를 번호 없이 가리키는 수단이
-//   없다). 그 사이(Linux는 파일 한 번 읽기, macOS는 ps 한 번)에 번호가 다시 쓰이는 경우는 막지 못한다.
-// - macOS의 시작 시각은 초 단위다. 같은 초 안에 끝나고 같은 번호로 다시 뜬 프로세스는 구별하지 못한다.
+// - 스스로 끝나지 않는 그룹 밖 프로세스(dev가 따로 띄워 둔 데몬 등)는 끝내지 못한다. 남았다고 알릴 뿐이다.
 import { execFile } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 
@@ -41,17 +41,8 @@ export interface ProcessRow {
   started: string;
 }
 
-/** 프로세스 인스턴스: 번호와 시작 시각 */
-export interface Instance {
-  pid: number;
-  started: string;
-}
-
 /** 지금 떠 있는 프로세스의 목록. 읽지 못했으면 null */
 export type ListProcesses = () => Promise<ProcessRow[] | null>;
-
-/** 그 번호들의 지금 시작 시각(없는 번호는 빠진다). 읽지 못했으면 null */
-export type Identify = (pids: readonly number[]) => Promise<Map<number, string> | null>;
 
 /**
  * `ps -A -o pid=,ppid=,pgid=,stat=,lstart=`의 출력을 읽는다.
@@ -139,17 +130,6 @@ export function procList(procDir: string): ProcessRow[] | null {
   return rows.length ? rows : null;
 }
 
-/** Linux: 그 번호들의 지금 시작 시각. 없는 번호와 좀비는 빠진다. `<procDir>`를 읽지 못하면 null */
-export function procStarted(procDir: string, pids: readonly number[]): Map<number, string> | null {
-  if (!procPids(procDir)) return null;
-  const now = new Map<number, string>();
-  for (const pid of pids) {
-    const row = procStat(procDir, pid);
-    if (row && !row.zombie) now.set(pid, row.started);
-  }
-  return now;
-}
-
 const LIST_TIMEOUT_MS = 1000;
 /** 목록을 읽는 횟수의 한도. 한 번의 실패(ps가 제때 끝나지 않음 등)로 "확인하지 못했다"고 하지 않는다 */
 export const LIST_ATTEMPTS = 3;
@@ -192,20 +172,6 @@ const listOnce: ListProcesses = async () => {
 
 /** 프로세스 목록. 읽지 못하면 `LIST_ATTEMPTS`번까지 다시 읽는다 */
 export const listProcesses: ListProcesses = () => readProcessList(listOnce, LIST_ATTEMPTS);
-
-/**
- * 그 번호들의 지금 시작 시각. 신호를 보내기 직전에, 그 번호가 아직 확인한 그 프로세스인지 보는 데 쓴다.
- * Linux는 번호마다 `/proc/<pid>/stat`을 바로 읽고(기다림이 없다), 그 밖은 목록을 한 번 읽어 고른다
- */
-export const identify: Identify = async (pids) => {
-  if (process.platform === 'linux') return procStarted('/proc', pids);
-  const rows = await listOnce();
-  if (!rows) return null;
-  const want = new Set(pids);
-  const now = new Map<number, string>();
-  for (const r of rows) if (want.has(r.pid) && !r.zombie && r.started) now.set(r.pid, r.started);
-  return now;
-};
 
 /** 이번 실행의 표식을 담는 환경 변수 이름 */
 export const RUN_MARK = 'HARNESS_VERIFY_RUN';
@@ -263,13 +229,14 @@ export const findMarked: FindMarked = async (needle) => {
  *   프로세스로 다시 쓰였으면(시작 시각이 다르다) 그것을 우리 것으로 보지 않는다
  * - 뿌리와 남은 프로세스의 자식을 새로 더한다(부모가 끝나 다른 부모로 넘어간 프로세스도 이미 알고 있으면 계속 따라간다)
  * - 좀비와 시작 시각을 읽지 못한 프로세스는 뺀다
- * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다. 더하는 것은 **이번에 읽은
- *   목록에 있는 것**이다: 목록(표식보다 먼저 읽는다)의 줄이 그 프로세스의 시작 시각을 준다. 부르는 쪽이 신호를 보내기
- *   직전에 시작 시각을 다시 읽어 같으면, 표식을 읽은 때를 사이에 두고 같은 프로세스였다는 뜻이다
+ * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다. 목록(표식보다 먼저
+ *   읽는다)에 있는 것은 그 줄의 시작 시각과 함께 알던 것이 된다
  * - 표식에는 있는데 목록에는 없는 번호(목록을 읽은 뒤에 뜬 프로세스)는 버리지 않고 "아직 목록에서 확인하지 못한 것"으로
- *   들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다. 어느 프로세스인지(시작 시각) 모르므로
- *   **신호 대상(`targets()`)은 아니다.** 다음에 읽은 목록에 나오고 표식이 다시 확인해 주면 알던 것이 된다.
- *   표식을 다시 읽어 거기 없으면 뺀다. 표식을 읽지 않았거나 읽지 못한 읽기에서는 그대로 들고 있는다
+ *   들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다. 다음에 읽은 목록에 나오고 표식이 다시
+ *   확인해 주면 알던 것이 된다. 표식을 다시 읽어 거기 없으면 뺀다. 표식을 읽지 않았거나 읽지 못한 읽기에서는 그대로
+ *   들고 있는다
+ *
+ * 여기서 기억한 프로세스는 세기만 한다. 신호를 보낼 대상을 내주는 메서드는 두지 않는다(파일 머리말)
  */
 export class Descendants {
   /** pid → 그 프로세스의 그룹과 시작 시각 */
@@ -319,7 +286,7 @@ export class Descendants {
     while (queue.length) {
       const parent = queue.pop()!;
       for (const c of children.get(parent) ?? []) {
-        // 이 프로세스와 그 자식(목록을 읽는 ps 등)은 우리가 끝낼 대상이 아니다
+        // 이 프로세스와 그 자식(목록을 읽는 ps 등)은 verify가 띄운 것의 자손이 아니다
         if (c.pid === process.pid || roots.includes(c.pid) || next.has(c.pid)) continue;
         next.set(c.pid, { pgid: c.pgid, started: c.started });
         queue.push(c.pid);
@@ -327,8 +294,7 @@ export class Descendants {
     }
     const unconfirmed = new Set<number>();
     // 표식을 읽었으면: 표식에는 있고 목록에는 없는 것(목록을 읽은 뒤에 떴을 수 있다)을 버리지 않는다.
-    // 읽지 않았거나 읽지 못했으면: 전에 표식으로만 본 번호가 끝났는지 모르므로 그대로 들고 있는다.
-    // 어느 쪽이든 남은 것으로만 세고 신호 대상으로는 삼지 않는다(시작 시각을 모른다)
+    // 읽지 않았거나 읽지 못했으면: 전에 표식으로만 본 번호가 끝났는지 모르므로 그대로 들고 있는다
     for (const pid of fresh ?? this.unconfirmed) {
       if (skip(pid) || next.has(pid)) continue;
       if (fresh && listed.has(pid)) continue;
@@ -345,15 +311,5 @@ export class Descendants {
    */
   pids(): number[] {
     return [...this.known.keys(), ...this.unconfirmed].sort((a, b) => a - b);
-  }
-
-  /**
-   * 신호를 보낼 수 있는 프로세스: 목록에서 확인한 자손(번호와 시작 시각). 보내는 쪽은 보내기 직전에 그 번호의
-   * 시작 시각을 다시 읽어 같을 때만 보낸다. `pids()`에는 있고 여기에는 없는 것은 어느 프로세스인지 모르는 번호다
-   */
-  targets(): Instance[] {
-    return [...this.known.entries()]
-      .map(([pid, v]) => ({ pid, started: v.started }))
-      .sort((a, b) => a.pid - b.pid);
   }
 }
