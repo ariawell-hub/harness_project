@@ -174,9 +174,10 @@ test('웹 프로파일의 dbPatterns는 모두 정규식으로 컴파일되고, 
 
 // 훅은 모든 Bash 호출에서 이 패턴을 돌린다. 플래그가 많은 긴 명령에서 역추적이 폭주하면 훅이 멈춘다.
 // 판정은 자식 프로세스에서 돌려 시간 제한을 건다(폭주하면 이 프로세스 안에서는 끊을 수 없다).
+// 입력은 표준 입력으로 넘긴다. 환경 변수나 인자로 넘기면 OS의 길이 한도에 걸린다
+// (Linux는 문자열 하나에 131072바이트, Windows는 환경 블록 전체에 32767자).
 const TIMING = `
-const patterns = JSON.parse(process.env.Q10_PATTERNS);
-const inputs = JSON.parse(process.env.Q10_INPUTS);
+const { patterns, inputs } = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 let hits = 0;
 for (const p of patterns) { const re = new RegExp(p, 'i'); for (const s of inputs) if (re.test(s)) hits += 1; }
 process.stdout.write(String(hits));
@@ -197,13 +198,13 @@ test('웹 프로파일의 dbPatterns는 플래그가 많은 긴 명령에서도 
   const r = spawnSync(process.execPath, ['-e', TIMING], {
     encoding: 'utf8',
     timeout: 20_000,
-    env: {
-      ...process.env,
-      Q10_PATTERNS: JSON.stringify(dbPatterns),
-      Q10_INPUTS: JSON.stringify(inputs),
-    },
+    input: JSON.stringify({ patterns: dbPatterns, inputs }),
   });
-  assert.equal(r.error, undefined, `판정이 시간 안에 끝나지 않았다: ${r.error?.message}`);
+  assert.equal(
+    r.error,
+    undefined,
+    `판정이 시간 안에 끝나지 않았거나 실행하지 못했다: ${r.error?.message}`,
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, '0', '금지 하위 명령이 없는 명령이 패턴에 맞았다');
 });
