@@ -42,6 +42,8 @@ export async function runStandard(
     timeoutMs: def.timeoutSec * 1000,
     stream: opts.stream,
     env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    // 명령은 새 프로세스 그룹에서 돈다. 하네스가 받은 신호를 넘겨야 명령이 띄운 것(dev, 실행기, 브라우저)이 남지 않는다
+    forwardSignals: true,
   });
   return { name, command, result, ok: result.code === 0, notApplicable: false };
 }

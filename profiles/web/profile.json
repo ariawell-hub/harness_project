@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "웹 프로파일(초안). pnpm + Prettier + ESLint + Vitest + 프로덕션 빌드. 제품의 실제 스크립트는 app:* 이름으로 둔다(하네스 별칭과 재귀를 피하려고)",
   "config": {
     "commands": {
@@ -14,7 +14,7 @@
       "test": { "run": "pnpm run app:test", "timeoutSec": 1200 },
       "build": { "run": "pnpm run app:build", "timeoutSec": 1200 },
       "dev": { "run": "pnpm run app:dev", "timeoutSec": 3600 },
-      "verify": null
+      "verify": { "run": "node scripts/verify/web.ts", "timeoutSec": 1800 }
     },
     "riskPaths": [
       { "glob": "docs/**", "risk": "low" },
@@ -69,6 +69,7 @@
   "templates": [
     { "from": "templates/PRD.md", "to": "docs/product/TEMPLATE.md" },
     { "from": "templates/ADR.md", "to": "docs/decisions/TEMPLATE.md" },
-    { "from": "templates/ARCHITECTURE.md", "to": "ARCHITECTURE.md", "replacePlaceholder": true }
+    { "from": "templates/ARCHITECTURE.md", "to": "ARCHITECTURE.md", "replacePlaceholder": true },
+    { "from": "templates/smoke.spec.ts", "to": "e2e/smoke.spec.ts" }
   ]
 }

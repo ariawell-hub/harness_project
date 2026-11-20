@@ -23,7 +23,21 @@ export interface ExecOptions {
   stream?: boolean;
   /** 종료 후에도 남은 같은 그룹의 프로세스(dev 서버 등)를 정리한다. 기본 true */
   killGroupOnExit?: boolean;
+  /**
+   * 실행하는 동안 이 프로세스가 받은 SIGTERM·SIGINT·SIGHUP을 자식의 프로세스 그룹에 넘기고, 자식이 끝난 뒤 이 프로세스도
+   * 그 신호로 끝난다. 자식은 새 프로세스 그룹이라 부모에게 온 신호도 터미널의 Ctrl-C도 받지 못한다. 넘기지 않으면
+   * 부모만 끝나고 자식 트리(dev 서버, 브라우저)가 남는다. 표준 명령 실행에 쓴다. Windows에서는 아무것도 하지 않는다
+   */
+  forwardSignals?: boolean;
+  /** 신호를 넘긴 뒤 자식이 끝나기를 기다리는 시간. 지나면 SIGKILL을 보낸다. 기본 10초 */
+  forwardGraceMs?: number;
 }
+
+/** forwardSignals가 자식에게 넘기는 신호. 정리할 것이 있는 명령(scripts/verify/web.ts)은 이 셋을 모두 처리해야 한다 */
+export const FORWARDED: readonly NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+/** forwardSignals로 돌고 있는 실행의 수와, 그 실행들이 받아 아직 이 프로세스에 되돌려 보내지 않은 신호 */
+let forwardingRuns = 0;
+let pendingSignal: NodeJS.Signals | null = null;
 
 const MAX_KEEP = 2_000_000; // 출력은 끝부분 2MB만 보관한다
 const isWin = process.platform === 'win32';
@@ -46,6 +60,19 @@ export function killTree(pid: number | undefined, signal: NodeJS.Signals = 'SIGT
   }
 }
 
+/** 프로세스 그룹에 남은 프로세스가 있는가(POSIX). 신호를 보낼 수 없는 것(EPERM)도 남은 것으로 본다 */
+function groupAlive(pid: number | undefined): boolean {
+  if (!pid || isWin) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+/** 신호를 넘긴 뒤 SIGKILL까지 보내고도 그룹이 남아 있을 때 더 기다리는 시간 */
+const GROUP_GONE_EXTRA_MS = 2000;
+
 export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
   const started = Date.now();
   return new Promise((resolve) => {
@@ -61,12 +88,60 @@ export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promis
       stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    // 신호 전달(forwardSignals): 첫 신호는 자식 그룹에 그대로 넘기고 유예 시간 뒤 SIGKILL을 보낸다.
+    // 유예 시간 안에 신호를 또 받으면 기다리지 않고 SIGKILL을 보낸다
+    let received: NodeJS.Signals | null = null;
+    let forceTimer: NodeJS.Timeout | undefined;
+    const onSignal = (signal: NodeJS.Signals) => {
+      if (received) {
+        killTree(child.pid, 'SIGKILL');
+        return;
+      }
+      received = signal;
+      pendingSignal = signal;
+      killTree(child.pid, signal);
+      forceTimer = setTimeout(() => killTree(child.pid, 'SIGKILL'), opts.forwardGraceMs ?? 10_000);
+    };
+    const forwarding = opts.forwardSignals === true && !isWin;
+    if (forwarding) {
+      forwardingRuns++;
+      for (const s of FORWARDED) process.on(s, onSignal);
+      // 다른 실행이 이미 신호를 받아 끝나는 중이면 이 실행도 바로 끝낸다
+      if (pendingSignal) onSignal(pendingSignal);
+    }
     const finish = (code: number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       child.stdout?.destroy();
       child.stderr?.destroy();
+      // 신호를 넘긴 실행: 명령(그룹의 첫 프로세스)이 끝나도 그 그룹에 남은 프로세스(명령의 자식)가 끝날 때까지
+      // 기다린다. 그 전에 돌아가면 이 프로세스가 신호로 끝난 뒤에도 그것들이 남는다. 유예 시간이 지나면 걸어 둔
+      // 타이머가 그룹에 SIGKILL을 보낸다. 그러고도 남으면(신호를 보낼 수 없는 프로세스) 조금 더 보고 돌아간다
+      if (forwarding && received && groupAlive(child.pid)) {
+        const giveUp = Date.now() + (opts.forwardGraceMs ?? 10_000) + GROUP_GONE_EXTRA_MS;
+        const poll = setInterval(() => {
+          if (groupAlive(child.pid) && Date.now() < giveUp) return;
+          clearInterval(poll);
+          done(code);
+        }, 10);
+        return;
+      }
+      done(code);
+    };
+    const done = (code: number) => {
+      clearTimeout(forceTimer);
+      if (forwarding) {
+        for (const s of FORWARDED) process.off(s, onSignal);
+        forwardingRuns--;
+        // 신호를 넘겨받은 실행이 모두 끝났다. 받은 신호의 기본 동작(종료)으로 이어 간다.
+        // 이 프로세스에 다른 처리기가 있으면 그쪽이 받는다. 아직 도는 실행이 있으면 그 실행이 끝날 때 한다
+        if (pendingSignal && forwardingRuns === 0) {
+          const signal = pendingSignal;
+          pendingSignal = null;
+          process.kill(process.pid, signal);
+        }
+      }
       resolve({ code, stdout, stderr, timedOut, durationMs: Date.now() - started });
     };
     child.stdout?.on('data', (d: Buffer) => {
