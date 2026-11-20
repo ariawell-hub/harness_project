@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { applyVerdict, emptyLedger, renderLedger, type Ledger } from '../ci/ledger.ts';
 import { ACTIONS_APP_ID } from '../ci/protection.ts';
 import { newTask } from '../commands/task.ts';
 import { loadConfig } from '../lib/config.ts';
@@ -412,4 +413,123 @@ test('이 리포의 설정: revert-check가 필수 체크 목록에 나오고 �
   const mine = of([status('revert-check', 'success', ci.recorderBot ?? '', 'revert PR 아님')]);
   assert.equal(mine?.state, 'success');
   assert.equal(mine?.description, 'revert PR 아님');
+});
+
+// ---------- 오래 열린 지적 (9.1절, Issue #165) ----------
+
+/** codex가 P1 하나를 등록하고 열어 둔 채 판정을 more번 더 낸 원장 */
+function ledgerWithOpenP1(more: number): Ledger {
+  const judge = (l: Ledger, head: string, first: boolean) =>
+    applyVerdict(l, {
+      reviewer: 'codex',
+      verdict: {
+        verdict: 'request_changes',
+        risk: 'normal',
+        summary: '요약',
+        findings: first
+          ? [
+              {
+                severity: 'P1',
+                file: 'note.txt',
+                line: 1,
+                title: '검증자가 쓴 제목이다',
+                evidence: '근거',
+                suggestion: '제안',
+                repro: { path: '', content: '' },
+              },
+            ]
+          : [],
+        resolutions: first ? [] : [{ id: 'F1', status: 'open', note: '' }],
+      },
+      headSha: head,
+      changedSinceLastRound: first ? ['note.txt'] : [],
+    });
+  let l = judge(emptyLedger('a'.repeat(40)), '0'.repeat(40), true);
+  for (let i = 0; i < more; i++) l = judge(l, String(i + 1).repeat(40), false);
+  return l;
+}
+
+const CHECKS = { ci: { requiredChecks: REQUIRED.slice(0, 1), recorderBot: BOT } };
+const LONG = /^- 오래 열린 지적: F1 \[P1, codex\] 재판정 3회 뒤에도 열려 있다/m;
+
+test('pr-state 명령: 재판정 3회 뒤에도 열린 차단 지적을 분류 줄 앞에 한 줄로 낸다(읽기만 한다)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    gh.commentAs(pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const before = readFileSync(state, 'utf8');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, LONG);
+    assert.match(r.stdout, /제작자에게 묻는다\(절차서 8절\)/);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.match(lines.at(-1)!, /^분류: /);
+    assert.ok(lines.findIndex((x) => LONG.test(x)) < lines.length - 1);
+    assert.ok(!r.stdout.includes('검증자가 쓴 제목이다'), r.stdout);
+    assert.equal(readFileSync(state, 'utf8'), before);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('pr-state 명령: 재판정이 2회뿐이거나 원장 댓글의 작성자가 검증 App이 아니면 오래 열린 지적 줄이 없다', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    gh.commentAs(pr.number, BOT, renderLedger(ledgerWithOpenP1(2)));
+    gh.commentAs(pr.number, 'harness-bot', renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(!r.stdout.includes('오래 열린 지적'), r.stdout);
+    assert.match(r.stdout, /^분류: /m);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('pr-state 명령: 원장이 깨졌으면 그 사실을 한 줄로 알리고 분류는 그대로 낸다', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    gh.commentAs(pr.number, BOT, '<!-- harness-ledger:v1 -->\n깨진 본문');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^- 오래 열린 지적 확인: 원장을 읽지 못했다/m);
+    assert.match(r.stdout.trimEnd().split('\n').at(-1)!, /^분류: /);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('pr-state 명령: ci.recorderBot이 비어 있으면 원장을 읽지 않는다', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR({
+    ci: {
+      requiredChecks: REQUIRED.filter((r) => r.source === 'actions').slice(0, 1),
+      recorderBot: '',
+    },
+  });
+  try {
+    gh.commentAs(pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr + r.stdout);
+    assert.ok(!r.stdout.includes('오래 열린 지적'), r.stdout);
+    assert.match(r.stdout, /^분류: /m);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('pr-state 명령: ci.requiredChecks가 빈 리포에서도 오래 열린 지적을 체크 요약 줄 뒤에 낸다', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR({
+    ci: { requiredChecks: [], recorderBot: BOT },
+  });
+  try {
+    gh.commentAs(pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    const lines = r.stdout.trimEnd().split('\n');
+    const summary = lines.findIndex((x) => x.includes('ci.requiredChecks가 비어'));
+    const long = lines.findIndex((x) => LONG.test(x));
+    assert.ok(summary >= 0 && long > summary, r.stdout);
+    assert.ok(!r.stdout.includes('분류:'), r.stdout);
+  } finally {
+    fx.cleanup();
+  }
 });
