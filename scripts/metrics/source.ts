@@ -21,6 +21,11 @@ const DEFAULT_DAYS = 7;
 const LIMIT = 1000;
 /** 버그 Issue의 라벨(17.2절 "병합 후 결함") */
 const BUG_LABEL = 'bug';
+/** PR 커밋 조회가 PR 하나에 주는 커밋 수의 상한(GitHub REST "List commits on a pull request") */
+const PR_COMMITS_LIMIT = 250;
+/** head별 PR 조회의 `--limit` */
+const HEAD_PRS_LIMIT = 100;
+const SHA_RE = /^[0-9a-f]{40}$/;
 
 function dayMs(day: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
@@ -89,6 +94,10 @@ export interface MergedPr {
   mergeSha: string;
   additions: number;
   deletions: number;
+  /** PR에 든 커밋의 SHA 전부. 다 받지 못하면 `mergedPrs`가 SourceError를 던지므로 일부만 든 목록은 없다 */
+  commits: string[];
+  /** 다른 리포(포크)의 브랜치에서 온 PR인가 */
+  crossRepo: boolean;
 }
 
 export interface WorkflowRun {
@@ -105,11 +114,47 @@ export interface WorkflowRun {
   attempt: number;
   /** 같은 워크플로 안에서 실행마다 늘어나는 번호. 같은 초에 만들어진 실행의 순서를 가린다 */
   runNumber: number;
+  /** 실행의 head 리포가 이 리포인가. 포크의 같은 이름 브랜치에서 돈 실행을 가린다 */
+  sameRepo: boolean;
 }
 
 export interface BugIssue {
   number: number;
   createdAt: string;
+}
+
+/** 커밋 상태 기록 하나 */
+export interface HeadStatus {
+  context: string;
+  state: string;
+  /** 없으면 '' */
+  description: string;
+  /** 기록한 계정의 login. 없으면 '' */
+  creator: string;
+  at: string;
+}
+
+export interface LabelEvent {
+  issue: number;
+  at: string;
+}
+
+export type EscalationKind =
+  | 'stop-limit'
+  | 'stop-deadlock'
+  | 'stop-failures'
+  | 'stop-conflict'
+  | 'stop-other'
+  | 'question'
+  | 'approval'
+  | 'ci-stall'
+  | 'revert';
+
+/** 봇이 쓴 에스컬레이션 댓글. 본문은 담지 않는다(14.6절) */
+export interface BotComment {
+  issue: number;
+  at: string;
+  kind: EscalationKind;
 }
 
 export interface MetricsSource {
@@ -118,6 +163,41 @@ export interface MetricsSource {
   bugIssues(p: Period): BugIssue[];
   /** PR의 지적 원장. 없으면 null */
   ledger(pr: number): Ledger | null;
+  /** PR head 커밋의 커밋 상태 전체(옛 기록 포함) */
+  headStatuses(sha: string): HeadStatus[];
+  /** 기간에 needs-human 라벨이 붙은 사건 */
+  needsHumanEvents(p: Period): LabelEvent[];
+  /** 기간에 봇 계정(`cfg.github.bot`)이 쓴 에스컬레이션 댓글 */
+  escalationComments(p: Period): BotComment[];
+  /** 그 head 브랜치 이름으로 열린 PR의 수(상태·base·포크 여부와 무관) */
+  headPrCount(head: string): number;
+}
+
+/**
+ * 봇 댓글의 본문을 에스컬레이션 종류로 가른다. 어느 것도 아니면 null.
+ * 문구는 댓글을 쓰는 코드의 것이다: 중단 보고 둘과 질문·승인·CI 대기는 scripts/runner/run.ts,
+ * 실패 사유는 scripts/lib/attempts.ts, 자동 revert 불가 표식은 scripts/ci/revert.ts
+ */
+export function classifyEscalation(body: string): EscalationKind | null {
+  const lines = body.split('\n');
+  if (lines.some((l) => l.startsWith('## 중단 보고:'))) {
+    const cause = lines.find((l) => l.startsWith('- 추정 원인: '))?.slice('- 추정 원인: '.length);
+    if (cause !== undefined) {
+      if (cause.startsWith('교착')) return 'stop-deadlock';
+      if (cause.startsWith('step 총량 상한')) return 'stop-limit';
+      if (/^실패 키 .+ \d+회/.test(cause)) return 'stop-failures';
+      // PR #44 전의 갱신 충돌 보고는 실패 중단 보고의 형식으로 쓰였다
+      if (cause.includes('병합이 충돌한다')) return 'stop-conflict';
+    }
+    if (lines.some((l) => l.startsWith('- 원인: ') && l.includes('병합이 충돌한다')))
+      return 'stop-conflict';
+    return 'stop-other';
+  }
+  if (body.includes('<!-- harness-revert-escalate')) return 'revert';
+  if (/질문 \d+건을 남겼다/.test(body)) return 'question';
+  if (body.includes('제작자 승인을 기다린다')) return 'approval';
+  if (body.includes('CI 대기가')) return 'ci-stall';
+  return null;
 }
 
 const first = (e: unknown) => (e instanceof Error ? e.message : String(e)).split('\n')[0];
@@ -153,6 +233,32 @@ function time(o: Json, k: string): string {
   if (Number.isNaN(Date.parse(v))) throw new Error(`${k}가 시각이 아니다`);
   return v;
 }
+function bool(o: Json, k: string): boolean {
+  if (typeof o[k] !== 'boolean') throw new Error(`${k}가 참·거짓이 아니다`);
+  return o[k];
+}
+
+/**
+ * `gh api --paginate --jq '… | tojson'`의 출력을 객체들로 바꾼다. 쪽마다 jq를 적용한 결과가 이어져 오므로
+ * 쪽의 경계 없이 한 줄에 JSON 하나다. 같은 `id`가 두 번 오면 읽는 동안 목록이 바뀐 것이라 끝낸다
+ */
+function jsonLines(what: string, text: string): Json[] {
+  const ids = new Set<number>();
+  const out: Json[] = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const v: unknown = JSON.parse(line);
+    if (!isObj(v)) throw new Error('응답 줄이 객체가 아니다');
+    const id = num(v, 'id');
+    if (ids.has(id))
+      throw new SourceError(
+        `${what}: 같은 기록이 중복으로 왔다. 읽는 동안 목록이 바뀌어 빠진 기록이 있을 수 있다. 다시 실행하라`,
+      );
+    ids.add(id);
+    out.push(v);
+  }
+  return out;
+}
 
 function list(text: string): Json[] {
   const v: unknown = JSON.parse(text);
@@ -185,10 +291,21 @@ function unique(what: string, raw: Json[]): void {
 
 /** 실행 목록의 한 페이지를 머리 줄(`{"total":N}`)과 실행 줄들로 바꾼다. 줄마다 JSON 하나다 */
 const RUNS_JQ =
-  '({total: .total_count} | tojson), (.workflow_runs[] | {id, path, event, branch: .head_branch, headSha: .head_sha, status, conclusion, createdAt: .created_at, startedAt: .run_started_at, updatedAt: .updated_at, attempt: .run_attempt, runNumber: .run_number} | tojson)';
+  '({total: .total_count} | tojson), (.workflow_runs[] | {id, path, event, branch: .head_branch, headSha: .head_sha, status, conclusion, createdAt: .created_at, startedAt: .run_started_at, updatedAt: .updated_at, attempt: .run_attempt, runNumber: .run_number, sameRepo: (.head_repository.full_name == .repository.full_name)} | tojson)';
 
+// `commits`는 달라고 하지 않는다: `--limit 1000`과 함께 쓰면 GraphQL 노드 한도를 넘어 조회가 실패한다
 const PR_FIELDS =
-  'number,headRefName,headRefOid,createdAt,mergedAt,mergeCommit,additions,deletions';
+  'number,headRefName,headRefOid,createdAt,mergedAt,mergeCommit,additions,deletions,isCrossRepository';
+
+/** 한 줄에 SHA 하나 */
+const PR_COMMITS_JQ = '.[].sha';
+const STATUSES_JQ =
+  '.[] | {id, context, state, description, creator: .creator.login, at: .created_at} | tojson';
+const EVENTS_JQ =
+  '.[] | select(.event == "labeled") | {id, label: .label.name, issue: .issue.number, at: .created_at} | tojson';
+// 본문은 분류에만 쓰고 결과에 담지 않는다
+const COMMENTS_JQ =
+  '.[] | {id, user: .user.login, at: .created_at, issue: (.issue_url | split("/") | last | tonumber), body} | tojson';
 
 export function ghSource(o: {
   cfg: HarnessConfig;
@@ -239,6 +356,7 @@ export function ghSource(o: {
           updatedAt: optStr(v, 'updatedAt'),
           attempt: num(v, 'attempt'),
           runNumber: num(v, 'runNumber'),
+          sameRepo: bool(v, 'sameRepo'),
         });
       }
       if (totals.size !== 1)
@@ -255,10 +373,42 @@ export function ghSource(o: {
     });
   }
 
+  /** PR에 든 커밋의 SHA 전부. 쪽을 넘긴 결과가 한 줄에 SHA 하나로 이어져 온다 */
+  function commitsOf(pr: number): string[] {
+    const what = `PR #${pr}의 커밋 목록`;
+    return reading(what, () => {
+      const text = o.gh([
+        'api',
+        '--paginate',
+        `repos/{owner}/{repo}/pulls/${pr}/commits?per_page=100`,
+        '--jq',
+        PR_COMMITS_JQ,
+      ]);
+      const shas = text.split('\n').filter((l) => l.trim() !== '');
+      // 병합된 PR에는 커밋이 하나 이상 있다. 빈 목록은 다 읽은 결과가 아니다
+      if (!shas.length)
+        throw new SourceError(`${what}이 비어 있다. 응답을 읽지 못했을 수 있다. 다시 실행하라`);
+      const seen = new Set<string>();
+      for (const sha of shas) {
+        if (!SHA_RE.test(sha)) throw new Error('커밋 SHA가 아닌 줄이 있다');
+        if (seen.has(sha))
+          throw new SourceError(
+            `${what}: 같은 커밋이 중복으로 왔다. 읽는 동안 목록이 바뀌어 빠진 커밋이 있을 수 있다. 다시 실행하라`,
+          );
+        seen.add(sha);
+      }
+      if (shas.length >= PR_COMMITS_LIMIT)
+        throw new SourceError(
+          `${what}이 조회 상한(${PR_COMMITS_LIMIT}개)에 닿아 다 읽었는지 알 수 없다. 이 PR이 병합된 날을 뺀 기간으로 다시 실행하라`,
+        );
+      return shas;
+    });
+  }
+
   return {
     mergedPrs(p) {
       const what = '병합된 PR 목록';
-      return reading(what, () => {
+      const prs = reading(what, () => {
         const raw = list(
           o.gh([
             'pr',
@@ -287,9 +437,12 @@ export function ghSource(o: {
             mergeSha: isObj(x.mergeCommit) ? optStr(x.mergeCommit, 'oid') : '',
             additions: num(x, 'additions'),
             deletions: num(x, 'deletions'),
+            crossRepo: bool(x, 'isCrossRepository'),
           }))
           .filter((x) => inPeriod(x.mergedAt, p));
       });
+      // 커밋 목록은 기간 안의 PR에만, PR마다 한 번 읽는다
+      return prs.map((x) => ({ ...x, commits: commitsOf(x.number) }));
     },
     workflowRuns(p) {
       return daysOf(p)
@@ -324,6 +477,91 @@ export function ghSource(o: {
     },
     ledger(pr) {
       return reading(`PR #${pr}의 지적 원장`, () => o.ledger(pr));
+    },
+    headStatuses(sha) {
+      const what = `커밋 ${sha.slice(0, 12)}의 상태 기록`;
+      return reading(what, () => {
+        // 경로에 그대로 들어가는 값이다
+        if (!SHA_RE.test(sha)) throw new Error('커밋 SHA가 16진수 40자가 아니다');
+        const text = o.gh([
+          'api',
+          '--paginate',
+          `repos/{owner}/{repo}/commits/${sha}/statuses?per_page=100`,
+          '--jq',
+          STATUSES_JQ,
+        ]);
+        return jsonLines(what, text).map((v) => ({
+          context: str(v, 'context'),
+          state: str(v, 'state'),
+          description: optStr(v, 'description'),
+          creator: optStr(v, 'creator'),
+          at: time(v, 'at'),
+        }));
+      });
+    },
+    needsHumanEvents(p) {
+      const what = '라벨 이벤트 목록';
+      return reading(what, () => {
+        const text = o.gh([
+          'api',
+          '--paginate',
+          'repos/{owner}/{repo}/issues/events?per_page=100',
+          '--jq',
+          EVENTS_JQ,
+        ]);
+        return jsonLines(what, text)
+          .filter((v) => v.label === o.cfg.github.needsHumanLabel)
+          .map((v) => ({ issue: num(v, 'issue'), at: time(v, 'at') }))
+          .filter((x) => inPeriod(x.at, p));
+      });
+    },
+    escalationComments(p) {
+      const what = '리포 댓글 목록';
+      return reading(what, () => {
+        const text = o.gh([
+          'api',
+          '--paginate',
+          `repos/{owner}/{repo}/issues/comments?since=${p.since}T00:00:00Z&per_page=100`,
+          '--jq',
+          COMMENTS_JQ,
+        ]);
+        const out: BotComment[] = [];
+        for (const v of jsonLines(what, text)) {
+          // 봇 계정이 쓴 댓글만 본다. 같은 문구를 다른 계정이 써도 세지 않는다
+          if (v.user !== o.cfg.github.bot) continue;
+          const at = time(v, 'at');
+          if (!inPeriod(at, p)) continue;
+          const kind = classifyEscalation(optStr(v, 'body'));
+          if (kind) out.push({ issue: num(v, 'issue'), at, kind });
+        }
+        return out;
+      });
+    },
+    headPrCount(head) {
+      const what = `head 브랜치 ${JSON.stringify(head)}로 열린 PR 목록`;
+      return reading(what, () => {
+        // `--head` 뒤 한 자리에 그대로 들어가는 값이다
+        if (!head || head.startsWith('-')) throw new Error('브랜치 이름이 비었거나 -로 시작한다');
+        const raw = list(
+          o.gh([
+            'pr',
+            'list',
+            '--state',
+            'all',
+            '--head',
+            head,
+            '--limit',
+            String(HEAD_PRS_LIMIT),
+            '--json',
+            'number',
+          ]),
+        );
+        if (raw.length >= HEAD_PRS_LIMIT)
+          throw new SourceError(
+            `${what}이 조회 상한(${HEAD_PRS_LIMIT}건)에 닿아 다 읽었는지 알 수 없다`,
+          );
+        return raw.length;
+      });
     },
   };
 }
