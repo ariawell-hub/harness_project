@@ -40,7 +40,12 @@
   - 명령: 허용(`generate`, `check`, `export`, `up`: 파일만 다룬다), 금지(`push`: 스키마 diff 자동 적용 / `migrate`·`studio`·`introspect`·`pull`: 설정이 가리키는 DB에 접속한다 / `drop`: 마이그레이션 파일을 지운다). 마이그레이션 적용은 표준 명령 안에서 앱의 마이그레이션 코드가 한다.
   - 훅이 보지 못하는 것: 패키지 스크립트(`pnpm db:migrate` 같은 이름) 안에 든 명령. 그런 스크립트를 더하는 변경은 리뷰에서 본다(절차 수준). 훅은 명령 전체의 글에서 찾으므로 금지 명령이 커밋 메시지에 글자로 들어 있어도 막히고, 플래그의 값이 금지 명령의 이름이어도 막힌다.
   - 한계: ADR-0007의 "알려진 한계"를 가리킨다.
-- `docs/harness/design.md` 14.3절의 "예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 줄: 줄의 자리와 있던 문장은 그대로 두고 같은 줄의 뒤에 웹 프로파일이 채운 것(DB에 접속하는 `drizzle-kit` 명령과 `drop`, 플래그가 앞에 오는 형태 포함)을 덧붙인다. 금지 분류 표는 고치지 않는다.
+- `docs/harness/design.md` 14.3절의 "예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 줄: 줄의 자리와 있던 문장은 그대로 두고 같은 줄의 뒤에 웹 프로파일이 채운 것을 덧붙여, 그 줄을 **글자 그대로** 아래와 같게 한다. 금지 분류 표와 14.3절의 다른 줄은 한 글자도 바꾸지 않는다. 이 줄의 글은 계획이 정한 것이고 AC가 같은 글로 비교한다. 글을 바꿔야 하면 구현에서 바꾸지 않고 계획을 고쳐 다시 검증받는다.
+
+  ```text
+  - 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10). 웹 프로파일은 DB에 접속하는 `drizzle-kit`의 하위 명령과 마이그레이션 파일을 지우는 하위 명령을 막는다(플래그가 하위 명령 앞에 오는 형태 포함, ADR-0007). 목록은 `profiles/web/README.md`의 "DB" 절에 있다.
+  ```
+
 - 0절 버전 이력과 문서 머리의 버전, `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄(검사를 약화하지 않는다는 것, 프로파일 버전). 번호는 push할 때 main의 다음 번호다.
 - `docs/harness/architecture.md`의 파일 표에 테스트 파일을 적는 칸이 있으면 더한다(없으면 고치지 않는다).
 - `docs/exec-plans/tech-debt-tracker.md`에 새 행 하나(번호는 push할 때 main의 다음 번호): 코어 DB 패턴(`scripts/hooks/rules.ts`의 `DB_PATTERNS`)은 도구 이름 바로 뒤의 하위 명령만 본다. 플래그가 앞에 오는 호출(`drizzle-kit --config x push`, 다른 도구의 같은 형태)을 놓친다. 웹 프로파일은 `drizzle-kit`에 대해 프로파일 패턴으로 막는다. 다른 행은 고치지 않는다.
@@ -58,17 +63,18 @@ grep -q "ADR-0007" profiles/web/README.md
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "프로파일이 채운다" | grep -q "drizzle-kit"
 test "$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -c "프로파일이 채운다")" = 1
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -q "^- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)\. "
-O=$(mktemp -d) && NEW=$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "^- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)\. ") && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | NEW="$NEW" awk '$0 == "- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." {print ENVIRON["NEW"]; next} {print}' > "$O/expected.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md > "$O/now.txt" && test -s "$O/expected.txt" && diff "$O/expected.txt" "$O/now.txt"
+O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | NEW='- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10). 웹 프로파일은 DB에 접속하는 `drizzle-kit`의 하위 명령과 마이그레이션 파일을 지우는 하위 명령을 막는다(플래그가 하위 명령 앞에 오는 형태 포함, ADR-0007). 목록은 `profiles/web/README.md`의 "DB" 절에 있다.' awk '$0 == "- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." {print ENVIRON["NEW"]; next} {print}' > "$O/expected.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md > "$O/now.txt" && test -s "$O/expected.txt" && diff "$O/expected.txt" "$O/now.txt"
 grep -q "DB_PATTERNS" docs/exec-plans/tech-debt-tracker.md
 node scripts/harness.ts lint
 node scripts/harness.ts doc-lint
 node scripts/harness.ts fmt --check
 ```
 
-- `git merge-base`가 든 줄은 14.3절 전체가 기대한 글과 같은지 본다. 기대한 글은 PR이 갈라진 지점의 14.3절에서 "- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 한 줄만 그 자리에서 지금의 줄(있던 문장으로 시작하고 뒤에 덧붙인 것)로 바꾼 것이다. 그 기대한 글과 지금의 14.3절 전체를 `diff`로 비교한다. 줄을 빼지도 건너뛰지도 않으므로, 고친 줄이 다른 자리(표 안 포함)로 옮겨지거나 다른 줄이 빠지거나 바뀌거나 빈 줄이 끼면 실패한다. `origin/main`이 필요하다(`git fetch origin`).
+- `git merge-base`가 든 줄은 14.3절 전체가 기대한 글과 같은지 본다. 기대한 글은 PR이 갈라진 지점의 14.3절에서 "- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 한 줄만 그 자리에서 **이 명령에 글자 그대로 적힌 줄**로 바꾼 것이다. 그 줄의 글을 지금 파일에서 가져오지 않는다. 그 기대한 글과 지금의 14.3절 전체를 `diff`로 비교한다. 그래서 고친 줄의 글이 한 글자라도 다르거나(뒤에 문장을 더 덧붙인 경우 포함), 다른 자리(표 안 포함)로 옮겨지거나, 다른 줄이 빠지거나 바뀌거나 빈 줄이 끼면 실패한다. `origin/main`이 필요하다(`git fetch origin`). 명령에 적힌 글에는 `drizzle-kit`의 하위 명령 이름을 넣지 않았다(금지 명령의 글자가 든 명령은 L1 훅이 막는다).
 
 ## 금지사항
 
+- 14.3절의 고치는 한 줄의 글을 "작업"과 AC에 적힌 것과 다르게 쓰지 마라(덧붙이기 포함). 이유: 14.3절은 DB 금지 규칙이고, 허용된 변경은 계획에 고정한 그 한 줄뿐이다. 다른 글은 규칙을 느슨하게 할 수 있어 계획 검증을 다시 받아야 한다.
 - `scripts/hooks/rules.ts`와 `scripts/hooks/guard.ts`를 고치지 마라. 이유: 코어 규칙은 스택과 무관한 목록이다. 스택별 목록은 프로파일의 설정으로 더한다(14.3절). 코어 패턴의 틈은 기술 부채 표에 남긴다.
 - 이미 있는 `dbPatterns`·`dbClients` 항목을 지우거나 좁히지 마라. 이유: R4(검사 약화).
 - `drizzle-kit generate`를 막지 마라(플래그가 앞에 오는 형태 포함). 이유: 마이그레이션은 파일로 쓰고 리뷰받는 것이 규칙이고(14.3절), 이 명령이 그 파일을 만든다.

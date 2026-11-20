@@ -72,7 +72,12 @@ ADR-0006의 형식(frontmatter, 날짜·상태·관련)을 따른다. `related_c
 
 - 18절 Q10 행: "잠정 결정: …(ADR-0007)". 내용: PostgreSQL + Drizzle, 일회용 DB는 PGlite, macOS에서 쟀고 Windows 네이티브와 Linux의 결과가 통과하면 확정한다(TD-14), 차단 목록은 웹 프로파일이 채운다(14.3절).
 - 19절 "현재 위치" 줄: Q10을 착수 전에 정할 것에서 빼지 않는다. Q10은 잠정 결정이고 Windows 네이티브·Linux 실측이 남았다는 것(ADR-0007)과 Q13이 열려 있다는 것을 적는다. "단계별 선행 결정" 줄은 그대로 둔다.
-- 14.3절 "DB 환경 구분" 표의 마지막 행(운영 DB) 바로 아래에 빈 줄 하나를 두고 항목 하나("- 웹 프로파일의 일회용 DB는 "으로 시작하는 한 줄. 그 뒤는 있던 빈 줄). 14.3절의 다른 줄은 한 글자도 바꾸지 않는다: 웹 프로파일의 일회용 DB는 worktree 안의 PGlite 폴더(테스트는 메모리)이고 PC에 DB 서버를 두지 않는다(ADR-0007, 잠정). 표준 명령에 잇는 일은 파일럿 리포에서 한다(TD-12).
+- 14.3절 "DB 환경 구분" 표의 마지막 행(운영 DB) 바로 아래에 빈 줄 하나를 두고 아래 한 줄을 **글자 그대로** 넣는다(그 뒤는 있던 빈 줄). 14.3절의 다른 줄은 한 글자도 바꾸지 않는다. 이 줄의 글은 계획이 정한 것이고 AC가 같은 글로 비교한다. 글을 바꿔야 하면 구현에서 바꾸지 않고 계획을 고쳐 다시 검증받는다.
+
+  ```text
+  - 웹 프로파일의 일회용 DB는 내장 PostgreSQL(PGlite)이다(ADR-0007, 잠정). worktree 안의 폴더 하나가 DB 하나이고 테스트는 메모리 DB를 쓴다. PC에 DB 서버나 컨테이너 런타임을 두지 않는다. 표준 명령에 잇는 일은 파일럿 대상 리포에서 한다(TD-12).
+  ```
+
 - 14.3절의 금지 분류 표, "코드·마이그레이션에 들어가는 것", 강제 장치 표는 고치지 않는다.
 - 0절 버전 이력에 한 줄, 문서 머리의 버전. `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄. 번호는 push할 때 main의 다음 번호다. 다른 PR이 먼저 병합되면 `origin/main`을 병합하고 다시 잡는다.
 
@@ -117,7 +122,7 @@ grep "^| Q10 " docs/harness/design.md | grep "ADR-0007" | grep "PGlite" | grep -
 grep "현재 위치" docs/harness/design.md | grep "Q10" | grep "잠정" | grep -q "Q13"
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "PGlite" | grep -q "ADR-0007"
 test "$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -c "^- 웹 프로파일의 일회용 DB는 ")" = 1
-O=$(mktemp -d) && ADD=$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "^- 웹 프로파일의 일회용 DB는 ") && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | ADD="$ADD" awk '{print} index($0, "| 운영 DB | 실서비스 DB |") == 1 {print ""; print ENVIRON["ADD"]}' > "$O/expected.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md > "$O/now.txt" && test -s "$O/expected.txt" && diff "$O/expected.txt" "$O/now.txt"
+O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | ADD='- 웹 프로파일의 일회용 DB는 내장 PostgreSQL(PGlite)이다(ADR-0007, 잠정). worktree 안의 폴더 하나가 DB 하나이고 테스트는 메모리 DB를 쓴다. PC에 DB 서버나 컨테이너 런타임을 두지 않는다. 표준 명령에 잇는 일은 파일럿 대상 리포에서 한다(TD-12).' awk '{print} index($0, "| 운영 DB | 실서비스 DB |") == 1 {print ""; print ENVIRON["ADD"]}' > "$O/expected.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md > "$O/now.txt" && test -s "$O/expected.txt" && diff "$O/expected.txt" "$O/now.txt"
 grep "^| TD-12 " docs/exec-plans/tech-debt-tracker.md | grep -q "ADR-0007"
 grep "^| TD-14 " docs/exec-plans/tech-debt-tracker.md | grep "lab/q10-db" | grep -q "ADR-0007"
 grep -q "lab/q10-db/README.md" docs/index.md
@@ -128,10 +133,11 @@ node scripts/harness.ts fmt --check
 - 다섯째 줄은 실물 확인을 실제로 돌린다(패키지 설치에 네트워크가 필요하고 1~2분 걸린다). 결과는 리포 밖 임시 폴더에 쓴다. 이 줄이 실행한 머신에서 통과하지 않으면 그 머신에서는 기준이 충족되지 않은 것이다(ADR-0007의 "되돌리는 조건").
 - ADR을 보는 줄들은 절 제목 사이를 잘라 그 절의 본문에 필수 내용이 있는지 본다. 절이 없거나 비어 있으면 실패한다.
 - `--confirm`을 돌리는 세 줄은 확정 조건이 아직 채워지지 않았음을 본다(이 step에서는 macOS 결과뿐이라 종료 코드 1이고, 없는 환경으로 Windows와 Linux를 낸다). 두 환경이 모두 있어야 한다는 것은 검사 스크립트의 테스트가 본다.
-- `git merge-base`가 든 줄은 14.3절 전체가 기대한 글과 같은지 본다. 기대한 글은 PR이 갈라진 지점의 14.3절에 이 step의 허용된 변경 하나만 정해진 자리에 적용한 것이다: "DB 환경 구분" 표의 마지막 행(운영 DB) 바로 아래에 빈 줄 하나와 "- 웹 프로파일의 일회용 DB는 "으로 시작하는 한 줄을 넣는다(그 한 줄의 글은 지금 파일에서 가져온다. 바로 윗줄이 한 줄뿐인지 본다). 그 기대한 글과 지금의 14.3절 전체를 `diff`로 비교한다. 줄을 빼지도 건너뛰지도 않으므로, 더한 줄이 다른 자리(표 안 포함)에 있거나 다른 줄이 빠지거나 바뀌거나 빈 줄이 끼면 실패한다. `origin/main`이 필요하다(`git fetch origin`).
+- `git merge-base`가 든 줄은 14.3절 전체가 기대한 글과 같은지 본다. 기대한 글은 PR이 갈라진 지점의 14.3절에 이 step의 허용된 변경 하나만 정해진 자리에 적용한 것이다: "DB 환경 구분" 표의 마지막 행(운영 DB) 바로 아래에 빈 줄 하나와 **이 명령에 글자 그대로 적힌 한 줄**을 넣는다. 그 줄의 글을 지금 파일에서 가져오지 않는다. 그 기대한 글과 지금의 14.3절 전체를 `diff`로 비교한다. 그래서 더한 줄의 글이 한 글자라도 다르거나(뒤에 문장을 덧붙인 경우 포함), 다른 자리(표 안 포함)에 있거나, 다른 줄이 빠지거나 바뀌거나 빈 줄이 끼면 실패한다. `origin/main`이 필요하다(`git fetch origin`).
 
 ## 금지사항
 
+- 14.3절에 더하는 한 줄의 글을 "작업"과 AC에 적힌 것과 다르게 쓰지 마라(덧붙이기 포함). 이유: 14.3절은 DB 금지 규칙이고, 허용된 변경은 계획에 고정한 그 한 줄뿐이다. 다른 글은 규칙을 느슨하게 할 수 있어 계획 검증을 다시 받아야 한다.
 - `profiles/web/profile.json`과 `scripts/`를 고치지 마라. 이유: 차단 목록과 그 테스트는 step1의 범위다.
 - 결과 파일(`lab/q10-db/results/*.json`)을 손으로 쓰거나 고치지 마라. 이유: 실측 기록이다. 기대와 다르면 스크립트나 절차를 고치고 다시 돌린다.
 - Windows·Linux의 결과 파일을 추정으로 만들지 마라. 이유: 재지 않은 환경을 잰 것으로 남기면 기준("영향이 없는가")의 근거가 거짓이 된다.
