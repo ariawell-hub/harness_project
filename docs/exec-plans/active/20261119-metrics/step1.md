@@ -77,7 +77,7 @@ export interface MetricsSource {
   - `gh pr list --json commits`는 쓰지 않는다: `--limit 1000`과 함께 쓰면 GraphQL 노드 한도를 넘어 조회가 실패한다(이 리포에서 2026-11-20에 확인).
 - `headStatuses`: `gh api --paginate "repos/{owner}/{repo}/commits/<sha>/statuses?per_page=100"`으로 그 커밋의 상태를 끝까지 읽는다.
 - `needsHumanEvents`: `gh api --paginate "repos/{owner}/{repo}/issues/events?per_page=100"`에서 `event`가 `labeled`이고 라벨이 `cfg.github.needsHumanLabel`인 것. 기간 안인 것만 남긴다.
-- `escalationComments`: `gh api --paginate "repos/{owner}/{repo}/issues/comments?since=<since의 전날>T00:00:00Z&per_page=100"`에서 작성자가 `cfg.github.bot`이고 생성 시각이 기간 안인 댓글을 본문 문구로 분류한다. 본문은 분류에만 쓰고 결과에 담지 않는다. `since`를 집계 시작일의 전날로 두는 이유: 이 조회의 `since`는 "그 시각 뒤에 갱신된 댓글"이라 시작일 00:00:00Z에 쓰이고 수정되지 않은 댓글이 서버에서 빠질 수 있다. 하루 앞서 읽고, 받은 뒤에 생성 시각으로 기간을 다시 거른다(step0의 PR·Issue 검색이 끝을 하루 넉넉히 잡는 것과 같다). 분류(위에서부터 먼저 맞는 것):
+- `escalationComments`: `gh api --paginate "repos/{owner}/{repo}/issues/comments?since=<since>T00:00:00Z&per_page=100"`에서 작성자가 `cfg.github.bot`이고 생성 시각이 기간 안인 댓글을 본문 문구로 분류한다. 본문은 분류에만 쓰고 결과에 담지 않는다. 분류(위에서부터 먼저 맞는 것):
   - 본문에 `## 중단 보고:`로 시작하는 줄이 있다 → 그 안에서 다시 가른다(`scripts/runner/run.ts`의 두 보고 형식). `- 추정 원인: `으로 시작하는 줄의 나머지가 `교착`으로 시작하면 `stop-deadlock`, `step 총량 상한`으로 시작하면 `stop-limit`, `실패 키 <키> <수>회` 꼴이면 `stop-failures`다. `- 원인: `으로 시작하는 줄에 `병합이 충돌한다`가 있으면 `stop-conflict`(PR 갱신 충돌 보고. 5회 실패 중단이 아니다). 어느 것도 아니면 `stop-other`
   - `<!-- harness-revert-escalate` 표식이 있다 → `revert`
   - `질문 N건을 남겼다`(N은 숫자) → `question`
@@ -154,7 +154,6 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
   - 커밋 조회가 상한에 닿으면 값을 내지 않는다(기본 자료원 경로): 한 PR의 커밋 조회가 250줄을 돌려주면 종료 코드 2이고 표준 출력이 비어 있으며 표준 오류에 "집계하지 않았다"와 그 PR 번호가 있다.
   - 커밋 조회가 빈 응답이면 값을 내지 않는다(기본 자료원 경로): 한 PR의 커밋 조회가 종료 코드 0과 빈 표준 출력을 돌려주면 종료 코드 2이고 표준 출력이 비어 있으며 표준 오류에 "집계하지 않았다"와 그 PR 번호가 있다(그 PR을 "실행을 찾지 못한 PR"로 세어 집계를 내지 않는다).
 - `renderBlock`이 `### 상시 지표` 절을 내고 제목 문자열을 담지 않는다.
-- `ghSource.escalationComments`의 조회 경계: 기록된 호출의 `since`가 집계 시작일의 전날 `T00:00:00Z`다(시작일이 2026-11-11이면 `since=2026-11-10T00:00:00Z`). 고정 응답에 시작일 00:00:00Z에 쓰인 봇 댓글과 그 직전 초(전날 23:59:59Z)에 쓰인 봇 댓글을 함께 주면 앞의 것만 결과에 든다.
 - `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자 배열이 1절에 더한 다섯 꼴 가운데 하나와 자리마다 맞는다.
 - `ghSource.mergedPrs`: PR 조회의 `--json` 필드에 `commits`가 없고 `isCrossRepository`가 있다. 기간 안의 PR마다 PR 커밋 조회를 그 번호로 한 번씩 부르고 기간 밖 PR에는 부르지 않는다. 응답의 SHA가 `commits`에 담긴다. 같은 SHA가 두 번 오면 `SourceError`다. 16진수 40자가 아닌 줄이 있으면 `SourceError`다. 커밋 조회가 실패하면 `SourceError`다.
   - 쪽 넘김: 고정 응답을 실제 출력 형식대로 첫 쪽의 100줄과 둘째 쪽의 1줄을 이어 붙여 만든다(쪽마다 jq 결과가 줄바꿈으로 끝난다). `commits`가 101개이고 순서가 받은 대로이며 둘째 쪽의 SHA가 들어 있다. 기록된 호출에 `--paginate`가 있고 `--jq`의 식이 `.[].sha`다(`--paginate`를 뺀 호출은 읽기 요청 꼴과 맞지 않는다는 것도 단언한다).
