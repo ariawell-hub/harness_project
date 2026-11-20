@@ -70,6 +70,7 @@ claimed_at: 2026-11-20T21:31:57+09:00 # new-task가 채운다
 - 2026-11-20 22:56 step0 테스트를 먼저 커밋했다(테스트 파일 둘만). 구현 전 `node --test scripts/test/runner-review.test.ts scripts/test/pr-state.test.ts`는 실패한다(종료 코드 1: `runner-review.test.ts`는 `../runner/review.ts`에 `LONG_OPEN_REJUDGED`가 없어 읽히지 않고, `pr-state.test.ts`는 줄이 나와야 하는 세 건이 실패한다. 줄이 없어야 하는 두 건은 구현 전에도 통과한다).
 - 2026-11-20 22:58 구현을 커밋했다. 같은 명령이 통과한다(51건). 문서(설계서, 절차서, `CHANGELOG`, TD-54 행)는 PR #162가 병합된 뒤에 쓴다: #162가 같은 TD-54 행과 `CHANGELOG`를 고친다.
 - 2026-11-20 23:10 PR #162가 병합돼 `origin/main`을 병합하고 문서를 썼다(절차서 2절·7절·8절, 설계서 9.1절·10.3절·v0.7.67, `CHANGELOG`, TD-54 해결). step0의 문장을 그대로 넣었고 AC의 문서 명령 여덟 개가 통과한다. push는 PR #164(같은 `CHANGELOG`·기술 부채 표)가 병합된 뒤에 한다.
+- 2026-11-21 00:15 PR #164가 병합돼 `origin/main`(`eb5a06e`)을 병합했다(`CHANGELOG`의 충돌은 main의 내용에 이 PR의 한 줄을 더해 풀었다. 설계서는 main이 v0.7.66 그대로라 v0.7.67을 쓴다). 병합한 head `4fe5c8c`에서 step0의 AC 전체를 다시 실행해 결과를 "검증 방법과 결과"에 적었다.
 
 ## 의사결정 로그
 
@@ -95,6 +96,13 @@ claimed_at: 2026-11-20T21:31:57+09:00 # new-task가 채운다
 
 - step0의 Acceptance Criteria.
 - `node scripts/harness.ts check`.
+
+결과(2026-11-21 00:15, head `4fe5c8c`. main `eb5a06e`를 병합한 상태):
+
+- `node --test scripts/test/runner-review.test.ts scripts/test/pr-state.test.ts`: 종료 코드 0. 51건 가운데 51건 통과, 실패 0, 건너뜀 0. 새 테스트가 7건(`longOpen` 2건, `pr-state` 명령 5건)이고 나머지 44건이 기존 테스트다(runner의 지적 대응·실패 횟수 사다리·반박 교착, `pr-state`의 분류). 기존 테스트는 고치지 않았다.
+- 문서를 견주는 명령 일곱 개(`grep -qxF -e` 둘, `grep -qF` 셋, `awk` 둘)와 `grep -q "^| TD-54 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 모두 종료 코드 0.
+- `complete-step`도 완료 처리 때 AC 전체를 실행해 통과를 확인했다(main `ba9107e`를 병합한 커밋에서).
+- `node scripts/harness.ts check`: push 직전에 실행한다(실패하면 push하지 않는다).
 
 ## 다음 할 일
 
