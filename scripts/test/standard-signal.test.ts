@@ -71,6 +71,15 @@ const exited = (p: ChildProcess) =>
   );
 const pids = (root: string) =>
   JSON.parse(readFileSync(path.join(root, 'pids.json'), 'utf8')) as { self: number; child: number };
+/** pid 파일이 다 쓰였는가. 파일이 생긴 직후에는 비어 있을 수 있어 있는지만 보면 안 된다(간헐 실패로 찾았다) */
+function hasPids(root: string): boolean {
+  try {
+    const p = pids(root);
+    return p.self > 0 && p.child > 0;
+  } catch {
+    return false;
+  }
+}
 const got = (root: string) =>
   existsSync(path.join(root, 'got-signal'))
     ? readFileSync(path.join(root, 'got-signal'), 'utf8').trim().split('\n')
@@ -105,7 +114,7 @@ for (const sig of ['SIGTERM', 'SIGINT'] as const) {
       const done = exited(harness);
       let p: { self: number; child: number } | undefined;
       try {
-        await waitFor(() => existsSync(path.join(root, 'pids.json')), 30_000, '명령의 pid 파일');
+        await waitFor(() => hasPids(root), 30_000, '명령의 pid 파일');
         p = pids(root);
         harness.kill(sig);
         const end = await done;
@@ -143,7 +152,7 @@ test(
     const done = exited(d);
     let p: { self: number; child: number } | undefined;
     try {
-      await waitFor(() => existsSync(path.join(root, 'pids.json')), 30_000, '명령의 pid 파일');
+      await waitFor(() => hasPids(root), 30_000, '명령의 pid 파일');
       p = pids(root);
       d.kill('SIGTERM');
       const end = await done;
@@ -157,6 +166,45 @@ test(
   },
 );
 
+// 명령(그룹의 첫 프로세스)이 끝났다고 그 그룹이 빈 것은 아니다. 명령의 자식이 신호를 받고 끝나는 데 시간이 걸리면
+// 그동안 기다린다(간헐 실패로 찾았다: 부하가 있을 때 자식이 아직 살아 있는 채로 하네스가 끝났다)
+test('명령이 먼저 끝나도 그 그룹에 남은 프로세스가 끝난 뒤에 신호로 끝난다', T, async () => {
+  const root = repo();
+  // 명령은 신호를 받자마자 끝나고, 같은 그룹의 자식은 0.7초 뒤에 끝난다
+  const child =
+    "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 700));" +
+    "require('node:fs').writeFileSync('child-ready', ''); setInterval(() => {}, 1000);";
+  write(
+    root,
+    'long.mjs',
+    `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const child = spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: 'ignore' });
+process.on('SIGTERM', () => process.exit(0));
+writeFileSync('pids.json', JSON.stringify({ self: process.pid, child: child.pid }));
+setInterval(() => {}, 1000);
+`,
+  );
+  const d = driver(root, 10_000);
+  const done = exited(d);
+  let p: { self: number; child: number } | undefined;
+  try {
+    await waitFor(
+      () => hasPids(root) && existsSync(path.join(root, 'child-ready')),
+      30_000,
+      '명령의 pid 파일과 자식의 준비',
+    );
+    p = pids(root);
+    d.kill('SIGTERM');
+    const end = await done;
+    assert.equal(alive(p.child), false, '명령의 자식이 남았다');
+    assert.equal(alive(p.self), false);
+    assert.deepEqual(end, { code: null, signal: 'SIGTERM' });
+  } finally {
+    reap(d.pid, p?.self, p?.child);
+  }
+});
+
 test('신호를 두 번 받으면 유예 시간을 기다리지 않고 SIGKILL로 끝낸다', T, async () => {
   const root = repo(true);
   // 유예 시간이 테스트 제한 시간보다 길다. 두 번째 신호가 아니면 끝나지 않는다
@@ -164,7 +212,7 @@ test('신호를 두 번 받으면 유예 시간을 기다리지 않고 SIGKILL�
   const done = exited(d);
   let p: { self: number; child: number } | undefined;
   try {
-    await waitFor(() => existsSync(path.join(root, 'pids.json')), 30_000, '명령의 pid 파일');
+    await waitFor(() => hasPids(root), 30_000, '명령의 pid 파일');
     p = pids(root);
     d.kill('SIGTERM');
     await waitFor(() => got(root).length === 1, 30_000, '첫 신호 전달');
@@ -244,7 +292,11 @@ setInterval(() => {}, 1000);
     let slow: number | undefined;
     try {
       await waitFor(
-        () => existsSync(path.join(root, 'pid-fast')) && existsSync(path.join(root, 'pid-slow')),
+        () =>
+          existsSync(path.join(root, 'pid-fast')) &&
+          existsSync(path.join(root, 'pid-slow')) &&
+          pidOf('fast') > 0 &&
+          pidOf('slow') > 0,
         30_000,
         '두 명령의 pid 파일',
       );

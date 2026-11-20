@@ -246,41 +246,45 @@ async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
   const look = async () => {
     seen = await tracker.refresh(running(procs), true);
   };
-  const signalAll = (signal: NodeJS.Signals) => {
-    for (const p of live) killTree(p.child.pid, signal);
-    for (const pid of tracker.pids()) {
-      try {
-        process.kill(pid, signal);
-      } catch {
-        // 이미 끝났다
-      }
-    }
-  };
-  const goneWithin = async (ms: number): Promise<boolean> => {
+  /**
+   * 그룹에 `signal`을 보내고 `ms` 동안 모두 사라지기를 기다린다. 참이면 남은 것이 없다.
+   * 기다리는 동안 볼 때마다, 그때 찾은 그룹 밖 자손 가운데 이 신호를 아직 받지 않은 것에 보낸다. 신호를 보낸 뒤에
+   * 처음 찾은 것(분리된 중간 프로세스가 자손을 남기고 끝난 경우)도 받는다(구현 판정 4라운드 F2).
+   * 보내는 대상은 방금 본 것에서 우리 것으로 확인된 pid뿐이다(`tracker.targets()`)
+   */
+  const sweep = async (signal: NodeJS.Signals, ms: number): Promise<boolean> => {
     const until = Date.now() + ms;
+    const sent = new Set<number>();
     let clear = 0;
+    // 이미 끝난 것은 빼고(번호가 다시 쓰였을 수 있다) 지금 떠 있는 것에만 보낸다.
+    // 목록을 읽지 못해도 멈추지 않는다: 그룹과, 마지막으로 목록에서 확인한 자손에는 보낸다(구현 판정 F5)
+    await look();
+    for (const p of live) killTree(p.child.pid, signal);
     for (;;) {
-      if (live.some(treeAlive)) clear = 0;
-      else {
-        // 그룹이 비었다. 그룹 밖의 자손이 남았는지는 프로세스 목록과 표식으로만 알 수 있다.
-        // 읽지 못했으면 끝났다고 보지 않고 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다).
-        // 표식으로만 보이고 목록에는 아직 없는 프로세스도 남은 것이다(tracker.pids()에 들어 있다)
-        await look();
-        clear = seen && tracker.pids().length === 0 ? clear + 1 : 0;
-        if (clear >= CLEAR_LOOKS) return true;
+      const targets = new Set(tracker.targets());
+      // 사라진 번호는 잊는다(같은 번호가 우리 것으로 다시 확인되면 다시 보낸다)
+      for (const pid of sent) if (!targets.has(pid)) sent.delete(pid);
+      for (const pid of targets) {
+        if (sent.has(pid)) continue;
+        sent.add(pid);
+        try {
+          process.kill(pid, signal);
+        } catch {
+          // 이미 끝났다
+        }
       }
+      const groups = live.some(treeAlive);
+      // 그룹 밖의 자손이 남았는지는 프로세스 목록과 표식으로만 알 수 있다. 읽지 못했으면 끝났다고 보지 않고
+      // 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다). 우리 것인지 확인하지 못한 번호도 남은 것이다
+      clear = !groups && seen && tracker.pids().length === 0 ? clear + 1 : 0;
+      if (clear >= CLEAR_LOOKS) return true;
       if (Date.now() >= until) return false;
-      await sleep(live.some(treeAlive) ? 25 : RECHECK_MS);
+      await sleep(groups ? 25 : RECHECK_MS);
+      await look();
     }
   };
-  // 이미 끝난 것은 빼고(번호가 다시 쓰였을 수 있다) 지금 떠 있는 것에만 신호를 보낸다
-  await look();
-  signalAll('SIGTERM');
-  if (await goneWithin(TERM_GRACE_MS)) return 'clean';
-  // 목록을 읽지 못하는 중이어도 멈추지 않는다: 그룹과, 마지막으로 알던 자손에 SIGKILL을 보낸다(구현 판정 F5)
-  await look();
-  signalAll('SIGKILL');
-  if (await goneWithin(KILL_CONFIRM_MS)) return 'clean';
+  if (await sweep('SIGTERM', TERM_GRACE_MS)) return 'clean';
+  if (await sweep('SIGKILL', KILL_CONFIRM_MS)) return 'clean';
   if (live.some(treeAlive)) return 'left';
   return seen ? 'left' : 'unknown';
 }

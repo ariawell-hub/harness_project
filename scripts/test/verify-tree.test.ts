@@ -269,6 +269,8 @@ test('Descendants: 표식을 가진 프로세스는 부모가 누구든 더하�
   assert.equal(await d.refresh([], true), true);
   // 목록에 없는 pid(999)도 버리지 않는다(목록을 읽은 뒤에 뜬 프로세스일 수 있다)
   assert.deepEqual(d.pids(), [300, 301, 999]);
+  // 방금 표식으로 확인한 것이라 끝낼 대상이다
+  assert.deepEqual(d.targets(), [300, 301, 999]);
 });
 
 // 구현 판정 3라운드 F2: 목록과 표식은 다른 시점에 읽는다. 목록을 읽은 뒤에 뜬 프로세스는 표식에만 나온다.
@@ -297,23 +299,67 @@ test('Descendants: 표식에는 있고 목록에는 없는 pid도 남은 것으�
   assert.deepEqual(d.pids(), []);
 });
 
-test('Descendants: 표식으로만 본 pid는 표식을 쓰지 않는 읽기에서도 목록에 있으면 이어서 따라간다', async () => {
+// 구현 판정 4라운드 F6: 표식으로만 본 pid는 그 뒤에 다른 프로세스가 같은 번호를 받을 수 있다.
+// 이번 읽기의 표식이 확인해 주지 않으면 끝낼 대상으로 삼지 않는다(남은 것으로 세어 완료만 막는다)
+test('Descendants: 표식으로만 본 pid는 표식을 다시 읽지 못하면 목록에 나와도 끝낼 대상이 아니다(번호가 다시 쓰였을 수 있다)', async () => {
+  // 500: 처음에는 표식을 가진 프로세스였다. 두 번째 읽기부터는 같은 번호를 받은 무관한 프로세스(그룹 900)다
   const lists = [
     [row(1, 0, 1)],
-    [row(1, 0, 1), row(500, 1, 777)],
-    [row(1, 0, 1), row(500, 1, 777)],
+    [row(1, 0, 1), row(500, 1, 900)],
+    [row(1, 0, 1), row(500, 1, 900)],
   ];
+  const marks: (number[] | null)[] = [[500], null, []];
+  let i = 0;
+  let j = 0;
+  const d = new Descendants(
+    () => Promise.resolve(lists[Math.min(i++, lists.length - 1)]),
+    () => Promise.resolve(marks[Math.min(j++, marks.length - 1)]),
+  );
+  assert.equal(await d.refresh([], true), true);
+  assert.deepEqual(d.pids(), [500]);
+  assert.deepEqual(d.targets(), [500]);
+  // 표식을 읽지 못했다: 끝났다고도, 우리 것이라고도 하지 못한다
+  assert.equal(await d.refresh([], true), false);
+  assert.deepEqual(d.pids(), [500]);
+  assert.deepEqual(d.targets(), []);
+  // 표식을 다시 읽었고 500에는 표식이 없다: 우리 것이 아니다(그룹이 그대로여도 따라가지 않는다)
+  assert.equal(await d.refresh([], true), true);
+  assert.deepEqual(d.pids(), []);
+  assert.deepEqual(d.targets(), []);
+});
+
+test('Descendants: 표식으로만 본 pid는 표식을 쓰지 않는 읽기로는 알던 것이 되지 않고, 표식이 다시 확인해 주면 된다', async () => {
+  const lists = [[row(1, 0, 1)], [row(1, 0, 1), row(500, 1, 777)]];
   let i = 0;
   const d = new Descendants(
     () => Promise.resolve(lists[Math.min(i++, lists.length - 1)]),
     () => Promise.resolve([500]),
   );
   await d.refresh([], true);
-  assert.deepEqual(d.pids(), [500]);
+  assert.deepEqual(d.targets(), [500]);
   assert.equal(await d.refresh(), true);
   assert.deepEqual(d.pids(), [500]);
-  assert.equal(await d.refresh(), true);
+  assert.deepEqual(d.targets(), []);
+  assert.equal(await d.refresh([], true), true);
   assert.deepEqual(d.pids(), [500]);
+  assert.deepEqual(d.targets(), [500]);
+  // 이제 목록에서 확인한 것이다: 표식을 쓰지 않는 읽기에서도 그룹이 그대로면 따라간다
+  assert.equal(await d.refresh(), true);
+  assert.deepEqual(d.targets(), [500]);
+});
+
+test('Descendants: 목록을 읽지 못하면 목록에서 확인한 것만 끝낼 대상으로 남는다', async () => {
+  const lists = [[row(100, 1, 100), row(200, 100, 200)], null];
+  let i = 0;
+  const d = new Descendants(
+    () => Promise.resolve(lists[Math.min(i++, lists.length - 1)]),
+    () => Promise.resolve([500]),
+  );
+  assert.equal(await d.refresh([100], true), true);
+  assert.deepEqual(d.targets(), [200, 500]);
+  assert.equal(await d.refresh([100], true), false);
+  assert.deepEqual(d.pids(), [200, 500]);
+  assert.deepEqual(d.targets(), [200]);
 });
 
 test('Descendants: 표식을 가졌어도 이 프로세스와 뿌리는 넣지 않고, 좀비도 넣지 않는다', async () => {
@@ -614,6 +660,81 @@ test(
     try {
       const r = await run(f, { listProcesses: hidden, findMarked: blink });
       assert.ok(after >= 3, '비어 보인 뒤에 다시 보지 않았다');
+      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+      assert.equal(r.ok, false);
+      assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
+    } finally {
+      reap(f.root);
+    }
+  },
+);
+
+// 구현 판정 4라운드 F6: 표식으로만 본 pid를, 표식을 다시 읽지 못한 채 프로세스 목록만 보고 끝내지 않는다.
+// 여기서는 무관한 프로세스 하나를 두고, 표식 읽기가 처음 한 번만 그 pid를 내놓게 한다(표식을 가진 프로세스가 끝나고
+// 무관한 프로세스가 같은 번호를 받은 경우를 흉내 낸다). 그 뒤의 표식 읽기는 실패한다
+test(
+  'verifyWeb: 표식을 다시 읽지 못하면, 전에 표식으로만 본 번호의 프로세스(무관할 수 있다)를 끝내지 않고 실패로 돌아간다',
+  T,
+  async () => {
+    const f = fx({ browser: 'plain' });
+    // SIGTERM을 무시한다(번호가 다시 쓰이기 전의 프로세스가 받은 신호 구실). 준비되면 한 줄을 낸다
+    const bystander = spawn(
+      process.execPath,
+      ['-e', "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);"],
+      { detached: true, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    await new Promise((r) => bystander.stdout!.once('data', r));
+    bystander.unref();
+    const runnerDone = () =>
+      existsSync(path.join(f.root, 'runner.pid')) && !alive(pidIn(f.root, 'runner.pid'));
+    let claimed = false;
+    const list = async () =>
+      (await listProcesses())?.filter((r) => claimed || r.pid !== bystander.pid) ?? null;
+    const marks: typeof findMarked = async (needle) => {
+      if (!runnerDone()) return findMarked(needle);
+      if (claimed) return null;
+      const found = await findMarked(needle);
+      claimed = true;
+      return found ? [...found, bystander.pid!] : null;
+    };
+    try {
+      const r = await run(f, { listProcesses: list, findMarked: marks });
+      assert.equal(claimed, true);
+      assert.equal(alive(bystander.pid!), true, '무관한 프로세스를 끝냈다');
+      // 우리 것은 끝냈다
+      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+      // 남은 것이 없는지 확인하지 못했다
+      assert.equal(r.ok, false);
+      assert.match(problems(r), /띄운 프로세스를 끝내지 못했다.*프로세스 목록/);
+    } finally {
+      reap(f.root, bystander.pid);
+    }
+  },
+);
+
+// 구현 판정 4라운드 F2: SIGKILL을 보낸 뒤에 처음 찾은 자손에도 SIGKILL을 보낸다.
+// 여기서는 SIGTERM을 무시하는 브라우저를 실행기가 살아 있는 동안에는 목록에서도 표식에서도 가린다
+test(
+  'verifyWeb: SIGKILL을 보낸 뒤 확인하다가 처음 찾은 프로세스도 끝내고 돌아간다',
+  T,
+  async () => {
+    const f = fx({ browser: 'stubborn', ignoreTerm: true, hang: true });
+    const has = (name: string) => existsSync(path.join(f.root, name));
+    const browser = () => (has('browser.pid') ? pidIn(f.root, 'browser.pid') : -1);
+    const runnerDead = () => has('runner.pid') && !alive(pidIn(f.root, 'runner.pid'));
+    const list = async () => (await listProcesses())?.filter((r) => r.pid !== browser()) ?? null;
+    let revealed = 0;
+    const marks: typeof findMarked = async (needle) => {
+      const found = await findMarked(needle);
+      if (!found) return null;
+      // 실행기가 SIGKILL로 끝난 뒤에야 보인다
+      if (!runnerDead()) return found.filter((pid) => pid !== browser());
+      if (found.includes(browser())) revealed++;
+      return found;
+    };
+    try {
+      const r = await run(f, { runnerTimeoutSec: 2, listProcesses: list, findMarked: marks });
+      assert.ok(revealed >= 1, 'SIGKILL 뒤에 브라우저가 보이지 않았다(테스트의 전제)');
       assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
       assert.equal(r.ok, false);
       assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);

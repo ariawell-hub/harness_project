@@ -149,14 +149,19 @@ export const findMarked: FindMarked = async (needle) => {
  * - 좀비는 뺀다
  * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다
  * - 목록과 표식은 다른 시점에 읽는다. 표식에는 있는데 목록에는 없는 pid(목록을 읽은 뒤에 뜬 프로세스)는 버리지 않고
- *   "아직 목록에서 확인하지 못한 것"으로 들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다.
- *   다음에 읽을 때 목록에 나오면 알던 것으로 옮기고, 목록에도 표식에도 없으면 끝난 것으로 뺀다
+ *   "아직 목록에서 확인하지 못한 것"으로 들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다
+ * - 표식으로만 본 pid는 번호 말고 아는 것이 없다(그룹을 모른다). 그 프로세스가 끝나고 무관한 프로세스가 같은 번호를
+ *   받을 수 있으므로, **이번 읽기의 표식이 다시 확인해 준 것만** 끝낼 대상(`targets()`)이고 알던 것으로 옮긴다.
+ *   표식을 읽지 않았거나 읽지 못한 읽기에서는 목록에 그 번호가 나와도 옮기지 않고, 끝낼 대상에서도 뺀다.
+ *   남은 것으로는 계속 센다(끝났다고 확인하지 못했다). 표식을 다시 읽어 거기 없으면 뺀다
  */
 export class Descendants {
   /** pid → 프로세스 그룹 */
   private known = new Map<number, number>();
   /** 표식으로는 봤지만 목록에서는 아직 확인하지 못한 pid */
   private unconfirmed = new Set<number>();
+  /** 그 가운데 마지막 읽기의 표식이 확인해 준 pid */
+  private verified = new Set<number>();
   private readonly list: ListProcesses;
   private readonly marked: (() => Promise<number[] | null>) | undefined;
 
@@ -174,14 +179,16 @@ export class Descendants {
    */
   async refresh(roots: readonly number[] = [], byMark = false): Promise<boolean> {
     const rows = await this.list();
-    if (!rows) return false;
+    if (!rows) {
+      // 표식으로만 본 것이 지금도 그 프로세스인지 확인하지 못했다
+      this.verified = new Set();
+      return false;
+    }
     // undefined: 표식으로 찾지 않았다. null: 찾으려 했지만 읽지 못했다
     const tagged = byMark && this.marked ? await this.marked() : undefined;
-    const mine = new Set(tagged ?? []);
+    /** 이번 읽기에서 표식을 가진 것으로 확인된 pid. 표식을 읽지 않았거나 읽지 못했으면 null */
+    const fresh = tagged ? new Set(tagged) : null;
     const skip = (pid: number) => pid === process.pid || roots.includes(pid);
-    // 표식을 이번에 읽었으면 그 결과만 믿는다(전에 표식으로 본 pid가 이번 표식에 없으면 다른 프로세스다).
-    // 읽지 않았거나 읽지 못했으면 전에 본 것을 그대로 믿는다
-    const pending = tagged ? mine : this.unconfirmed;
     const next = new Map<number, number>();
     const listed = new Set<number>();
     const children = new Map<number, ProcessRow[]>();
@@ -192,11 +199,9 @@ export class Descendants {
       if (siblings) siblings.push(r);
       else children.set(r.ppid, [r]);
       if (skip(r.pid)) continue;
-      if (this.known.get(r.pid) === r.pgid || pending.has(r.pid)) next.set(r.pid, r.pgid);
+      // 전에 표식으로만 본 번호는 여기서 쓰지 않는다: 이번 표식(fresh)이 확인해 준 것만 알던 것이 된다
+      if (this.known.get(r.pid) === r.pgid || fresh?.has(r.pid)) next.set(r.pid, r.pgid);
     }
-    // 목록에 없는 것: 목록을 읽은 뒤에 떴을 수 있다. 버리지 않는다(구현 판정 3라운드 F2)
-    const unconfirmed = new Set<number>();
-    for (const pid of pending) if (!listed.has(pid) && !skip(pid)) unconfirmed.add(pid);
     const queue = [...next.keys(), ...roots];
     while (queue.length) {
       const parent = queue.pop()!;
@@ -207,13 +212,40 @@ export class Descendants {
         queue.push(c.pid);
       }
     }
+    const unconfirmed = new Set<number>();
+    const verified = new Set<number>();
+    if (fresh) {
+      // 표식에는 있고 목록에는 없다: 목록을 읽은 뒤에 떴을 수 있다. 버리지 않는다(구현 판정 3라운드 F2).
+      // 방금 표식으로 확인했으니 끝낼 대상이다
+      for (const pid of fresh) {
+        if (listed.has(pid) || skip(pid)) continue;
+        unconfirmed.add(pid);
+        verified.add(pid);
+      }
+    } else {
+      // 표식을 읽지 않았거나 읽지 못했다: 전에 표식으로만 본 번호가 끝났는지도, 아직 그 프로세스인지도 모른다.
+      // 남은 것으로 세되 끝낼 대상으로는 삼지 않는다(구현 판정 4라운드 F6)
+      for (const pid of this.unconfirmed) if (!next.has(pid) && !skip(pid)) unconfirmed.add(pid);
+    }
     this.known = next;
     this.unconfirmed = unconfirmed;
+    this.verified = verified;
     return tagged !== null;
   }
 
-  /** 지금 알고 있는 자손의 pid: 마지막으로 읽은 목록에 있던 것과, 표식으로만 보고 목록에서는 아직 확인하지 못한 것 */
+  /**
+   * 남은 것으로 세는 pid: 마지막으로 읽은 목록에 있던 자손과, 표식으로만 보고 아직 끝났다고 확인하지 못한 것.
+   * 비어 있어야 남은 것이 없다
+   */
   pids(): number[] {
     return [...this.known.keys(), ...this.unconfirmed].sort((a, b) => a - b);
+  }
+
+  /**
+   * 신호를 보낼 pid: 목록에서 확인한 자손과, 표식으로만 본 것 가운데 마지막 읽기의 표식이 확인해 준 것.
+   * `pids()`에는 있고 여기에는 없는 것은 우리 것인지 확인하지 못한 번호다
+   */
+  targets(): number[] {
+    return [...this.known.keys(), ...this.verified].sort((a, b) => a - b);
   }
 }

@@ -60,6 +60,19 @@ export function killTree(pid: number | undefined, signal: NodeJS.Signals = 'SIGT
   }
 }
 
+/** 프로세스 그룹에 남은 프로세스가 있는가(POSIX). 신호를 보낼 수 없는 것(EPERM)도 남은 것으로 본다 */
+function groupAlive(pid: number | undefined): boolean {
+  if (!pid || isWin) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+/** 신호를 넘긴 뒤 SIGKILL까지 보내고도 그룹이 남아 있을 때 더 기다리는 시간 */
+const GROUP_GONE_EXTRA_MS = 2000;
+
 export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
   const started = Date.now();
   return new Promise((resolve) => {
@@ -100,9 +113,24 @@ export function run(cmd: string, args: string[], opts: ExecOptions = {}): Promis
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      clearTimeout(forceTimer);
       child.stdout?.destroy();
       child.stderr?.destroy();
+      // 신호를 넘긴 실행: 명령(그룹의 첫 프로세스)이 끝나도 그 그룹에 남은 프로세스(명령의 자식)가 끝날 때까지
+      // 기다린다. 그 전에 돌아가면 이 프로세스가 신호로 끝난 뒤에도 그것들이 남는다. 유예 시간이 지나면 걸어 둔
+      // 타이머가 그룹에 SIGKILL을 보낸다. 그러고도 남으면(신호를 보낼 수 없는 프로세스) 조금 더 보고 돌아간다
+      if (forwarding && received && groupAlive(child.pid)) {
+        const giveUp = Date.now() + (opts.forwardGraceMs ?? 10_000) + GROUP_GONE_EXTRA_MS;
+        const poll = setInterval(() => {
+          if (groupAlive(child.pid) && Date.now() < giveUp) return;
+          clearInterval(poll);
+          done(code);
+        }, 10);
+        return;
+      }
+      done(code);
+    };
+    const done = (code: number) => {
+      clearTimeout(forceTimer);
       if (forwarding) {
         for (const s of FORWARDED) process.off(s, onSignal);
         forwardingRuns--;
