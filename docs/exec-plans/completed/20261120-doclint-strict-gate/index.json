@@ -1,0 +1,11 @@
+{
+  "plan": "20261120-doclint-strict-gate",
+  "steps": [
+    {
+      "step": 0,
+      "name": "gate-read-failure",
+      "status": "completed",
+      "completed_at": "2026-11-20T22:41:40+09:00"
+    }
+  ]
+}

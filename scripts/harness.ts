@@ -60,7 +60,7 @@ import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/tas
 import { bypassScan } from './gates/bypass-scan.ts';
 import { CODEOWNERS_FILE, codeownersProblems, codeownersText } from './gates/codeowners.ts';
 import { revertCheck, revertTarget, type RevertCheck } from './gates/revert-check.ts';
-import { docLint, printDocLint } from './gates/doc-lint.ts';
+import { docLintGate, printDocLint } from './gates/doc-lint.ts';
 import { planGate, type PlanG1 } from './gates/plan-gate.ts';
 import { secretScan } from './gates/secret-scan.ts';
 import { testEffect } from './gates/test-effect.ts';
@@ -349,7 +349,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'doc-lint': {
       const info = repoInfo(cwd);
-      const r = docLint(info.root, loadConfig(info.root));
+      const r = docLintGate(info.root, loadConfig(info.root));
       printDocLint(r);
       log(
         r.errors.length
