@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "steady-github",
-      "status": "in_progress"
+      "status": "completed",
+      "completed_at": "2026-11-20T17:05:57+09:00"
     },
     {
       "step": 2,
