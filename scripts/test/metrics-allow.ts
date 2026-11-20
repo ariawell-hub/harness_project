@@ -1,0 +1,100 @@
+// metrics 명령이 띄워도 되는 자식 프로세스의 허용 목록(계획 20261119-metrics step0 1절 "읽기 요청 꼴", 5절).
+// 명령과 인자 배열 전체(길이와 자리마다의 값)가 맞을 때만 허용한다. 금지할 옵션은 나열하지 않는다:
+// 금지할 표기(-X POST, --method=POST, -XPOST …)는 끝없이 늘고, 실제로 쓰는 조회는 몇 개뿐이며 꼴이 고정돼 있다.
+// 뒤 step이 조회나 읽기 명령을 더하면 여기에 꼴을 더하고, 고정 응답과 호출 단언도 함께 넓힌다.
+
+/** 인자 한 자리. 문자열은 그대로 같아야 하고 정규식은 그 자리 전체와 맞아야 한다 */
+export type Slot = string | RegExp;
+
+export interface Shape {
+  name: string;
+  args: Slot[];
+}
+
+const DAY = String.raw`\d{4}-\d{2}-\d{2}`;
+const REPO = String.raw`repos/\{owner\}/\{repo\}`;
+/** `--jq` 바로 뒤 한 자리의 식 */
+const JQ = /^[\s\S]+$/;
+
+/** `gh`의 읽기 요청 꼴 넷: PR 조회, Issue 조회, 실행 조회, 댓글 조회(원장) */
+export function ghReadShapes(defaultBranch: string): Shape[] {
+  return [
+    {
+      name: 'prs',
+      args: [
+        'pr',
+        'list',
+        '--state',
+        'merged',
+        '--base',
+        defaultBranch,
+        '--search',
+        new RegExp(`^merged:${DAY}\\.\\.${DAY}$`),
+        '--limit',
+        '1000',
+        '--json',
+        /^[A-Za-z]+(,[A-Za-z]+)*$/,
+      ],
+    },
+    {
+      name: 'issues',
+      args: [
+        'issue',
+        'list',
+        '--state',
+        'all',
+        '--label',
+        'bug',
+        '--search',
+        new RegExp(`^created:${DAY}\\.\\.${DAY}$`),
+        '--limit',
+        '1000',
+        '--json',
+        'number,createdAt',
+      ],
+    },
+    {
+      name: 'runs',
+      args: [
+        'api',
+        '--paginate',
+        new RegExp(`^${REPO}/actions/runs\\?created=${DAY}&per_page=100$`),
+        '--jq',
+        JQ,
+      ],
+    },
+    {
+      name: 'comments',
+      args: [
+        'api',
+        '--paginate',
+        new RegExp(`^${REPO}/issues/\\d+/comments\\?per_page=100$`),
+        '--jq',
+        JQ,
+      ],
+    },
+  ];
+}
+
+/** `repoInfo`(scripts/lib/git.ts)가 실행하는 둘. 둘 다 읽기만 한다 */
+export const GIT_READ_SHAPES: Shape[] = [
+  {
+    name: 'rev-parse',
+    args: ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'],
+  },
+  { name: 'symbolic-ref', args: ['symbolic-ref', '--short', '-q', 'HEAD'] },
+];
+
+export function fits(shape: Shape, args: readonly string[]): boolean {
+  return (
+    shape.args.length === args.length &&
+    shape.args.every((slot, i) =>
+      typeof slot === 'string' ? slot === args[i] : slot.test(args[i]),
+    )
+  );
+}
+
+/** 인자 배열과 맞는 꼴. 없으면 null */
+export function matchShape(shapes: readonly Shape[], args: readonly string[]): Shape | null {
+  return shapes.find((s) => fits(s, args)) ?? null;
+}

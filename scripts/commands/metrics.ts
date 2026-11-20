@@ -1,0 +1,103 @@
+// metrics(17.2절): 지표를 집계해 표준 출력에 낸다. 파일을 쓰지 않는다.
+// GitHub은 읽기만 한다. 순서가 규칙이다: 기간 검사 → 자료 읽기 → 계산·렌더 → 출력.
+// 자료를 다 읽지 못하면 아무것도 내지 않는다(종료 코드 2).
+// 출력은 docs/QUALITY_SCORE.md의 표식 구간에 그대로 붙여 넣는 글이다. 문서에는 작업자가 붙여 넣어 기록한다.
+import type { Ledger } from '../ci/ledger.ts';
+import { loadConfig } from '../lib/config.ts';
+import { repoInfo } from '../lib/git.ts';
+import { isMainCheck, pilotMetrics } from '../metrics/pilot.ts';
+import { renderBlock } from '../metrics/render.ts';
+import {
+  daysBefore,
+  defaultSource,
+  parsePeriod,
+  type MetricsSource,
+  type Period,
+} from '../metrics/source.ts';
+
+/** 기간 직전의 main `check` 결론을 찾으러 거슬러 올라가는 날 수 */
+const PRIOR_DAYS = 7;
+
+export interface MetricsOptions {
+  since?: string;
+  until?: string;
+  now?: Date;
+  out?: (line: string) => void;
+  err?: (line: string) => void;
+}
+
+const first = (e: unknown) => (e instanceof Error ? e.message : String(e)).split('\n')[0];
+
+/**
+ * 기간 직전의 마지막 main `check` 실행(결론이 success·failure인 것)의 결론.
+ * 전날부터 하루씩 거슬러 그런 실행이 처음 나온 날의 가장 늦은 실행을 쓴다. 없으면 null
+ */
+function priorMainCheck(
+  source: MetricsSource,
+  p: Period,
+  defaultBranch: string,
+): 'success' | 'failure' | null {
+  for (let n = 1; n <= PRIOR_DAYS; n++) {
+    const day = daysBefore(p.since, n);
+    let last: { t: number; conclusion: 'success' | 'failure' } | null = null;
+    for (const r of source.workflowRuns({ since: day, until: day })) {
+      if (!isMainCheck(r, defaultBranch)) continue;
+      if (r.conclusion !== 'success' && r.conclusion !== 'failure') continue;
+      const t = Date.parse(r.createdAt);
+      if (Number.isNaN(t)) continue;
+      if (!last || t >= last.t) last = { t, conclusion: r.conclusion };
+    }
+    if (last) return last.conclusion;
+  }
+  return null;
+}
+
+export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSource): number {
+  const out = o.out ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const err = o.err ?? ((l: string) => process.stderr.write(`${l}\n`));
+
+  // ① 기간. GitHub을 읽기 전에 본다
+  let period: Period;
+  try {
+    period = parsePeriod(o.since, o.until, o.now ?? new Date());
+  } catch (e) {
+    err(`metrics: ${first(e)}. 날짜는 UTC 기준 YYYY-MM-DD로 준다(예: --since 2026-11-11)`);
+    return 1;
+  }
+
+  // ② 자료 읽기. 하나라도 읽지 못하면 값을 내지 않는다
+  let block: string;
+  try {
+    const info = repoInfo(cwd);
+    const cfg = loadConfig(info.root);
+    const src = source ?? defaultSource(info.root, cfg);
+    const prs = src.mergedPrs(period);
+    const runs = src.workflowRuns(period);
+    const bugs = src.bugIssues(period);
+    const ledgers = new Map<number, Ledger | null>();
+    for (const p of prs) ledgers.set(p.number, src.ledger(p.number));
+    const prior = priorMainCheck(src, period, cfg.github.defaultBranch);
+    // ③ 계산·렌더
+    block = renderBlock(
+      period,
+      pilotMetrics({
+        period,
+        defaultBranch: cfg.github.defaultBranch,
+        priorMainCheck: prior,
+        prs,
+        runs,
+        bugs,
+        ledgers,
+      }),
+    );
+  } catch (e) {
+    err(
+      `metrics: ${first(e)}. 집계하지 않았다(자료를 일부만 읽은 값은 내지 않는다). gh 인증과 네트워크를 확인하고 다시 실행하라`,
+    );
+    return 2;
+  }
+
+  // ④ 출력
+  out(block);
+  return 0;
+}
