@@ -2,7 +2,7 @@
 id: 20261119-metrics
 issue: 146 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -231,6 +231,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
   - 재현 테스트를 먼저 올렸다(커밋 `eb3d776`, 19:20). 네 테스트가 단언에서 실패했다: 명령 수준의 문서 조회 실패(종료 코드 `0 !== 2`), 형식이 다른 보고서(`2 !== 1`: 검사를 지나 자료 읽기까지 갔다), 보고서를 한 번만 읽는지(`2 !== 0`), 리포가 아닌 폴더의 `localMetrics`(예외 없음).
   - 완료된 step을 하네스의 재작업 함수(`reopenStep`, runner가 쓰는 것)로 다시 열었다(`51e867c`: 계획을 `active/`로 되돌리고 step2를 진행 중으로). 수정은 `84b9392`(19:21). 지표 테스트 110건 통과.
 - 2026-11-20 19:28 고친 코드로 `self-test --out`(10개 모두 통과)과 재집계를 다시 실행해 기록했다(병합 PR 104개, 4분 30초). 앞선 출력과 다른 줄은 셋이다: Actions 실행 시간과 판정 워크플로 시간(그 사이에 돈 실행), 발견 사항의 처리 분포(이 계획에 더한 발견 사항). 로컬 지표의 나머지 값은 같다.
+- 2026-11-20T19:56:35+09:00 step2 재작업: PR #160 구현 판정 2라운드의 F2 대응
 
 ## 의사결정 로그
 

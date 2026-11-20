@@ -16,8 +16,7 @@
     {
       "step": 2,
       "name": "steady-local",
-      "status": "completed",
-      "completed_at": "2026-11-20T19:34:03+09:00"
+      "status": "in_progress"
     }
   ]
 }
