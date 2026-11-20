@@ -121,7 +121,7 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
 ### 3. 연결과 렌더
 
 - `runMetrics`가 위 자료를 읽어 `steadyMetrics`를 부른다. 병합된 PR마다 `headStatuses(headSha)`를 `statuses`에, `headPrCount(head)`를 `headPrCounts`에, `planClaimedAt(root, prs)`의 결과를 `planClaimedAt`에 PR 번호를 키로 담아 넘긴다. 그리고 `renderBlock`이 `### 상시 지표` 절을 파일럿 지표 아래에 더한다. 형식 규칙은 step0과 같다(목록, 수와 번호만).
-- `docs/QUALITY_SCORE.md`의 "측정 정의"에 이 step의 지표를 더하고, 이 리포에서 `metrics --since 2026-11-11 --until <작업일(UTC)> --write`를 다시 실행해 기록한다.
+- `docs/QUALITY_SCORE.md`의 "측정 정의"에 이 step의 지표를 더하고, 이 리포에서 `metrics --since 2026-11-11 --until <작업일(UTC)>`을 다시 실행하고 출력을 표식 구간에 그대로 붙여 넣어 기록한다.
 - `docs/harness/architecture.md`의 `metrics/*` 행과 `docs/harness/CHANGELOG.md`를 고친다.
 - 이 step의 PR은 보호 경로(`scripts/**`, `docs/harness/**`)를 바꾼다. 운영 단계에서는 계획의 `risk`와 무관하게 `risk-gate`가 위험도 높음으로 판정하고 제작자 승인이 있어야 병합된다(절차서 5절 "운영 단계의 보호 경로 PR"). 초안으로 올리고, 완료 처리·`origin/main` 병합·`check`가 끝난 뒤 `pr-ready`로 승인을 한 번 요청한다.
 

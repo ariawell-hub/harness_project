@@ -57,8 +57,8 @@ export function localMetrics(i: LocalInput): LocalMetrics;
 
 - `runMetrics`가 `localMetrics`를 불러 `### 상시 지표` 절에 더한다. runner 로그 경로는 `harnessStateDir(info, 'common')`의 `runner.jsonl`이다.
 - 자체 테스트 보고서 경로는 `metrics --self-test-report <파일>`로 받는다. `scripts/harness.ts`에는 `OPTIONS`의 `self-test-report`, `HELP` 한 줄, `case 'metrics'`의 인자 전달만 더한다. 파일이 없거나 형식이 다르면 종료 코드 1(GitHub을 읽기 전에 끝낸다).
-- `docs/QUALITY_SCORE.md`의 "측정 정의"에 이 step의 지표와 잴 수 없는 지표를 더하고, 이 리포에서 `self-test --out <임시 파일>` 뒤 `metrics --since 2026-11-11 --until <작업일(UTC)> --self-test-report <임시 파일> --write`를 실행해 기록한다.
-- 기술 부채 표: 위 "새 TD" 넷을 등록한다(번호는 push 직전 `origin/main`의 마지막 번호 다음부터). TD-11에 "주 1회 실행 때 `self-test --out`과 `metrics --write`를 함께 돌린다"를 적는다.
+- `docs/QUALITY_SCORE.md`의 "측정 정의"에 이 step의 지표와 잴 수 없는 지표를 더하고, 이 리포에서 `self-test --out <임시 파일>` 뒤 `metrics --since 2026-11-11 --until <작업일(UTC)> --self-test-report <임시 파일>`을 실행하고 출력을 표식 구간에 그대로 붙여 넣어 기록한다.
+- 기술 부채 표: 위 "새 TD" 넷을 등록한다(번호는 push 직전 `origin/main`의 마지막 번호 다음부터). TD-11에 "주 1회 실행 때 `self-test --out`과 `metrics`를 함께 돌리고, 출력을 문서에 기록하는 수단을 그 정기 작업에서 만든다"를 적는다.
 - `docs/harness/architecture.md`의 `metrics/*` 행, `docs/harness/CHANGELOG.md`를 고친다. 설계서 17.2절에 잴 수 없는 지표가 `docs/QUALITY_SCORE.md`에 이유와 함께 표시된다는 한 문장을 더하고 버전을 올린다.
 - 이 step의 PR은 보호 경로(`scripts/**`, `docs/harness/**`)를 바꾼다. 운영 단계에서는 계획의 `risk`와 무관하게 `risk-gate`가 위험도 높음으로 판정하고 제작자 승인이 있어야 병합된다(절차서 5절 "운영 단계의 보호 경로 PR"). 초안으로 올리고, 완료 처리·`origin/main` 병합·`check`가 끝난 뒤 `pr-ready`로 승인을 한 번 요청한다.
 
