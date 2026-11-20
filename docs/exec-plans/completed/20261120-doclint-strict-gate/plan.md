@@ -2,7 +2,7 @@
 id: 20261120-doclint-strict-gate
 issue: 163 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -76,6 +76,9 @@ claimed_at: 2026-11-20T21:18:07+09:00 # new-task가 채운다
 - 2026-11-20 22:29 PR #164 계획 검증 5라운드(head `a060e29`): claude 승인(지적 없음), codex 수정 요청. F8이 다른 이유로 열려 있다: `^{commit}`은 주석 태그를 벗기므로 브랜치 ref가 커밋을 가리키는 주석 태그 객체를 담고 있으면 통과한다는 것이다.
   - 임시 리포에서 확인했다(git 2.50.1): 그 리포에서 `git ls-files`는 성공하고, `git log -1 --format=%ct -- <경로>`는 태그를 거쳐 그 커밋의 시각을 정확히 출력한다. 게이트가 읽는 값이 틀리지 않는다. `git fsck`만 "not a commit"을 알린다.
   - 앞 라운드에 적은 대로 더 고치지 않고 제작자에게 물었다. 제작자 결정(대화, 2026-11-20): 반박한다. → F8 반박 1회(근거는 이 파일의 수용 기준 3). 수용 기준 3에 "읽을 수 있다"의 뜻을 적고, 그 사례가 읽기 실패가 아님을 테스트 명세에 더했다.
+- 2026-11-20 22:35 PR #164 계획 검증 6라운드(head `32597f9`): 두 검증자 승인. F8은 반박이 받아들여져 닫혔다(rejected). 계획 승인(G1) 해시 `6682b17c669b`.
+- 2026-11-20 22:37 step0 테스트를 먼저 올렸다(`982f660`, 테스트 파일만). 구현 전 `node --test scripts/test/doc-lint-gate.test.ts`는 실패한다(종료 코드 1: `../gates/doc-lint.ts`에 `DocLintReadError`·`docLintGate`가 없다).
+- 2026-11-20 22:40 구현을 올렸다. 같은 명령이 통과한다(16건). `CHANGELOG`에 한 줄을 더하고 TD-60을 해결로 바꿨다.
 
 ## 의사결정 로그
 
@@ -105,4 +108,4 @@ claimed_at: 2026-11-20T21:18:07+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- 계획만 담은 커밋을 push해 초안 PR을 열고 계획 검증(G1)을 받는다. 승인 뒤 step0을 구현한다.
+- PR #162(같은 `CHANGELOG`·기술 부채 표를 고친다)가 병합되면 `origin/main`을 병합해 push하고 구현 판정을 받는다. 통과하면 `pr-ready`로 제작자 승인을 요청한다.
