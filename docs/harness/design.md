@@ -1143,7 +1143,7 @@ pnpm test src/auth/login-guard.spec.ts
 | Tier | 수준 | 내용 | 도입 시점 |
 |---|---|---|---|
 | 0 | 필수 | 작업 기록(8절). 앱은 구조화 JSON 로그를 worktree별 파일로 남기고, 에이전트는 `jq`·`grep`으로 조회한다. 앱은 worktree별로 실행된다(포트·일회용 DB로 격리, 14.3절). | 코어 |
-| 1 | 권장 | UI·플레이 자동 검증. 웹은 Playwright 또는 Chrome DevTools MCP로 DOM 스냅샷·스크린샷을 남긴다. 게임은 헤드리스 실행, 입력 리플레이, 고정 시드, 프레임 캡처를 쓴다. 버그 수정 PR에는 수정 전후 증거(스크린샷·영상)를 붙인다. | 버그 수정 PR은 파일럿부터, 나머지는 각 프로파일의 첫 버전 |
+| 1 | 권장 | UI·플레이 자동 검증. 웹은 Playwright 또는 Chrome DevTools MCP로 DOM 스냅샷·스크린샷을 남긴다. 게임은 헤드리스 실행, 입력 리플레이, 고정 시드, 프레임 캡처를 쓴다. 버그 수정 PR에는 수정 전후 증거를 붙인다. 웹은 지금 글 요약(`evidence/summary.md`)만 올리고, 스크린샷·영상은 올리기 전 검사가 생긴 뒤에 올린다(11.1절 절차 6). | 버그 수정 PR은 파일럿부터, 나머지는 각 프로파일의 첫 버전 |
 | 2 | 선택 | worktree별 임시 관측성 스택(Vector → VictoriaLogs·Metrics·Traces). 에이전트가 LogQL·PromQL·TraceQL로 조회하고, 작업이 끝나면 삭제한다. 성능 예산을 수용 기준으로 쓴다(예: "서비스 시작 800ms 이내", "핵심 여정의 스팬 2초 이하"). | 성능 요구가 생길 때 |
 
 **구조화 로그 필드(Tier 0)**: `timestamp`, `level`, `event`, `context`, `plan_id`(또는 worktree 식별자).

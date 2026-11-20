@@ -2,7 +2,7 @@
 id: 20261119-pilot-prep
 issue: 140 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -277,6 +277,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - F1을 고쳤다: 설계서 11.1절 절차 6의 첫 문장이 스크린샷·영상·trace를 PR에 붙이라고 하고, 그 아래에 더한 항목은 올리지 않는다고 해 서로 어긋났다. 첫 문장을 "글 요약을 PR 본문에 옮긴다"로 바꾸고, 올리기 전 자격증명 제거와 보관 기간은 증거 필수 상태 체크를 만들 때의 요건으로 적었다(그 전에는 올리지 않는다). AC 9개와 `check`를 다시 돌려 통과했다.
 - 2026-11-20 step4의 F1 수정 push(head `20e2208`) 직후 다른 세션의 PR #158·#160이 병합돼 이 PR이 main과 충돌했다. 충돌한 PR에는 `check` 워크플로가 돌지 않아 2라운드 판정이 시작되지 않았다. `origin/main`을 두 번 병합했다(충돌: `CHANGELOG`, 설계서 0절, 기술 부채 표의 TD-11·TD-12 행). PR #160이 v0.7.65를 썼으므로 이 PR의 항목을 v0.7.66으로 옮겼다. 기술 부채 표는 TD-11은 main의 것, TD-12는 이 PR의 것이다.
 - 2026-11-20T21:02:40+09:00 step4 재작업: 구현 판정 2라운드(codex) F3 대응: 11절 Tier 1 표의 증거 안내
+- 2026-11-20 step4 구현 판정 2라운드(PR #159, head `1e67e34`): CI `check` 통과. `review/claude`·`review/codex` 승인. F1은 `fixed`로 판정됐고 `review-ledger`가 통과했다. codex가 P2 하나를 더 냈다(F3, 미룸): 11절의 Tier 1 표가 버그 수정 PR에 스크린샷·영상을 붙이라고 해 11.1절 절차 6과 어긋난다. F1과 같은 종류라 승인 요청 전에 고쳤다(표의 그 문장에 웹은 글 요약만 올린다는 것과 11.1절 절차 6을 적었다).
 
 ## 의사결정 로그
 
@@ -364,6 +365,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - CI의 `check`는 실패한 테스트의 출력 끝 80줄만 보여 준다(`scripts/commands/check.ts`). 테스트가 800개를 넘으면 실패한 테스트의 이름과 단언이 로그에 남지 않아, 로컬에서 재현되지 않는 실패(운영체제 차이)의 원인을 로그로 알 수 없다. → 처리: 해당 없음(이 계획의 범위 밖이다. 제작자에게 보고했다. 고치려면 별도 Issue가 필요하다)
 - 구현 판정 F1(codex, P1): 설계서 11.1절 절차 6의 첫 문장이 로컬 진단 파일(스크린샷·영상·trace)을 PR에 붙이라고 한다. → 처리: 해당 없음(이 PR에서 고쳤다. `docs/harness/design.md` 11.1절 절차 6)
 - 구현 판정 F2(codex, P2): 완료된 step 파일(`step4.md`)의 "읽어야 할 파일"이 옮기기 전 경로(`docs/exec-plans/active/…/plan.md`)를 가리킨다. 이 계획만의 일이 아니다: `complete-step`은 계획 폴더를 `completed/`로 옮길 때 step 파일 안의 경로를 고쳐 쓰지 않아, 완료된 계획의 step 파일 대부분이 같은 꼴이다. → 처리: 해당 없음(이 계획의 범위 밖이다. 이 파일만 고치면 다른 완료 계획과 어긋난다. 고치려면 `complete-step`을 바꾸는 별도 Issue가 필요하다. 제작자에게 보고했다)
+- 구현 판정 F3(codex, P2): 11절의 Tier 1 표가 버그 수정 PR에 수정 전후 증거(스크린샷·영상)를 붙이라고 한다. 이번 변경이 고친 문장은 아니지만 11.1절 절차 6(글 요약만 올린다)과 어긋난다. → 처리: 해당 없음(이 PR에서 고쳤다. `docs/harness/design.md` 11절의 표)
 
 ## 열린 질문
 
