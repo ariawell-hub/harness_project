@@ -1,4 +1,4 @@
-// metrics 명령(17.2절): 기간 검사 → 자료 읽기 → 계산·렌더 → 출력. 계획 20261119-metrics step0.
+// metrics 명령(17.2절): 기간 검사 → 자료 읽기 → 계산·렌더 → 출력. 계획 20261119-metrics step0·step1.
 // 자료를 다 읽지 못하면 값을 내지 않는 것, 읽은 자료가 출력까지 이어지는 것,
 // 명령이 파일을 쓰지 않고 허용한 읽기 명령만 띄우는 것을 본다.
 import assert from 'node:assert/strict';
@@ -11,6 +11,7 @@ import fs, {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -26,7 +27,10 @@ import {
   defaultSource,
   ghSource,
   inPeriod,
+  type BotComment,
   type BugIssue,
+  type HeadStatus,
+  type LabelEvent,
   type MergedPr,
   type MetricsSource,
   type Period,
@@ -40,6 +44,10 @@ const CHECK = '.github/workflows/check.yml';
 const SINCE = '2026-11-11';
 const UNTIL = '2026-11-12';
 const RECORDER = 'harness-recorder[bot]';
+/** 임시 리포 설정의 봇 계정(helpers.ts) */
+const BOT = 'harness-bot';
+const QUESTION =
+  '@maker runner의 step 1 세션이 질문 2건을 남겼다. 답을 받을 때까지 계획 `20261111-x`를 멈춘다.';
 const docText = (block: string) =>
   `# 품질 점수\n\n앞 문단.\n\n## 집계 결과\n\n${BEGIN}\n\n${block}\n\n${END}\n\n## 측정 정의\n\n뒤 문단.\n`;
 
@@ -75,6 +83,8 @@ function pr(number: number, over: Partial<MergedPr> = {}): MergedPr {
     mergeSha: `m${number}`,
     additions: 10,
     deletions: 2,
+    commits: [],
+    crossRepo: false,
     ...over,
   };
 }
@@ -92,6 +102,7 @@ function run(over: Partial<WorkflowRun> = {}): WorkflowRun {
     updatedAt: '2026-11-11T03:10:00Z',
     attempt: 1,
     runNumber: 1,
+    sameRepo: true,
     ...over,
   };
 }
@@ -126,6 +137,12 @@ interface Data {
   runs: WorkflowRun[];
   bugs: BugIssue[];
   ledgers: Map<number, Ledger | null>;
+  /** head 커밋 SHA → 커밋 상태 */
+  statuses: Map<string, HeadStatus[]>;
+  /** head 브랜치 이름 → 그 이름으로 열린 PR의 수. 없으면 1 */
+  headPrCounts: Map<string, number>;
+  labels: LabelEvent[];
+  comments: BotComment[];
 }
 
 interface Mem {
@@ -139,7 +156,17 @@ const span = (p: Period) => `${p.since}~${p.until}`;
 /** 메모리 자료. 기간으로 거르는 것은 실제 자료 원천과 같다 */
 function mem(d: Partial<Data> = {}): Mem {
   const calls: string[] = [];
-  const data: Data = { prs: [], runs: [], bugs: [], ledgers: new Map(), ...d };
+  const data: Data = {
+    prs: [],
+    runs: [],
+    bugs: [],
+    ledgers: new Map(),
+    statuses: new Map(),
+    headPrCounts: new Map(),
+    labels: [],
+    comments: [],
+    ...d,
+  };
   return {
     calls,
     source: {
@@ -158,6 +185,22 @@ function mem(d: Partial<Data> = {}): Mem {
       ledger(n) {
         calls.push(`ledger ${n}`);
         return data.ledgers.get(n) ?? null;
+      },
+      headStatuses(sha) {
+        calls.push(`headStatuses ${sha}`);
+        return data.statuses.get(sha) ?? [];
+      },
+      needsHumanEvents(p) {
+        calls.push(`needsHumanEvents ${span(p)}`);
+        return data.labels.filter((x) => inPeriod(x.at, p));
+      },
+      escalationComments(p) {
+        calls.push(`escalationComments ${span(p)}`);
+        return data.comments.filter((x) => inPeriod(x.at, p));
+      },
+      headPrCount(head) {
+        calls.push(`headPrCount ${head}`);
+        return data.headPrCounts.get(head) ?? 1;
       },
     },
   };
@@ -186,12 +229,14 @@ function exec(cwd: string, m?: Mem | MetricsSource, o: { since?: string } = {}):
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 
-const BASE: Data = {
+const BASE: Partial<Data> = {
   prs: [pr(1), pr(2)],
   runs: [run({ headSha: 'm1' }), run({ createdAt: '2026-11-10T09:00:00Z' })],
   bugs: [],
   ledgers: new Map<number, Ledger | null>([[1, ledger([finding('F1')])]]),
 };
+const BASE_PRS = [pr(1), pr(2)];
+const BASE_RUNS = [run({ headSha: 'm1' }), run({ createdAt: '2026-11-10T09:00:00Z' })];
 
 // ── 파일을 쓰지 않는 것을 보는 도구 ──
 
@@ -376,37 +421,103 @@ const REPO_INFO_GIT = [
 
 // ── 기본 자료원 테스트의 고정 응답. 허용 목록(metrics-allow.ts)의 gh 꼴마다 하나 ──
 
+/** PR `n`의 head 커밋 SHA(16진수 40자) */
+const headOf = (n: number) => String(n).repeat(40);
+/** 커밋 조회의 한 쪽이 내는 출력: 한 줄에 SHA 하나, 줄바꿈으로 끝난다 */
+const shaN = (n: number) => n.toString(16).padStart(40, '0');
+const page = (from: number, n: number) =>
+  Array.from({ length: n }, (_, i) => `${shaN(from + i)}\n`).join('');
+
 const ghPr = (n: number) => ({
   number: n,
   headRefName: `feat/x-s${n}`,
-  headRefOid: `h${n}`,
+  headRefOid: headOf(n),
   createdAt: '2026-11-11T01:00:00Z',
   mergedAt: '2026-11-11T02:00:00Z',
   mergeCommit: { oid: `m${n}` },
   additions: 10,
   deletions: 2,
+  isCrossRepository: false,
 });
 
-/** 날짜별 실행. 11-10(기간 전날)은 성공, 11-11은 PR 1의 병합 커밋에서 실패, 11-12는 PR의 check */
+/** PR 2의 `check` 실행 */
+const prRun = (over: Partial<WorkflowRun> = {}) =>
+  run({
+    event: 'pull_request',
+    branch: 'feat/x-s2',
+    headSha: headOf(2),
+    createdAt: '2026-11-11T01:30:00Z',
+    ...over,
+  });
+
+/**
+ * 날짜별 실행. 11-10(기간 전날)은 성공, 11-11은 PR 1의 병합 커밋에서 실패와 PR 2의 첫 check(통과),
+ * 11-12는 PR 2가 병합된 뒤에 같은 브랜치에서 돈 check(PR 2의 실행이 아니다)
+ */
 const FIXED_RUNS: Record<string, WorkflowRun[]> = {
   '2026-11-10': [run({ createdAt: '2026-11-10T09:00:00Z' })],
-  '2026-11-11': [run({ headSha: 'm1', conclusion: 'failure' })],
-  '2026-11-12': [
-    run({ createdAt: '2026-11-12T03:00:00Z', event: 'pull_request', branch: 'feat/x-s2' }),
-  ],
+  '2026-11-11': [run({ headSha: 'm1', conclusion: 'failure' }), prRun()],
+  '2026-11-12': [prRun({ createdAt: '2026-11-12T03:00:00Z', conclusion: 'failure' })],
 };
 
-const FIXED: Record<string, (args: string[]) => string> = {
+const runsAnswer = (byDay: Record<string, WorkflowRun[]>) => (args: string[]) => {
+  const day = /created=(\d{4}-\d{2}-\d{2})/.exec(args[2])?.[1] ?? '';
+  const runs = byDay[day] ?? [];
+  return [
+    JSON.stringify({ total: runs.length }),
+    ...runs.map((r, i) => JSON.stringify({ id: i + 1, ...r })),
+  ].join('\n');
+};
+
+const riskStatus = (id: number, description: string, creator = RECORDER) =>
+  JSON.stringify({
+    id,
+    context: 'risk-gate',
+    state: 'success',
+    description,
+    creator,
+    at: '2026-11-11T01:50:00Z',
+  });
+
+type Fixed = Record<string, (args: string[]) => string>;
+
+const FIXED: Fixed = {
   prs: () => JSON.stringify([ghPr(1), ghPr(2)]),
   issues: () => JSON.stringify([{ number: 77, createdAt: '2026-11-12T01:00:00Z' }]),
-  runs(args) {
-    const day = /created=(\d{4}-\d{2}-\d{2})/.exec(args[2])?.[1] ?? '';
-    const runs = FIXED_RUNS[day] ?? [];
-    return [
-      JSON.stringify({ total: runs.length }),
-      ...runs.map((r, i) => JSON.stringify({ id: i + 1, ...r })),
-    ].join('\n');
+  runs: runsAnswer(FIXED_RUNS),
+  // PR마다 head 커밋 하나
+  prCommits(args) {
+    const n = Number(/pulls\/(\d+)\/commits/.exec(args[2])?.[1]);
+    return `${headOf(n)}\n`;
   },
+  // PR 1은 위험도 높음, PR 2는 낮음. 검증 App이 아닌 계정의 기록은 쓰이지 않는다
+  statuses(args) {
+    const sha = /commits\/([0-9a-f]{40})\/statuses/.exec(args[2])?.[1];
+    return sha === headOf(1)
+      ? [
+          riskStatus(11, '위험도 높음, 제작자 head 승인: 보호 경로'),
+          riskStatus(12, '위험도 낮음: 내가 썼다', 'someone'),
+        ].join('\n')
+      : riskStatus(21, '위험도 낮음: 문서만');
+  },
+  // needs-human 라벨이 기간 안에 한 번, 기간 밖에 한 번. 다른 라벨 하나
+  events: () =>
+    [
+      { id: 1, label: 'needs-human', issue: 7, at: '2026-11-12T05:00:00Z' },
+      { id: 2, label: 'needs-human', issue: 8, at: '2026-11-13T05:00:00Z' },
+      { id: 3, label: 'bug', issue: 9, at: '2026-11-12T05:00:00Z' },
+    ]
+      .map((x) => JSON.stringify(x))
+      .join('\n'),
+  // 봇의 질문 알림 하나. 같은 문구를 다른 계정이 쓴 댓글은 세지 않는다
+  repoComments: () =>
+    [
+      { id: 1, user: BOT, at: '2026-11-12T05:00:00Z', issue: 7, body: QUESTION },
+      { id: 2, user: 'someone', at: '2026-11-12T05:00:00Z', issue: 7, body: QUESTION },
+    ]
+      .map((x) => JSON.stringify(x))
+      .join('\n'),
+  headPrs: () => JSON.stringify([{ number: 1 }]),
   comments(args) {
     const n = /issues\/(\d+)\/comments/.exec(args[2])?.[1];
     if (n !== '1') return '';
@@ -419,12 +530,25 @@ const FIXED: Record<string, (args: string[]) => string> = {
 };
 
 /** 허용 목록의 git은 실행하고, 허용 목록의 gh에는 고정 응답을 주고, 그 밖은 응답을 주기 전에 막는다 */
-const gate: Decide = (c) => {
-  if (c.cmd === 'git') return matchShape(GIT_READ_SHAPES, c.args) ? 'run' : 'block';
-  if (c.cmd !== 'gh') return 'block';
-  const shape = matchShape(ghReadShapes('main'), c.args);
-  return shape ? { stdout: FIXED[shape.name](c.args) } : 'block';
-};
+const gateOf =
+  (fixed: Fixed): Decide =>
+  (c) => {
+    if (c.cmd === 'git') return matchShape(GIT_READ_SHAPES, c.args) ? 'run' : 'block';
+    if (c.cmd !== 'gh') return 'block';
+    const shape = matchShape(ghReadShapes('main'), c.args);
+    return shape ? { stdout: fixed[shape.name](c.args) } : 'block';
+  };
+const gate = gateOf(FIXED);
+
+/** 기본 자료원(실제 `gh` 실행 경로)으로 명령을 돌린다. `gh`에는 `fixed`의 응답을 준다 */
+function execDefault(cwd: string, fixed: Fixed): { r: Result; blocked: Call[] } {
+  const guard = guardCp(gateOf(fixed));
+  try {
+    return { r: withoutFakeGh(() => exec(cwd)), blocked: guard.blocked };
+  } finally {
+    guard.restore();
+  }
+}
 
 /** `HARNESS_FAKE_GH`를 비우고 `fn`을 실행한다. 기본 자료원이 실제 경로(`runSync('gh', …)`)를 타게 한다 */
 function withoutFakeGh<T>(fn: () => T): T {
@@ -600,14 +724,14 @@ test('읽은 자료가 출력까지 이어진다: 자료를 하나 바꾸면 그
   assert.match(base.out, /^ {2}- 버그 Issue: 0건$/m);
   assert.match(base.out, /^- 오탐: 0건 ÷ 차단 지적 1건 = 0\.0%$/m);
 
-  const morePrs = exec(work, mem({ ...BASE, prs: [...BASE.prs, pr(3)] }));
+  const morePrs = exec(work, mem({ ...BASE, prs: [...BASE_PRS, pr(3)] }));
   assert.match(morePrs.out, /병합 PR 3개$/m);
 
   const failed = exec(
     work,
     mem({
       ...BASE,
-      runs: [...BASE.runs, run({ createdAt: '2026-11-12T01:00:00Z', conclusion: 'failure' })],
+      runs: [...BASE_RUNS, run({ createdAt: '2026-11-12T01:00:00Z', conclusion: 'failure' })],
     }),
   );
   assert.match(failed.out, /^ {2}- main `check` 실패: 1건/m);
@@ -656,6 +780,147 @@ test('지적의 제목은 출력에 나오지 않는다(14.6절)', () => {
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /^- 오탐: 1건/m);
   assert.ok(!r.out.includes('검증자에게'));
+});
+
+// ── 상시 지표의 연결(step1) ──
+
+/** PR 1의 첫 `check` 실행(통과) */
+const firstCheck = (over: Partial<WorkflowRun> = {}) =>
+  run({
+    event: 'pull_request',
+    branch: 'feat/x-s1',
+    headSha: 'c1',
+    createdAt: '2026-11-11T01:30:00Z',
+    ...over,
+  });
+
+test('headPrCount가 병합된 PR마다 불리고, 값이 1일 때만 실행이 그 PR에 이어진다', () => {
+  const { work } = repo();
+  const data = { prs: [pr(1, { commits: ['c1'] }), pr(2)], runs: [firstCheck()] };
+  const one = mem(data);
+  const r1 = exec(work, one);
+  assert.equal(r1.code, 0, r1.err);
+  assert.match(r1.out, /^- CI 첫 통과율: 1건 ÷ 실행을 찾은 PR 1건 = 100\.0%$/m);
+  assert.match(r1.out, /^ {2}- 실행을 이을 수 없는 PR: 0건$/m);
+  assert.deepEqual(one.calls.filter((c) => c.startsWith('headPrCount')).sort(), [
+    'headPrCount feat/x-s1',
+    'headPrCount feat/x-s2',
+  ]);
+  // 같은 자료에서 그 head 브랜치 이름으로 열린 PR이 둘이면 빠진다
+  const r2 = exec(work, mem({ ...data, headPrCounts: new Map([['feat/x-s1', 2]]) }));
+  assert.equal(r2.code, 0, r2.err);
+  assert.match(r2.out, /^- CI 첫 통과율: —\(실행을 찾은 PR 없음\)$/m);
+  assert.match(r2.out, /^ {2}- 실행을 이을 수 없는 PR: 1건$/m);
+});
+
+test('headStatuses가 병합된 PR마다 head 커밋으로 불리고, risk-gate 기록이 위험도별 PR 수가 된다', () => {
+  const { work } = repo();
+  const status = (description: string): HeadStatus => ({
+    context: 'risk-gate',
+    state: 'success',
+    description,
+    creator: RECORDER,
+    at: '2026-11-11T01:50:00Z',
+  });
+  const low = mem({
+    ...BASE,
+    statuses: new Map([
+      ['h1', [status('위험도 낮음: 문서만')]],
+      ['h2', [status('위험도 낮음: 문서만')]],
+    ]),
+  });
+  const r1 = exec(work, low);
+  assert.equal(r1.code, 0, r1.err);
+  assert.match(r1.out, /^- 위험도별 PR 수: 낮음 2개 · 보통 0개 · 높음 0개 · 알 수 없음 0개$/m);
+  assert.deepEqual(low.calls.filter((c) => c.startsWith('headStatuses')).sort(), [
+    'headStatuses h1',
+    'headStatuses h2',
+  ]);
+  const r2 = exec(
+    work,
+    mem({
+      ...BASE,
+      statuses: new Map([
+        ['h1', [status('위험도 낮음: 문서만')]],
+        ['h2', [status('위험도 높음, 제작자 head 승인: 보호 경로')]],
+      ]),
+    }),
+  );
+  assert.match(r2.out, /^- 위험도별 PR 수: 낮음 1개 · 보통 0개 · 높음 1개 · 알 수 없음 0개$/m);
+  // 기록이 없으면 알 수 없음이다
+  assert.match(exec(work, mem(BASE)).out, /알 수 없음 2개$/m);
+});
+
+test('계획 파일의 claimed_at이 리드타임이 되고, 계획 파일이 없으면 계획을 찾지 못한 PR로 센다', () => {
+  const { work } = repo();
+  const plan = path.join(work, 'docs/exec-plans/active/20261111-lead.md');
+  const m = () => mem({ prs: [pr(1, { head: 'feat/20261111-lead' }), pr(2)] });
+  mkdirSync(path.dirname(plan), { recursive: true });
+  writeFileSync(plan, '---\nid: 20261111-lead\nclaimed_at: 2026-11-11T00:00:00Z # new-task\n---\n');
+  let withPlan: Result;
+  try {
+    withPlan = exec(work, m());
+  } finally {
+    rmSync(plan);
+  }
+  assert.equal(withPlan.code, 0, withPlan.err);
+  // 계획 생성 00:00 → 병합 02:00
+  assert.match(withPlan.out, /^- PR 리드타임\(계획 생성 → 병합\): 중앙값 120분 · 최대 120분$/m);
+  assert.match(withPlan.out, /^ {2}- 계획을 찾지 못한 PR: 1건$/m);
+  const without = exec(work, m());
+  assert.match(without.out, /^- PR 리드타임\(계획 생성 → 병합\): —\(계획을 찾은 PR 없음\)$/m);
+  assert.match(without.out, /^ {2}- 계획을 찾지 못한 PR: 2건$/m);
+});
+
+test('라벨 이벤트와 에스컬레이션 댓글을 하나씩 늘리면 그 수가 1씩 늘어난다', () => {
+  const { work } = repo();
+  const base = mem(BASE);
+  const r0 = exec(work, base);
+  assert.match(r0.out, /^ {2}- `needs-human` 라벨이 붙은 횟수: 0건$/m);
+  assert.match(r0.out, /5회 실패 중단 0건 · 총량 상한 중단 0건/);
+  assert.match(r0.out, /^- 5회 중단: 0건 · 총량 상한 도달: 0건$/m);
+  assert.ok(base.calls.includes(`needsHumanEvents ${SINCE}~${UNTIL}`));
+  assert.ok(base.calls.includes(`escalationComments ${SINCE}~${UNTIL}`));
+  const at = '2026-11-12T05:00:00Z';
+  const r1 = exec(
+    work,
+    mem({
+      ...BASE,
+      labels: [{ issue: 7, at }],
+      comments: [{ issue: 7, at, kind: 'stop-limit' }],
+    }),
+  );
+  assert.match(r1.out, /^ {2}- `needs-human` 라벨이 붙은 횟수: 1건$/m);
+  assert.match(r1.out, /5회 실패 중단 0건 · 총량 상한 중단 1건/);
+  assert.match(r1.out, /^- 5회 중단: 0건 · 총량 상한 도달: 1건$/m);
+});
+
+test('실행은 기간에 병합된 PR이 열린 가장 이른 날부터 읽고, 사용량은 기간 안의 실행만 센다', () => {
+  const { work } = repo();
+  const usage = (out: string) => /^ {2}- Actions 실행 시간: .*$/m.exec(out)?.[0];
+  const inside = mem(BASE);
+  const r0 = exec(work, inside);
+  assert.ok(inside.calls.includes(`workflowRuns ${SINCE}~${UNTIL}`));
+  // 기간 전(11-08)에 열린 PR과 그 PR이 열린 뒤 기간 전에 돈 실행
+  const early = mem({
+    ...BASE,
+    prs: [pr(1, { createdAt: '2026-11-08T05:00:00Z', commits: ['c1'] }), pr(2)],
+    runs: [
+      ...BASE_RUNS,
+      firstCheck({
+        createdAt: '2026-11-09T02:00:00Z',
+        startedAt: '2026-11-09T02:00:00Z',
+        updatedAt: '2026-11-09T03:00:00Z',
+      }),
+    ],
+  });
+  const r1 = exec(work, early);
+  assert.equal(r1.code, 0, r1.err);
+  assert.ok(early.calls.includes(`workflowRuns 2026-11-08~${UNTIL}`), early.calls.join('\n'));
+  // 기간 전의 실행이 첫 통과율에는 쓰이고 사용량에는 들지 않는다
+  assert.match(r1.out, /^- CI 첫 통과율: 1건 ÷ 실행을 찾은 PR 1건 = 100\.0%$/m);
+  assert.ok(usage(r0.out));
+  assert.equal(usage(r1.out), usage(r0.out));
 });
 
 // ── 기본 자료원 ──
@@ -829,8 +1094,15 @@ test('기본 자료원 경로: 허용 목록의 읽기 명령만 띄우고 파�
   assert.match(r.out, /^ {2}- 버그 Issue: 1건\(#77\)$/m);
   assert.match(r.out, /^- 검증 누락: 1건\(#1\)$/m);
   assert.match(r.out, /^- 오탐: 1건 ÷ 차단 지적 1건 = 100\.0%$/m);
+  // 상시 지표: PR 2의 첫 check는 통과했고 PR 1은 실행이 없다. 병합 뒤(11-12)의 실패한 실행은 PR 2의 것이 아니다
+  assert.match(r.out, /^### 상시 지표$/m);
+  assert.match(r.out, /^- CI 첫 통과율: 1건 ÷ 실행을 찾은 PR 1건 = 100\.0%$/m);
+  assert.match(r.out, /^ {2}- 이을 수 있지만 실행을 찾지 못한 PR: 1건$/m);
+  assert.match(r.out, /^- 위험도별 PR 수: 낮음 1개 · 보통 0개 · 높음 1개 · 알 수 없음 0개$/m);
+  assert.match(r.out, /^ {2}- `needs-human` 라벨이 붙은 횟수: 1건$/m);
+  assert.match(r.out, /질문 1건 · 승인 요청 0건/);
 
-  // 관찰한 호출: git 둘, 그리고 gh의 네 조회
+  // 관찰한 호출: git 둘, 그리고 gh의 아홉 조회(step0의 넷과 step1의 다섯)
   const gh = cpGuard.seen.filter((c) => c.cmd === 'gh').map((c) => c.args);
   const named = (name: string) =>
     gh.filter((a) => matchShape(ghReadShapes('main'), a)?.name === name);
@@ -850,8 +1122,83 @@ test('기본 자료원 경로: 허용 목록의 읽기 명령만 띄우고 파�
       .sort(),
     ['1', '2'],
   );
-  assert.equal(gh.length, 7);
+  // PR 커밋 조회, 커밋 상태 조회, head별 PR 조회는 병합된 PR마다 한 번
+  assert.deepEqual(
+    named('prCommits')
+      .map((a) => /pulls\/(\d+)\/commits/.exec(a[2])?.[1])
+      .sort(),
+    ['1', '2'],
+  );
+  assert.deepEqual(
+    named('statuses')
+      .map((a) => /commits\/([0-9a-f]+)\/statuses/.exec(a[2])?.[1])
+      .sort(),
+    [headOf(1), headOf(2)],
+  );
+  assert.deepEqual(
+    named('headPrs')
+      .map((a) => a[a.indexOf('--head') + 1])
+      .sort(),
+    ['feat/x-s1', 'feat/x-s2'],
+  );
+  assert.equal(named('events').length, 1);
+  assert.equal(named('repoComments').length, 1);
+  assert.equal(gh.length, 15);
   assert.deepEqual(cpGuard.seen.filter((c) => c.cmd !== 'gh').map(show), REPO_INFO_GIT);
+});
+
+test('기본 자료원 경로: 둘째 쪽으로 온 커밋의 실행이 CI 첫 통과율에 쓰인다', () => {
+  const { work } = repo();
+  // PR 2의 커밋 조회가 두 쪽으로 온다: 첫 쪽 100줄 + 둘째 쪽 1줄.
+  // 가장 이른 check는 둘째 쪽의 SHA(101번째)에서 돌았고, 그 뒤의 check는 첫 쪽의 SHA에서 통과했다
+  const fixed = (firstConclusion: string): Fixed => ({
+    ...FIXED,
+    prCommits: (args) =>
+      /pulls\/2\/commits/.test(args[2]) ? page(1, 100) + page(101, 1) : `${headOf(1)}\n`,
+    runs: runsAnswer({
+      '2026-11-11': [
+        prRun({
+          headSha: shaN(101),
+          createdAt: '2026-11-11T01:10:00Z',
+          conclusion: firstConclusion,
+        }),
+        prRun({ headSha: shaN(1), createdAt: '2026-11-11T01:30:00Z', runNumber: 2 }),
+      ],
+    }),
+  });
+  const failed = execDefault(work, fixed('failure'));
+  assert.equal(failed.r.code, 0, failed.r.err);
+  assert.deepEqual(failed.blocked, []);
+  // 둘째 쪽을 잃으면 뒤 실행이 첫 실행이 되어 1건 ÷ 1건이 된다
+  assert.match(failed.r.out, /^- CI 첫 통과율: 0건 ÷ 실행을 찾은 PR 1건 = 0\.0%$/m);
+  const passed = execDefault(work, fixed('success'));
+  assert.equal(passed.r.code, 0, passed.r.err);
+  assert.match(passed.r.out, /^- CI 첫 통과율: 1건 ÷ 실행을 찾은 PR 1건 = 100\.0%$/m);
+});
+
+test('기본 자료원 경로: 커밋 조회가 상한에 닿거나 빈 응답이면 종료 코드 2이고 표준 출력이 비어 있다', () => {
+  const { work } = repo();
+  const fixed = (n: number): Fixed => ({
+    ...FIXED,
+    prCommits: (args) => (/pulls\/2\/commits/.test(args[2]) ? page(1, n) : `${headOf(1)}\n`),
+  });
+  const full = execDefault(work, fixed(250));
+  assert.equal(full.r.code, 2);
+  assert.equal(full.r.out, '');
+  assert.match(full.r.err, /집계하지 않았다/);
+  assert.match(full.r.err, /PR #2의 커밋 목록/);
+  assert.deepEqual(full.blocked, []);
+  // 빈 응답(종료 코드 0, 빈 표준 출력)도 다 읽은 결과가 아니다. 그 PR을 "실행을 찾지 못한 PR"로 세지 않는다
+  const empty = execDefault(work, fixed(0));
+  assert.equal(empty.r.code, 2);
+  assert.equal(empty.r.out, '');
+  assert.match(empty.r.err, /집계하지 않았다/);
+  assert.match(empty.r.err, /PR #2의 커밋 목록/);
+  assert.deepEqual(empty.blocked, []);
+  // 249개까지는 다 받은 것이다
+  const under = execDefault(work, fixed(249));
+  assert.equal(under.r.code, 0, under.r.err);
+  assert.match(under.r.out, /^### 상시 지표$/m);
 });
 
 test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 않고 막는다', () => {
@@ -878,6 +1225,32 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
     '--json',
     'number',
   ];
+  const headPrs = [
+    'pr',
+    'list',
+    '--state',
+    'all',
+    '--head',
+    'x',
+    '--limit',
+    '100',
+    '--json',
+    'number',
+  ];
+  const events = [
+    'api',
+    '--paginate',
+    'repos/{owner}/{repo}/issues/events?per_page=100',
+    '--jq',
+    '.',
+  ];
+  const prCommits = [
+    'api',
+    '--paginate',
+    'repos/{owner}/{repo}/pulls/1/commits?per_page=100',
+    '--jq',
+    '.',
+  ];
   const outside: Call[] = [
     {
       cmd: 'gh',
@@ -887,6 +1260,12 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
     { cmd: 'gh', args: [...comments, '--method=POST'] },
     { cmd: 'gh', args: prs.map((a, i) => (i === 1 ? 'merge' : a)) },
     { cmd: 'gh', args: prs.map((a, i) => (i === 5 ? 'other' : a)) },
+    // step1이 더한 꼴에 인자를 덧붙이거나 경로를 바꾼 것, 쓰기 요청
+    { cmd: 'gh', args: [...headPrs, '--web'] },
+    { cmd: 'gh', args: [...events, '--method=POST'] },
+    { cmd: 'gh', args: ['api', 'repos/{owner}/{repo}/issues/1/labels', '-f', 'labels[]=x'] },
+    { cmd: 'gh', args: [...prCommits, '-X', 'POST'] },
+    { cmd: 'gh', args: prCommits.map((a) => a.replace('/commits?', '/merge?')) },
     { cmd: 'git', args: ['status'] },
     { cmd: 'git', args: ['rev-parse', '--show-toplevel'] },
     { cmd: 'sh', args: ['-c', `echo x > '${made}'`] },
@@ -896,6 +1275,8 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
     // 허용되는 꼴은 막히지 않는다(고정 응답이 온다)
     assert.equal(runSync('gh', comments, { cwd: work }).code, 0);
     assert.equal(runSync('gh', prs, { cwd: work }).code, 0);
+    for (const allowed of [headPrs, events, prCommits])
+      assert.equal(runSync('gh', allowed, { cwd: work }).code, 0, allowed.join(' '));
     assert.deepEqual(guard.blocked, []);
     for (const c of outside) {
       const r = runSync(c.cmd, c.args, { cwd: work });
@@ -977,4 +1358,6 @@ test('이 리포의 docs/QUALITY_SCORE.md에 집계 결과가 형식대로 들�
     );
   }
   assert.ok(!lines.some((l) => l.startsWith('|')), '표가 남아 있다');
+  // 상시 지표 절이 파일럿 지표 아래에 있다
+  assert.ok(block.indexOf('### 상시 지표') > start, '상시 지표 제목이 없다');
 });
