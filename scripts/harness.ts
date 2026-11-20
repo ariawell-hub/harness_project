@@ -161,6 +161,7 @@ CI(gates 워크플로, 10.4절):
   metrics [--since <날짜>] [--until <날짜>]
                                            지표(17.2절)를 집계해 출력한다. 기간은 UTC 날짜(YYYY-MM-DD, 양끝 포함, 기본 최근 7일).
                                            파일을 쓰지 않는다. 출력을 docs/QUALITY_SCORE.md의 집계 결과 구간에 붙여 넣는다
+                                           --self-test-report <파일>: self-test --out이 쓴 보고서로 자체 테스트 통과율을 낸다
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
@@ -280,6 +281,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   json: { type: 'boolean' },
   since: { type: 'string' },
   until: { type: 'string' },
+  'self-test-report': { type: 'string' },
   profile: { type: 'string' },
   bot: { type: 'string' },
 };
@@ -1247,7 +1249,11 @@ async function main(argv: string[]): Promise<number> {
         );
         return 1;
       }
-      return runMetrics(cwd, { since: str('since'), until: str('until') });
+      return runMetrics(cwd, {
+        since: str('since'),
+        until: str('until'),
+        selfTestReport: str('self-test-report'),
+      });
     case 'init':
       return init(repoInfo(cwd).root, str('profile') ?? '', {
         owner: str('owner'),
