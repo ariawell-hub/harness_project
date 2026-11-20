@@ -75,11 +75,16 @@ export function defaultSource(cwd: string, cfg: HarnessConfig): MetricsSource;
 
 - `parsePeriod`: 형식이 `YYYY-MM-DD`가 아니거나 없는 날짜이거나 `since`가 `until`보다 뒤면 예외(`SourceError`가 아닌 일반 오류, 명령이 종료 코드 1로 바꾼다). `until`이 없으면 `now`의 UTC 날짜, `since`가 없으면 `until`의 6일 전.
 - `inPeriod`: `since`일 00:00:00Z 이상이고 `until` 다음 날 00:00:00Z 미만이면 참.
-- `ghSource`는 받은 `gh` 함수로만 GitHub을 읽는다. 읽기 요청만 보낸다: 인자는 `pr list`, `issue list`, `api`(`--paginate`·`--jq`와 경로만. `-X`·`--method`·`-f`·`-F`·`--field`·`--raw-field`·`--input` 없음) 셋 중 하나다. `defaultSource`의 `gh` 함수는 `runSync('gh', args, { cwd, timeoutMs: 120_000 })`이고 종료 코드가 0이 아니면 예외다.
-  - `mergedPrs`: `gh pr list --state merged --base <cfg.github.defaultBranch> --search "merged:>=<since>" --limit 1000 --json …`으로 기본 브랜치에 병합된 PR을 읽고 `mergedAt`이 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`(다 읽었는지 알 수 없다).
+- `ghSource`는 받은 `gh` 함수로만 GitHub을 읽는다. 읽기 요청만 보낸다: 인자 배열은 아래 "읽기 요청 꼴" 가운데 PR·Issue·실행 조회 셋 중 하나와 자리마다 맞는다(다른 인자를 덧붙이지 않는다). `defaultSource`의 `gh` 함수는 `runSync('gh', args, { cwd, timeoutMs: 120_000 })`이고 종료 코드가 0이 아니면 예외다.
+  - `mergedPrs`: `gh pr list --state merged --base <cfg.github.defaultBranch> --search "merged:<since>..<until 다음 날>" --limit 1000 --json …`으로 기본 브랜치에 병합된 PR을 읽고(검색은 끝을 하루 넉넉히 잡는다. 검색의 날짜 경계가 UTC와 어긋나도 빠지지 않게 한다) `mergedAt`이 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`(다 읽었는지 알 수 없다).
   - `workflowRuns`: 기간의 날짜마다 `gh api --paginate "repos/{owner}/{repo}/actions/runs?created=<날짜>&per_page=100"`으로 읽는다. 이 API는 `created` 조건이 있으면 조회 하나에 1000건까지만 준다. 응답의 `total_count`를 함께 받아, 그날 받은 실행 수가 `total_count`와 다르거나 `total_count`가 1000 이상이면 `SourceError`다(1000건이면 상한에 닿은 것이라 다 읽었는지 알 수 없다).
-  - `bugIssues`: `gh issue list --state all --label bug --search "created:>=<since>" --limit 1000 --json number,createdAt`으로 읽고 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`.
+  - `bugIssues`: `gh issue list --state all --label bug --search "created:<since>..<until 다음 날>" --limit 1000 --json number,createdAt`으로 읽고 기간 안인 것만 남긴다. 받은 수가 1000이면 `SourceError`.
   - `ledger`: 받은 `ledger` 함수를 부른다. `defaultSource`는 `readPrLedger(getGitHub(cwd), cfg, pr)`를 끼운다(검증 App 봇이 쓴 원장 댓글만 인정하는 규칙을 그대로 쓴다).
+  - 읽기 요청 꼴(인자 배열의 길이와 자리마다의 값이 맞아야 한다. `<날짜>`는 `YYYY-MM-DD`, `<번호>`는 숫자, `<필드>`는 영문자와 쉼표, `<jq>`는 `--jq` 바로 뒤 한 자리의 문자열이다):
+    - PR 조회: `pr` `list` `--state` `merged` `--base` `<기본 브랜치>` `--search` `merged:<날짜>..<날짜>` `--limit` `1000` `--json` `<필드>`
+    - Issue 조회: `issue` `list` `--state` `all` `--label` `bug` `--search` `created:<날짜>..<날짜>` `--limit` `1000` `--json` `number,createdAt`
+    - 실행 조회: `api` `--paginate` `repos/{owner}/{repo}/actions/runs?created=<날짜>&per_page=100` `--jq` `<jq>`
+    - 댓글 조회(원장. `scripts/lib/github.ts`의 `prComments`가 보낸다): `api` `--paginate` `repos/{owner}/{repo}/issues/<번호>/comments?per_page=100` `--jq` `<jq>`
   - `gh`·`ledger` 함수가 예외를 내거나 응답을 형식대로 읽지 못하면 `SourceError`다(원장이 깨진 PR이 하나라도 있으면 집계 전체가 실패한다).
 
 ### 2. 파일럿 판정 지표 `scripts/metrics/pilot.ts`
@@ -150,7 +155,7 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
 
 ### 5. 테스트
 
-- `scripts/test/metrics-pilot.test.ts`: `parsePeriod`·`inPeriod`(경계 시각, 틀린 형식), `ghSource`(호출을 기록하고 고정 응답을 돌려주는 `gh` 함수를 끼운다: 응답이 위 형으로 바뀐다, 기간 밖 항목이 빠진다, 날짜마다 실행을 따로 읽는다, 받은 실행 수가 `total_count`와 다르면 `SourceError`, 받은 수와 `total_count`가 모두 1000이어도 `SourceError`, PR·Issue 수가 상한이면 `SourceError`, `gh`·`ledger` 함수의 예외가 `SourceError`가 된다, 기록된 모든 호출의 인자가 위 "읽기 요청" 꼴이다), `pilotMetrics`(위 정의의 값마다 고정 입력으로 단언: 재실행 뒤 통과 분리, 자정(UTC)을 사이에 둔 연속 실패는 `priorMainCheck`가 `failure`라 검증 누락이 아니다, 기간 전 성공 뒤 기간 첫 실행의 실패는 검증 누락이다, `priorMainCheck`가 null인 첫 실패는 "전환 여부 미확인"이다, 검증 누락은 실패로 바뀐 실행의 원인 PR만 세고 이어진 실패·원인 PR을 찾지 못한 실패·버그 Issue는 넣지 않는다, 같은 PR은 한 번만 센다, 동결 P1·P2 제외, 재현 안 됨과 rejected가 겹친 지적은 한 번, 짝수 개 중앙값, PR 0개일 때 null, 깨진 시각), `renderBlock`(null 표시, 표 없음).
+- `scripts/test/metrics-pilot.test.ts`: `parsePeriod`·`inPeriod`(경계 시각, 틀린 형식), `ghSource`(호출을 기록하고 고정 응답을 돌려주는 `gh` 함수를 끼운다: 응답이 위 형으로 바뀐다, 기간 밖 항목이 빠진다, 날짜마다 실행을 따로 읽는다, 받은 실행 수가 `total_count`와 다르면 `SourceError`, 받은 수와 `total_count`가 모두 1000이어도 `SourceError`, PR·Issue 수가 상한이면 `SourceError`, `gh`·`ledger` 함수의 예외가 `SourceError`가 된다, 기록된 모든 호출의 인자 배열이 위 "읽기 요청 꼴"의 PR·Issue·실행 조회 가운데 하나와 자리마다 맞는다), `pilotMetrics`(위 정의의 값마다 고정 입력으로 단언: 재실행 뒤 통과 분리, 자정(UTC)을 사이에 둔 연속 실패는 `priorMainCheck`가 `failure`라 검증 누락이 아니다, 기간 전 성공 뒤 기간 첫 실행의 실패는 검증 누락이다, `priorMainCheck`가 null인 첫 실패는 "전환 여부 미확인"이다, 검증 누락은 실패로 바뀐 실행의 원인 PR만 세고 이어진 실패·원인 PR을 찾지 못한 실패·버그 Issue는 넣지 않는다, 같은 PR은 한 번만 센다, 동결 P1·P2 제외, 재현 안 됨과 rejected가 겹친 지적은 한 번, 짝수 개 중앙값, PR 0개일 때 null, 깨진 시각), `renderBlock`(null 표시, 표 없음).
 - `scripts/test/metrics-command.test.ts`: 임시 리포(`makeFixture`)와 메모리 `MetricsSource`로 `runMetrics`를 부른다. 같은 자료로 두 번 실행하면 출력이 같다, 자료 읽기 예외는 종료 코드 2이고 표준 출력이 비어 있다, `priorMainCheck`를 전날 실행에서 찾는 경우·이틀 전에서 찾는 경우·7일 안에 없는 경우(null)에 `runMetrics`가 읽는 날짜와 결과가 맞다, 자료가 상한에 닿은 `ghSource`(실행 1000건, `total_count` 1000)로 실행하면 종료 코드 2이고 표준 출력이 비어 있다, 기간이 틀리면 종료 코드 1이고 자료를 읽지 않는다, 원장 지적의 제목 문자열이 출력에 나오지 않는다. 연결 확인: 메모리 `MetricsSource`의 자료를 한 가지씩만 바꿔(병합 PR 하나 추가, main `check` 실패 실행 하나 추가, 버그 Issue 하나 추가, 한 PR의 원장에 rejected 차단 지적 하나 추가) `runMetrics`의 출력에서 그에 해당하는 값(병합 PR 수, main `check` 실패 수, 버그 Issue 수, 오탐 수)이 바뀌는 것을 단언한다. `ledger`가 병합된 PR마다 그 번호로 한 번씩 불리는 것도 단언한다. `scripts/harness.ts metrics --since 2026-13-01`을 자식 프로세스로 실행해 종료 코드 1과 오류 메시지를 확인한다(등록 확인. GitHub을 읽기 전에 끝난다). 이 리포의 `docs/QUALITY_SCORE.md`를 읽어 표식 줄(`BEGIN`, `END`)이 이 순서로 하나씩 있고, 구간의 첫 줄이 `집계 기간: <날짜> ~ <날짜>(UTC) · 병합 PR <수>개` 꼴이고, `### 파일럿 판정 지표` 아래에 지표 넷(병합 후 결함, 검증 누락, 오탐, PR당 대기 시간, PR당 사용량 항목)마다 수가 든 줄 또는 `—`와 이유가 든 줄이 있으며, 표(`|`로 시작하는 줄)가 남아 있지 않은 것을 단언한다. 이 테스트는 다음 집계 뒤에도 통과해야 하므로 날짜와 값 자체는 고정하지 않는다. 첫 집계의 시작일은 AC의 둘째 명령이 본다.
 
 - 명령이 파일을 쓰지 않는 것은 `scripts/test/metrics-command.test.ts`에서 두 가지로 본다(Git 상태로는 보지 않는다. 같은 내용으로 다시 쓰거나 Git이 무시하는 경로에 쓰면 드러나지 않는다).
@@ -159,12 +164,15 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
   - 쓰기 시도 감지(임시 폴더 밖에 쓰는 경우까지 본다): 테스트가 내장 `fs` 모듈의 내용을 바꾸는 함수를 "호출을 기록하고 예외를 던지는 함수"로 바꿔 끼운 뒤(`node:module`의 `syncBuiltinESMExports()`를 불러, `fs`와 `node:fs` 어느 표기로 이름을 가져온 모듈에도 반영되게 한다) 정상 입력으로 `runMetrics`를 실행하고, 기록된 호출이 0건이며 종료 코드가 0이라고 단언한다. 끝나면(실패해도) 원래 함수로 되돌리고 다시 `syncBuiltinESMExports()`를 부른다.
     - 바꿔 끼우는 함수: `writeFileSync`, `writeSync`, `writevSync`, `appendFileSync`, `renameSync`, `copyFileSync`, `cpSync`, `mkdirSync`, `mkdtempSync`, `rmSync`, `rmdirSync`, `unlinkSync`, `truncateSync`, `ftruncateSync`, `symlinkSync`, `linkSync`, `chmodSync`, `fchmodSync`, `lchmodSync`, `chownSync`, `fchownSync`, `lchownSync`, `utimesSync`, `futimesSync`, `lutimesSync`, `createWriteStream`, 그리고 이들의 콜백 꼴(`writeFile`, `write`, `writev`, `appendFile`, `rename`, `copyFile`, `cp`, `mkdir`, `mkdtemp`, `rm`, `rmdir`, `unlink`, `truncate`, `ftruncate`, `symlink`, `link`, `chmod`, `fchmod`, `lchmod`, `chown`, `fchown`, `lchown`, `utimes`, `futimes`, `lutimes`)과 `fs.promises`의 같은 이름. `openSync`·`open`·`fs.promises.open`은 읽기 전용(`'r'` 또는 `O_RDONLY`)이 아닌 플래그로 부를 때만 기록하고 막는다.
     - 그 감지가 실제로 잡는지: 테스트 파일 옆에 두지 않고 테스트 안에서 만든 두 함수로 본다. 하나는 `fs`에서, 하나는 `node:fs`에서 `writeFileSync`를 이름으로 가져온 것이다(테스트 파일 머리의 정적 `import` 둘). 바꿔 끼운 상태에서 둘을 각각 부르면 예외가 나고 호출이 기록되며 파일이 생기지 않는 것을 단언한다. 읽기 함수(`readFileSync`)는 두 표기 모두 그대로 동작하는 것도 단언한다.
-  - 자식 프로세스(메모리 자료): 같은 방식으로 `child_process`의 `spawnSync`·`spawn`·`execSync`·`exec`·`execFileSync`·`execFile`·`fork`를 "기록하고 원래 함수를 부르는 함수"로 감싸, 메모리 `MetricsSource`로 `runMetrics`를 실행하는 동안 뜬 자식 프로세스가 `git rev-parse …`(리포 위치를 읽는 명령)뿐이라고 단언한다.
+  - 자식 프로세스의 허용 목록(아래 두 테스트가 함께 쓴다. 명령과 인자 배열 전체가 맞을 때만 허용한다. 금지할 옵션을 나열하지 않는다):
+    - `git`: `repoInfo`(`scripts/lib/git.ts`)가 실행하는 둘. `rev-parse` `--show-toplevel` `--absolute-git-dir` `--git-common-dir`, 그리고 `symbolic-ref` `--short` `-q` `HEAD`. 둘 다 읽기만 한다.
+    - `gh`: 1절의 "읽기 요청 꼴" 넷.
+  - 자식 프로세스(메모리 자료): 같은 방식으로 `child_process`의 `spawnSync`·`spawn`·`execSync`·`exec`·`execFileSync`·`execFile`·`fork`를 "기록하고 원래 함수를 부르는 함수"로 감싸, 메모리 `MetricsSource`로 `runMetrics`를 실행하는 동안 뜬 자식 프로세스가 허용 목록의 `git` 둘뿐이라고 단언한다(`gh`는 뜨지 않는다).
   - 기본 자료원 경로(명령행이 타는 경로): 유효한 기간으로 `runMetrics`를 `source` 인자 없이 부르는 테스트를 둔다. 네트워크와 실제 `gh` 없이 돈다.
-    - 프로세스 실행 경계를 막는다: 위의 `child_process` 함수들을 바꿔 끼워, `git rev-parse …`는 원래 함수로 실행하고, `gh`의 읽기 요청(`pr list`, `issue list`, 그리고 `api`로 시작하고 `-X`·`--method`·`-f`·`-F`·`--field`·`--raw-field`·`--input`이 없는 것)에는 실행하지 않고 고정 응답(병합 PR 목록, 날짜별 실행 목록과 `total_count`, 버그 Issue 목록, PR의 댓글 목록)을 돌려준다. 그 밖의 호출(다른 명령, `gh`의 쓰기 요청, 셸 실행)은 실행하지 않고 "막은 호출"로 기록한 뒤 실패를 돌려준다.
+    - 프로세스 실행 경계를 막는다: 위의 `child_process` 함수들을 바꿔 끼워, 허용 목록의 `git` 둘은 원래 함수로 실행하고, 허용 목록의 `gh` 넷에는 실행하지 않고 고정 응답(병합 PR 목록, 날짜별 실행 목록과 `total_count`, 버그 Issue 목록, PR의 댓글 목록)을 돌려준다. 허용 목록과 맞지 않는 호출은 고정 응답을 주기 전에 막는다: 실행하지 않고 "막은 호출"로 기록한 뒤 실패를 돌려준다.
     - 이 테스트 동안 `HARNESS_FAKE_GH`를 비워 `defaultSource`가 실제 경로(`runSync('gh', …)`와 `getGitHub`의 `gh` 구현)를 타게 하고, 끝나면 되돌린다.
-    - 단언: 종료 코드 0이고 출력의 값이 고정 응답과 맞는다(병합 PR 수, main `check` 실패 수, 버그 Issue 수). 막은 호출이 0건이다. 관찰한 `gh` 호출에 병합 PR 조회, 날짜별 실행 조회, 버그 Issue 조회, 병합된 PR마다의 댓글 조회가 있다. 위의 `fs` 쓰기 시도 감지를 함께 켜 두고 기록된 쓰기 호출이 0건이다.
-    - 그 경계가 실제로 막는지: 같은 상태에서 `runSync('gh', ['api', '-X', 'POST', …])`와 `runSync('sh', ['-c', …])`를 부르면 실행되지 않고 막은 호출로 기록되는 것을 단언한다.
+    - 단언: 종료 코드 0이고 출력의 값이 고정 응답과 맞는다(병합 PR 수, main `check` 실패 수, 버그 Issue 수). 막은 호출이 0건이다. 관찰한 `gh` 호출에 PR 조회, 날짜별 실행 조회, Issue 조회, 병합된 PR마다의 댓글 조회가 있다. 위의 `fs` 쓰기 시도 감지를 함께 켜 두고 기록된 쓰기 호출이 0건이다.
+    - 그 경계가 실제로 막는지: 같은 상태에서 아래를 `runSync`로 부르면 모두 실행되지 않고 막은 호출로 기록되는 것을 단언한다. `gh api -X POST …`, `gh api --method=POST …`, 허용되는 댓글 조회 인자 끝에 `--method=POST`를 덧붙인 것, 허용되는 PR 조회에서 `list`를 `merge`로 바꾼 것, `git status`, `sh -c …`.
 
 ### 6. 문서와 첫 집계
 
