@@ -1,0 +1,10 @@
+{
+  "plan": "20261120-doclint-strict-gate",
+  "steps": [
+    {
+      "step": 0,
+      "name": "gate-read-failure",
+      "status": "pending"
+    }
+  ]
+}
