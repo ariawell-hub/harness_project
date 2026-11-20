@@ -1,10 +1,12 @@
 // metrics(17.2절): 지표를 집계해 표준 출력에 낸다. 파일을 쓰지 않는다.
-// GitHub은 읽기만 한다. 순서가 규칙이다: 기간 검사 → 자료 읽기 → 계산·렌더 → 출력.
+// GitHub은 읽기만 한다. 순서가 규칙이다: 기간·보고서 검사 → 자료 읽기 → 계산·렌더 → 출력.
 // 자료를 다 읽지 못하면 아무것도 내지 않는다(종료 코드 2).
 // 출력은 docs/QUALITY_SCORE.md의 표식 구간에 그대로 붙여 넣는 글이다. 문서에는 작업자가 붙여 넣어 기록한다.
+import path from 'node:path';
 import type { Ledger } from '../ci/ledger.ts';
 import { loadConfig } from '../lib/config.ts';
 import { repoInfo } from '../lib/git.ts';
+import { localMetrics, readSelfTestReport } from '../metrics/local.ts';
 import { isMainCheck, pilotMetrics, runOrder } from '../metrics/pilot.ts';
 import { planClaimedAt } from '../metrics/plans.ts';
 import { renderBlock } from '../metrics/render.ts';
@@ -26,6 +28,8 @@ const PRIOR_DAYS = 7;
 export interface MetricsOptions {
   since?: string;
   until?: string;
+  /** `self-test --out <파일>`이 쓴 보고서. 주지 않으면 자체 테스트 통과율을 내지 않는다 */
+  selfTestReport?: string;
   now?: Date;
   out?: (line: string) => void;
   err?: (line: string) => void;
@@ -85,11 +89,32 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
     return 1;
   }
 
+  // 자체 테스트 보고서도 GitHub을 읽기 전에 본다(몇 분 걸리는 조회 뒤에 틀린 경로로 끝나지 않게)
+  const report = o.selfTestReport === undefined ? null : path.resolve(cwd, o.selfTestReport);
+  if (report !== null) {
+    try {
+      readSelfTestReport(report);
+    } catch (e) {
+      err(
+        `metrics: --self-test-report ${first(e)}. \`node scripts/harness.ts self-test --out <파일>\`이 쓴 파일을 준다`,
+      );
+      return 1;
+    }
+  }
+
   // ② 자료 읽기. 하나라도 읽지 못하면 값을 내지 않는다
   let block: string;
   try {
     const info = repoInfo(cwd);
     const cfg = loadConfig(info.root);
+    // 리포 파일과 로컬 로그. runner 로그는 공유 git-dir에 있다(harnessStateDir는 폴더를 만들므로 부르지 않는다)
+    const local = localMetrics({
+      root: info.root,
+      cfg,
+      period,
+      runnerLog: path.join(info.commonDir, 'harness', 'runner.jsonl'),
+      selfTestReport: report,
+    });
     const src = source ?? defaultSource(info.root, cfg);
     const prs = src.mergedPrs(period);
     const runs = src.workflowRuns({ since: runsSince(period, prs), until: period.until });
@@ -129,6 +154,7 @@ export function runMetrics(cwd: string, o: MetricsOptions, source?: MetricsSourc
         labels,
         comments,
       }),
+      local,
     );
   } catch (e) {
     err(
