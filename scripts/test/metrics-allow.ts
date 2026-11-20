@@ -9,6 +9,8 @@ export type Slot = string | RegExp;
 export interface Shape {
   name: string;
   args: Slot[];
+  /** 있으면 `args` 뒤에 한 자리 이상이 더 오고, 그 자리마다 이 식과 맞아야 한다 */
+  rest?: RegExp;
 }
 
 const DAY = String.raw`\d{4}-\d{2}-\d{2}`;
@@ -129,21 +131,35 @@ export function ghReadShapes(defaultBranch: string): Shape[] {
   ];
 }
 
-/** `repoInfo`(scripts/lib/git.ts)가 실행하는 둘. 둘 다 읽기만 한다 */
+/** `--` 뒤 한 자리의 리포 상대 경로. 옵션(-), 절대 경로(/), pathspec 표식(:)으로 시작하지 않는다 */
+const REPO_PATH = /^(?![-/:])[^\0]+$/;
+
+/**
+ * `repoInfo`(scripts/lib/git.ts)가 실행하는 둘과 `docLint`(scripts/gates/doc-lint.ts)가 실행하는 둘(step2).
+ * 넷 다 읽기만 한다. `log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 맞는다
+ */
 export const GIT_READ_SHAPES: Shape[] = [
   {
     name: 'rev-parse',
     args: ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'],
   },
   { name: 'symbolic-ref', args: ['symbolic-ref', '--short', '-q', 'HEAD'] },
+  {
+    name: 'ls-files',
+    args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'],
+  },
+  { name: 'log', args: ['log', '-1', '--format=%ct', '--'], rest: REPO_PATH },
 ];
 
 export function fits(shape: Shape, args: readonly string[]): boolean {
+  const fixed = shape.args.length;
+  if (shape.rest ? args.length <= fixed : args.length !== fixed) return false;
+  const { rest } = shape;
   return (
-    shape.args.length === args.length &&
     shape.args.every((slot, i) =>
       typeof slot === 'string' ? slot === args[i] : slot.test(args[i]),
-    )
+    ) &&
+    (!rest || args.slice(fixed).every((a) => rest.test(a)))
   );
 }
 

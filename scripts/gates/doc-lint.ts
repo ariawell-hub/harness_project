@@ -22,12 +22,23 @@ export interface DocLintResult {
   warnings: Problem[];
 }
 
-function listMarkdown(root: string): string[] {
+export interface DocLintOptions {
+  /**
+   * 참이면 `git` 읽기(문서 목록, 커밋 시각)가 실패할 때 빈 결과로 넘기지 않고 예외를 던진다.
+   * 결과를 수로 기록하는 쪽(지표 집계)이 쓴다. 기본은 거짓이고 게이트의 동작은 그대로다
+   */
+  strict?: boolean;
+}
+
+function listMarkdown(root: string, strict: boolean): string[] {
   const r = gitTry(
     ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'],
     root,
   );
-  if (!r.ok) return [];
+  if (!r.ok) {
+    if (strict) throw new Error('문서 목록을 읽지 못했다(git ls-files 실패)');
+    return [];
+  }
   return r.stdout
     .split('\0')
     .filter(Boolean)
@@ -55,16 +66,21 @@ function isExternal(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#');
 }
 
-function lastCommitTime(root: string, paths: string[]): number {
+/** 그 경로들의 마지막 커밋 시각(초). 조회는 성공했지만 커밋 이력이 없으면 0이다 */
+function lastCommitTime(root: string, paths: string[], strict: boolean): number {
   const r = gitTry(['log', '-1', '--format=%ct', '--', ...paths], root);
-  return r.ok && r.stdout.trim() ? Number(r.stdout.trim()) : 0;
+  const text = r.stdout.trim();
+  if (strict && (!r.ok || (text !== '' && !/^\d+$/.test(text))))
+    throw new Error(`커밋 시각을 읽지 못했다(git log 실패: ${paths.join(', ')})`);
+  return r.ok && text ? Number(text) : 0;
 }
 
-export function docLint(root: string, cfg: HarnessConfig): DocLintResult {
+export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}): DocLintResult {
+  const strict = o.strict === true;
   const errors: Problem[] = [];
   const warnings: Problem[] = [];
   const exclude = cfg.docLint.exclude ?? [];
-  const files = listMarkdown(root).filter((f) => !matchesAny(f, exclude));
+  const files = listMarkdown(root, strict).filter((f) => !matchesAny(f, exclude));
 
   // 1) 깨진 상대 링크
   const linked = new Map<string, Set<string>>(); // 대상 → 링크한 파일들
@@ -150,8 +166,8 @@ export function docLint(root: string, cfg: HarnessConfig): DocLintResult {
       Array.isArray(fm.related_code) &&
       fm.related_code.length
     ) {
-      const codeT = lastCommitTime(root, fm.related_code);
-      const docT = lastCommitTime(root, [f]);
+      const codeT = lastCommitTime(root, fm.related_code, strict);
+      const docT = lastCommitTime(root, [f], strict);
       if (codeT && docT && codeT > docT) {
         warnings.push({
           rule: 'R8 검토 필요',
