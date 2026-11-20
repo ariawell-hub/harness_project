@@ -73,6 +73,14 @@ export function median(values: number[]): number | null {
 
 const numeric = (a: number, b: number) => a - b;
 
+/**
+ * 실행의 순서: 만들어진 시각, 같은 시각이면 실행 번호(같은 워크플로 안에서 늘어난다).
+ * 응답에 실린 순서에 기대지 않는다. 기간 안의 전환 판정과 기간 직전 실행 선택이 함께 쓴다
+ */
+export function runOrder(a: WorkflowRun, b: WorkflowRun): number {
+  return Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.runNumber - b.runNumber;
+}
+
 /** main의 push로 돈 끝난 `check` 실행인가(기간은 보지 않는다) */
 export function isMainCheck(r: WorkflowRun, defaultBranch: string): boolean {
   return (
@@ -111,8 +119,8 @@ export function pilotMetrics(i: PilotInput): PilotMetrics {
   for (const p of i.prs) if (p.mergeSha) byMergeSha.set(p.mergeSha, p.number);
   const decided = mainChecks
     .filter((r) => r.conclusion === 'success' || r.conclusion === 'failure')
-    .map((r, n) => ({ r, n, t: Date.parse(r.createdAt) }))
-    .sort((a, b) => a.t - b.t || a.n - b.n);
+    .map((r, n) => ({ r, n }))
+    .sort((a, b) => runOrder(a.r, b.r) || a.n - b.n);
   const missed = new Set<number>();
   let unattributed = 0;
   let unknownTransition = 0;

@@ -50,6 +50,7 @@ function run(over: Partial<WorkflowRun> = {}): WorkflowRun {
     startedAt: '2026-11-11T03:00:00Z',
     updatedAt: '2026-11-11T03:10:00Z',
     attempt: 1,
+    runNumber: 1,
     ...over,
   };
 }
@@ -333,6 +334,35 @@ test('ghSource: PR·Issue 수가 상한(1000)이면 SourceError다', () => {
   assert.throws(() => source(fakeGh({ issues })).bugIssues(P), SourceError);
 });
 
+test('ghSource: PR·Issue 번호가 중복으로 오면 SourceError다', () => {
+  // 읽는 동안 검색 결과의 순서가 바뀌면 페이지 경계에서 한 번호가 두 번 오고 다른 번호가 빠질 수 있다
+  const dup = (e: unknown) => e instanceof SourceError && /중복/.test(e.message);
+  const prs = [
+    rawPr(1, '2026-11-11T00:00:00Z'),
+    rawPr(2, '2026-11-11T01:00:00Z'),
+    rawPr(1, '2026-11-11T00:00:00Z'),
+  ];
+  assert.throws(() => source(fakeGh({ prs })).mergedPrs(P), dup);
+  // 기간 밖 항목이 중복이어도 같다: 빠진 항목은 기간 안의 것일 수 있다
+  const outside = [
+    rawPr(1, '2026-11-11T00:00:00Z'),
+    rawPr(9, '2026-11-13T00:00:00Z'),
+    rawPr(9, '2026-11-13T00:00:00Z'),
+  ];
+  assert.throws(() => source(fakeGh({ prs: outside })).mergedPrs(P), dup);
+  const issues = [
+    { number: 5, createdAt: '2026-11-12T23:00:00Z' },
+    { number: 5, createdAt: '2026-11-12T23:00:00Z' },
+  ];
+  assert.throws(() => source(fakeGh({ issues })).bugIssues(P), dup);
+  const far = [
+    { number: 5, createdAt: '2026-11-12T23:00:00Z' },
+    { number: 6, createdAt: '2026-11-13T00:00:00Z' },
+    { number: 6, createdAt: '2026-11-13T00:00:00Z' },
+  ];
+  assert.throws(() => source(fakeGh({ issues: far })).bugIssues(P), dup);
+});
+
 test('ghSource.bugIssues: bug 라벨 Issue를 읽고 기간 밖은 뺀다', () => {
   const f = fakeGh({
     issues: [
@@ -495,6 +525,47 @@ test('pilotMetrics: 실행은 받은 순서가 아니라 createdAt 순으로 본
   // 먼저 실패한 것은 other(원인 PR 없음)이고, m2는 이어진 실패다
   assert.deepEqual(m.missed.prs, []);
   assert.equal(m.missed.unattributed, 1);
+});
+
+test('pilotMetrics: 같은 초에 만들어진 실행은 받은 순서가 아니라 실행 번호 순으로 본다', () => {
+  const t = '2026-11-11T05:00:00Z';
+  const ok = run({ createdAt: t, runNumber: 10, conclusion: 'success' });
+  const bad = run({ createdAt: t, runNumber: 11, conclusion: 'failure', headSha: 'm2' });
+  // 직전은 실패였다. 성공(10) 뒤에 실패(11)가 왔으므로 PR 2가 main을 실패로 바꿨다
+  for (const runs of [
+    [ok, bad],
+    [bad, ok],
+  ]) {
+    const m = pilotMetrics(input({ prs: [pr(2)], runs, priorMainCheck: 'failure' }));
+    assert.deepEqual(m.missed.prs, [2]);
+    assert.equal(m.missed.unattributed, 0);
+  }
+});
+
+test('ghSource.workflowRuns: 실행 번호를 읽는다', () => {
+  const f = fakeGh({
+    runs: {
+      '2026-11-11': [JSON.stringify({ total: 1 }), runLine({ runNumber: 42 })],
+      '2026-11-12': [JSON.stringify({ total: 0 })],
+    },
+  });
+  assert.deepEqual(
+    source(f)
+      .workflowRuns(P)
+      .map((r) => r.runNumber),
+    [42],
+  );
+  // 번호가 없는 응답은 읽지 못한 것이다
+  const { runNumber: _dropped, ...noNumber } = run();
+  const broken = fakeGh({
+    runs: {
+      '2026-11-11': [JSON.stringify({ total: 1 }), JSON.stringify({ id: 1, ...noNumber })],
+    },
+  });
+  assert.throws(() => source(broken).workflowRuns(P), SourceError);
+  // 조회식이 실행 번호를 달라고 한다
+  const jq = f.calls[0][f.calls[0].indexOf('--jq') + 1];
+  assert.match(jq, /runNumber: \.run_number/);
 });
 
 test('pilotMetrics: 기간 첫 실행의 실패는 기간 직전 결론으로 가른다', () => {

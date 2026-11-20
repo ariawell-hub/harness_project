@@ -103,6 +103,8 @@ export interface WorkflowRun {
   startedAt: string;
   updatedAt: string;
   attempt: number;
+  /** 같은 워크플로 안에서 실행마다 늘어나는 번호. 같은 초에 만들어진 실행의 순서를 가린다 */
+  runNumber: number;
 }
 
 export interface BugIssue {
@@ -165,9 +167,25 @@ function capped(what: string, n: number): void {
     );
 }
 
+/**
+ * 목록에 같은 번호가 두 번 오면 끝낸다. 읽는 동안 검색 결과의 순서가 바뀌면 페이지 경계에서
+ * 한 항목이 두 번 오고 다른 항목이 빠질 수 있다. 그때도 받은 수는 상한보다 적다
+ */
+function unique(what: string, raw: Json[]): void {
+  const seen = new Set<number>();
+  for (const x of raw) {
+    const n = num(x, 'number');
+    if (seen.has(n))
+      throw new SourceError(
+        `${what}: 같은 번호(#${n})가 중복으로 왔다. 읽는 동안 목록이 바뀌어 빠진 항목이 있을 수 있다. 다시 실행하라`,
+      );
+    seen.add(n);
+  }
+}
+
 /** 실행 목록의 한 페이지를 머리 줄(`{"total":N}`)과 실행 줄들로 바꾼다. 줄마다 JSON 하나다 */
 const RUNS_JQ =
-  '({total: .total_count} | tojson), (.workflow_runs[] | {id, path, event, branch: .head_branch, headSha: .head_sha, status, conclusion, createdAt: .created_at, startedAt: .run_started_at, updatedAt: .updated_at, attempt: .run_attempt} | tojson)';
+  '({total: .total_count} | tojson), (.workflow_runs[] | {id, path, event, branch: .head_branch, headSha: .head_sha, status, conclusion, createdAt: .created_at, startedAt: .run_started_at, updatedAt: .updated_at, attempt: .run_attempt, runNumber: .run_number} | tojson)';
 
 const PR_FIELDS =
   'number,headRefName,headRefOid,createdAt,mergedAt,mergeCommit,additions,deletions';
@@ -220,6 +238,7 @@ export function ghSource(o: {
           startedAt: optStr(v, 'startedAt'),
           updatedAt: optStr(v, 'updatedAt'),
           attempt: num(v, 'attempt'),
+          runNumber: num(v, 'runNumber'),
         });
       }
       if (totals.size !== 1)
@@ -257,6 +276,7 @@ export function ghSource(o: {
           ]),
         );
         capped(what, raw.length);
+        unique(what, raw);
         return raw
           .map((x) => ({
             number: num(x, 'number'),
@@ -296,6 +316,7 @@ export function ghSource(o: {
           ]),
         );
         capped(what, raw.length);
+        unique(what, raw);
         return raw
           .map((x) => ({ number: num(x, 'number'), createdAt: time(x, 'createdAt') }))
           .filter((x) => inPeriod(x.createdAt, p));

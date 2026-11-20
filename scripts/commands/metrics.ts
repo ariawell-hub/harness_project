@@ -5,7 +5,7 @@
 import type { Ledger } from '../ci/ledger.ts';
 import { loadConfig } from '../lib/config.ts';
 import { repoInfo } from '../lib/git.ts';
-import { isMainCheck, pilotMetrics } from '../metrics/pilot.ts';
+import { isMainCheck, pilotMetrics, runOrder } from '../metrics/pilot.ts';
 import { renderBlock } from '../metrics/render.ts';
 import {
   daysBefore,
@@ -13,6 +13,7 @@ import {
   parsePeriod,
   type MetricsSource,
   type Period,
+  type WorkflowRun,
 } from '../metrics/source.ts';
 
 /** 기간 직전의 main `check` 결론을 찾으러 거슬러 올라가는 날 수 */
@@ -39,13 +40,13 @@ function priorMainCheck(
 ): 'success' | 'failure' | null {
   for (let n = 1; n <= PRIOR_DAYS; n++) {
     const day = daysBefore(p.since, n);
-    let last: { t: number; conclusion: 'success' | 'failure' } | null = null;
+    let last: (WorkflowRun & { conclusion: 'success' | 'failure' }) | null = null;
     for (const r of source.workflowRuns({ since: day, until: day })) {
       if (!isMainCheck(r, defaultBranch)) continue;
       if (r.conclusion !== 'success' && r.conclusion !== 'failure') continue;
-      const t = Date.parse(r.createdAt);
-      if (Number.isNaN(t)) continue;
-      if (!last || t >= last.t) last = { t, conclusion: r.conclusion };
+      if (Number.isNaN(Date.parse(r.createdAt))) continue;
+      // 가장 늦은 실행. 순서 기준은 기간 안의 전환 판정과 같다(runOrder)
+      if (!last || runOrder(r, last) >= 0) last = { ...r, conclusion: r.conclusion };
     }
     if (last) return last.conclusion;
   }

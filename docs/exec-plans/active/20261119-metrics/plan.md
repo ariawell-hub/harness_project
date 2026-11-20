@@ -127,6 +127,14 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
   - 대조 기록 ① 종료일: 기대값(실행한 날의 UTC 날짜) 2026-11-20, 문서 첫 줄의 종료일 2026-11-20. 같다.
   - 대조 기록 ② 병합 PR 수: 문서 98, `gh pr list --state merged --base main --search "merged:2026-11-11..2026-11-20" --limit 1000 --json number --jq length` 98. 같다. 버그 Issue 수: 문서 6(#33, #41, #43, #48, #70, #99), `gh issue list --state all --label bug --search "created:2026-11-11..2026-11-20" --limit 1000 --json number --jq '[.[].number]|sort|@json'` `[33,41,43,48,70,99]`. 같다. main `check` 실패 수: 문서 0, `gh run list --workflow check.yml --branch main --event push --status failure --created "2026-11-11..2026-11-20" --limit 1000 --json databaseId --jq length` 0. 같다(같은 조건에서 `--status failure`를 뺀 전체 실행은 99건이고 모두 success다).
   - 대조 기록 ③ 문서의 표식 구간(표식 줄과 앞뒤 빈 줄을 뺀 내용)과 받아 둔 출력 파일의 `diff` 종료 코드 0. 같다.
+- 2026-11-20 11:20 구현 판정(다시 올린 구현, head `c2f50cb`): claude 승인. codex는 쓰기 경로가 없어진 것과 읽기 전용 테스트를 확인했고, 자료 읽기와 계산에서 P1 둘을 냈다(둘 다 재현 테스트가 "재현됨"). 둘 다 받아들였다. 앞선 구현 판정 6라운드 동안 같은 코드에 있던 것이다.
+  - F27: PR·Issue 목록에 같은 번호가 두 번 와도 그대로 집계한다. 읽는 동안 검색 결과의 순서가 바뀌면 한 항목이 두 번 오고 다른 항목이 빠질 수 있는데, 받은 수는 상한보다 적어 걸리지 않는다. 기간으로 거르기 전에 번호 중복을 보고 `SourceError`로 끝낸다(Actions 실행 목록의 id 중복 검사와 같은 방식).
+  - F28: 같은 초에 만들어진 main `check` 실행의 순서가 응답에 실린 순서를 따라, 검증 누락 수가 응답 순서에 따라 달라진다. 실행 번호(`run_number`)를 읽어 `WorkflowRun.runNumber`에 두고, 만들어진 시각이 같으면 실행 번호 순으로 놓는다(`runOrder`). 기간 안의 전환 판정과 기간 직전 실행 선택이 같은 기준을 쓴다.
+  - 재현 테스트를 먼저 썼고 고치기 전에는 4개가 실패했다(번호 중복, 같은 초의 실행 순서, 실행 번호 읽기, 기간 직전 결론의 같은 초). 고친 뒤 52개가 통과한다.
+  - 조회식이 바뀌어 첫 집계를 다시 실행했다: `node scripts/harness.ts metrics --since 2026-11-11 --until 2026-11-20`(종료 코드 0). 출력을 표식 구간에 다시 붙여 넣었다. 달라진 값은 Actions 실행 시간(2511분 → 2527분)과 판정 워크플로(710분 → 715분)뿐이다(같은 날의 실행이 더 쌓였다).
+  - 대조 기록 ① 종료일: 기대값 2026-11-20, 문서 첫 줄의 종료일 2026-11-20. 같다.
+  - 대조 기록 ② 병합 PR 수: 문서 98, `gh pr list --state merged --base main --search "merged:2026-11-11..2026-11-20" --limit 1000 --json number --jq length` 98. 같다. 버그 Issue 수: 문서 6(#33, #41, #43, #48, #70, #99), `gh issue list --state all --label bug --search "created:2026-11-11..2026-11-20" --limit 1000 --json number --jq '[.[].number]|sort|@json'` `[33,41,43,48,70,99]`. 같다. main `check` 실패 수: 문서 0, `gh run list --workflow check.yml --branch main --event push --status failure --created "2026-11-11..2026-11-20" --limit 1000 --json databaseId --jq length` 0. 같다(같은 조건에서 `--status failure`를 뺀 전체 실행은 99건이고 모두 success다).
+  - 대조 기록 ③ 문서의 표식 구간과 받아 둔 출력 파일의 `diff` 종료 코드 0. 같다.
 
 ## 의사결정 로그
 
@@ -161,6 +169,8 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 - 결정: 자식 프로세스 허용 목록을 `scripts/test/metrics-allow.ts` 한 파일에 두고 `metrics-pilot.test.ts`(`ghSource`의 호출 꼴)와 `metrics-command.test.ts`(프로세스 실행 경계)가 함께 쓴다. / 이유: step0 5절이 "허용 목록은 한곳에 둔다"고 정했고, 뒤 step이 꼴을 더할 자리가 하나여야 두 테스트가 어긋나지 않는다. 테스트 파일끼리 가져오면 가져온 쪽의 테스트가 함께 돌아 따로 뺐다.
 - 결정: 프로세스 실행 경계에서 고정 응답은 동기 실행(`spawnSync`)에만 준다. 허용 목록의 `gh` 꼴이라도 `spawn`·`exec` 같은 다른 실행 함수로 오면 막는다. / 이유: 명령은 `runSync`(`spawnSync`)만 쓴다. 다른 꼴의 실행이 생기면 테스트가 실패해 알아채는 쪽이 낫다.
 - 결정: `metrics --write`는 `scripts/harness.ts`의 등록부에서 종료 코드 1로 거부한다(계획에 없던 것). / 이유: `--write`는 다른 명령(`review-plan` 등)의 옵션이라 파서가 받아들인다. 그대로 두면 `metrics --write`가 오류 없이 출력만 하고 끝나, 문서가 바뀐 줄 알 수 있다. 등록부의 조건 한 곳이고 GitHub을 읽기 전에 끝난다. / 버린 대안: 조용히 무시하기(다른 명령들의 방식이지만 이 옵션은 이 PR의 이력에 있던 것이라 헷갈린다).
+- 결정: `WorkflowRun`에 `runNumber`를 더한다(F28. step0 1절의 형에 없던 필드다). / 이유: 만들어진 시각은 초 단위라 같은 초의 실행은 순서를 가릴 수 없다. 실행 번호는 같은 워크플로 안에서 실행마다 늘어나 순서가 정해진다. 실행 조회의 인자 꼴은 그대로다(`--jq` 식만 바뀐다). / 버린 대안: 실행 id로 가리기(id가 만들어진 순서를 따른다는 보장이 문서에 없다), 같은 초의 실행을 "순서 미확인"으로 따로 세기(값을 읽는 사람이 가를 수 없다).
+- 결정: PR·Issue 목록의 번호 중복은 기간으로 거르기 전에 본다(F27). / 이유: 중복된 항목이 기간 밖이어도, 그 때문에 빠진 항목은 기간 안의 것일 수 있다.
 
 ## 발견 사항
 

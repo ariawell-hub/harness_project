@@ -91,6 +91,7 @@ function run(over: Partial<WorkflowRun> = {}): WorkflowRun {
     startedAt: '2026-11-11T03:00:00Z',
     updatedAt: '2026-11-11T03:10:00Z',
     attempt: 1,
+    runNumber: 1,
     ...over,
   };
 }
@@ -571,6 +572,23 @@ test('기간 직전의 main check 결론을 하루씩 거슬러 찾는다', () =
   );
   assert.match(rc.out, /^- 검증 누락: 0건$/m);
   assert.match(rc.out, /^ {2}- 전환 여부 미확인[^\n]*: 1건$/m);
+});
+
+test('기간 직전의 결론: 같은 초에 만들어진 실행은 실행 번호가 큰 쪽이 마지막이다', () => {
+  const { work } = repo();
+  const first = run({ createdAt: '2026-11-11T00:10:00Z', conclusion: 'failure', headSha: 'm1' });
+  const t = '2026-11-10T10:00:00Z';
+  const failed = run({ createdAt: t, runNumber: 5, conclusion: 'failure' });
+  const passed = run({ createdAt: t, runNumber: 6, conclusion: 'success' });
+  // 전날의 마지막은 성공(6)이다 → 기간 첫 실패는 검증 누락이다. 받은 순서와 무관하다
+  for (const prior of [
+    [failed, passed],
+    [passed, failed],
+  ]) {
+    const r = exec(work, mem({ prs: [pr(1)], runs: [first, ...prior] }));
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /^- 검증 누락: 1건\(#1\)$/m);
+  }
 });
 
 test('읽은 자료가 출력까지 이어진다: 자료를 하나 바꾸면 그 값만 바뀐다', () => {
