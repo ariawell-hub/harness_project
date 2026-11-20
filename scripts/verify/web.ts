@@ -32,9 +32,11 @@ import { isScenarioPath, judge, type Verdict } from './judge.ts';
 import {
   Descendants,
   findMarked,
+  identify,
   listProcesses,
   RUN_MARK,
   type FindMarked,
+  type Identify,
   type ListProcesses,
 } from './tree.ts';
 
@@ -70,6 +72,8 @@ export interface VerifyOptions {
   listProcesses?: ListProcesses;
   /** 이번 실행의 표식(환경 변수)을 가진 프로세스를 찾는 수단. 기본은 ps -E(Linux는 /proc). 테스트가 바꾼다 */
   findMarked?: FindMarked;
+  /** 번호들의 지금 시작 시각을 읽는 수단(신호를 보내기 직전의 확인). 기본은 ps(Linux는 /proc). 테스트가 바꾼다 */
+  identify?: Identify;
 }
 
 export interface VerifyResult {
@@ -228,6 +232,10 @@ const RECHECK_MS = 50;
  * 뜨고 그 부모가 끝난 프로세스는 한 번의 읽기에서 빠질 수 있다) 한 번 비어 보인 것으로는 끝났다고 하지 않는다
  */
 const CLEAR_LOOKS = 2;
+/** 그룹 밖의 자손에 신호를 처음 보낸 뒤, 기한이 지났어도 그것이 끝나는 것을 보려고 더 두는 시간 */
+const SETTLE_MS = 500;
+/** 그렇게 늘릴 수 있는 한도(신호 단계 하나의 기한에 더한다). 새 자손이 끝없이 나와도 여기서 멈춘다 */
+const SETTLE_MAX_MS = 3000;
 
 /** clean: 모두 끝났다. left: 남은 것이 있다. unknown: 프로세스 목록을 읽지 못해 남은 것이 없는지 확인하지 못했다 */
 type Cleaned = 'clean' | 'left' | 'unknown';
@@ -238,7 +246,7 @@ type Cleaned = 'clean' | 'left' | 'unknown';
  * 모두에 SIGTERM → 2초 안에 끝나지 않으면 SIGKILL → 확인.
  * 신호를 보내기 전에, 아직 떠 있는 dev와 실행기의 자손을 마지막으로 한 번 더 찾는다
  */
-async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
+async function cleanup(procs: Proc[], tracker: Descendants, startedOf: Identify): Promise<Cleaned> {
   const live = procs.filter((p) => p.child.pid);
   /** 마지막으로 본 것이 온전한가(목록과 표식을 모두 읽었는가) */
   let seen = false;
@@ -247,38 +255,74 @@ async function cleanup(procs: Proc[], tracker: Descendants): Promise<Cleaned> {
     seen = await tracker.refresh(running(procs), true);
   };
   /**
+   * 방금 본 그룹 밖 자손 가운데 이 신호를 아직 받지 않은 것에 보낸다. 보낸 수를 돌려준다.
+   * 신호는 번호가 아니라 확인한 프로세스(번호와 시작 시각)에 묶는다: 보내기 직전에 그 번호의 시작 시각을 다시 읽어,
+   * 기억한 것과 같을 때만 보낸다(그 프로세스가 끝나고 무관한 프로세스가 같은 번호를 받았으면 보내지 않는다.
+   * 구현 판정 F6). 다시 읽지 못했으면 아무것에도 보내지 않는다. 다시 읽기와 보내기 사이에는 기다림을 두지 않는다
+   */
+  const signalNew = async (signal: NodeJS.Signals, sent: Map<number, string>): Promise<number> => {
+    const targets = tracker.targets();
+    // 사라졌거나 다른 프로세스가 된 번호는 잊는다
+    for (const [pid, started] of sent)
+      if (!targets.some((t) => t.pid === pid && t.started === started)) sent.delete(pid);
+    const fresh = targets.filter((t) => sent.get(t.pid) !== t.started);
+    if (fresh.length === 0) return 0;
+    const now = await startedOf(fresh.map((t) => t.pid));
+    if (!now) return 0;
+    let count = 0;
+    for (const t of fresh) {
+      if (now.get(t.pid) !== t.started) continue;
+      sent.set(t.pid, t.started);
+      try {
+        process.kill(t.pid, signal);
+        count++;
+      } catch {
+        // 이미 끝났다
+      }
+    }
+    return count;
+  };
+  /** 신호를 보낸 프로세스가 모두 사라질 때까지(같은 번호·시작 시각이 더는 없다) `ms`까지 기다린다 */
+  const settle = async (sent: Map<number, string>, ms: number): Promise<void> => {
+    const until = Date.now() + ms;
+    for (;;) {
+      const now = await startedOf([...sent.keys()]);
+      if (now && ![...sent].some(([pid, started]) => now.get(pid) === started)) return;
+      if (Date.now() >= until) return;
+      await sleep(25);
+    }
+  };
+  /**
    * 그룹에 `signal`을 보내고 `ms` 동안 모두 사라지기를 기다린다. 참이면 남은 것이 없다.
-   * 기다리는 동안 볼 때마다, 그때 찾은 그룹 밖 자손 가운데 이 신호를 아직 받지 않은 것에 보낸다. 신호를 보낸 뒤에
-   * 처음 찾은 것(분리된 중간 프로세스가 자손을 남기고 끝난 경우)도 받는다(구현 판정 4라운드 F2).
-   * 보내는 대상은 방금 본 것에서 우리 것으로 확인된 pid뿐이다(`tracker.targets()`)
+   * 기다리는 동안 볼 때마다, 그때 찾은 그룹 밖 자손에도 보낸다. 신호를 보낸 뒤에 처음 찾은 것(분리된 중간 프로세스가
+   * 자손을 남기고 끝난 경우)도 받는다(구현 판정 4라운드 F2).
+   * 신호를 보낸 바로 뒤에는 돌아가지 않는다(신호 전달은 종료를 기다리지 않는다. 5라운드 F2): 기한이 지났어도 방금
+   * 처음 보낸 것이 있으면 `SETTLE_MS`씩 더 보고(모두 `SETTLE_MAX_MS`까지), 그 한도에서도 방금 보낸 것이 있으면
+   * 그것이 사라지는 것을 `SETTLE_MS`까지 기다린 뒤 돌아간다
    */
   const sweep = async (signal: NodeJS.Signals, ms: number): Promise<boolean> => {
-    const until = Date.now() + ms;
-    const sent = new Set<number>();
+    let until = Date.now() + ms;
+    const hardStop = until + SETTLE_MAX_MS;
+    const sent = new Map<number, string>();
     let clear = 0;
     // 이미 끝난 것은 빼고(번호가 다시 쓰였을 수 있다) 지금 떠 있는 것에만 보낸다.
-    // 목록을 읽지 못해도 멈추지 않는다: 그룹과, 마지막으로 목록에서 확인한 자손에는 보낸다(구현 판정 F5)
+    // 목록을 읽지 못해도 멈추지 않는다: 그룹과, 마지막으로 목록에서 확인한 자손(시작 시각이 그대로인 것)에는
+    // 보낸다(구현 판정 F5)
     await look();
     for (const p of live) killTree(p.child.pid, signal);
     for (;;) {
-      const targets = new Set(tracker.targets());
-      // 사라진 번호는 잊는다(같은 번호가 우리 것으로 다시 확인되면 다시 보낸다)
-      for (const pid of sent) if (!targets.has(pid)) sent.delete(pid);
-      for (const pid of targets) {
-        if (sent.has(pid)) continue;
-        sent.add(pid);
-        try {
-          process.kill(pid, signal);
-        } catch {
-          // 이미 끝났다
-        }
-      }
+      const newly = await signalNew(signal, sent);
       const groups = live.some(treeAlive);
       // 그룹 밖의 자손이 남았는지는 프로세스 목록과 표식으로만 알 수 있다. 읽지 못했으면 끝났다고 보지 않고
-      // 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다). 우리 것인지 확인하지 못한 번호도 남은 것이다
+      // 기다린다(다음에는 읽힐 수 있다. 끝내 못 읽으면 unknown이다). 어느 프로세스인지 모르는 번호도 남은 것이다
       clear = !groups && seen && tracker.pids().length === 0 ? clear + 1 : 0;
       if (clear >= CLEAR_LOOKS) return true;
-      if (Date.now() >= until) return false;
+      const now = Date.now();
+      if (newly > 0) until = Math.min(hardStop, Math.max(until, now + SETTLE_MS));
+      if (now >= until) {
+        if (newly > 0) await settle(sent, SETTLE_MS);
+        return false;
+      }
       await sleep(groups ? 25 : RECHECK_MS);
       await look();
     }
@@ -613,7 +657,7 @@ export async function verifyWeb(
   } finally {
     try {
       await stopFollowing?.();
-      const cleaned = await cleanup(procs, tracker);
+      const cleaned = await cleanup(procs, tracker, o.identify ?? identify);
       // 남은 프로세스가 있거나 남은 것이 없는지 확인하지 못했으면 통과로 두지 않는다.
       // 시나리오별 결과는 그대로 두고 전체 문제로 더한다
       const problem = {

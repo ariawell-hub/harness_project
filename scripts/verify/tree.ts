@@ -11,8 +11,23 @@
 //    물려지므로, 부모가 누구든 그 표식을 가진 프로세스는 이번 실행이 띄운 것이다. 한 번도 보지 못한 채 부모를 잃은
 //    프로세스(목록을 읽는 사이에 브라우저가 뜨고 실행기가 죽은 경우)도 이것으로 찾는다. 정리할 때 읽는다.
 //
-// 한계: 환경을 읽을 수 없거나(Linux에서 다른 사용자나 덤프가 막힌 프로세스) 표식을 지운 프로세스가, 목록을 읽는
-// 사이(주기는 web.ts)에 띄워지고 그 부모가 곧바로 끝나면 놓칠 수 있다.
+// 프로세스는 번호(pid)가 아니라 **인스턴스(pid와 시작 시각)**로 기억한다. 번호는 프로세스가 끝나면 다른 프로세스가
+// 다시 받을 수 있다. 시작 시각은 그 프로세스가 사는 동안 바뀌지 않는다. 목록의 한 줄이 번호·부모·그룹·시작 시각을
+// 함께 주고(한 프로세스에 대해 한 번에 읽은 값이다), 신호를 보내는 쪽(web.ts)은 보내기 직전에 그 번호의 시작 시각을
+// 다시 읽어 같을 때만 보낸다(`identify`). 표식으로만 보고 목록에서는 아직 못 본 번호는 인스턴스를 모르므로 신호 대상이
+// 아니다(남은 것으로만 센다).
+//
+// 읽는 수단은 운영체제마다 하나로 맞춘다(시작 시각의 표현이 서로 달라 섞으면 견줄 수 없다).
+// - Linux: /proc. 목록·시작 시각은 `/proc/<pid>/stat`(시작 시각은 부팅 뒤의 틱 수다), 표식은 `/proc/<pid>/environ`.
+//   `ps`는 쓰지 않는다(procps의 `lstart`는 부르는 시점에 따라 1초 달라질 수 있다).
+// - 그 밖(macOS): `ps`. 목록·시작 시각은 `ps -A -o pid=,ppid=,pgid=,stat=,lstart=`, 표식은 `ps -A -E -o pid=,command=`.
+//
+// 한계
+// - 환경을 읽을 수 없거나(Linux에서 다른 사용자나 덤프가 막힌 프로세스) 표식을 지운 프로세스가, 목록을 읽는
+//   사이(주기는 web.ts)에 띄워지고 그 부모가 곧바로 끝나면 놓칠 수 있다.
+// - 시작 시각을 다시 읽는 것과 신호를 보내는 것은 한 동작이 아니다(Node에는 프로세스를 번호 없이 가리키는 수단이
+//   없다). 그 사이(Linux는 파일 한 번 읽기, macOS는 ps 한 번)에 번호가 다시 쓰이는 경우는 막지 못한다.
+// - macOS의 시작 시각은 초 단위다. 같은 초 안에 끝나고 같은 번호로 다시 뜬 프로세스는 구별하지 못한다.
 import { execFile } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 
@@ -22,13 +37,24 @@ export interface ProcessRow {
   pgid: number;
   /** 끝났지만 부모가 아직 거두지 않았다. 남은 프로세스로 세지 않는다 */
   zombie: boolean;
+  /** 시작 시각(같은 운영체제 안에서만 견준다). 읽지 못했으면 빈 문자열이고, 그런 프로세스는 따라가지 않는다 */
+  started: string;
+}
+
+/** 프로세스 인스턴스: 번호와 시작 시각 */
+export interface Instance {
+  pid: number;
+  started: string;
 }
 
 /** 지금 떠 있는 프로세스의 목록. 읽지 못했으면 null */
 export type ListProcesses = () => Promise<ProcessRow[] | null>;
 
+/** 그 번호들의 지금 시작 시각(없는 번호는 빠진다). 읽지 못했으면 null */
+export type Identify = (pids: readonly number[]) => Promise<Map<number, string> | null>;
+
 /**
- * `ps -A -o pid=,ppid=,pgid=,stat=`의 출력을 읽는다.
+ * `ps -A -o pid=,ppid=,pgid=,stat=,lstart=`의 출력을 읽는다.
  * 읽지 못한 줄이 하나라도 있으면 목록 전체를 버린다(일부만 믿고 "남은 것이 없다"고 하지 않는다)
  */
 export function parseProcessList(text: string): ProcessRow[] | null {
@@ -36,17 +62,92 @@ export function parseProcessList(text: string): ProcessRow[] | null {
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     // 상태 칸은 빈칸 없는 글자열이면 받는다. macOS는 막 생기거나 끝나는 중인 프로세스를 ?·?E로 적는다
-    // (그런 프로세스가 하나만 있어도 목록 전체를 버리면 프로세스가 자주 바뀌는 동안에는 읽지 못한다)
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+    // (그런 프로세스가 하나만 있어도 목록 전체를 버리면 프로세스가 자주 바뀌는 동안에는 읽지 못한다).
+    // 시작 시각은 줄의 나머지다(`Fri Nov 20 08:16:18 2026`. 날짜가 한 자리면 빈칸이 둘이라 하나로 줄인다)
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+(\S.*?))?\s*$/.exec(line);
     if (!m) return null;
     rows.push({
       pid: Number(m[1]),
       ppid: Number(m[2]),
       pgid: Number(m[3]),
       zombie: m[4].startsWith('Z'),
+      started: (m[5] ?? '').replace(/\s+/g, ' '),
     });
   }
   return rows.length ? rows : null;
+}
+
+/**
+ * Linux의 `/proc/<pid>/stat` 한 줄을 읽는다: `pid (comm) state ppid pgrp … starttime …`.
+ * comm에는 빈칸과 괄호가 들 수 있어 마지막 `)` 뒤부터 센다. 그 뒤 1번째가 상태, 2번째가 부모, 3번째가 그룹,
+ * 20번째가 시작 시각(부팅 뒤의 틱 수)이다. 꼴이 다르면 null
+ */
+export function parseProcStat(text: string): ProcessRow | null {
+  const open = text.indexOf('(');
+  const close = text.lastIndexOf(')');
+  if (open < 1 || close < open) return null;
+  const pid = text.slice(0, open).trim();
+  const rest = text
+    .slice(close + 1)
+    .trim()
+    .split(/\s+/);
+  if (!/^\d+$/.test(pid) || rest.length < 20) return null;
+  const [state, ppid, pgid] = rest;
+  const started = rest[19];
+  if (!/^\d+$/.test(ppid) || !/^\d+$/.test(pgid) || !/^\d+$/.test(started)) return null;
+  return {
+    pid: Number(pid),
+    ppid: Number(ppid),
+    pgid: Number(pgid),
+    // Z: 좀비, X: 끝나는 중
+    zombie: state === 'Z' || state === 'X',
+    started,
+  };
+}
+
+/** `<procDir>`의 숫자 이름(프로세스) 목록. 폴더를 읽지 못하면 null */
+function procPids(procDir: string): string[] | null {
+  try {
+    return readdirSync(procDir).filter((name) => /^\d+$/.test(name));
+  } catch {
+    return null;
+  }
+}
+
+/** `<procDir>/<pid>/stat`을 읽는다. 없거나(읽는 사이 끝났다) 꼴이 다르면 null */
+function procStat(procDir: string, pid: string | number): ProcessRow | null {
+  try {
+    const row = parseProcStat(readFileSync(`${procDir}/${pid}/stat`, 'latin1'));
+    return row && row.pid === Number(pid) ? row : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Linux: `<procDir>`에서 프로세스 목록을 읽는다. 읽는 사이 끝난 프로세스는 건너뛴다.
+ * 폴더를 읽지 못했거나 하나도 읽지 못했으면 null
+ */
+export function procList(procDir: string): ProcessRow[] | null {
+  const names = procPids(procDir);
+  if (!names) return null;
+  const rows: ProcessRow[] = [];
+  for (const name of names) {
+    const row = procStat(procDir, name);
+    if (row) rows.push(row);
+  }
+  return rows.length ? rows : null;
+}
+
+/** Linux: 그 번호들의 지금 시작 시각. 없는 번호와 좀비는 빠진다. `<procDir>`를 읽지 못하면 null */
+export function procStarted(procDir: string, pids: readonly number[]): Map<number, string> | null {
+  if (!procPids(procDir)) return null;
+  const now = new Map<number, string>();
+  for (const pid of pids) {
+    const row = procStat(procDir, pid);
+    if (row && !row.zombie) now.set(pid, row.started);
+  }
+  return now;
 }
 
 const LIST_TIMEOUT_MS = 1000;
@@ -65,19 +166,46 @@ export async function readProcessList(
   return null;
 }
 
-/** ps를 한 번 돌려 읽는다(POSIX의 -A와 -o만 쓴다). ps가 없거나 실패하거나 제때 끝나지 않으면 null */
-const listOnce: ListProcesses = () =>
-  new Promise((resolve) => {
+/** ps를 돌려 출력을 받는다. ps가 없거나 실패하거나 제때 끝나지 않으면 null. 날짜의 표기가 바뀌지 않게 로캘을 고정한다 */
+function ps(args: string[], maxBuffer: number): Promise<string | null> {
+  return new Promise((resolve) => {
     execFile(
       'ps',
-      ['-A', '-o', 'pid=,ppid=,pgid=,stat='],
-      { timeout: LIST_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024 },
-      (err, stdout) => resolve(err ? null : parseProcessList(stdout)),
+      args,
+      {
+        timeout: LIST_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        maxBuffer,
+        env: { ...process.env, LC_ALL: 'C' },
+      },
+      (err, stdout) => resolve(err ? null : stdout),
     );
   });
+}
 
-/** ps로 읽는다. 읽지 못하면 `LIST_ATTEMPTS`번까지 다시 읽는다 */
+/** 목록을 한 번 읽는다. Linux는 /proc, 그 밖은 ps(POSIX의 -A와 -o) */
+const listOnce: ListProcesses = async () => {
+  if (process.platform === 'linux') return procList('/proc');
+  const out = await ps(['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart='], 16 * 1024 * 1024);
+  return out === null ? null : parseProcessList(out);
+};
+
+/** 프로세스 목록. 읽지 못하면 `LIST_ATTEMPTS`번까지 다시 읽는다 */
 export const listProcesses: ListProcesses = () => readProcessList(listOnce, LIST_ATTEMPTS);
+
+/**
+ * 그 번호들의 지금 시작 시각. 신호를 보내기 직전에, 그 번호가 아직 확인한 그 프로세스인지 보는 데 쓴다.
+ * Linux는 번호마다 `/proc/<pid>/stat`을 바로 읽고(기다림이 없다), 그 밖은 목록을 한 번 읽어 고른다
+ */
+export const identify: Identify = async (pids) => {
+  if (process.platform === 'linux') return procStarted('/proc', pids);
+  const rows = await listOnce();
+  if (!rows) return null;
+  const want = new Set(pids);
+  const now = new Map<number, string>();
+  for (const r of rows) if (want.has(r.pid) && !r.zombie && r.started) now.set(r.pid, r.started);
+  return now;
+};
 
 /** 이번 실행의 표식을 담는 환경 변수 이름 */
 export const RUN_MARK = 'HARNESS_VERIFY_RUN';
@@ -104,15 +232,10 @@ export function parseMarked(text: string, needle: string): number[] {
  * 폴더 자체를 읽지 못하면 null
  */
 export function scanProc(procDir: string, needle: string): number[] | null {
-  let names: string[];
-  try {
-    names = readdirSync(procDir);
-  } catch {
-    return null;
-  }
+  const names = procPids(procDir);
+  if (!names) return null;
   const pids: number[] = [];
   for (const name of names) {
-    if (!/^\d+$/.test(name)) continue;
     try {
       const env = readFileSync(`${procDir}/${name}/environ`, 'latin1');
       if (`\0${env}\0`.includes(`\0${needle}\0`)) pids.push(Number(name));
@@ -127,15 +250,8 @@ export function scanProc(procDir: string, needle: string): number[] | null {
 export const findMarked: FindMarked = async (needle) => {
   if (process.platform === 'linux') return scanProc('/proc', needle);
   for (let i = 0; i < LIST_ATTEMPTS; i++) {
-    const found = await new Promise<number[] | null>((resolve) => {
-      execFile(
-        'ps',
-        ['-A', '-E', '-o', 'pid=,command='],
-        { timeout: LIST_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 256 * 1024 * 1024 },
-        (err, stdout) => resolve(err ? null : parseMarked(stdout, needle)),
-      );
-    });
-    if (found) return found;
+    const out = await ps(['-A', '-E', '-o', 'pid=,command='], 256 * 1024 * 1024);
+    if (out !== null) return parseMarked(out, needle);
   }
   return null;
 };
@@ -143,25 +259,23 @@ export const findMarked: FindMarked = async (needle) => {
 /**
  * 뿌리 프로세스들의 자손을 기억한다. 뿌리 자신은 넣지 않는다(뿌리와 그 그룹은 부르는 쪽이 따로 다룬다).
  * `refresh`를 부를 때마다 목록을 다시 읽어:
- * - 알던 프로세스 가운데 pid와 프로세스 그룹이 그대로인 것만 남긴다. 사라진 pid는 뺀다. 같은 번호가 무관한 프로세스로
- *   다시 쓰였을 때(그룹이 다르다) 그것을 우리 것으로 보지 않는다
+ * - 알던 프로세스 가운데 번호·시작 시각·프로세스 그룹이 그대로인 것만 남긴다. 사라진 번호는 뺀다. 같은 번호가 무관한
+ *   프로세스로 다시 쓰였으면(시작 시각이 다르다) 그것을 우리 것으로 보지 않는다
  * - 뿌리와 남은 프로세스의 자식을 새로 더한다(부모가 끝나 다른 부모로 넘어간 프로세스도 이미 알고 있으면 계속 따라간다)
- * - 좀비는 뺀다
- * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다
- * - 목록과 표식은 다른 시점에 읽는다. 표식에는 있는데 목록에는 없는 pid(목록을 읽은 뒤에 뜬 프로세스)는 버리지 않고
- *   "아직 목록에서 확인하지 못한 것"으로 들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다
- * - 표식으로만 본 pid는 번호 말고 아는 것이 없다(그룹을 모른다). 그 프로세스가 끝나고 무관한 프로세스가 같은 번호를
- *   받을 수 있으므로, **이번 읽기의 표식이 다시 확인해 준 것만** 끝낼 대상(`targets()`)이고 알던 것으로 옮긴다.
- *   표식을 읽지 않았거나 읽지 못한 읽기에서는 목록에 그 번호가 나와도 옮기지 않고, 끝낼 대상에서도 뺀다.
- *   남은 것으로는 계속 센다(끝났다고 확인하지 못했다). 표식을 다시 읽어 거기 없으면 뺀다
+ * - 좀비와 시작 시각을 읽지 못한 프로세스는 뺀다
+ * - `marked`를 주면 표식을 가진 프로세스(와 그 자식)도 더한다. 부모가 누구인지와 무관하다. 더하는 것은 **이번에 읽은
+ *   목록에 있는 것**이다: 목록(표식보다 먼저 읽는다)의 줄이 그 프로세스의 시작 시각을 준다. 부르는 쪽이 신호를 보내기
+ *   직전에 시작 시각을 다시 읽어 같으면, 표식을 읽은 때를 사이에 두고 같은 프로세스였다는 뜻이다
+ * - 표식에는 있는데 목록에는 없는 번호(목록을 읽은 뒤에 뜬 프로세스)는 버리지 않고 "아직 목록에서 확인하지 못한 것"으로
+ *   들고 있는다. `pids()`에 들어가므로 부르는 쪽은 남은 것이 있다고 본다. 어느 프로세스인지(시작 시각) 모르므로
+ *   **신호 대상(`targets()`)은 아니다.** 다음에 읽은 목록에 나오고 표식이 다시 확인해 주면 알던 것이 된다.
+ *   표식을 다시 읽어 거기 없으면 뺀다. 표식을 읽지 않았거나 읽지 못한 읽기에서는 그대로 들고 있는다
  */
 export class Descendants {
-  /** pid → 프로세스 그룹 */
-  private known = new Map<number, number>();
+  /** pid → 그 프로세스의 그룹과 시작 시각 */
+  private known = new Map<number, { pgid: number; started: string }>();
   /** 표식으로는 봤지만 목록에서는 아직 확인하지 못한 pid */
   private unconfirmed = new Set<number>();
-  /** 그 가운데 마지막 읽기의 표식이 확인해 준 pid */
-  private verified = new Set<number>();
   private readonly list: ListProcesses;
   private readonly marked: (() => Promise<number[] | null>) | undefined;
 
@@ -179,28 +293,27 @@ export class Descendants {
    */
   async refresh(roots: readonly number[] = [], byMark = false): Promise<boolean> {
     const rows = await this.list();
-    if (!rows) {
-      // 표식으로만 본 것이 지금도 그 프로세스인지 확인하지 못했다
-      this.verified = new Set();
-      return false;
-    }
+    if (!rows) return false;
     // undefined: 표식으로 찾지 않았다. null: 찾으려 했지만 읽지 못했다
     const tagged = byMark && this.marked ? await this.marked() : undefined;
     /** 이번 읽기에서 표식을 가진 것으로 확인된 pid. 표식을 읽지 않았거나 읽지 못했으면 null */
     const fresh = tagged ? new Set(tagged) : null;
     const skip = (pid: number) => pid === process.pid || roots.includes(pid);
-    const next = new Map<number, number>();
+    const next = new Map<number, { pgid: number; started: string }>();
     const listed = new Set<number>();
     const children = new Map<number, ProcessRow[]>();
     for (const r of rows) {
       listed.add(r.pid);
-      if (r.zombie) continue;
+      // 시작 시각을 모르는 프로세스는 어느 프로세스인지 묶어 둘 수 없다
+      if (r.zombie || !r.started) continue;
       const siblings = children.get(r.ppid);
       if (siblings) siblings.push(r);
       else children.set(r.ppid, [r]);
       if (skip(r.pid)) continue;
+      const was = this.known.get(r.pid);
+      const same = was !== undefined && was.started === r.started && was.pgid === r.pgid;
       // 전에 표식으로만 본 번호는 여기서 쓰지 않는다: 이번 표식(fresh)이 확인해 준 것만 알던 것이 된다
-      if (this.known.get(r.pid) === r.pgid || fresh?.has(r.pid)) next.set(r.pid, r.pgid);
+      if (same || fresh?.has(r.pid)) next.set(r.pid, { pgid: r.pgid, started: r.started });
     }
     const queue = [...next.keys(), ...roots];
     while (queue.length) {
@@ -208,28 +321,21 @@ export class Descendants {
       for (const c of children.get(parent) ?? []) {
         // 이 프로세스와 그 자식(목록을 읽는 ps 등)은 우리가 끝낼 대상이 아니다
         if (c.pid === process.pid || roots.includes(c.pid) || next.has(c.pid)) continue;
-        next.set(c.pid, c.pgid);
+        next.set(c.pid, { pgid: c.pgid, started: c.started });
         queue.push(c.pid);
       }
     }
     const unconfirmed = new Set<number>();
-    const verified = new Set<number>();
-    if (fresh) {
-      // 표식에는 있고 목록에는 없다: 목록을 읽은 뒤에 떴을 수 있다. 버리지 않는다(구현 판정 3라운드 F2).
-      // 방금 표식으로 확인했으니 끝낼 대상이다
-      for (const pid of fresh) {
-        if (listed.has(pid) || skip(pid)) continue;
-        unconfirmed.add(pid);
-        verified.add(pid);
-      }
-    } else {
-      // 표식을 읽지 않았거나 읽지 못했다: 전에 표식으로만 본 번호가 끝났는지도, 아직 그 프로세스인지도 모른다.
-      // 남은 것으로 세되 끝낼 대상으로는 삼지 않는다(구현 판정 4라운드 F6)
-      for (const pid of this.unconfirmed) if (!next.has(pid) && !skip(pid)) unconfirmed.add(pid);
+    // 표식을 읽었으면: 표식에는 있고 목록에는 없는 것(목록을 읽은 뒤에 떴을 수 있다)을 버리지 않는다.
+    // 읽지 않았거나 읽지 못했으면: 전에 표식으로만 본 번호가 끝났는지 모르므로 그대로 들고 있는다.
+    // 어느 쪽이든 남은 것으로만 세고 신호 대상으로는 삼지 않는다(시작 시각을 모른다)
+    for (const pid of fresh ?? this.unconfirmed) {
+      if (skip(pid) || next.has(pid)) continue;
+      if (fresh && listed.has(pid)) continue;
+      unconfirmed.add(pid);
     }
     this.known = next;
     this.unconfirmed = unconfirmed;
-    this.verified = verified;
     return tagged !== null;
   }
 
@@ -242,10 +348,12 @@ export class Descendants {
   }
 
   /**
-   * 신호를 보낼 pid: 목록에서 확인한 자손과, 표식으로만 본 것 가운데 마지막 읽기의 표식이 확인해 준 것.
-   * `pids()`에는 있고 여기에는 없는 것은 우리 것인지 확인하지 못한 번호다
+   * 신호를 보낼 수 있는 프로세스: 목록에서 확인한 자손(번호와 시작 시각). 보내는 쪽은 보내기 직전에 그 번호의
+   * 시작 시각을 다시 읽어 같을 때만 보낸다. `pids()`에는 있고 여기에는 없는 것은 어느 프로세스인지 모르는 번호다
    */
-  targets(): number[] {
-    return [...this.known.keys(), ...this.verified].sort((a, b) => a - b);
+  targets(): Instance[] {
+    return [...this.known.entries()]
+      .map(([pid, v]) => ({ pid, started: v.started }))
+      .sort((a, b) => a.pid - b.pid);
   }
 }
