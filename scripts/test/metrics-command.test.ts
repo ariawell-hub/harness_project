@@ -12,6 +12,7 @@ import fs, {
   readFileSync,
   readdirSync,
   rmSync,
+  rmdirSync,
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -213,7 +214,11 @@ interface Result {
 }
 
 /** `m`을 주지 않으면 명령행처럼 기본 자료원을 쓴다 */
-function exec(cwd: string, m?: Mem | MetricsSource, o: { since?: string } = {}): Result {
+function exec(
+  cwd: string,
+  m?: Mem | MetricsSource,
+  o: { since?: string; selfTestReport?: string } = {},
+): Result {
   const out: string[] = [];
   const err: string[] = [];
   const code = runMetrics(
@@ -221,6 +226,7 @@ function exec(cwd: string, m?: Mem | MetricsSource, o: { since?: string } = {}):
     {
       since: o.since ?? SINCE,
       until: UNTIL,
+      selfTestReport: o.selfTestReport,
       out: (l) => out.push(l),
       err: (l) => err.push(l),
     },
@@ -973,10 +979,17 @@ test('실행 전후로 임시 폴더의 어느 항목도 바뀌지 않는다', (
   const before = snapshot(fx.dir);
   assert.ok(before.has(path.join('repo', '.git')), '.git을 보지 않았다');
   assert.ok(before.has(path.join('wt-work', DOC)), '문서를 보지 않았다');
+  // runner 로그 폴더가 없는 리포다. 명령이 로그를 찾다가 폴더를 만들지 않는다(harnessStateDir를 부르지 않는다)
+  const state = path.join(fx.root, '.git', 'harness');
+  assert.ok(!existsSync(state), '임시 리포에 runner 로그 폴더가 이미 있다');
   const r = exec(work, mem(BASE));
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /병합 PR 2개$/m);
+  // 로컬 지표(계획 파일, runner 로그, 문서 검사)까지 낸 실행이다
+  assert.match(r.out, /^- runner 연속 실행 시간과 멈춘 이유: —\(이 머신에 runner 로그 없음\)$/m);
+  assert.match(r.out, /^- 발견 사항의 처리 분포: /m);
   assert.deepEqual(snapshot(fx.dir), before);
+  assert.ok(!existsSync(state), 'runner 로그 폴더를 만들었다');
 });
 
 test('전후 비교는 같은 내용으로 다시 쓴 것과 무시되는 경로에 만든 파일을 잡는다', () => {
@@ -1010,6 +1023,9 @@ test('쓰기 시도 감지: runMetrics는 fs의 쓰기 함수를 한 번도 부�
   assert.deepEqual(guard.calls, []);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /병합 PR 2개$/m);
+  // 로컬 지표까지 낸 실행이다
+  assert.match(r.out, /^- "검토 필요" 문서 수: \d+개/m);
+  assert.match(r.out, /^- 3회 방법 전환: \d+건/m);
 });
 
 test('쓰기 시도 감지는 fs와 node:fs 어느 표기로 가져온 쓰기도 막고 읽기는 그대로 둔다', async () => {
@@ -1058,7 +1074,7 @@ test('쓰기 시도 감지는 fs와 node:fs 어느 표기로 가져온 쓰기도
 
 // ── 자식 프로세스 ──
 
-test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 목록의 git 둘뿐이다', () => {
+test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 목록의 git 넷뿐이다', () => {
   const { work } = repo();
   const guard = guardCp(() => 'run');
   let r: Result;
@@ -1068,8 +1084,19 @@ test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 
     guard.restore();
   }
   assert.equal(r.code, 0, r.err);
-  assert.deepEqual(guard.seen.map(show), REPO_INFO_GIT);
-  for (const c of guard.seen) assert.ok(matchShape(GIT_READ_SHAPES, c.args), show(c));
+  // repoInfo의 둘이 먼저 오고, 그 뒤는 docLint의 문서 목록과 커밋 시각 읽기뿐이다
+  assert.deepEqual(guard.seen.slice(0, 2).map(show), REPO_INFO_GIT);
+  for (const c of guard.seen) {
+    assert.equal(c.cmd, 'git', show(c));
+    assert.ok(matchShape(GIT_READ_SHAPES, c.args), show(c));
+  }
+  const names = guard.seen.map((c) => matchShape(GIT_READ_SHAPES, c.args)?.name);
+  assert.deepEqual(names.slice(0, 3), ['rev-parse', 'symbolic-ref', 'ls-files']);
+  assert.ok(names.slice(3).every((n) => n === 'log'));
+  assert.deepEqual(
+    GIT_READ_SHAPES.map((x) => x.name),
+    ['rev-parse', 'symbolic-ref', 'ls-files', 'log'],
+  );
 });
 
 test('기본 자료원 경로: 허용 목록의 읽기 명령만 띄우고 파일을 쓰지 않는다', () => {
@@ -1144,7 +1171,18 @@ test('기본 자료원 경로: 허용 목록의 읽기 명령만 띄우고 파�
   assert.equal(named('events').length, 1);
   assert.equal(named('repoComments').length, 1);
   assert.equal(gh.length, 15);
-  assert.deepEqual(cpGuard.seen.filter((c) => c.cmd !== 'gh').map(show), REPO_INFO_GIT);
+  // gh 밖은 허용 목록의 git뿐이다: repoInfo의 둘, docLint의 문서 목록(과 커밋 시각 읽기)
+  const others = cpGuard.seen.filter((c) => c.cmd !== 'gh');
+  assert.deepEqual(others.slice(0, 2).map(show), REPO_INFO_GIT);
+  assert.deepEqual(others.slice(2, 3).map(show), [
+    'git ls-files -z --cached --others --exclude-standard -- *.md',
+  ]);
+  for (const c of others) {
+    assert.equal(c.cmd, 'git', show(c));
+    assert.ok(matchShape(GIT_READ_SHAPES, c.args), show(c));
+  }
+  // step2는 gh 조회를 더하지 않는다. 로컬 지표가 같은 출력에 있다
+  assert.match(r.out, /^- "검토 필요" 문서 수: 0개/m);
 });
 
 test('기본 자료원 경로: 둘째 쪽으로 온 커밋의 실행이 CI 첫 통과율에 쓰인다', () => {
@@ -1265,6 +1303,7 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
     '--jq',
     '.',
   ];
+  const lsFiles = ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'];
   const outside: Call[] = [
     {
       cmd: 'gh',
@@ -1282,6 +1321,16 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
     { cmd: 'gh', args: prCommits.map((a) => a.replace('/commits?', '/merge?')) },
     { cmd: 'git', args: ['status'] },
     { cmd: 'git', args: ['rev-parse', '--show-toplevel'] },
+    // step2가 더한 git 꼴에 옵션을 끼우거나 덧붙인 것, 경로가 없는 것, 경로 자리에 옵션·절대 경로·pathspec 표식이 온 것
+    { cmd: 'git', args: ['log', '-1', '--format=%ct', '--output=x', '--', 'a.md'] },
+    { cmd: 'git', args: [...lsFiles, '--error-unmatch'] },
+    { cmd: 'git', args: ['log', '-1', '--format=%ct', '--'] },
+    { cmd: 'git', args: ['log', '-1', '--format=%ct'] },
+    { cmd: 'git', args: ['log', '-2', '--format=%ct', '--', 'a.md'] },
+    { cmd: 'git', args: ['log', '-1', '--format=%ct', '--', 'a.md', '--output=x'] },
+    { cmd: 'git', args: ['log', '-1', '--format=%ct', '--', '/etc/passwd'] },
+    { cmd: 'git', args: ['log', '-1', '--format=%ct', '--', ':(top)a.md'] },
+    { cmd: 'git', args: lsFiles.map((a) => (a === '*.md' ? '*' : a)) },
     { cmd: 'sh', args: ['-c', `echo x > '${made}'`] },
   ];
   const guard = guardCp(gate);
@@ -1291,6 +1340,17 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
     assert.equal(runSync('gh', prs, { cwd: work }).code, 0);
     for (const allowed of [headPrs, events, prCommits])
       assert.equal(runSync('gh', allowed, { cwd: work }).code, 0, allowed.join(' '));
+    // step2의 git 읽기 둘은 실제로 실행된다(경로는 하나 이상)
+    assert.equal(runSync('git', lsFiles, { cwd: work }).code, 0);
+    for (const paths of [
+      ['AGENTS.md'],
+      ['AGENTS.md', 'scripts/commands/', 'docs/exec-plans/TEMPLATE*.md'],
+    ])
+      assert.equal(
+        runSync('git', ['log', '-1', '--format=%ct', '--', ...paths], { cwd: work }).code,
+        0,
+        paths.join(' '),
+      );
     assert.deepEqual(guard.blocked, []);
     for (const c of outside) {
       const r = runSync(c.cmd, c.args, { cwd: work });
@@ -1308,6 +1368,155 @@ test('프로세스 실행 경계는 허용 목록 밖의 호출을 실행하지 
   assert.ok(!existsSync(made), '막은 셸 명령이 실행됐다');
   // 되돌린 뒤에는 실제로 실행된다
   assert.equal(runSync('git', ['status', '--porcelain'], { cwd: work }).code, 0);
+});
+
+// ── 로컬 자료(step2): 계획 파일, runner 로그, 자체 테스트 보고서, 문서 검사 ──
+
+const rev = (ts: string, worker: string, event: string, data: Record<string, unknown> = {}) =>
+  JSON.stringify({ ts, worker, event, ...data });
+
+test('runner 로그: 공유 git-dir의 harness/runner.jsonl로 실행 수를 세고, 파일이 없으면 "이 머신에 runner 로그 없음"이다', () => {
+  const { fx, work } = repo();
+  const dir = path.join(fx.root, '.git', 'harness');
+  const file = path.join(dir, 'runner.jsonl');
+  assert.ok(!existsSync(dir), '임시 리포에 runner 로그 폴더가 이미 있다');
+  const none = exec(work, mem(BASE));
+  assert.equal(none.code, 0, none.err);
+  assert.match(none.out, /^- runner 연속 실행 시간과 멈춘 이유: —\(이 머신에 runner 로그 없음\)$/m);
+  assert.match(none.out, /^- 발산 감지 횟수: —\(이 머신에 runner 로그 없음\)$/m);
+  assert.ok(!existsSync(dir), 'runner 로그 폴더를 만들었다');
+
+  // 폴더는 테스트가 만든다(명령은 만들지 않는다)
+  mkdirSync(dir);
+  writeFileSync(
+    file,
+    [
+      rev('2026-11-11T01:00:00Z', 'w1', 'start'),
+      rev('2026-11-11T01:30:00Z', 'w1', 'exit', { reason: 'idle' }),
+      rev('2026-11-12T01:00:00Z', 'w1', 'start'),
+      rev('2026-11-12T02:00:00Z', 'w1', 'review-diverged', { plan: 'p', pr: 1 }),
+      '',
+    ].join('\n'),
+  );
+  let inWork: Result;
+  let inMain: Result;
+  try {
+    inWork = exec(work, mem(BASE));
+    // 메인 체크아웃에서 실행해도 같은 로그를 본다(공유 git-dir)
+    inMain = exec(fx.root, mem(BASE));
+  } finally {
+    rmSync(file);
+    rmdirSync(dir);
+  }
+  for (const r of [inWork, inMain]) {
+    assert.equal(r.code, 0, r.err);
+    assert.match(
+      r.out,
+      /^- runner 연속 실행 시간과 멈춘 이유\(이 명령을 실행한 머신의 로그만 본다\)$/m,
+    );
+    assert.match(r.out, /^ {2}- 실행: 2회 · 중앙값 30분 · 최대 30분 · 종료 기록 없음 1회$/m);
+    assert.match(r.out, /^ {2}- 멈춘 이유: 할 일 없음 1회$/m);
+    assert.match(r.out, /^- 발산 감지 횟수: 1건$/m);
+  }
+});
+
+test('계획 파일: "- 방법 전환(" 줄을 하나 더하면 출력의 방법 전환 횟수가 1 늘어난다', () => {
+  const { work } = repo();
+  const plan = path.join(work, 'docs/exec-plans/active/20261111-sw.md');
+  const text = (lines: string[]) =>
+    `---\nid: 20261111-sw\n---\n\n## 의사결정 로그\n\n${lines.join('\n')}\n\n## 발견 사항\n\n- 넘겼다 → 처리: #7\n`;
+  const line = (key: string) => `- 방법 전환(${key}, 3회): 가설 … / 새 방법 …`;
+  const before = exec(work, mem(BASE));
+  assert.match(before.out, /^- 3회 방법 전환: 0건$/m);
+  assert.match(
+    before.out,
+    /^- 발견 사항의 처리 분포: 문서 반영 0건 · Issue·TD 0건 · 해당 없음 0건 · 처리 표기 없음 0건$/m,
+  );
+  mkdirSync(path.dirname(plan), { recursive: true });
+  let one: Result;
+  let two: Result;
+  try {
+    writeFileSync(plan, text([line('check:lint')]));
+    one = exec(work, mem(BASE));
+    writeFileSync(plan, text([line('check:lint'), line('ac:x')]));
+    two = exec(work, mem(BASE));
+  } finally {
+    rmSync(plan);
+  }
+  assert.equal(one.code, 0, one.err);
+  assert.match(one.out, /^- 3회 방법 전환: 1건\(20261111-sw 1건\)$/m);
+  assert.match(two.out, /^- 3회 방법 전환: 2건\(20261111-sw 2건\)$/m);
+  assert.match(
+    one.out,
+    /^- 발견 사항의 처리 분포: 문서 반영 0건 · Issue·TD 1건 · 해당 없음 0건 · 처리 표기 없음 0건$/m,
+  );
+  // 계획의 문장은 출력에 나오지 않는다(수와 계획 id만 적는다)
+  assert.ok(!two.out.includes('가설') && !two.out.includes('넘겼다'));
+});
+
+test('자체 테스트 보고서: --self-test-report로 준 보고서의 통과 수와 전체 수가 출력에 나온다', () => {
+  const { fx, work } = repo();
+  const file = path.join(fx.dir, 'selftest-report.json');
+  const state = (s: string, i: number) => ({ id: `s${i}`, covers: 'R1', state: s, detail: '제목' });
+  writeFileSync(
+    file,
+    JSON.stringify({ version: 1, headSha: '', results: ['pass', 'fail', 'pass'].map(state) }),
+  );
+  let r: Result;
+  try {
+    r = exec(work, mem(BASE), { selfTestReport: file });
+  } finally {
+    rmSync(file);
+  }
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^- 하네스 자체 테스트 통과율: 2건 ÷ 3건 = 66\.7%$/m);
+  // 시나리오의 제목은 출력에 나오지 않는다
+  assert.ok(!r.out.includes('제목'));
+  const without = exec(work, mem(BASE));
+  assert.match(
+    without.out,
+    /^- 하네스 자체 테스트 통과율: —\(보고서 없음\. `self-test --out`으로 만든다\)$/m,
+  );
+});
+
+test('"검토 필요" 문서 수: related_code가 문서보다 나중에 커밋되면 1 늘어나고, 그 값을 git 읽기 둘로 얻는다', () => {
+  // 이 테스트만의 임시 리포다. 다른 테스트의 값을 바꾸지 않는다
+  const fx = makeFixture();
+  try {
+    const at = (date: string) => ({ GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date });
+    write(
+      fx.root,
+      'docs/a.md',
+      '---\nstatus: active\nrelated_code: [src/a.ts]\nreview_cycle: on-change\n---\n\n# A\n',
+    );
+    write(fx.root, 'src/a.ts', 'export const a = 1;\n');
+    sh('git', ['add', '-A'], fx.root);
+    sh('git', ['commit', '-q', '-m', 'doc and code'], fx.root, at('2026-11-11T00:00:00Z'));
+    const same = exec(fx.root, mem(BASE));
+    assert.equal(same.code, 0, same.err);
+    assert.match(same.out, /^- "검토 필요" 문서 수: 0개\(기간과 무관한 현재 값\)$/m);
+
+    // 파일만 고쳐 10초 뒤의 커밋 시각으로 커밋한다(docLint는 초 단위 커밋 시각을 견준다)
+    write(fx.root, 'src/a.ts', 'export const a = 2;\n');
+    sh('git', ['add', '-A'], fx.root);
+    sh('git', ['commit', '-q', '-m', 'code only'], fx.root, at('2026-11-11T00:00:10Z'));
+    const guard = guardCp(() => 'run');
+    let later: Result;
+    try {
+      later = exec(fx.root, mem(BASE));
+    } finally {
+      guard.restore();
+    }
+    assert.equal(later.code, 0, later.err);
+    assert.match(later.out, /^- "검토 필요" 문서 수: 1개\(기간과 무관한 현재 값\)$/m);
+    const seen = guard.seen.map(show);
+    assert.ok(seen.includes('git ls-files -z --cached --others --exclude-standard -- *.md'));
+    assert.ok(seen.includes('git log -1 --format=%ct -- docs/a.md'), seen.join('\n'));
+    assert.ok(seen.includes('git log -1 --format=%ct -- src/a.ts'), seen.join('\n'));
+    for (const c of guard.seen) assert.ok(matchShape(GIT_READ_SHAPES, c.args), show(c));
+  } finally {
+    fx.cleanup();
+  }
 });
 
 // ── 등록과 문서 ──
@@ -1333,7 +1542,20 @@ test('harness.ts에 등록돼 있다: 틀린 기간은 GitHub을 읽기 전에 �
   assert.equal(w.code, 1, w.stderr);
   assert.match(w.stderr, /metrics: --write 옵션은 없다/);
   assert.equal(w.stdout, '');
-  assert.match(help.stdout, /^ {2}metrics \[--since <날짜>\] \[--until <날짜>\]$/m);
+  assert.match(
+    help.stdout,
+    /^ {2}metrics \[--since <날짜>\] \[--until <날짜>\] \[--self-test-report <파일>\]$/m,
+  );
+  // --self-test-report가 명령까지 전달된다: 없는 파일이면 GitHub을 읽기 전에 종료 코드 1로 끝난다
+  const missing = path.join(HARNESS_ROOT, 'no-such-dir', 'selftest.json');
+  const s = runSync(
+    process.execPath,
+    [path.join(HARNESS_ROOT, 'scripts/harness.ts'), 'metrics', '--self-test-report', missing],
+    { cwd: HARNESS_ROOT, timeoutMs: 60_000 },
+  );
+  assert.equal(s.code, 1, s.stderr);
+  assert.match(s.stderr, /metrics: .*--self-test-report/);
+  assert.equal(s.stdout, '');
 });
 
 test('이 리포의 docs/QUALITY_SCORE.md에 집계 결과가 형식대로 들어 있다', () => {
