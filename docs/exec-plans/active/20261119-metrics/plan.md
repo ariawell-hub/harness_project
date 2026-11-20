@@ -212,6 +212,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
 - 2026-11-20 17:00 `origin/main`(`45e03a0`, PR #157)을 병합했다. `CHANGELOG.md`와 `architecture.md`가 충돌해 main의 내용에 이 step의 한 줄과 `metrics/*` 한 행만 더했다.
 - 2026-11-20 17:27 PR #158 구현 판정 1라운드(head `450eb38`): claude 승인, codex 수정 요청(P1 1). 게이트는 `risk-gate`(제작자 head 승인 대기)만 남고 모두 통과했다. PR #151의 F6(순서)은 다시 나오지 않았다.
   - F1(P1, codex, 재현됨) head별 PR 조회가 잘못된 항목을 유효한 PR로 센다(`[{}]`처럼 번호 없는 항목 하나를 PR 하나로 세어 실행을 잇고, 같은 번호 둘을 PR 둘로 세어 뺀다) → 수용. 재현 테스트를 먼저 올렸다(커밋 `4a06d5d`, 17:27. 자료원 테스트는 `Missing expected exception (SourceError): 번호 없는 항목`, 명령 테스트는 종료 코드 `0 !== 2`로 단언 실패). 그 뒤 `headPrCount`가 항목마다 번호가 양의 정수인지 보고 같은 번호가 두 번 오면 `SourceError`로 끝내게 고쳤다. 지표 테스트 86개 통과.
+- 2026-11-20 17:59 PR #158 구현 판정 2라운드(head `dc23aa2`): 두 검증자 승인, F1은 닫혔다(fixed). 열린 지적 없음. 초안 해제는 다른 세션의 PR #149(제작자 승인 대기, `CHANGELOG.md`·`architecture.md`·설계서를 고친다)가 병합될 때까지 미뤘다(세션 간 합의). PR #149가 17:58에 병합된 뒤 `origin/main`(`0cf42a7`)을 병합했다. 두 문서가 충돌해 main의 내용에 이 step의 한 줄과 `metrics/*` 한 행만 더했다. 이 뒤 `check`가 통과하면 `pr-ready`로 승인을 한 번 요청한다.
 
 ## 의사결정 로그
 
