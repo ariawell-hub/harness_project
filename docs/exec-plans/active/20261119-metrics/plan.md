@@ -2,7 +2,7 @@
 id: 20261119-metrics
 issue: 146 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -224,6 +224,7 @@ claimed_at: 2026-11-19T22:49:45+09:00 # new-task가 채운다
   - 방법 전환 5건: 계획 파일의 `- 방법 전환(` 줄(`20261119-pilot-prep` 3, `20261119-metrics` 1, `20261117-revert-fail-first` 1).
   - `judge-fail`·발산 이벤트는 로그에 없다(0건).
 - 2026-11-20 18:49 문서: 측정 정의, 기술 부채 표(TD-55 ~ TD-59, TD-11 메모), `architecture.md`의 `metrics/*` 행, `CHANGELOG`, 설계서 17.2절 문장과 v0.7.65. AC 둘 다 통과(지표 테스트 107건, 집계 기간 줄).
+- 2026-11-20T19:20:42+09:00 step2 재작업: PR #160 구현 판정 1라운드의 F1·F2 대응
 
 ## 의사결정 로그
 
