@@ -261,37 +261,64 @@ function runnerMetrics(file: string, p: Period): RunnerMetrics {
 
 const STATES = new Set(['pass', 'fail', 'error']);
 
+/** `--self-test-report`로 받은 파일이 없거나 `self-test --out`의 보고서가 아니다. 명령은 종료 코드 1로 끝낸다 */
+export class SelfTestReportError extends Error {}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 /**
- * `self-test --out <파일>`이 쓴 보고서의 통과 수와 전체 수.
- * 파일이 없거나 형식이 다르면(`self-test --live`의 보고서 포함) 예외다
+ * `self-test --out <파일>`이 쓴 보고서(`SelfTestReport`, scripts/selftest/run.ts)의 통과 수와 전체 수.
+ * 파일을 한 번 읽는다. 없거나 형식이 다르면(`self-test --live`의 보고서 포함) `SelfTestReportError`다.
+ * 형식: `version`이 1, `headSha`가 문자열, `results`의 항목마다 `id`(비지 않은 문자열, 겹치지 않는다)·
+ * `covers`·`detail`(문자열)·`state`(`pass`·`fail`·`error`)
  */
 export function readSelfTestReport(file: string): { passed: number; total: number } {
+  const bad = (why: string) =>
+    new SelfTestReportError(`\`self-test --out\`의 보고서 형식이 아니다(${why})`);
   let v: unknown;
   try {
     v = JSON.parse(readFileSync(file, 'utf8'));
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
-    throw new Error(code === 'ENOENT' ? '파일이 없다' : '읽을 수 없거나 JSON이 아니다');
+    throw new SelfTestReportError(
+      code === 'ENOENT' ? '파일이 없다' : '읽을 수 없거나 JSON이 아니다',
+    );
   }
-  const d = v as { live?: unknown; results?: unknown } | null;
-  if (!d || typeof d !== 'object' || d.live === true || !Array.isArray(d.results))
-    throw new Error('`self-test --out`의 보고서 형식이 아니다(results 배열이 없다)');
+  if (!isObject(v)) throw bad('객체가 아니다');
+  if (v.live === true) throw bad('`self-test --live`의 보고서다');
+  if (v.version !== 1) throw bad('version이 1이 아니다');
+  if (typeof v.headSha !== 'string') throw bad('headSha가 문자열이 아니다');
+  if (!Array.isArray(v.results)) throw bad('results 배열이 없다');
+  const ids = new Set<string>();
   let passed = 0;
-  for (const r of d.results as unknown[]) {
-    const state = (r as { state?: unknown } | null)?.state;
-    if (typeof state !== 'string' || !STATES.has(state))
-      throw new Error('`self-test --out`의 보고서 형식이 아니다(state가 pass·fail·error가 아니다)');
-    if (state === 'pass') passed++;
+  for (const r of v.results as unknown[]) {
+    if (!isObject(r)) throw bad('시나리오가 객체가 아니다');
+    if (typeof r.id !== 'string' || !r.id) throw bad('시나리오의 id가 없다');
+    if (ids.has(r.id)) throw bad('같은 id의 시나리오가 두 번 있다');
+    ids.add(r.id);
+    if (typeof r.covers !== 'string' || typeof r.detail !== 'string')
+      throw bad('시나리오의 covers·detail이 문자열이 아니다');
+    if (typeof r.state !== 'string' || !STATES.has(r.state))
+      throw bad('시나리오의 state가 pass·fail·error가 아니다');
+    if (r.state === 'pass') passed++;
   }
-  return { passed, total: d.results.length };
+  return { passed, total: v.results.length };
 }
 
+/**
+ * 보고서를 가장 먼저 읽는다: 틀린 보고서는 다른 자료를 읽기 전에 `SelfTestReportError`로 끝난다.
+ * 문서 목록이나 커밋 시각을 읽지 못하면 "검토 필요" 문서 수를 0으로 내지 않고 예외다(`docLint`의 엄격 모드)
+ */
 export function localMetrics(i: LocalInput): LocalMetrics {
+  const selfTest = i.selfTestReport === null ? null : readSelfTestReport(i.selfTestReport);
   return {
     ...planMetrics(i.root, i.period),
-    reviewNeeded: docLint(i.root, i.cfg).warnings.filter((w) => w.rule === 'R8 검토 필요').length,
+    reviewNeeded: docLint(i.root, i.cfg, { strict: true }).warnings.filter(
+      (w) => w.rule === 'R8 검토 필요',
+    ).length,
     runner:
       i.runnerLog !== null && existsSync(i.runnerLog) ? runnerMetrics(i.runnerLog, i.period) : null,
-    selfTest: i.selfTestReport === null ? null : readSelfTestReport(i.selfTestReport),
+    selfTest,
   };
 }
