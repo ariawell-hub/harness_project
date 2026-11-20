@@ -565,6 +565,11 @@ interface RunnerCfg {
   devHelper?: boolean;
   /** 브라우저를 띄우고 조금 뒤 SIGKILL로 죽는다(브라우저를 닫아 줄 것이 없다) */
   crash?: boolean;
+  /**
+   * dev를 띄운 셸이 dev로 바뀌지(exec) 않고 부모로 남는다. 그러면 dev의 프로세스 그룹 번호는 셸의 pid이고
+   * dev.pid와 다르다(셸에 따라 `sh -c '<명령 하나>'`도 이렇게 된다)
+   */
+  devKeepShell?: boolean;
 }
 
 const DEV = (helper: boolean) => `import http from 'node:http';
@@ -633,7 +638,7 @@ function fx(cfg: RunnerCfg, verifyRun: string | null = null) {
       fixtureConfig({
         commands: {
           ...NONE,
-          dev: { run: 'node dev.mjs', timeoutSec: 60 },
+          dev: { run: cfg.devKeepShell ? 'node dev.mjs && true' : 'node dev.mjs', timeoutSec: 60 },
           verify: verifyRun ? { run: verifyRun, timeoutSec: 120 } : null,
         },
       }),
@@ -1201,6 +1206,8 @@ function groupRecorder() {
   const rec = {
     real,
     kills: [] as { pgid: number; signal: NodeJS.Signals }[],
+    /** verify가 물어본 그룹 번호(직접 띄운 것의 pid. dev는 셸의 pid일 수 있다) */
+    seen: new Set<number>(),
     /** 비어 있는 것이 관찰된 그룹 */
     empty: new Set<number>(),
     /** 비어 있는 것이 관찰된 뒤에 그 번호로 간 신호 */
@@ -1209,6 +1216,7 @@ function groupRecorder() {
     toEmpty: [] as string[],
     ops: {
       alive(pgid: number): boolean {
+        rec.seen.add(pgid);
         const a = real.alive(pgid);
         if (!a) rec.empty.add(pgid);
         return a;
@@ -1228,24 +1236,30 @@ test(
   'verifyWeb(F8): SIGTERM으로 빈 프로세스 그룹에는 SIGKILL을 보내지 않는다(그 번호가 다른 그룹에 다시 배정됐을 수 있다)',
   T,
   async () => {
-    // 실행기와 dev는 SIGTERM에 끝나고, 실행기가 다른 그룹에 띄운 프로세스만 SIGTERM을 무시해 SIGKILL 단계까지 간다
-    const f = fx({ browser: 'stubborn', hang: true });
-    const g = groupRecorder();
-    try {
-      const r = await run(f, { runnerTimeoutSec: 2, group: g.ops });
-      const dev = pidIn(f.root, 'dev.pid');
-      const runner = pidIn(f.root, 'runner.pid');
-      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
-      assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
-      // 두 그룹에는 SIGTERM이 한 번씩만 갔다. SIGKILL 단계에서는 이미 빈 그룹에 보내지 않았다
-      assert.deepEqual(
-        g.kills.map((k) => `${k.signal}→${k.pgid}`).sort(),
-        [`SIGTERM→${dev}`, `SIGTERM→${runner}`].sort(),
-      );
-      assert.deepEqual(g.afterEmpty, []);
-      assert.deepEqual(g.toEmpty, []);
-    } finally {
-      reap(f.root);
+    // dev의 그룹 번호는 dev.pid가 아닐 수 있다(셸이 부모로 남는 경우). 두 경우를 모두 본다
+    for (const devKeepShell of [false, true]) {
+      // 실행기와 dev는 SIGTERM에 끝나고, 실행기가 다른 그룹에 띄운 프로세스만 SIGTERM을 무시해 SIGKILL 단계까지 간다
+      const f = fx({ browser: 'stubborn', hang: true, devKeepShell });
+      const g = groupRecorder();
+      try {
+        const r = await run(f, { runnerTimeoutSec: 2, group: g.ops });
+        const runner = pidIn(f.root, 'runner.pid');
+        assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+        assert.equal(alive(pidIn(f.root, 'dev.pid')), false, 'dev가 남았다');
+        assert.doesNotMatch(problems(r), /띄운 프로세스를 끝내지 못했다/);
+        // verify가 다룬 그룹은 둘(dev, 실행기)이다. 실행기는 직접 띄우므로 그룹 번호가 그 pid다
+        assert.equal(g.seen.size, 2, `그룹 ${[...g.seen]}`);
+        assert.ok(g.seen.has(runner));
+        // 두 그룹에는 SIGTERM이 한 번씩만 갔다. SIGKILL 단계에서는 이미 빈 그룹에 보내지 않았다
+        assert.deepEqual(
+          g.kills.map((k) => `${k.signal}→${k.pgid}`).sort(),
+          [...g.seen].map((pgid) => `SIGTERM→${pgid}`).sort(),
+        );
+        assert.deepEqual(g.afterEmpty, []);
+        assert.deepEqual(g.toEmpty, []);
+      } finally {
+        reap(f.root);
+      }
     }
   },
 );
@@ -1281,21 +1295,27 @@ test(
   'verifyWeb(F8): 실행기가 스스로 끝나 그룹이 빈 뒤의 정리는 그 그룹에 신호를 보내지 않는다',
   T,
   async () => {
-    // 실행기는 통과 보고서를 쓰고 끝난다(브라우저 구실의 프로세스는 다른 그룹에 남긴다)
-    const f = fx({ browser: 'plain' });
-    const g = groupRecorder();
-    try {
-      const r = await run(f, { group: g.ops });
-      assert.equal(r.ok, true, problems(r));
-      const dev = pidIn(f.root, 'dev.pid');
-      assert.deepEqual(
-        g.kills.map((k) => `${k.signal}→${k.pgid}`),
-        [`SIGTERM→${dev}`],
-      );
-      assert.deepEqual(g.toEmpty, []);
-      assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
-    } finally {
-      reap(f.root);
+    // dev의 그룹 번호는 dev.pid가 아닐 수 있다(셸이 부모로 남는 경우). 두 경우를 모두 본다
+    for (const devKeepShell of [false, true]) {
+      // 실행기는 통과 보고서를 쓰고 끝난다(브라우저 구실의 프로세스는 다른 그룹에 남긴다)
+      const f = fx({ browser: 'plain', devKeepShell });
+      const g = groupRecorder();
+      try {
+        const r = await run(f, { group: g.ops });
+        assert.equal(r.ok, true, problems(r));
+        const runner = pidIn(f.root, 'runner.pid');
+        // 신호는 dev의 그룹에 SIGTERM 한 번뿐이다. 이미 빈 실행기의 그룹에는 가지 않았다
+        assert.equal(g.kills.length, 1, JSON.stringify(g.kills));
+        assert.equal(g.kills[0].signal, 'SIGTERM');
+        assert.notEqual(g.kills[0].pgid, runner);
+        assert.ok(g.empty.has(runner), '실행기의 그룹이 빈 것을 보지 못했다');
+        assert.deepEqual(g.toEmpty, []);
+        assert.deepEqual(g.afterEmpty, []);
+        assert.equal(alive(pidIn(f.root, 'browser.pid')), false, '브라우저가 남았다');
+        assert.equal(alive(pidIn(f.root, 'dev.pid')), false, 'dev가 남았다');
+      } finally {
+        reap(f.root);
+      }
     }
   },
 );

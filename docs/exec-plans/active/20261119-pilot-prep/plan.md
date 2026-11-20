@@ -263,6 +263,9 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 남는 틈: 살아 있는지 본 것과 신호 사이(기다림 없음), 그리고 그룹이 빈 것을 보기 전(다음 확인까지 25ms 안쪽)에 그 번호가 다시 배정되는 경우. 번호로 보내는 신호의 한계라 코드로는 없애지 못한다. F6의 남는 틈과 함께 제작자 승인 댓글 경로(설계서 10.2절 (4) `accepted`)로 다룬다.
 - 2026-11-20 Issue #150의 두 step이 병합됐다(PR #152, PR #157 `45e03a0`). `origin/main`을 병합했다(충돌: 설계서 0절, `CHANGELOG`, `architecture.md`의 표). PR #157이 v0.7.63을 썼으므로 이 PR의 항목을 v0.7.64로 옮겼다. `architecture.md`의 표는 행마다 3-way로 합쳤다(이쪽: `lib/exec.ts`·`commands/standard.ts`·`verify/*`, main: `ci/*`).
 - 2026-11-20T17:18:51+09:00 step3 재작업: CI check 실패(F8 테스트가 그룹 번호를 dev.pid로 가정) 수정
+- 2026-11-20 11라운드 push(head `33c1fd2`)의 CI `check`가 실패했다(테스트 864개 중 2개 실패, 로컬 macOS에서는 통과). 판정은 돌지 않았다.
+  - 원인: 새 F8 테스트 둘이 dev의 프로세스 그룹 번호를 `dev.pid`로 가정했다. dev는 셸로 띄우는데(`shell: true`), 셸이 dev로 바뀌지(exec) 않고 부모로 남으면 그룹 번호는 셸의 pid다. CI 로그는 실패한 테스트 이름을 보여 주지 않아(`check`가 테스트 출력의 끝 80줄만 낸다), macOS에서 dev 명령을 `node dev.mjs && true`로 바꿔 같은 구성을 만들어 재현했다(같은 두 테스트가 같은 꼴로 실패).
+  - 고친 것: 테스트만 고쳤다(`scripts/verify/web.ts`는 그대로다). 그룹 번호를 `dev.pid`와 견주지 않고 `verify`가 실제로 다룬 그룹 번호로 본다. 두 테스트를 셸이 남는 구성(`devKeepShell`)과 남지 않는 구성 모두로 돌린다. `verify-tree` 52개 통과.
 
 ## 의사결정 로그
 
@@ -343,6 +346,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
 - macOS의 `ps`는 막 생기거나 끝나는 중인 프로세스의 상태 칸을 `?`·`?E`로 적는다. 상태를 영문자로만 기대하면 프로세스가 자주 바뀌는 동안(테스트를 병렬로 돌릴 때) 목록을 읽지 못한다. → 처리: #140 (이 계획의 step3에서 고쳤다: `scripts/verify/tree.ts`의 `parseProcessList`와 다시 읽기)
 - 빈 연결(브라우저가 프록시에 미리 연결해 두는 경우)을 거부 건수에 넣지 않은 결정(step2)은 실제 Chromium에서 문제없었다: 통과 사례(`full-run`, `pass`, `ws-same-port`, `service-worker`, `allowed-failure`, `exact-select`)의 거부 건수가 모두 0이다. → 처리: [실물 확인 기록](../../../../lab/pilot-prep/README.md)
 - `retain-on-failure`인 trace와 영상은 Playwright의 시나리오가 실패했을 때만 남는다. 시나리오는 통과했지만 `verify`가 실패로 판정한 실행(콘솔 에러, 거부된 요청)에는 스크린샷만 남는다. 원인은 `local/detail.json`의 문제 문장으로 본다. → 처리: [웹 프로파일 README](../../../../profiles/web/README.md) (출력 표에 적었다)
+- CI의 `check`는 실패한 테스트의 출력 끝 80줄만 보여 준다(`scripts/commands/check.ts`). 테스트가 800개를 넘으면 실패한 테스트의 이름과 단언이 로그에 남지 않아, 로컬에서 재현되지 않는 실패(운영체제 차이)의 원인을 로그로 알 수 없다. → 처리: 해당 없음(이 계획의 범위 밖이다. 제작자에게 보고했다. 고치려면 별도 Issue가 필요하다)
 
 ## 열린 질문
 
