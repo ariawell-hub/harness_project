@@ -73,6 +73,7 @@ export interface MetricsSource {
   - 출력 형식: `--jq`는 `.[].sha`다. `gh api --paginate --jq`는 쪽마다 jq를 적용한 결과를 이어서 내므로 표준 출력은 쪽의 경계 없이 한 줄에 SHA 하나다(이 리포의 PR #147을 `per_page=30`으로 읽어 두 쪽 34줄이 오는 것을 확인했다). 자료원은 출력의 빈 줄이 아닌 줄을 모두 받은 순서대로 `commits`에 담는다. 16진수 40자가 아닌 줄이 있으면 `SourceError`다.
   - 상한: 이 조회는 PR 하나에 250개까지만 준다(GitHub REST 문서의 "List commits on a pull request"). 받은 SHA가 250개 이상이면 더 있는지 알 수 없으므로 PR 번호를 담은 `SourceError`를 던진다(수용 기준 4: 종료 코드 2, 집계 결과를 내지 않는다). 249개까지는 그대로 쓴다.
   - 같은 SHA가 두 번 오면 `SourceError`다.
+  - 빈 응답: SHA가 하나도 없으면(`gh`가 성공으로 끝났지만 표준 출력이 비었거나 빈 줄뿐이다) PR 번호를 담은 `SourceError`를 던진다. 병합된 PR에는 커밋이 하나 이상 있으므로 빈 목록은 다 읽은 결과가 아니다.
   - `gh pr list --json commits`는 쓰지 않는다: `--limit 1000`과 함께 쓰면 GraphQL 노드 한도를 넘어 조회가 실패한다(이 리포에서 2026-11-20에 확인).
 - `headStatuses`: `gh api --paginate "repos/{owner}/{repo}/commits/<sha>/statuses?per_page=100"`으로 그 커밋의 상태를 끝까지 읽는다.
 - `needsHumanEvents`: `gh api --paginate "repos/{owner}/{repo}/issues/events?per_page=100"`에서 `event`가 `labeled`이고 라벨이 `cfg.github.needsHumanLabel`인 것. 기간 안인 것만 남긴다.
@@ -151,11 +152,13 @@ export function steadyMetrics(i: SteadyInput): SteadyMetrics;
   - `workflowRuns`가 기간에 병합된 PR의 가장 이른 `createdAt` 날짜부터 불린다(기간 전에 열린 PR을 준다).
   - 둘째 쪽의 커밋이 집계에 쓰인다(기본 자료원 경로, 아래 허용 목록 테스트와 같은 장치): 커밋 조회의 고정 응답이 100줄 + 1줄인 PR에서, 가장 이른 `check` 실행의 `headSha`가 둘째 쪽의 SHA(101번째)이고 실패했으며 그 뒤의 실행은 첫 쪽의 SHA로 통과했다. 출력의 CI 첫 통과율이 0건 ÷ 1건이다(둘째 쪽을 잃으면 뒤 실행이 첫 실행이 되어 1건 ÷ 1건이 된다). 같은 자료에서 가장 이른 실행의 결론만 통과로 바꾸면 1건 ÷ 1건이다.
   - 커밋 조회가 상한에 닿으면 값을 내지 않는다(기본 자료원 경로): 한 PR의 커밋 조회가 250줄을 돌려주면 종료 코드 2이고 표준 출력이 비어 있으며 표준 오류에 "집계하지 않았다"와 그 PR 번호가 있다.
+  - 커밋 조회가 빈 응답이면 값을 내지 않는다(기본 자료원 경로): 한 PR의 커밋 조회가 종료 코드 0과 빈 표준 출력을 돌려주면 종료 코드 2이고 표준 출력이 비어 있으며 표준 오류에 "집계하지 않았다"와 그 PR 번호가 있다(그 PR을 "실행을 찾지 못한 PR"로 세어 집계를 내지 않는다).
 - `renderBlock`이 `### 상시 지표` 절을 내고 제목 문자열을 담지 않는다.
 - `ghSource`: 더한 네 조회(`headStatuses`, `needsHumanEvents`, `escalationComments`, `headPrCount`)가 고정 응답을 위 형으로 바꾸고, 기록된 호출의 인자 배열이 1절에 더한 다섯 꼴 가운데 하나와 자리마다 맞는다.
 - `ghSource.mergedPrs`: PR 조회의 `--json` 필드에 `commits`가 없고 `isCrossRepository`가 있다. 기간 안의 PR마다 PR 커밋 조회를 그 번호로 한 번씩 부르고 기간 밖 PR에는 부르지 않는다. 응답의 SHA가 `commits`에 담긴다. 같은 SHA가 두 번 오면 `SourceError`다. 16진수 40자가 아닌 줄이 있으면 `SourceError`다. 커밋 조회가 실패하면 `SourceError`다.
   - 쪽 넘김: 고정 응답을 실제 출력 형식대로 첫 쪽의 100줄과 둘째 쪽의 1줄을 이어 붙여 만든다(쪽마다 jq 결과가 줄바꿈으로 끝난다). `commits`가 101개이고 순서가 받은 대로이며 둘째 쪽의 SHA가 들어 있다. 기록된 호출에 `--paginate`가 있고 `--jq`의 식이 `.[].sha`다(`--paginate`를 뺀 호출은 읽기 요청 꼴과 맞지 않는다는 것도 단언한다).
   - 상한: 249줄이 오면 `commits`가 249개다. 250줄이 오면 `SourceError`이고 메시지에 그 PR 번호가 있다.
+  - 빈 응답: 빈 문자열과 빈 줄뿐인 응답은 `SourceError`이고 메시지에 그 PR 번호가 있다.
 - 자식 프로세스 허용 목록과 기본 자료원 테스트를 넓힌다(`scripts/test/metrics-command.test.ts`, step0 5절):
   - 허용 목록의 `gh`에 1절에 더한 다섯 꼴을 넣고, 기본 자료원 테스트의 고정 응답에 다섯의 응답(PR의 커밋 목록, PR head 커밋의 `risk-gate` 상태, 라벨 이벤트, 봇 댓글, head별 PR 목록)을 넣는다.
   - 기본 자료원 테스트의 단언: 종료 코드 0, 막은 호출 0건, 관찰한 `gh` 호출에 step0의 넷과 이 step의 다섯이 모두 있다(PR 커밋 조회, 커밋 상태 조회, head별 PR 조회는 병합된 PR마다 한 번씩). 출력의 `### 상시 지표` 값이 고정 응답과 맞는다(위험도별 PR 수, `needs-human` 라벨 수). `fs` 쓰기 시도는 0건이다.
