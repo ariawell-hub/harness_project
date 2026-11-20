@@ -1,0 +1,7 @@
+{
+  "plan": "20261120-p0-maker-approval",
+  "steps": [
+    { "step": 0, "name": "accept-ledger", "status": "pending" },
+    { "step": 1, "name": "accept-wire", "status": "pending" }
+  ]
+}
