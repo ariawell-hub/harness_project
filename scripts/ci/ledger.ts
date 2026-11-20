@@ -13,7 +13,8 @@ import {
 
 export const REVIEWERS = ['claude', 'codex'] as const;
 export type Reviewer = (typeof REVIEWERS)[number];
-export const ENTRY_STATUSES = ['open', 'fixed', 'rejected', 'deferred'] as const;
+/** accepted: 제작자가 남은 위험을 받아들인 P0(owner-accept.ts만 만든다). 검증자의 판정으로 바뀌지 않는다 */
+export const ENTRY_STATUSES = ['open', 'fixed', 'rejected', 'deferred', 'accepted'] as const;
 export type EntryStatus = (typeof ENTRY_STATUSES)[number];
 export const REPRO_RESULTS = ['', 'reproduced', 'not-reproduced', 'error'] as const;
 export type ReproResult = (typeof REPRO_RESULTS)[number];
@@ -42,6 +43,11 @@ export interface Entry {
   round: number;
   /** P0을 rejected로 보자고 한 검증자. 둘 다 있어야 rejected다(B11) */
   rejectedBy: Reviewer[];
+  /**
+   * 이 지적이 open인 채로 원장 댓글에 게시된 것이 확인된 시각(GitHub이 준 ISO 8601 시각). 제작자 승인 댓글이
+   * 이보다 뒤여야 인정된다. 이 파일의 함수는 채우지 않는다(원장을 읽는 쪽이 채운다). 다시 열리면 지운다
+   */
+  openedAt?: string;
 }
 
 export interface Round {
@@ -116,6 +122,8 @@ export interface ApplyOptions {
  * 판정 하나를 원장에 반영한 새 원장을 돌려준다(입력은 바꾸지 않는다).
  * - 새 지적: P0·P1은 open, P2·P3은 deferred. 그 검증자의 2라운드부터는 바뀌지 않은 파일의 P1을 deferred로 등록한다(동결)
  * - resolutions: 자기 지적의 fixed·rejected·open만 반영한다. 남의 P0에 대한 rejected는 동의로 기록한다
+ * - accepted(제작자 승인)인 지적은 deferred처럼 판정으로 바뀌지 않는다
+ * - 닫힌 지적이 다시 열리면 openedAt을 지운다(게시 시각을 다시 확인해야 승인을 받을 수 있다)
  */
 export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
   const out: Ledger = {
@@ -129,7 +137,7 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
 
   for (const r of o.verdict.resolutions) {
     const e = out.findings.find((x) => x.id === r.id);
-    if (!e || e.status === 'deferred') continue;
+    if (!e || e.status === 'deferred' || e.status === 'accepted') continue;
     const own = e.reviewer === o.reviewer;
     const note = oneLine(r.note, LIMITS.note);
     if (e.severity === 'P0' && r.status === 'rejected') {
@@ -140,6 +148,7 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
     }
     if (!own) continue;
     e.rejectedBy = e.rejectedBy.filter((x) => x !== o.reviewer);
+    if (e.status !== 'open' && r.status === 'open') delete e.openedAt;
     e.status = r.status;
     if (note) e.note = note;
   }
@@ -155,9 +164,10 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
     const dup = out.findings.find((e) => same(e, f));
     if (dup) {
       if (repro) dup.repro = repro;
-      // 닫힌 지적을 낸 검증자가 같은 지적을 다시 냈다: 회귀로 보고 다시 연다. deferred는 그대로 둔다
+      // 닫힌 지적을 낸 검증자가 같은 지적을 다시 냈다: 회귀로 보고 다시 연다. deferred·accepted는 그대로 둔다
       if (dup.status === 'fixed' || dup.status === 'rejected') {
         dup.status = 'open';
+        delete dup.openedAt;
         dup.rejectedBy = dup.rejectedBy.filter((x) => x !== o.reviewer);
         dup.note = `다시 지적됨(${round}라운드)`;
       }
@@ -228,21 +238,28 @@ export function applyPlanReview(l: Ledger, o: PlanReviewOptions): Ledger {
 
 /**
  * review-ledger 판정(R16): open인 P0·P1이 없어야 한다.
- * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다
+ * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다.
+ * accepted(제작자 승인)인 P0도 막지 않고 수를 적는다
  */
 export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; description: string } {
   const open = l.findings.filter((e) => BLOCKING.includes(e.severity) && e.status === 'open');
   if (open.length === 0) {
     const deferred = l.findings.filter((e) => e.status === 'deferred');
     const frozen = deferred.filter((e) => e.severity === 'P1').length;
+    const accepted = l.findings.filter((e) => e.status === 'accepted').length;
     return {
       state: 'success',
-      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''})`,
+      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''}${accepted ? `, 제작자 승인 ${accepted}` : ''})`,
     };
   }
   let ids = open.map((e) => e.id).join(', ');
   if (ids.length > 100) ids = `${ids.slice(0, 100).replace(/,[^,]*$/, '')} 외`;
-  return { state: 'failure', description: `열린 차단 지적 ${open.length}건: ${ids}` };
+  // 제작자 승인 수는 실패할 때도 적는다(무엇이 승인으로 닫혀 있는지 상태만 보고 알 수 있게)
+  const accepted = l.findings.filter((e) => e.status === 'accepted').length;
+  return {
+    state: 'failure',
+    description: `열린 차단 지적 ${open.length}건: ${ids}${accepted ? `, 제작자 승인 ${accepted}` : ''}`,
+  };
 }
 
 export const LEDGER_MARKER = '<!-- harness-ledger:v1 -->';
@@ -321,9 +338,14 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 const keysAre = (o: object, keys: readonly string[]) =>
   Object.keys(o).length === keys.length && keys.every((k) => k in o);
 const isReviewer = (v: unknown): v is Reviewer => (REVIEWERS as readonly unknown[]).includes(v);
+const validTime = (v: unknown) =>
+  typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v));
 
-function validEntry(e: unknown): e is Entry {
-  if (!isObj(e)) return false;
+function validEntry(raw: unknown): raw is Entry {
+  if (!isObj(raw)) return false;
+  // openedAt은 없어도 된다(이 필드가 생기기 전의 원장, 게시 시각을 아직 모르는 지적)
+  const { openedAt, ...e } = raw;
+  if ('openedAt' in raw && !validTime(openedAt)) return false;
   if (
     !keysAre(e, [
       'id',

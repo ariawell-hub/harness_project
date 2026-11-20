@@ -261,6 +261,7 @@ claimed_at: 2026-11-19T18:28:11+09:00 # new-task가 채운다
   - 바꾼 것(`scripts/verify/web.ts`의 `cleanup`): 그룹에 신호를 보내기 바로 앞에서 그 그룹이 살아 있는지 다시 본다. 비어 있는 것을 한 번이라도 본 그룹의 번호는 기억해, 그 뒤로는 신호를 보내지 않고 살아 보여도 남은 것으로 세지 않는다(빈 그룹은 다시 차지 않고, 그 번호는 무관한 그룹에 다시 배정될 수 있다). 전에는 SIGTERM·SIGKILL 단계마다 두 그룹에 확인 없이 보냈다. 테스트가 바꿔 끼울 수 있게 그룹을 보고 신호를 보내는 수단을 `VerifyOptions.group`으로 뺐다(기본은 전과 같은 `kill(-pgid)`).
   - 실패 확인: `scripts/test/verify-tree.test.ts`의 새 경우 셋(SIGTERM으로 빈 그룹에 SIGKILL을 보내지 않는다, 빈 것을 본 번호가 다시 살아 보여도 보내지 않고 세지 않는다, 실행기가 스스로 끝난 뒤의 정리는 그 그룹에 보내지 않는다)이 고치기 전에 실패했다. 고친 뒤 `verify-tree` 52개, `verify-web` 43개, `verify-playwright` 19개, `verify-guard` 25개, `verify-observe` 10개 통과.
   - 남는 틈: 살아 있는지 본 것과 신호 사이(기다림 없음), 그리고 그룹이 빈 것을 보기 전(다음 확인까지 25ms 안쪽)에 그 번호가 다시 배정되는 경우. 번호로 보내는 신호의 한계라 코드로는 없애지 못한다. F6의 남는 틈과 함께 제작자 승인 댓글 경로(설계서 10.2절 (4) `accepted`)로 다룬다.
+- 2026-11-20 Issue #150의 두 step이 병합됐다(PR #152, PR #157 `45e03a0`). `origin/main`을 병합했다(충돌: 설계서 0절, `CHANGELOG`, `architecture.md`의 표). PR #157이 v0.7.63을 썼으므로 이 PR의 항목을 v0.7.64로 옮겼다. `architecture.md`의 표는 행마다 3-way로 합쳤다(이쪽: `lib/exec.ts`·`commands/standard.ts`·`verify/*`, main: `ci/*`).
 
 ## 의사결정 로그
 

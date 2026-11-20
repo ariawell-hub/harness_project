@@ -61,7 +61,7 @@ export function localMetrics(i: LocalInput): LocalMetrics;
   - `log` `-1` `--format=%ct` `--` `<경로>…`(`--` 뒤는 리포 상대 경로 하나 이상이다)
 - 자체 테스트 보고서 경로는 `metrics --self-test-report <파일>`로 받는다. `scripts/harness.ts`에는 `OPTIONS`의 `self-test-report`, `HELP` 한 줄, `case 'metrics'`의 인자 전달만 더한다. 파일이 없거나 형식이 다르면 종료 코드 1(GitHub을 읽기 전에 끝낸다).
 - `docs/QUALITY_SCORE.md`의 "측정 정의"에 이 step의 지표와 잴 수 없는 지표를 더하고, 이 리포에서 `self-test --out <임시 파일>` 뒤 `metrics --since 2026-11-11 --until <작업일(UTC)> --self-test-report <임시 파일>`을 실행하고 출력을 표식 구간에 그대로 붙여 넣어 기록한다.
-- 기술 부채 표: 위 "새 TD" 넷을 등록한다(번호는 push 직전 `origin/main`의 마지막 번호 다음부터). TD-11에 "주 1회 실행 때 `self-test --out`과 `metrics`를 함께 돌리고, 출력을 문서에 기록하는 수단을 그 정기 작업에서 만든다"를 적는다.
+- 기술 부채 표: 위 "새 TD" 넷을 등록한다(번호는 push 직전 `origin/main`의 마지막 번호 다음부터). 여기에 step1에서 알게 된 조회의 한계 둘을 TD 하나로 더 등록한다(모두 다섯): 라벨 이벤트 조회(`issues/events`)는 기간 조건이 없어 리포의 이벤트 전체를 읽으므로 리포가 오래될수록 쪽 수가 늘어난다, PR 커밋 조회는 250개까지만 주므로 커밋이 250개 이상인 PR이 든 기간은 집계하지 못한다(종료 코드 2). TD-11에 "주 1회 실행 때 `self-test --out`과 `metrics`를 함께 돌리고, 출력을 문서에 기록하는 수단을 그 정기 작업에서 만든다"를 적는다.
 - `docs/harness/architecture.md`의 `metrics/*` 행, `docs/harness/CHANGELOG.md`를 고친다. 설계서 17.2절에 잴 수 없는 지표가 `docs/QUALITY_SCORE.md`에 이유와 함께 표시된다는 한 문장을 더하고 버전을 올린다.
 - 이 step의 PR은 보호 경로(`scripts/**`, `docs/harness/**`)를 바꾼다. 운영 단계에서는 계획의 `risk`와 무관하게 `risk-gate`가 위험도 높음으로 판정하고 제작자 승인이 있어야 병합된다(절차서 5절 "운영 단계의 보호 경로 PR"). 초안으로 올리고, 완료 처리·`origin/main` 병합·`check`가 끝난 뒤 `pr-ready`로 승인을 한 번 요청한다.
 
@@ -74,6 +74,7 @@ export function localMetrics(i: LocalInput): LocalMetrics;
 - "검토 필요" 문서 수가 명령의 출력에 반영되는지(`scripts/test/metrics-command.test.ts`. 메모리 `MetricsSource`로 `runMetrics`를 부른다): 임시 리포에 frontmatter가 `review_cycle: on-change`이고 `related_code`가 한 파일을 가리키는 문서와 그 파일을 함께 커밋한 상태에서는 출력의 "검토 필요" 문서 수가 0이다. 그 뒤 그 파일만 고쳐 더 늦은 커밋 시각으로 커밋하면(두 커밋의 시각을 `GIT_COMMITTER_DATE`로 1초 넘게 벌려 고정한다. `docLint`는 초 단위 커밋 시각을 견준다) 1이다. 둘째 실행에서 관찰한 자식 프로세스에 `git ls-files`와, 그 문서 경로의 `git log`와 그 파일 경로의 `git log`가 있다. 이 문서와 파일은 다른 테스트의 값이 바뀌지 않게 이 테스트 안에서 만들고 끝나면 되돌리는 커밋을 한다(또는 이 테스트만의 임시 리포를 쓴다).
 - 자식 프로세스 허용 목록을 넓힌다(`scripts/test/metrics-command.test.ts`, step0 5절): 허용 목록의 `git`에 3절의 둘을 넣는다(`log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 허용한다). 메모리 자료 테스트는 "자식 프로세스가 허용 목록의 `git` 넷뿐"으로, 기본 자료원 테스트는 그대로 종료 코드 0·막은 호출 0건으로 통과한다. `fs` 쓰기 시도 감지와 실행 전후 비교도 이 step의 `runMetrics`에서 그대로 통과한다(runner 로그 폴더가 없는 임시 리포에서 실행해도 폴더가 생기지 않는다). 목록 밖 호출 사례에 `git log -1 --format=%ct --output=x -- a.md`와 `git ls-files -z --cached --others --exclude-standard -- *.md --error-unmatch`를 더해 막히는 것을 단언한다.
 - 이 리포의 `docs/QUALITY_SCORE.md` 표식 구간 안에 17.2절 상시 지표 13항목 각각에 대응하는 줄이 있다.
+- 이 리포의 기술 부채 표(`docs/exec-plans/tech-debt-tracker.md`)에 3절이 등록하라고 한 TD가 있다(`scripts/test/metrics-local.test.ts`): `| TD-<번호> |`로 시작하는 한 행에 `issues/events`, `250`, `종료 코드 2`가 모두 들어 있다(조회의 한계 둘을 담은 TD). `renderBlock`의 출력에 나오는 `TD-<번호>`마다 표에 그 번호로 시작하는 행이 있다.
 
 ## Acceptance Criteria
 
@@ -82,7 +83,7 @@ node --test scripts/test/metrics-pilot.test.ts scripts/test/metrics-command.test
 grep -q "^집계 기간: 2026-11-11 ~ $(date -u +%Y-%m-%d)(UTC) · 병합 PR [0-9][0-9]*개$" docs/QUALITY_SCORE.md
 ```
 
-둘째 명령은 문서의 집계 기간이 2026-11-11부터 AC를 실행하는 날(UTC)까지인지 본다. 날짜가 바뀐 뒤에 완료 처리하게 되면 집계를 다시 실행한다.
+첫째 명령의 `metrics-local.test.ts`가 기술 부채 표에 새 TD(조회의 한계를 담은 행, 출력이 가리키는 번호의 행)가 등록됐는지도 본다. 둘째 명령은 문서의 집계 기간이 2026-11-11부터 AC를 실행하는 날(UTC)까지인지 본다. 날짜가 바뀐 뒤에 완료 처리하게 되면 집계를 다시 실행한다.
 
 ## 금지사항
 
