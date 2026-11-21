@@ -77,6 +77,8 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
 - 2026-11-21 step0 테스트 먼저: `scripts/test/command-position.test.ts`(11건)를 쓰고 구현 전에 돌렸다. 6건 실패(닫는 꼴, 분석기의 낱말, 검사 순서 규칙, 파일 이름 검사, 실제 bash 대조, 실제 zsh 대조), 5건 통과(기준, 유지하는 꼴, 허용, 다른 방언, 시간)였다. 구현 뒤 11건 통과.
 - 2026-11-21 step0 기존 테스트와 부딪힌 곳 하나: 예약어뿐인 조각을 없앴더니 `db-commands.test.ts`의 "명령의 첫 낱말 자리의 묶음 괄호" 테스트가 실패했다(조각의 순서로 명령을 고른다). 기존 단언을 고치지 않고, 예약어뿐인 조각은 전처럼 그 낱말을 담은 명령을 내게 했다(의사결정 로그). 그 뒤 기존 훅 테스트 네 파일(94건)과 새 테스트가 모두 통과했다.
 - 2026-11-21 step0 판정 비교(고치기 전 main과 고친 뒤): `bash -c>/dev/null "…"`, `eval >/dev/null "…"`, `>/dev/null eval …`, `if [[ … ]]; then …; fi`, `[[ … ]] 명령`, `>.env`, `: >.env`, `node scripts/harness.ts >log check; git push …`가 통과에서 막힘으로 바뀌었다. `echo "see <.env"`, `gh issue comment 1 --body "cat <.env"`, `cat .env.example > x`, `git add .env`는 전처럼 통과한다. `nice -n 5 …`, `sudo -u root …`, `timeout -s KILL 5 …`, `find . -exec … ;`, `exec -a x …`는 고치기 전에도 뒤에도 통과한다(비범위. 남는 틈으로 적는다).
+- 2026-11-22 step0 AC 수정(push 전): 기술 부채 표를 비교하는 AC 줄이 실패했다. 표의 칸 맞춤 공백이 줄 끝이 아니라 가운데 칸에 있어서였다(TD-62 행의 글이 길어져 그 칸의 공백이 줄었다). 비교가 모든 칸의 맞춤 공백을 빼게 고쳤다. 표의 내용은 손대지 않았다.
+- 2026-11-22 step0 main 병합: 다른 세션의 PR(#179)이 설계서 v0.7.71을 먼저 썼다. `origin/main`(`47dee9d`)을 병합하고 이 변경의 버전을 v0.7.72로 옮겼다(변경 이력, 머리말, CHANGELOG). 충돌은 설계서의 변경 이력 한 곳이었다.
 
 ## 의사결정 로그
 
@@ -107,7 +109,7 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
 - step0의 AC 명령, `node scripts/harness.ts check`, `node scripts/harness.ts self-test`.
 - 수용 기준 1~6, 8: `node --test scripts/test/command-position.test.ts`와 기존 테스트.
 - 수용 기준 7: 같은 테스트 파일의 실제 셸 대조(bash는 CI와 이 Mac, zsh는 이 Mac).
-- 결과는 step을 진행하며 적는다.
+- 결과(2026-11-22, main 병합 뒤): step0의 AC 10줄 통과, `node scripts/harness.ts check` 통과, `node scripts/harness.ts self-test` 통과(시나리오 10개). 새 테스트 11건 통과(실제 셸 대조는 이 Mac의 bash 3.2.57과 zsh 5.9에서 돌았다. CI는 bash만 있어 zsh 대조는 건너뛴다). 기존 훅 테스트는 고치지 않았다.
 
 ## 다음 할 일
 
