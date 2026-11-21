@@ -2,7 +2,7 @@
 id: 20261121-owner-accept-p1
 issue: 178 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -97,6 +97,11 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
   - AC를 고쳤다(이 줄은 계획 승인에 묶여 있어 계획 검증을 다시 받는다): 예외 줄 검사가 계획을 `active/`와 `completed/` 가운데 있는 곳에서 찾고, 찾지 못하거나 읽지 못하면 실패한다. 함께, 미뤄 둔 F5(P2)도 고쳤다: `record.test.ts`의 "줄을 지우지 않았다"를 `git diff --numstat`의 삭제 줄 수로 본다(빈 줄 삭제도 센다. 차이가 없으면 값이 비어 실패한다).
   - `origin/main`을 병합했다(#169가 설계서 v0.7.70을 먼저 썼다). 설계서 변경 기록과 `CHANGELOG`가 충돌해 main의 줄 다음에 이 PR의 줄을 두고, 이 PR의 버전을 v0.7.71로 올렸다(병합 커밋 `b097f3b`).
   - 계획 검증을 다시 받으려고 `scripts/`와 `docs/harness/`를 `origin/main`의 상태로 되돌리는 커밋을 더했다. 승인되면 `b097f3b`의 내용을 테스트 → 구현 → 문서 순서로 다시 올린다.
+
+- 2026-11-21 계획 검증 재검증(head `173f096`): 두 검증자 승인(G1 해시 `4a85edf9cd46`). F6은 `fixed`.
+- 2026-11-21 코드를 다시 올렸다. `origin/main`을 다시 병합했다(#176이 `CHANGELOG`·절차서·`check`를 고쳤다). 병합 커밋 `b097f3b`에 있던 이 PR의 변경을 테스트 → 구현 → 문서 순서로 다시 넣었다(`CHANGELOG`는 main의 줄 다음에 이 PR의 줄).
+  - 테스트 커밋 `6e713f2`: 다섯 테스트 파일 77개 가운데 17개가 실패한다. 구현 커밋 `d253c09`: 일곱 테스트 파일 107개 통과. 문서 커밋 `358f7ac`(설계서 v0.7.71).
+  - AC 16줄과 `check` 통과. step0 완료 처리. 완료 처리 뒤(계획이 `completed/`에 있을 때)에도 고친 AC 줄이 통과하는 것을 확인했다.
 
 ## 의사결정 로그
 
