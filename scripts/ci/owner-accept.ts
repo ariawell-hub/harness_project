@@ -1,4 +1,4 @@
-// 제작자 승인으로 P0 지적을 닫는다(10.2절 (4) accepted, B11): 제작자 계정이 PR에 단 승인 댓글을 가려 원장에 반영한다.
+// 제작자 승인으로 열린 P0·P1 지적을 닫는다(10.2절 (4) accepted, B11): 제작자 계정이 PR에 단 승인 댓글을 가려 원장에 반영한다.
 // 검증자(LLM)의 판단을 거치지 않는다. 이 파일은 순수 함수만 둔다(네트워크·파일·환경 변수·시계 없음).
 // 댓글은 편집 이력 필드와 함께 읽은 것(GraphQL)을 받는다. 고쳐지지 않은 것이 확인되지 않으면 버린다(TD-26).
 import type { Entry, Ledger } from './ledger.ts';
@@ -101,7 +101,7 @@ export function ownerAccepts(comments: readonly AcceptComment[], owner: string):
 /** 이 승인을 그 지적에 반영하지 않는 이유. 반영하면 null */
 function refusal(e: Entry | undefined, a: Accept): string | null {
   if (!e) return '원장에 없는 지적';
-  if (e.severity !== 'P0') return 'P0이 아니다';
+  if (e.severity !== 'P0' && e.severity !== 'P1') return '차단 지적(P0·P1)이 아니다';
   if (e.status !== 'open' && e.status !== 'accepted') return '열린 지적이 아니다';
   if (e.openedAt === undefined) return '게시 시각을 모르는 지적';
   // 같은 시각은 뒤로 보지 않는다(GitHub 시각은 초 단위라 순서를 단정할 수 없다). 읽을 수 없는 시각도 거부된다
@@ -141,9 +141,11 @@ export function applyOwnerAccepts(l: Ledger, accepts: readonly Accept[]): Accept
   return { ledger: { ...l, findings }, applied, ignored, reopened };
 }
 
-/** 이 원장에 승인을 볼 지적이 있는가: open이거나 accepted인 P0이 하나라도 있다 */
+/** 이 원장에 승인을 볼 지적이 있는가: open이거나 accepted인 P0·P1이 하나라도 있다 */
 export function needsAccepts(l: Ledger): boolean {
   return l.findings.some(
-    (e) => e.severity === 'P0' && (e.status === 'open' || e.status === 'accepted'),
+    (e) =>
+      (e.severity === 'P0' || e.severity === 'P1') &&
+      (e.status === 'open' || e.status === 'accepted'),
   );
 }
