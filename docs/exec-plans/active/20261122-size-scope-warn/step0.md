@@ -24,11 +24,14 @@
   export const DETAIL_LINE_MAX = 200;
   export const DETAILS_MAX_BYTES = 12_000;
   export const DETAILS_CUT = '… (상세를 줄였다)';
+  /** 줄 하나의 크기: JSON 문자열로 적었을 때의 UTF-8 바이트 수 + 1 */
+  export const detailBytes: (line: string) => number;
   export function capDetails(lines: string[]): string[];
   ```
 
   - 한 줄은 `DETAIL_LINE_MAX`자(글자열의 `length`)까지다. 넘으면 199자로 자르고 끝에 `…`를 붙인다.
-  - 앞에서부터 담는다. 담은 줄들의 UTF-8 바이트 수(줄마다 1을 더한다)의 합이 `DETAILS_MAX_BYTES`를 넘게 되는 줄부터는 모두 버리고, 끝에 `DETAILS_CUT` 한 줄을 더한다(이 줄은 합에 세지 않는다). 버린 줄이 없으면 더하지 않는다.
+  - 앞에서부터 담는다. 담은 줄들(자른 뒤의 줄)의 `detailBytes` 합이 `DETAILS_MAX_BYTES`를 넘게 되는 줄부터는 모두 버리고, 끝에 `DETAILS_CUT` 한 줄을 더한다(이 줄은 합에 세지 않는다). 버린 줄이 없으면 더하지 않는다.
+  - 줄의 크기를 JSON으로 재는 이유: 결과는 JSON 파일로 넘어가고, 파일 이름의 제어 문자·따옴표·역슬래시는 JSON에서 여섯 배까지 길어진다.
   - 순수 함수다. 받은 배열을 고치지 않는다.
 
 - `scripts/ci/results.ts`:
@@ -42,10 +45,32 @@
 
   - `GATE_CONTEXTS`는 그대로다(값과 순서). `scope`는 step1이 `WARN_CONTEXTS`에 더한다.
 
+- `scripts/ci/results.ts`에 결과 파일 전체의 크기 상한을 더한다. `capDetails`는 경고 판정 하나의 상세만 묶는다. 필수 판정의 결과가 이미 크면 경고 판정이 더해진 만큼 전체가 한도를 넘을 수 있으므로, 전체 크기로 한 번 더 본다.
+
+  ```ts
+  /** 판정 결과 파일의 크기 상한(바이트) */
+  export const RESULTS_MAX_BYTES = 90_000;
+  /** 결과가 커서 경고 판정의 상세를 뺐을 때 그 자리에 두는 한 줄 */
+  export const WARN_DETAILS_DROPPED = '… (판정 결과가 커서 상세를 뺐다)';
+  /** `gates` 명령이 결과 파일에 쓰는 글자(`JSON.stringify(r, null, 2) + '\n'`)의 UTF-8 바이트 수 */
+  export function resultsBytes(r: GateResults): number;
+  export function fitWarnings(r: GateResults): GateResults;
+  ```
+
+  - `RESULTS_MAX_BYTES`의 근거: 결과 파일은 Base64(크기의 4/3)로 환경 변수 `RESULTS_B64` 하나에 실린다. Linux에서 환경 변수 하나는 131,072바이트까지다. 90,000바이트는 Base64로 120,000자다.
+  - `fitWarnings`(순수 함수. 받은 값을 고치지 않는다):
+    1. `resultsBytes(r)`가 `RESULTS_MAX_BYTES` 이하이면 `r`을 그대로 돌려준다.
+    2. 넘으면 `WARN_CONTEXTS`의 결과 가운데 `details`가 비어 있지 않은 것의 `details`를 `[WARN_DETAILS_DROPPED]`로 바꾼 값을 만든다. 그 값이 상한 이하이면 그것을 돌려준다.
+    3. 그래도 넘으면 `WARN_CONTEXTS`의 결과를 `results`에서 뺀 값을 돌려준다(크기와 무관하게).
+  - 필수 판정(`GATE_CONTEXTS`)의 결과와 `risk`·`headSha`·순서는 어느 경우에도 바꾸지 않는다.
+  - 그래서 돌려주는 값은 상한 이하이거나, 경고 판정이 없던 때의 결과와 글자까지 같다. 경고 판정 때문에 기록 step이 시작되지 못하는 일이 없다.
+  - 3의 경우 기록 job은 빠진 경고 context만 `error`(`판정 결과에 pr-size가 없다`)로 쓴다. 필수 체크가 아니라 병합에는 영향이 없다.
+
 - `scripts/ci/gates.ts`의 `runGates`: 필수 판정 다섯을 지금 순서대로 낸 뒤 `WARN_CONTEXTS`의 판정을 그 순서대로 `results`에 더한다.
   - 경고 판정 하나는 `guarded`로 감싼다. 예외는 그 context만 `error`로 만들고 다른 결과를 바꾸지 않는다.
   - `revert-check`가 확인한 revert PR(`verified`)이면 경고 판정을 실행하지 않고 `state: 'success'`, `description: 'revert PR: 보지 않는다'`, `details: []`를 낸다.
   - 경고 판정은 위험도 신호(`signals`)와 `risk`에 아무것도 더하지 않는다.
+  - 돌려주는 값은 `fitWarnings`를 거친 것이다. `scripts/harness.ts`의 `gates` 명령은 그 값을 그대로 파일과 요약에 쓴다(고치지 않는다).
 - `scripts/ci/gates.ts`:
 
   ```ts
@@ -135,7 +160,12 @@ export function prSize(o: { root: string; base: string; cfg: HarnessConfig }): P
 - **상한**: 센 줄 수가 상한과 같으면 `over`가 거짓이고 `description`이 `통과 (변경 N줄 / 상한 N줄)`이다. 상한보다 1 많으면 `over`가 참이고 `description`이 `경고: `로 시작하며 두 수가 들어 있다. 두 경우 모두 `state`는 `success`다.
 - **제외**: 기본 설정에서 `README.md`, `docs/a.txt`, `src/a.test.ts`, `scripts/test/x.ts`, `src/generated/x.ts`, `pnpm-lock.yaml`, 바이너리는 세지 않는다. `src/a.ts`와 `scripts/gates/x.ts`는 센다. `prSize.exclude`를 `['src/**']`로 주면 `README.md`와 `scripts/test/x.ts`를 세고 `src/a.ts`는 세지 않으며, `pnpm-lock.yaml`은 여전히 세지 않는다.
 - **`details`**: 줄 수가 많은 파일이 먼저 나온다. 넘었을 때만 고치는 법과 근거 줄이 있고, 그 두 줄은 파일 줄보다 앞이다. 센 파일이 31개면 30개만 적히고 나머지 1개는 수로 적힌다.
-- **`capDetails`**: 짧은 줄들은 그대로다. 250자인 줄은 200자가 되고 `…`로 끝나며, 200자인 줄은 그대로다. 190자 남짓의 한글 줄 100개를 주면 끝이 `DETAILS_CUT`이고, 그 줄을 뺀 나머지의 바이트 합(줄마다 1을 더한다)이 `DETAILS_MAX_BYTES` 이하이며, 한 줄을 더 담았다면 넘었을 만큼 채워져 있다.
+- **`capDetails`**: 짧은 줄들은 그대로다. 250자인 줄은 200자가 되고 `…`로 끝나며, 200자인 줄은 그대로다. 190자 남짓의 한글 줄 100개를 주면 끝이 `DETAILS_CUT`이고, 그 줄을 뺀 나머지의 `detailBytes` 합이 `DETAILS_MAX_BYTES` 이하이며, 한 줄을 더 담았다면 넘었을 만큼 채워져 있다. 제어 문자(U+0001), 큰따옴표, 역슬래시만으로 된 200자 줄 100개를 각각 주면, 끝 줄을 뺀 나머지를 JSON 배열로 적은 크기가 `DETAILS_MAX_BYTES + 2` 이하다.
+- **`fitWarnings`**(만든 결과 값을 직접 넘긴다):
+  - 작은 결과는 받은 값 그대로다(같은 객체).
+  - 필수 판정의 상세가 80KiB쯤이고 경고 판정의 상세가 더해져 상한을 넘는 결과: 돌려준 값의 `resultsBytes`가 `RESULTS_MAX_BYTES` 이하이고, context와 순서가 그대로이며, 경고 판정의 `details`는 `[WARN_DETAILS_DROPPED]`이고 `state`·`description`은 그대로다(`isWarning`이 참). 필수 판정의 결과와 `risk`는 받은 것과 같다. 받은 값은 바뀌지 않는다.
+  - 필수 판정만으로 상한에 200바이트 안쪽까지 찬 결과: 돌려준 값이 경고 판정을 뺀 결과와 글자까지 같다(`JSON.stringify(…, null, 2)`). 그 값을 `toStatuses`(`RECORDED_CONTEXTS`)로 바꾸면 경고 context만 `error`이고 필수 판정은 `success`다.
+  - 필수 판정만으로 이미 상한을 넘는 결과: 필수 판정을 줄이지 않고 경고 판정만 뺀다.
 - **긴 경로**(`prSizeOf`에 직접 넘긴다. 파일 시스템을 거치지 않는다): 경로가 4,000자(한글)인 파일 40개로 상한을 넘기면, `description`과 `details`를 JSON으로 만든 것의 UTF-8 크기가 16,000바이트보다 작다. `details`의 모든 줄이 200자 이하이고, 앞의 세 줄(수, 고치는 법, 근거)이 남아 있으며, 끝 줄이 `DETAILS_CUT`이다.
 - **경로의 글자**(`prSizeOf`에 직접 넘긴다): 경로가 `docs\a.ts`(역슬래시가 든 파일 이름)와 `src\test\a.ts`인 파일은 센다. `docs/a.ts`와 `src/test/a.ts`는 세지 않는다.
 - **설정**: 키가 없는 설정 파일을 `loadConfig`로 읽으면 `prSize`가 기본값이다. `{ maxLines: 10 }`이면 `exclude`는 기본 목록이다. `{ exclude: [] }`이면 `maxLines`는 400이다. `ConfigError`(메시지에 `prSize`): `maxLines`가 0, 음수, 1.5, `'400'`인 경우, `exclude`에 `/abs`, `../x`, 수가 든 경우, 모르는 키, 배열, `null`. 돌려받은 `exclude`에 항목을 더해도 `DEFAULT_PR_SIZE.exclude`의 길이는 8이다.
@@ -147,7 +177,7 @@ export function prSize(o: { root: string; base: string; cfg: HarnessConfig }): P
 기존 테스트 파일에서 고칠 곳(단언을 지우지 않는다. context 목록이 늘어난 만큼 기대값을 넓힌다):
 
 - `scripts/test/ci.test.ts`: 정상 결과를 만드는 도우미(`results`)가 `RECORDED_CONTEXTS`의 결과를 모두 담는다. 그 도우미의 결과를 검사·변환하는 호출(`validateResults`, `toStatuses`)과 `runGates`의 context 순서 단언, `recordStatuses`의 두 테스트(정상 결과, 결과가 없거나 깨짐)가 `RECORDED_CONTEXTS`를 기준으로 한다. 더하는 사례: 결과에 `pr-size`만 빠져 있으면 `pr-size`만 `error`로 기록되고 필수 판정은 결과대로(그 가운데 하나를 `failure`로 둔다) 기록된다.
-- `scripts/test/record.test.ts`: `record-status` 명령의 정상 결과 파일을 만드는 도우미(`gatesFile`)가 `RECORDED_CONTEXTS`의 결과를 모두 담는다(그대로 두면 빠진 `pr-size`가 `error`로 기록돼 "다른 기계 판정은 그대로다" 단언이 실패한다). 기록된 상태 수의 단언은 `RECORDED_CONTEXTS.length`를 기준으로 한다. 더하는 사례 둘(`record-status` 명령으로): (1) `pr-size`의 결과가 `success`이고 설명이 `경고: `로 시작하면 그 상태와 설명이 그대로 PR head에 기록되고 모든 context가 `success`다. (2) 결과 파일에 `pr-size`만 빠져 있으면 종료 코드 0이고 `pr-size`만 `error`, 나머지는 `success`로 기록된다.
+- `scripts/test/record.test.ts`: `record-status` 명령의 정상 결과 파일을 만드는 도우미(`gatesFile`)가 `RECORDED_CONTEXTS`의 결과를 모두 담는다(그대로 두면 빠진 `pr-size`가 `error`로 기록돼 "다른 기계 판정은 그대로다" 단언이 실패한다). 기록된 상태 수의 단언은 `RECORDED_CONTEXTS.length`를 기준으로 한다. 더하는 사례 둘(`record-status` 명령으로): (1) `pr-size`의 결과가 `success`이고 설명이 `경고: `로 시작하면 그 상태와 설명이 그대로 PR head에 기록되고 모든 context가 `success`다. (2) 결과 파일에 `pr-size`만 빠져 있으면 종료 코드 0이고 `pr-size`만 `error`, 나머지는 `success`로 기록된다. 그리고 `gates` 명령을 실행하는 기존 테스트의 도우미에 단언 하나를 더한다: 명령이 쓴 결과 파일의 UTF-8 바이트 수가 그 내용을 읽어 `resultsBytes`로 잰 값과 같다(상한이 재는 글자와 명령이 쓰는 글자가 같다는 것).
 - `scripts/test/risk-gate.test.ts`: `runGates` 결과를 `validateResults`로 검사하는 단언이 `RECORDED_CONTEXTS`를 쓴다.
 - `scripts/test/revert-check.test.ts`: 확인된 revert PR의 `runGates` 테스트에서 context 순서 단언이 `RECORDED_CONTEXTS`를 기준으로 하고, `pr-size`가 `success`·`revert PR: 보지 않는다`인 단언을 더한다.
 - `scripts/test/harness-guard.test.ts`: main과 PR 트리의 `harness.config.json`에서 `prSize`만 다르면 "판정 관련 설정 변경" 신호에 `prSize`가 있다는 사례를 더한다.
@@ -161,7 +191,7 @@ export function prSize(o: { root: string; base: string; cfg: HarnessConfig }): P
   ```
 
 - `docs/harness/architecture.md`: `gates/*` 행에 `pr-size.ts`의 한 문장을, `ci/*` 행에 경고 판정 context(`WARN_CONTEXTS`)의 한 문장을 더한다.
-- `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)"에 한 줄: 무엇이 바뀌었는지, 새 설정 키 `prSize`(없으면 기본값)와 `CONFIG_KEYS`, 경고는 `success`와 `경고: ` 설명으로 낸다는 것, 필수 체크와 워크플로는 바뀌지 않는다는 것, 검사를 약화하지 않는다는 것.
+- `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)"에 한 줄: 무엇이 바뀌었는지, 새 설정 키 `prSize`(없으면 기본값)와 `CONFIG_KEYS`, 경고는 `success`와 `경고: ` 설명으로 낸다는 것, 경고 판정이 결과 파일을 한도(`RESULTS_MAX_BYTES`) 너머로 키우지 않는다는 것, 필수 체크와 워크플로는 바뀌지 않는다는 것, 검사를 약화하지 않는다는 것.
 - 설계서와 기술 부채 표는 이 step에서 고치지 않는다(step1이 한 번에 고친다).
 
 ## Acceptance Criteria
@@ -183,6 +213,6 @@ grep -q 'prSize' docs/harness/CHANGELOG.md
 - 필수 판정 다섯(`revert-check`, `plan-gate`, `harness-guard`, `risk-gate`, `deps-guard`)의 판정 기준·순서·결과 문구를 바꾸지 마라. 이유: 이 step은 판정을 더할 뿐이다. `harness-guard`는 `CONFIG_KEYS`의 한 항목만 더한다.
 - PR 트리의 `harness.config.json`으로 상한이나 제외 목록을 정하지 마라. 이유: PR이 판정 기준을 함께 바꿀 수 있다.
 - `matchesAny`로 파일 경로를 견주지 마라. 이유: 파일 경로의 `\`를 `/`로 바꿔, 이름에 `\`가 든 파일이 다른 경로로 판정된다.
-- 필수 판정 다섯의 `details`에 `capDetails`를 적용하지 마라. 이유: 필수 판정의 결과 문구를 바꾸지 않는다. 남은 일로 step1이 기술 부채 표에 적는다.
+- 필수 판정 다섯의 `details`에 `capDetails`를 적용하지 마라. `fitWarnings`가 필수 판정의 결과를 줄이거나 빼게 하지 마라. 이유: 필수 판정의 결과 문구를 바꾸지 않는다. 필수 판정만으로 한도를 넘는 경우는 지금도 있는 문제이고, 남은 일로 step1이 기술 부채 표에 적는다.
 - 기존 테스트 파일의 단언을 지우거나 약하게 하지 마라(R4). 이유: 필수 판정의 결과가 같다는 증거다. context 목록이 늘어난 곳의 기대값만 넓힌다.
 - `docs/harness/design.md`와 `docs/exec-plans/tech-debt-tracker.md`를 고치지 마라. 이유: step1이 두 판정을 함께 적는다. 다른 세션의 PR과 겹치는 횟수를 줄인다.
