@@ -2,7 +2,7 @@
 id: 20261121-hook-command-position
 issue: 182 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -79,6 +79,7 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
 - 2026-11-21 step0 판정 비교(고치기 전 main과 고친 뒤): `bash -c>/dev/null "…"`, `eval >/dev/null "…"`, `>/dev/null eval …`, `if [[ … ]]; then …; fi`, `[[ … ]] 명령`, `>.env`, `: >.env`, `node scripts/harness.ts >log check; git push …`가 통과에서 막힘으로 바뀌었다. `echo "see <.env"`, `gh issue comment 1 --body "cat <.env"`, `cat .env.example > x`, `git add .env`는 전처럼 통과한다. `nice -n 5 …`, `sudo -u root …`, `timeout -s KILL 5 …`, `find . -exec … ;`, `exec -a x …`는 고치기 전에도 뒤에도 통과한다(비범위. 남는 틈으로 적는다).
 - 2026-11-22 step0 AC 수정(push 전): 기술 부채 표를 비교하는 AC 줄이 실패했다. 표의 칸 맞춤 공백이 줄 끝이 아니라 가운데 칸에 있어서였다(TD-62 행의 글이 길어져 그 칸의 공백이 줄었다). 비교가 모든 칸의 맞춤 공백을 빼게 고쳤다. 표의 내용은 손대지 않았다.
 - 2026-11-22 step0 main 병합: 다른 세션의 PR(#179)이 설계서 v0.7.71을 먼저 썼다. `origin/main`(`47dee9d`)을 병합하고 이 변경의 버전을 v0.7.72로 옮겼다(변경 이력, 머리말, CHANGELOG). 충돌은 설계서의 변경 이력 한 곳이었다.
+- 2026-11-22T00:15:03+09:00 step0 재작업: 중규모 계획인데 계획 검증(G1) 전에 구현까지 함께 올렸다(절차서 2절 "계획 검증"을 건너뛴 봇의 실수). 절차서대로 구현을 내려 PR에 계획만 남기고 계획 검증을 받는다. 내린 구현은 승인 뒤 그 커밋을 되돌려 다시 올린다. 구현·검증 기록(진행 로그, 검증 방법과 결과)은 그대로 둔다.
 
 ## 의사결정 로그
 
