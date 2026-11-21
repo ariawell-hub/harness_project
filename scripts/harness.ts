@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
-import { runGates, selfTestNeeded, summaryMarkdown } from './ci/gates.ts';
+import { gatesOutput, runGates, selfTestNeeded } from './ci/gates.ts';
 import { planCarry } from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
@@ -1027,8 +1027,10 @@ async function main(argv: string[]): Promise<number> {
         planReview,
         targetCheck,
       });
-      writeFileSync(out, JSON.stringify(r, null, 2) + '\n');
-      const md = summaryMarkdown(r);
+      // 결과 파일에는 크기를 맞춘 결과를, 요약에는 원래 결과를 쓴다(ci/gates.ts의 gatesOutput)
+      const output = gatesOutput(r);
+      writeFileSync(out, output.file);
+      const md = output.summary;
       const summary = str('summary');
       if (summary) appendFileSync(summary, md);
       log(md);

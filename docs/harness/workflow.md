@@ -147,6 +147,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
   - Actions나 검증자가 멈춘 것을 알면(사용량 소진, 사용 한도) 풀릴 때까지 올리지 않는다. 판정 없는 실행이 돌고 나중에 다시 실행해야 한다.
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약과 `gh pr checks`는 출처를 보지 않는다. 필수 체크별 상태(기대 출처가 쓴 결과만)와 지금 무엇을 기다리는지는 worktree에서 `node scripts/harness.ts pr-state`로 본다(`--pr <번호>`로 다른 PR. 읽기만 한다). 병합 가능 여부는 `mergeStateStatus`로 본다.
+- 경고 판정 `pr-size`는 필수 체크가 아니다. PR의 변경 줄 수(추가 + 삭제. 문서·테스트·생성 파일·lockfile·바이너리 제외)가 상한(`harness.config.json`의 `prSize.maxLines`, 없으면 400)을 넘으면 커밋 상태의 설명이 `경고: `로 시작한다. 상태는 `success`라 병합을 막지 않는다. 경고가 나오면 step을 더 잘게 나눌 수 있는지 본다(R15).
 - `harness.config.json`의 `protectedPaths`나 `github.owner`를 바꾸면 같은 PR에서 `node scripts/harness.ts codeowners --write`로 `.github/CODEOWNERS`를 다시 만든다. 이 파일은 손으로 고치지 않는다. 어긋나면 `check`의 doc-lint 단계가 실패한다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
 - **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 worktree 안에서 `node scripts/harness.ts pr-ready`로 초안을 해제하며 승인을 요청한다.
