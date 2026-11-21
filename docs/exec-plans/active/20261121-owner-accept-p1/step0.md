@@ -80,10 +80,10 @@
 
 ```bash
 node --test scripts/test/owner-accept.test.ts scripts/test/accept-load.test.ts scripts/test/accept-cli.test.ts scripts/test/ledger-accept.test.ts scripts/test/record.test.ts scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts
-b=$(git merge-base HEAD origin/main) && test "$(git diff "$b" -- scripts/test/record.test.ts | grep -c '^-[^-]')" -eq 0 && grep -q "gqlCalls" scripts/test/record.test.ts
+b=$(git merge-base HEAD origin/main) && test "$(git diff --numstat "$b" -- scripts/test/record.test.ts | awk '{print $2}')" = "0" && grep -q "gqlCalls" scripts/test/record.test.ts
 node scripts/harness.ts test-effect
 b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts)"
-grep -qF "차단 지적(P0·P1)이 아니다" scripts/test/accept-cli.test.ts && grep -q "applyOwnerAccepts" scripts/test/ledger-accept.test.ts && test "$(grep -c "^- test-effect 예외:" docs/exec-plans/active/20261121-owner-accept-p1/plan.md)" -eq 0
+grep -qF "차단 지적(P0·P1)이 아니다" scripts/test/accept-cli.test.ts && grep -q "applyOwnerAccepts" scripts/test/ledger-accept.test.ts && p=$(ls -d docs/exec-plans/active/20261121-owner-accept-p1 docs/exec-plans/completed/20261121-owner-accept-p1 2>/dev/null | head -n 1) && test -f "$p/plan.md" && n=$(grep -c "^- test-effect 예외:" "$p/plan.md"; true) && test "$n" -eq 0
 test "$(grep -c "P0이 아니다" scripts/ci/owner-accept.ts)" -eq 0 && grep -qF "차단 지적(P0·P1)이 아니다" scripts/ci/owner-accept.ts && grep -qF "차단 지적(P0·P1)이 아니다" scripts/test/owner-accept.test.ts
 b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- scripts/cross-review/prompt.md scripts/ci/rebuttal.ts scripts/ci/ledger-store.ts scripts/runner scripts/commands .github harness.config.json)"
 b=$(git merge-base HEAD origin/main) && test "$(git diff "$b" -- scripts/ci/ledger.ts scripts/ci/accept-load.ts | grep -E '^[+-][^+-]' | grep -vcE '^[+-][[:space:]]*(//|/\*|\*)')" -eq 0

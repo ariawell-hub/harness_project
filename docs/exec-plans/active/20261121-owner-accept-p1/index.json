@@ -4,7 +4,7 @@
     {
       "step": 0,
       "name": "p1-accept",
-      "status": "in_progress",
+      "status": "pending",
       "started_at": "2026-11-21T21:38:07+09:00"
     }
   ]

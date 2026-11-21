@@ -2,7 +2,7 @@
 id: 20261121-owner-accept-p1
 issue: 178 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -92,6 +92,12 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
   - 반박 2회째를 냈다(근거: `scripts/commands/task.ts`). 이번에도 받아들여지지 않으면 교착이다. 더 반박하지 않고 제작자에게 묻는다(선택지: AC 문구를 고쳐 계획 검증부터 다시 받는다 / 그 밖).
 - 2026-11-21T23:08:20+09:00 step0 재작업: F6(교착, 제작자 결정: 지적대로 고친다)으로 step0의 AC 한 줄을 고쳐 계획 검증을 다시 받는다
 
+- 2026-11-21 코드 판정 3라운드(head `b1e45e2`): `review/claude` 승인. `review/codex` 수정 요청(새 지적 없음. F6만 open). codex는 2회째 반박(지적 대응 때는 step을 되돌려 계획이 `active/`로 돌아온다)이 그 경로에서는 맞다고 했고, 다른 경로를 들었다: runner가 완료된 PR의 병합 충돌을 풀 때(`scripts/runner/run.ts`의 `judgeResolution`)는 step을 되돌리지 않고 AC를 돌린다. 코드에서 확인했다. 맞는 말이다(`judgeResolution`은 `acceptanceCommands`를 그대로 실행하고 `reopen`을 부르지 않는다). 내 반박이 틀렸다: 완료 뒤에 AC가 도는 경로를 하나만 확인하고 반박했다.
+  - 반박 2회 뒤에도 열려 있어 교착이다. 제작자에게 물었다(대화). 선택지: A 지적대로 고친다(추천) / B 멈춘다. **제작자의 답(2026-11-21, 대화): A.**
+  - AC를 고쳤다(이 줄은 계획 승인에 묶여 있어 계획 검증을 다시 받는다): 예외 줄 검사가 계획을 `active/`와 `completed/` 가운데 있는 곳에서 찾고, 찾지 못하거나 읽지 못하면 실패한다. 함께, 미뤄 둔 F5(P2)도 고쳤다: `record.test.ts`의 "줄을 지우지 않았다"를 `git diff --numstat`의 삭제 줄 수로 본다(빈 줄 삭제도 센다. 차이가 없으면 값이 비어 실패한다).
+  - `origin/main`을 병합했다(#169가 설계서 v0.7.70을 먼저 썼다). 설계서 변경 기록과 `CHANGELOG`가 충돌해 main의 줄 다음에 이 PR의 줄을 두고, 이 PR의 버전을 v0.7.71로 올렸다(병합 커밋 `b097f3b`).
+  - 계획 검증을 다시 받으려고 `scripts/`와 `docs/harness/`를 `origin/main`의 상태로 되돌리는 커밋을 더했다. 승인되면 `b097f3b`의 내용을 테스트 → 구현 → 문서 순서로 다시 올린다.
+
 ## 의사결정 로그
 
 - 결정(제작자, 2026-11-21 대화): `/harness accept`를 P1까지 넓힌다. / 이유: 검증자(LLM)를 거치지 않아 결과가 확정적이고, 봇은 쓸 수 없으며, 변경이 작다. / 버린 대안: 제작자 계정의 PR 댓글을 검증자 입력에 넣기(자유 글이 검증자에게 가는 길이 생기고, 닫힐지는 여전히 검증자에 달려 있다).
@@ -104,7 +110,7 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 - runner의 교착 보고(Issue에 올리는 A/B/C 선택지)에는 제작자 승인이 선택지로 없다. P0에도 지금 없다. → 처리: 해당 없음(제작자에게 보고한다. 이 계획의 범위 밖이다)
 - 이 변경 뒤에는 열린 P1이 있는 모든 판정 실행이 PR 댓글의 편집 이력을 GraphQL로 읽는다(전에는 열린 P0이 있을 때만). 읽지 못하면 `review-ledger`가 `error`로 남는다. 닫힌 쪽이지만 GraphQL 장애에 걸리는 PR이 늘어난다. → 처리: 해당 없음(설계서 10.2절 (4)에 이미 적힌 닫힌 쪽 동작이다. 문제가 실제로 나오면 그때 다룬다)
 - `scripts/test/record.test.ts`의 가짜 서버처럼 `/graphql`을 모르는 호출 환경에서는 열린 P1이 있는 원장의 기록이 `error`가 된다(닫힌 쪽). 실제 판정 워크플로는 원장 토큰으로 GraphQL을 읽으므로 해당하지 않는다. 계획을 쓸 때 "열린 P1이 있는 모든 실행이 편집 이력을 읽는다"는 것은 적었지만, 있던 테스트 가운데 그 요청을 모르는 가짜 서버가 있는지는 확인하지 않았다. → 처리: #178(이 계획의 step0에 더해 고쳤다. 진행 로그)
-- 계획 검증 4라운드의 F5(P2, 미룸): `record.test.ts`에 줄을 더하기만 했는지 보는 AC(`grep -c '^-[^-]'`)가 빈 줄 삭제를 세지 않는다. → 처리: 해당 없음(이 PR에서는 `git diff --numstat`으로 삭제 0줄을 따로 확인했다. AC를 고치면 계획 승인이 무효가 돼 고치지 않았다)
+- 계획 검증 4라운드의 F5(P2, 미룸): `record.test.ts`에 줄을 더하기만 했는지 보는 AC(`grep -c '^-[^-]'`)가 빈 줄 삭제를 세지 않는다. → 처리: #178(이 계획에서 고쳤다. 코드 판정 3라운드 뒤 AC를 고칠 때 `git diff --numstat`의 삭제 줄 수로 바꿨다)
 - step의 AC에 자기 계획 파일의 경로(`docs/exec-plans/active/<id>/plan.md`)를 적으면, 마지막 step에서는 완료 처리가 계획을 `completed/`로 옮긴 뒤 그 줄을 다시 돌릴 수 없다(이 계획의 F6). AC는 완료 처리 전에 돌리므로 그때는 통과한다. → 처리: 해당 없음(제작자에게 보고한다. 계획 템플릿이나 절차서에 "AC에 계획 폴더의 `active/` 경로를 적지 않는다"를 더할지는 제작자가 정한다)
 
 ## 열린 질문
