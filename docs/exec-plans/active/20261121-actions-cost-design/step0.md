@@ -135,7 +135,12 @@ export function ghActionsSource(o: { cwd: string /* 그 밖은 구현 재량 */ 
 
 - `gh api`로 읽기만 한다. 실행 목록은 날짜별로 읽는다(`created=<날짜>`). 아래 가운데 하나면 `SourceError`다(`scripts/metrics/source.ts`의 `ghSource`가 실행을 읽을 때 쓰는 검사와 같다): 받은 수가 `total_count`와 다르다, 쪽마다 온 `total_count`가 서로 다르다, 같은 실행 id가 두 번 왔다(읽는 동안 목록이 바뀌어 다른 실행이 빠졌을 수 있다), 조회 상한(한 조회에 1,000건)에 닿았다.
 - job은 실행마다 모든 시도를 받는다(`filter=all`). 쪽을 끝까지 넘긴다. job의 시도 번호는 job 기록의 `run_attempt`에서 읽는다(2026-11-21에 이 리포의 다시 실행한 실행에서 `filter=all` 응답의 job마다 `run_attempt`가 오는 것을 확인했다). `run_attempt`가 없거나 수가 아닌 job이 있으면 `SourceError`다(실행의 최신 시도 번호로 채우지 않는다). 받은 job 수가 그 조회의 `total_count`와 다르거나 같은 job id가 두 번 오면 `SourceError`다.
-- **PR과 head 찾기**: `pull_request`·`pull_request_target` 실행은 실행 기록의 PR 번호와 head 커밋 SHA를 쓴다(포크의 PR이라 PR 목록이 비어 있으면 둘 다 null). `workflow_run`으로 시작한 실행은 `pull_request` 실행에서 본 head 커밋의 커밋 상태를 읽어, `target_url`이 가리키는 실행 번호로 그 PR과 head에 잇는다. 찾지 못하면 둘 다 null이다. 이 방법의 조회 수가 지나치면 다른 방법을 써도 된다(의사결정 로그에 적는다). 찾지 못한 실행을 버리지 않는다. `offPr`은 이벤트가 `push`이고 브랜치가 기본 브랜치인 실행만 참이다.
+- **PR과 head 찾기**: 실행 기록의 PR 목록(`pull_requests`)은 쓰지 않는다. PR이 닫히면 비기 때문이다(2026-11-21에 확인: 2026-11-17의 실행 100건 모두 비어 있었다). 지난 기간을 재면 그 목록으로는 PR을 하나도 찾지 못한다. 아래 순서로 찾는다.
+  - `pull_request`·`pull_request_target` 실행의 `head_sha`가 PR head 커밋이다(같은 날 이 리포의 실행에서 확인). 이 실행들의 서로 다른 `head_sha`마다 그 커밋에 이어진 PR을 조회한다(`repos/{owner}/{repo}/commits/<sha>/pulls`. 닫힌 PR의 옛 head 커밋도 그 PR을 준다). PR이 하나면 그 번호다. 여럿이면 지금 head가 그 커밋인 PR이 하나일 때만 그 번호다. 그 밖(없음, 가릴 수 없음)은 그 커밋에 PR이 없는 것으로 둔다. 포크의 PR도 같은 방법이다.
+  - PR을 찾은 커밋이 head다. `head_sha`가 그 커밋인 실행(이벤트가 `push`인 것은 뺀다)은 그 PR과 head에 잇는다.
+  - `workflow_run`으로 시작한 실행은 `head_sha`가 기본 브랜치의 커밋이라 위 방법으로 이을 수 없다. PR을 찾은 head 커밋마다 커밋 상태를 읽어(쪽을 끝까지 넘긴다), `target_url`이 가리키는 실행 번호의 실행을 그 PR과 head에 잇는다. 한 실행을 두 head의 상태가 가리키면 잇지 않는다.
+  - 어디에도 이어지지 않은 실행은 PR과 head 둘 다 null이다(상태를 남기지 않는 `revert` 실행, 판정 없이 끝난 판정 실행이 그렇다). 버리지 않는다("PR을 찾지 못함"으로 합산한다). `offPr`은 이벤트가 `push`이고 브랜치가 기본 브랜치인 실행만 참이다.
+  - 조회가 실패하면 `SourceError`다. 찾지 못한 것(null)과 읽지 못한 것(오류)을 가른다.
 - 조회가 실패하면 `SourceError`를 던진다. 일부만 읽은 목록을 돌려주지 않는다.
 - `scripts/metrics/source.ts`의 `Period`·`parsePeriod`·`daysOf`·`SourceError`는 가져다 쓴다.
 
@@ -176,7 +181,7 @@ export function runActionsCost(cwd: string, o: ActionsCostOptions, source?: Acti
 - 렌더: 같은 입력을 순서만 바꿔 넣어도 출력이 같다. 허용 목록에 없는 이름은 글자와 길이가 무난해도(예: 짧은 영문 낱말, 계정 이름처럼 보이는 글) 출력에 그대로 나오지 않고 `(기타)`로 합쳐진다. 목록에 있어도 글자 조건에 어긋나는 이름(마크다운 문법, 줄바꿈, 41자 이상)은 `(기타)`다. `knownNamesFrom`은 이 리포의 실제 워크플로 파일에서 `check`의 `check`, `gates`의 `evaluate`·`selftest`·`record`를 읽어 낸다. 출력에 PR 제목·브랜치 이름이 들어갈 길이 없다는 것(입력 타입에 그 필드가 없다)을 주석으로 적는다.
 - 명령: 가짜 `ActionsSource`로 종료 코드 0·1·2를 확인한다. 2일 때 `out`이 한 번도 불리지 않는다. 기간이 틀리면 자료 원천을 부르지 않는다.
 - 명령의 보존 기록(임시 폴더에서): `--save`가 파일을 쓰고, 그 파일을 `--from`으로 낸 출력이 `--save` 때의 출력과 같은 글이다. `--from`은 자료 원천을 한 번도 부르지 않는다. `--save`의 파일이 이미 있으면 종료 코드 1이고 자료 원천을 부르지 않으며 파일의 내용이 그대로다. 자료 읽기가 실패한 `--save`는 종료 코드 2이고 파일이 생기지 않는다(임시 파일도 남지 않는다). `--from`을 `--since`·`--until`·`--save`와 함께 주면 종료 코드 1이다. 없는 파일과 형식이 어긋난 파일의 `--from`은 종료 코드 2이고 `out`이 불리지 않는다. `--save`를 주지 않은 실행 뒤에 임시 폴더가 비어 있다.
-- 자료 읽기(`ghActionsSource`)는 `gh`를 가짜 실행 파일이나 주입한 실행 함수로 바꿔, `total_count` 불일치·쪽마다 다른 `total_count`·받은 수는 맞지만 실행 id가 중복된 응답·job id가 중복된 응답·`run_attempt`가 없는 job·조회 실패·쪽 넘김·`filter=all`·일부만 다시 실행한 응답의 시도 번호·PR과 head 찾기(상태의 `target_url`)를 확인한다. 오류 경우마다 명령이 종료 코드 2로 끝나고 표준 출력이 비어 있는지도 확인한다. 네트워크를 쓰지 않는다.
+- 자료 읽기(`ghActionsSource`)는 `gh`를 가짜 실행 파일이나 주입한 실행 함수로 바꿔, `total_count` 불일치·쪽마다 다른 `total_count`·받은 수는 맞지만 실행 id가 중복된 응답·job id가 중복된 응답·`run_attempt`가 없는 job·조회 실패·쪽 넘김·`filter=all`·일부만 다시 실행한 응답의 시도 번호·PR과 head 찾기를 확인한다. PR과 head 찾기는 경우마다 본다: 실행 기록의 PR 목록이 비어 있어도 커밋에 이어진 PR 조회로 찾는다, 그 조회가 PR 하나·여럿 가운데 head가 그 커밋인 것 하나·여럿이라 가릴 수 없음·없음을 줄 때, `workflow_run` 실행을 상태의 `target_url`로 잇는다, 두 head의 상태가 가리키는 실행과 어느 상태도 가리키지 않는 실행은 null이다, 기본 브랜치의 `push` 실행만 `offPr`이다, PR 조회나 상태 조회의 실패는 null이 아니라 오류다. 오류 경우마다 명령이 종료 코드 2로 끝나고 표준 출력이 비어 있는지도 확인한다. 네트워크를 쓰지 않는다.
 
 ### 5. 문서
 
