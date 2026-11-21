@@ -1,0 +1,21 @@
+{
+  "plan": "20261121-actions-cost-design",
+  "steps": [
+    {
+      "step": 0,
+      "name": "shadow-cost",
+      "status": "completed",
+      "completed_at": "2026-11-21T19:43:18+09:00"
+    },
+    {
+      "step": 1,
+      "name": "baseline-procedure",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "options-adr",
+      "status": "pending"
+    }
+  ]
+}
