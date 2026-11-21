@@ -2,7 +2,7 @@
 id: 20261120-q10-db-decision
 issue: 166 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -139,6 +139,7 @@ claimed_at: 2026-11-20T21:50:40+09:00 # new-task가 채운다
 - 2026-11-21 계획 수정 PR #177의 계획 검증 3라운드(head `cb6fb9d`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청. F2는 닫혔다. F3만 새 이유로 열려 있다(`pr-state`에 "오래 열린 지적" 줄은 없다). 받아들였다.
   - F3(자리와 줄의 꼴을 보지 않는다): 바로 윗줄이 TD 행인지만 봐서 TD-62를 TD-1 바로 뒤에 넣어도 통과했고, 첫 `|` 앞에 글자를 붙인 줄도 통과했다. 조건을 하나씩 덧대는 대신 기대한 파일을 만들어 전체를 비교하게 바꿨다: 더한 줄이 `| TD-<번호> |`로 시작해 `|`로 끝나고 칸 수가 구분선 행과 같은지 보고, 갈라진 지점의 표에서 그 번호보다 작은 번호의 마지막 행 바로 아래에 그 줄을 넣은 파일과 지금의 파일이 같은지 `diff`로 본다. 번호는 숫자로 비교해 갈라진 지점의 표에 있으면 실패한다.
   - 확인: 고친 AC 줄을 step 파일에서 그대로 뽑아 열여섯 경우에 돌렸다. 통과: 새 행 하나(TD-62, 마지막 행 아래), 건너뛴 새 번호(TD-63, 마지막 행 아래). 실패: 앞 라운드의 아홉 경우와 TD-1 바로 뒤, TD-60 아래, 첫 `|` 앞에 글자, 마지막 `|` 뒤에 글자, 앞에 0을 붙인 있던 번호(TD-061).
+- 2026-11-21T22:10:44+09:00 step1 재작업: 계획 수정(PR #177) 병합 뒤, 웹 프로파일의 목록을 guard.dbCommands 항목으로 다시 구현한다
 
 ## 의사결정 로그
 
