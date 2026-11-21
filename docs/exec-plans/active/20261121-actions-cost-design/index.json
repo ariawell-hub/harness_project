@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "baseline-procedure",
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-11-22T08:38:16+09:00"
     },
     {
       "step": 2,

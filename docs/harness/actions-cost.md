@@ -1,7 +1,6 @@
 ---
 status: active
-related_code:
-  [scripts/metrics/actions-cost.ts, scripts/commands/actions-cost.ts, lab/actions-cost/check-doc.ts]
+related_code: [scripts/metrics/actions-cost.ts, lab/actions-cost/check-doc.ts]
 review_cycle: on-change
 ---
 
