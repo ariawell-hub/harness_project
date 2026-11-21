@@ -184,6 +184,10 @@ export function prSize(o: { root: string; base: string; cfg: HarnessConfig }): P
   - 작은 결과: `file`이 `serializeResults(r)`이고 `summary`가 `summaryMarkdown(r)`이다.
   - 경고 판정의 상세만 빠지는 크기의 결과와 경고 판정이 통째로 빠지는 크기의 결과 각각: `file`은 `serializeResults(fitWarnings(r))`이고 `RESULTS_MAX_BYTES` 이하이며 경고 판정의 상세 줄이 들어 있지 않다. `summary`는 `summaryMarkdown(r)`과 같고, 경고 context마다 결과 칸이 `경고`인 행과 `### <context>` 제목, 상세 줄이 들어 있다.
   - 경고 판정이 통째로 빠지는 크기의 결과: `file`을 읽은 값의 context가 `GATE_CONTEXTS`뿐이다.
+- **`gates` 명령**(`node scripts/harness.ts gates --repo … --config-root … --base … --head-ref … --out … --summary …`를 프로세스로 실행한다. 크기 상한이 실제로 발동하는 입력이다):
+  - 입력 만들기: 임시 리포의 설정에 서로 다른 `riskPaths` glob 열 개(모두 `pad/` 아래의 같은 파일들에 맞고 위험도는 `normal`)를 둔다. PR 브랜치에 세는 파일 40개(파일마다 20줄, `pr-size` 경고)와 `pad/` 아래의 `.md` 파일들을 둔다. `risk-gate`는 맞는 규칙마다 근거 줄을 내므로 파일 하나가 필수 판정의 상세를 열 줄 늘린다. 경로는 100자 안쪽으로 한다(Windows의 경로 길이 한도).
+  - `pad/` 파일을 하나씩 늘려 커밋하며 `runGates`의 결과가 `RESULTS_MAX_BYTES`를 처음 넘는 때를 찾는다(파일 하나가 늘리는 크기가 `pr-size`의 상세보다 작아, 그때는 경고의 상세만 빼면 상한 안이다). 그 결과에서 `pr-size`가 경고이고 `fitWarnings`가 그 상세를 `[WARN_DETAILS_DROPPED]`로 바꾸며 상한 이하가 되는지를 먼저 단언한다(판정 문구가 바뀌어 크기가 달라지면 여기서 드러난다).
+  - 그 head에서 명령을 실행한 뒤: `--out` 파일의 글자가 `serializeResults(fitWarnings(r))`과 같고, `RESULTS_MAX_BYTES` 이하이며, `pr-size`의 파일 줄이 들어 있지 않고, `validateResults`(`contexts: RECORDED_CONTEXTS`)를 통과한다. `--summary` 파일의 글자는 `summaryMarkdown(r)`과 같고, `| pr-size | 경고 |`가 든 행과 `pr-size`의 파일 줄이 그대로 들어 있다(`r`은 같은 입력으로 `runGates`가 돌려준 원래 결과다).
 - **긴 경로**(`prSizeOf`에 직접 넘긴다. 파일 시스템을 거치지 않는다): 경로가 4,000자(한글)인 파일 40개로 상한을 넘기면, `description`과 `details`를 JSON으로 만든 것의 UTF-8 크기가 16,000바이트보다 작다. `details`의 모든 줄이 200자 이하이고, 앞의 세 줄(수, 고치는 법, 근거)이 남아 있으며, 끝 줄이 `DETAILS_CUT`이다.
 - **경로의 글자**(`prSizeOf`에 직접 넘긴다): 경로가 `docs\a.ts`(역슬래시가 든 파일 이름)와 `src\test\a.ts`인 파일은 센다. `docs/a.ts`와 `src/test/a.ts`는 세지 않는다.
 - **설정**: 키가 없는 설정 파일을 `loadConfig`로 읽으면 `prSize`가 기본값이다. `{ maxLines: 10 }`이면 `exclude`는 기본 목록이다. `{ exclude: [] }`이면 `maxLines`는 400이다. `ConfigError`(메시지에 `prSize`): `maxLines`가 0, 음수, 1.5, `'400'`인 경우, `exclude`에 `/abs`, `../x`, 수가 든 경우, 모르는 키, 배열, `null`. 돌려받은 `exclude`에 항목을 더해도 `DEFAULT_PR_SIZE.exclude`의 길이는 8이다.

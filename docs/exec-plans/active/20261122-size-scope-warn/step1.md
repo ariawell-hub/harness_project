@@ -121,6 +121,9 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
   - 해시에 묶이지 않는 자리(긴 펜스 안의 `## 예시` 줄 뒤, 바깥 블록이 닫힌 뒤)에 `` `late.ts` ``를 적은 계획과 적지 않은 계획: 두 리포의 `planHash`가 같고, `late.ts`를 바꾼 PR에서 둘 다 `outside`가 `late.ts`이며 경고다.
 - **`runGates`**: 결과의 context 순서가 `RECORDED_CONTEXTS`와 같고 끝의 둘이 `pr-size`, `scope`다. 범위 밖 파일이 있는 PR에서 `scope`가 `success`이고 `isWarning`이 참이며, 필수 판정 다섯의 `state`는 범위 밖 파일이 없는 같은 모양의 PR과 같다. 계획 파일 자리에 폴더가 있어 읽을 수 없으면 `scope`는 `error`이고 `pr-size`는 `success`다.
 - **요약에 남는 범위 경고**(`gatesOutput`에 만든 결과 값을 직접 넘긴다): `judgeScope`가 낸 범위 밖 파일 셋의 경고를 `scope`의 결과로 두고, 필수 판정의 상세를 채워 (가) `scope`의 상세만 빠지는 크기와 (나) 경고 판정이 통째로 빠지는 크기의 결과를 만든다. 두 경우 모두 `file`은 `RESULTS_MAX_BYTES` 이하이고, (가)의 `file`에는 모든 context가 있되 범위 밖 파일의 줄이 없으며 (나)의 `file`에는 `GATE_CONTEXTS`만 있다. 두 경우 모두 `summary`에는 `| scope | 경고 |` 행과 `### scope` 제목, 범위 밖 파일 셋이 한 줄씩 들어 있다.
+- **`gates` 명령**(프로세스로 실행한다. step0의 `scripts/test/pr-size.test.ts`에 있는 같은 이름의 사례와 같은 방법으로 크기 상한이 실제로 발동하는 입력을 만든다): 임시 리포에 계획 폴더("관련 파일·문서"에 `pad/`는 없다)와 `riskPaths` glob 열 개를 두고, `pad/` 아래의 `.md` 파일을 하나씩 늘려 `runGates`의 결과가 `RESULTS_MAX_BYTES`를 처음 넘는 때를 찾는다. 그 결과에서 `scope`가 경고이고 상세에 `pad/`로 시작하는 범위 밖 파일 줄이 30개인지 먼저 단언한다. 그 head에서 `gates --out … --summary …`를 실행한 뒤:
+  - `--out` 파일은 `RESULTS_MAX_BYTES` 이하이고, `scope`의 `details`가 `[WARN_DETAILS_DROPPED]`이며 `description`은 원래 결과와 같고, 필수 판정 다섯의 결과는 원래 결과와 같다.
+  - `--summary` 파일에는 `| scope | 경고 |`로 시작하는 행과 `### scope` 줄, 범위 밖 파일 줄 30개가 한 줄씩 그대로 들어 있다.
 - **레이어**: `scripts/gates/scope.ts`의 글에 `../ci/`가 없다.
 - `scripts/test/revert-check.test.ts`: 확인된 revert PR의 `runGates` 테스트에 `scope`가 `success`·`revert PR: 보지 않는다`인 단언을 더한다.
 
