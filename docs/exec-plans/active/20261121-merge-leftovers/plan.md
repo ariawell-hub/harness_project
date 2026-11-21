@@ -98,6 +98,7 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 2026-11-21 17:52 구현을 올렸다. 같은 명령이 통과한다(15건). 절차서 5절에 한 항목, `CHANGELOG`에 한 줄을 더하고 TD-30을 해결로 바꿨다.
 - 2026-11-21 18:18 PR #176 구현 판정 1라운드(head `2659d92`): claude 승인(지적 없음), codex 수정 요청(P1 1, 재현됨).
   - F8(P1, codex) 한 파일에 표식 줄이 아주 많으면(20만 줄) 줄 번호 배열을 `Math.min(...)`의 인자로 펼치다 `RangeError`로 끝나 R7 진단이 나오지 않는다 → 수용. 20만 줄짜리 파일의 테스트를 먼저 더했고 고치기 전에는 실패한다(`RangeError: Maximum call stack size exceeded`). 줄 번호를 모으지 않고 파일마다 가장 작은 줄 번호와 표식 줄의 수만 누적하게 고친다. 완료 커밋 뒤에 코드를 고치므로 step0을 `in_progress`로 되돌렸다(절차서 4절).
+- 2026-11-21 18:20 F8을 고쳤다(테스트 커밋 `406c464` 뒤). 20만 줄 테스트가 통과하고 step0의 AC 명령을 다시 돌렸다(57건 통과).
 
 ## 의사결정 로그
 
@@ -126,9 +127,9 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 각 step의 Acceptance Criteria.
 - `node scripts/harness.ts check`.
 
-step0 결과(2026-11-21 17:52, 구현 커밋의 작업 트리):
+step0 결과(2026-11-21 18:20, F8을 고친 작업 트리에서 다시 실행):
 
-- `node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scripts/test/cli.test.ts scripts/test/check-skip.test.ts`: 종료 코드 0. 56건 가운데 56건 통과, 실패 0, 건너뜀 0. 새 테스트는 15건이다.
+- `node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scripts/test/cli.test.ts scripts/test/check-skip.test.ts`: 종료 코드 0. 57건 가운데 57건 통과, 실패 0, 건너뜀 0. 새 테스트는 16건이다.
 - `node scripts/harness.ts bypass-scan`: 종료 코드 0(`bypass-scan: 통과`). 이 리포에는 충돌 표식 줄이 없다.
 - 절차서의 문장을 글자 그대로 견주는 `grep -qxF` 명령: 종료 코드 0.
 - `grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.

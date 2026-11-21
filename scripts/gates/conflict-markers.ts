@@ -53,8 +53,8 @@ export function conflictMarkers(root: string): Problem[] {
   if (r.code === 1 && r.stdout === '') return [];
   if (r.code !== 0) return failed(`종료 코드 ${r.code}`);
 
-  const byFile = new Map<string, number[]>();
-  RECORD.lastIndex = 0;
+  // 줄 번호를 모으지 않는다. 표식 줄이 아주 많은 파일에서도 파일마다 두 값만 든다
+  const byFile = new Map<string, { first: number; count: number }>();
   let at = 0;
   while (at < r.stdout.length) {
     RECORD.lastIndex = at;
@@ -62,16 +62,21 @@ export function conflictMarkers(root: string): Problem[] {
     if (!m) return failed('출력 해석 실패');
     at = RECORD.lastIndex;
     if (!MARKER_LINE.test(m[3])) continue;
-    const lines = byFile.get(m[1]) ?? [];
-    lines.push(Number(m[2]));
-    byFile.set(m[1], lines);
+    const line = Number(m[2]);
+    const seen = byFile.get(m[1]);
+    if (seen) {
+      seen.first = Math.min(seen.first, line);
+      seen.count += 1;
+    } else {
+      byFile.set(m[1], { first: line, count: 1 });
+    }
   }
 
   return [...byFile.keys()].sort().map((file) => {
-    const lines = byFile.get(file)!;
+    const { first, count } = byFile.get(file)!;
     return {
       rule: 'R7 충돌 표식',
-      what: `${file}:${Math.min(...lines)}에 병합 충돌 표식이 남아 있다(표식 ${lines.length}줄)`,
+      what: `${file}:${first}에 병합 충돌 표식이 남아 있다(표식 ${count}줄)`,
       how: '충돌 블록을 풀고 표식 줄을 지워라. 표식 모양의 줄이 꼭 필요한 파일이면 줄 머리에 오지 않게 써라',
       doc: DOC,
     };
