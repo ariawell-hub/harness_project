@@ -22,8 +22,8 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 
 1. 제작자 계정이 PR에 단, 승인 줄만 있는 고쳐지지 않은 댓글이 지적이 게시된 뒤에 달렸으면, 원장의 열린 P1이 `accepted`가 되고 `review-ledger`가 그 지적 때문에 막지 않는다(테스트가 판별 함수, 읽기, 기록 명령에서 단언한다).
 2. 승인을 인정하는 조건은 P0과 같고 바뀌지 않는다: 제작자가 아닌 계정(PR 작성자인 봇 포함)의 댓글, 고쳐진 댓글, 다른 글이 섞인 댓글, 지적이 게시되기 전의 댓글은 P1에도 승인이 아니다(테스트가 단언한다). 계획·반박에 적은 글은 승인이 아니다.
-3. P2·P3과, `deferred`·`fixed`·`rejected`인 P1은 대상이 아니다. 반영하지 않은 이유가 고정된 문구로 로그에 남는다.
-4. `accepted`인 P1은 검증자의 판정으로 바뀌지 않고, 승인 댓글이 없어지면 `open`으로 돌아가 다시 막는다. 검증자가 다른 위치나 제목으로 낸 새 지적은 새 ID로 다시 막는다(P0의 지금 동작과 같다).
+3. P2·P3과, `deferred`·`fixed`·`rejected`인 P1은 대상이 아니다. 댓글을 읽는 실행(원장에 열렸거나 `accepted`인 P0·P1이 하나라도 있다)에서는 반영하지 않은 이유가 고정된 문구로 로그에 남는다(기록 명령 테스트가 열린 P1과 `deferred`인 P2를 함께 승인한 댓글로 단언한다). 그런 지적이 없는 원장에서는 댓글을 읽지 않으므로 이유도 남지 않는다(지금의 P0과 같다. 테스트가 단언한다).
+4. `accepted`인 P1은 검증자의 판정으로 바뀌지 않고, 승인 댓글이 없어지면 `open`으로 돌아가 다시 막는다. 검증자가 다른 위치나 제목으로 낸 새 지적은 새 ID로 등록되고, 막는지는 있던 등록 규칙을 그대로 따른다: 새 P0과, 직전 판정 이후 바뀐 파일에 대한(또는 재현된) 새 P1은 `open`으로 다시 막는다. 그 검증자의 2라운드 이후에 바뀌지 않은 파일에 대해 낸 재현되지 않은 새 P1은 동결 규칙(설계서 10.2절 (5))대로 `deferred`로 등록돼 막지 않는다(테스트가 두 경우를 모두 단언한다).
 5. P0에 대한 지금의 동작은 바뀌지 않는다(있던 P0 테스트가 그대로 통과한다).
 6. 설계서 10.2절 (4), 절차서 8절, 원장 형식 문서(`scripts/cross-review/ledger.md`), `docs/harness/architecture.md`의 `ci/*` 행이 "제작자 승인은 P0·P1"이라고 같은 말을 한다. 설계서의 버전이 오르고 변경 기록과 `CHANGELOG`에 한 줄이 있다. `node scripts/harness.ts check` 통과.
 
@@ -32,7 +32,7 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 범위:
 
 - `scripts/ci/owner-accept.ts`의 판별 두 곳(`refusal`, `needsAccepts`)과 주석. `scripts/ci/accept-load.ts`·`scripts/ci/ledger.ts`의 주석.
-- 테스트: `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`, `scripts/test/ledger.test.ts`.
+- 테스트: `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`. 네 파일 모두 새 동작을 단언해 변경 전 코드에서 실패한다(`test-effect`).
 - 문서: `docs/harness/design.md`(10.2절 (4), 버전, 변경 기록), `docs/harness/workflow.md`(8절), `scripts/cross-review/ledger.md`, `docs/harness/architecture.md`(`ci/*` 행), `docs/harness/CHANGELOG.md`.
 
 비범위:
@@ -47,9 +47,9 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 ## 관련 파일·문서
 
 - `scripts/ci/owner-accept.ts`, `scripts/ci/accept-load.ts`, `scripts/ci/ledger.ts`
-- `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`, `scripts/test/ledger.test.ts`
+- `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`
 - `docs/harness/design.md`, `docs/harness/workflow.md`, `docs/harness/architecture.md`, `docs/harness/CHANGELOG.md`, `scripts/cross-review/ledger.md`
-- 읽기만: `scripts/ci/ledger-store.ts`, `scripts/cross-review/prompt.md`, `scripts/ci/rebuttal.ts`, `scripts/test/ledger-store.test.ts`
+- 읽기만: `scripts/ci/ledger-store.ts`, `scripts/cross-review/prompt.md`, `scripts/ci/rebuttal.ts`, `scripts/test/ledger-store.test.ts`, `scripts/test/ledger.test.ts`, `scripts/gates/test-effect.ts`
 
 ## step 목록
 
@@ -58,6 +58,10 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-21 계획 작성. 출처: PR #171의 F28 교착(재판정 4회)에서 제작자가 "하네스를 먼저 고친다"를 골랐다(대화). 봇이 Issue #178을 등록했다.
+- 2026-11-21 계획 검증 1라운드(head `076373a`): `review/claude` 승인. `review/codex` 수정 요청(P1 3건). 셋 다 맞는 지적이라 계획을 고쳤다.
+  - F1(있던 원장 동작만 보는 테스트 파일은 `test-effect`에서 실패한다): 원장 쪽 테스트를 `ledger-accept.test.ts`에만 두고, 열린 P1에 `applyOwnerAccepts`로 승인을 반영한 원장을 입력으로 쓰게 했다(변경 전 코드에서 실패한다). `ledger.test.ts`는 고치지 않는다. 예외 줄은 쓰지 않는다. AC에 `test-effect`를 더했다.
+  - F2(승인 뒤 새 P1이 막는 조건에 동결 규칙이 빠졌다): 수용 기준 4와 테스트를 있던 등록 규칙대로 적었다(바뀐 파일의 새 P1과 새 P0은 `open`, 바뀌지 않은 파일의 재현되지 않은 새 P1은 `deferred`).
+  - F3(댓글 조회를 건너뛰는 원장에서는 거부 이유가 남지 않는다): 수용 기준 3을 "댓글을 읽는 실행에서 남는다"로 고치고, 기록 명령 테스트 둘(열린 P1과 `deferred` P2를 함께 승인, `fixed` P1만 있는 원장)을 더했다.
 
 ## 의사결정 로그
 
@@ -77,7 +81,7 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 
 ## 검증 방법과 결과
 
-- step0의 AC: 테스트 여섯 파일, 판별 문구, 범위 밖 파일이 바뀌지 않았는지, `ledger.ts`·`accept-load.ts`는 주석만 바뀌었는지, 문서 다섯 곳, `node scripts/harness.ts check`.
+- step0의 AC: 테스트 여섯 파일, `test-effect`, 판별 문구, 범위 밖 파일이 바뀌지 않았는지, `ledger.ts`·`accept-load.ts`는 주석만 바뀌었는지, 문서 다섯 곳, `node scripts/harness.ts check`.
 - 결과: (step0 실행 뒤 적는다)
 
 ## 다음 할 일

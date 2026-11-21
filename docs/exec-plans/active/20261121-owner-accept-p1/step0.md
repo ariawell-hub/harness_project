@@ -7,7 +7,8 @@
 - `docs/harness/workflow.md` 8절(반박, 교착, 오래 열린 지적, 제작자 승인)
 - `scripts/cross-review/ledger.md`(원장 형식, "제작자 승인" 절, "규칙" 절), `scripts/cross-review/prompt.md`(읽기만)
 - `scripts/ci/owner-accept.ts`(`refusal`, `applyOwnerAccepts`, `needsAccepts`), `scripts/ci/accept-load.ts`(`loadAccepted`), `scripts/ci/ledger.ts`(`ENTRY_STATUSES`, `ledgerStatus`), `scripts/ci/ledger-store.ts`(읽기만)
-- `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`, `scripts/test/ledger.test.ts`
+- `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`, `scripts/test/ledger.test.ts`(읽기만)
+- `scripts/gates/test-effect.ts`(읽기만. 고친 테스트 파일마다 변경 전 코드에서 실패해야 한다), `scripts/ci/ledger.ts`의 `applyVerdict`(새 지적의 등록과 동결)
 
 ## 작업
 
@@ -24,6 +25,7 @@
   - 열린 P1에 인정되는 승인 댓글이 있으면 `accepted`가 되고 처리 칸이 `제작자 승인(댓글 <id>)`이다.
   - 동결돼 `deferred`인 P1, `fixed`·`rejected`인 P1은 `'열린 지적이 아니다'`로 반영되지 않는다. P2·P3은 `'차단 지적(P0·P1)이 아니다'`로 반영되지 않는다.
   - `accepted`인 P1의 승인 댓글이 없어지면(지워짐, 고쳐짐) `open`으로 돌아간다.
+  - 반영하지 않은 승인의 이유는 댓글을 읽은 실행에서만 로그에 남는다. `needsAccepts`가 거짓인 원장(열렸거나 `accepted`인 P0·P1이 없다)에서는 댓글을 읽지 않으므로 이유도 남지 않는다(지금의 P0과 같은 동작이다).
   - 열린 P1만 있는 원장에서도 기록 job과 plan job이 PR 댓글의 편집 이력을 읽는다(`loadAccepted`가 GraphQL을 부른다). 읽지 못하면 지금의 P0과 같은 길로 닫힌 쪽이다(기록 job은 원장을 쓰지 않고 `review-ledger`가 `error`).
 
 ### 2. 주석 (`scripts/ci/owner-accept.ts`, `scripts/ci/accept-load.ts`, `scripts/ci/ledger.ts`)
@@ -42,10 +44,15 @@
   - 열린 P1만 있는 원장에서 `loadAccepted`가 GraphQL을 한 번 부르고 승인을 반영한다.
   - 볼 지적이 없는 원장(`deferred`인 P2만, `fixed`인 P1만)에서는 GraphQL을 부르지 않는다.
   - 열린 P1만 있는 원장에서 GraphQL 읽기가 실패하면 예외가 그대로 올라온다(닫힌 쪽).
-- `scripts/test/accept-cli.test.ts`(기록 job을 명령으로 부르는 테스트): 열린 P1 하나가 있는 원장에 제작자의 승인 댓글이 있으면 원장 표의 그 행이 `accepted`가 되고 `review-ledger`가 `success`다(상태 설명에 `제작자 승인 1`). 같은 원장에 봇 계정의 승인 줄 댓글만 있으면 `open`으로 남고 `review-ledger`가 `failure`다.
-- `scripts/test/ledger-accept.test.ts` 또는 `scripts/test/ledger.test.ts`:
-  - `ledgerStatus`: `accepted`인 P1만 있으면 `success`이고 설명에 `제작자 승인 1`이 있다. `accepted`인 P1과 `open`인 P1이 함께 있으면 `failure`다.
-  - `accepted`인 P1은 그 지적을 낸 검증자의 판정(`resolutions`의 `open`·`fixed`·`rejected`, 같은 위치·제목의 재등록)으로 바뀌지 않는다. 다른 위치나 제목의 새 P1은 새 ID로 등록되고 `open`이다(다시 막는다).
+- `scripts/test/accept-cli.test.ts`(기록 job을 명령으로 부르는 테스트):
+  - 열린 P1 하나가 있는 원장에 제작자의 승인 댓글이 있으면 원장 표의 그 행이 `accepted`가 되고 `review-ledger`가 `success`다(상태 설명에 `제작자 승인 1`). 같은 원장에 봇 계정의 승인 줄 댓글만 있으면 `open`으로 남고 `review-ledger`가 `failure`다.
+  - 거부 이유의 로그: 열린 P1(F1)과 `deferred`인 P2(F2)가 함께 있는 원장에서 제작자가 두 지적을 모두 승인하는 댓글을 달면, F1은 `accepted`가 되고 F2는 `deferred` 그대로이며, 출력에 `record-review: 제작자 승인 무시 F2(댓글 <id>): 차단 지적(P0·P1)이 아니다` 줄이 있다.
+  - 조회를 건너뛰는 원장: `fixed`인 P1만 있는 원장에 제작자의 승인 줄 댓글이 있어도 댓글을 읽지 않고(가짜 GraphQL이 불린 횟수가 0이다. 테스트 도우미가 횟수를 세지 않으면 세게 한다), 출력에 `제작자 승인`으로 시작하는 기록 줄이 없으며, 원장은 그대로다. 거부 이유는 댓글을 읽는 원장(열렸거나 `accepted`인 P0·P1이 하나라도 있는 원장)에서만 남는다.
+- `scripts/test/ledger-accept.test.ts`(이 파일에만 더한다. `scripts/test/ledger.test.ts`는 고치지 않는다):
+  - 아래 테스트는 모두 **열린 P1에 `applyOwnerAccepts`로 승인을 반영한 원장**을 입력으로 쓴다(손으로 `accepted`를 적은 원장을 쓰지 않는다). 지금 코드에서는 P1이 `accepted`가 되지 않으므로 구현 전에 실패한다. `ledgerStatus`와 `applyVerdict`는 이 step에서 동작이 바뀌지 않으므로, 손으로 만든 `accepted` 원장만 쓰는 테스트는 변경 전 코드에서도 통과해 `test-effect`가 그 파일을 막는다. `test-effect` 예외 줄은 쓰지 않는다.
+  - `ledgerStatus`: 승인이 반영된 P1만 있으면 `success`이고 설명에 `제작자 승인 1`이 있다. 승인이 반영된 P1과 `open`인 다른 P1이 함께 있으면 `failure`다.
+  - 승인이 반영된 P1은 그 지적을 낸 검증자의 판정(`resolutions`의 `open`·`fixed`·`rejected`, 같은 위치·제목의 재등록)으로 바뀌지 않는다.
+  - 새 지적은 있던 등록 규칙(동결 포함)을 그대로 따른다. 승인이 반영된 P1을 낸 검증자의 2라운드 이후 판정에서: (가) 직전 판정 이후 **바뀐 파일**에 대한, 위치나 제목이 다른 새 P1은 새 ID로 등록되고 `open`이다(다시 막는다). (나) 직전 판정 이후 **바뀌지 않은 파일**에 대한 재현되지 않은 새 P1은 새 ID로 등록되지만 `deferred`다(막지 않는다. 설계서 10.2절 (5)의 동결). (다) 새 P0은 파일이 바뀌었든 아니든 `open`이다.
 - 있던 단언 가운데 고치는 것은 **"P1은 승인되지 않는다"를 전제한 것뿐**이다(예: `owner-accept.test.ts`의 "반영하지 않는 경우" 표의 P1 행과 문구 `'P0이 아니다'`, `needsAccepts` 테스트의 P1 줄, `accept-load.test.ts`의 "볼 지적이 없으면 GraphQL을 부르지 않는다"의 P1 원장, `accept-cli.test.ts`의 "P0이 아닌 지적" 사례). 그 자리의 P1을 P2로 바꾸거나 기대값을 새 동작으로 바꾼다. 고친 테스트의 파일과 이름을 진행 로그에 적는다. 그 밖의 있던 단언은 지우거나 약하게 하지 않는다.
 
 ### 4. 문서
@@ -68,6 +75,9 @@
 
 ```bash
 node --test scripts/test/owner-accept.test.ts scripts/test/accept-load.test.ts scripts/test/accept-cli.test.ts scripts/test/ledger-accept.test.ts scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts
+node scripts/harness.ts test-effect
+b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts)"
+grep -qF "차단 지적(P0·P1)이 아니다" scripts/test/accept-cli.test.ts && grep -q "applyOwnerAccepts" scripts/test/ledger-accept.test.ts && test "$(grep -c "^- test-effect 예외:" docs/exec-plans/active/20261121-owner-accept-p1/plan.md)" -eq 0
 test "$(grep -c "P0이 아니다" scripts/ci/owner-accept.ts)" -eq 0 && grep -qF "차단 지적(P0·P1)이 아니다" scripts/ci/owner-accept.ts && grep -qF "차단 지적(P0·P1)이 아니다" scripts/test/owner-accept.test.ts
 b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- scripts/cross-review/prompt.md scripts/ci/rebuttal.ts scripts/ci/ledger-store.ts scripts/runner scripts/commands .github harness.config.json)"
 b=$(git merge-base HEAD origin/main) && test "$(git diff "$b" -- scripts/ci/ledger.ts scripts/ci/accept-load.ts | grep -E '^[+-][^+-]' | grep -vcE '^[+-][[:space:]]*(//|/\*|\*)')" -eq 0
@@ -89,4 +99,6 @@ node scripts/harness.ts check
 - 제작자 계정의 댓글 글을 검증자 입력에 넣지 마라. 이유: 자유 글이 검증자에게 가는 길이 생긴다(10.2절 (4) "반박 형식"). 제작자가 고르지 않은 방법이다.
 - 반박(`scripts/ci/rebuttal.ts`)과 runner(`scripts/runner/**`), `pr-state`의 동작을 고치지 마라. 이유: 범위 밖이다. runner의 교착 보고 문구에 승인 선택지를 더하는 일은 발견 사항으로 남긴다.
 - "P1은 승인되지 않는다"를 전제한 것 말고는 있던 테스트의 단언을 지우거나 약하게 하지 마라. 이유: R4.
+- `test-effect` 예외 줄을 쓰지 마라. 이유: 고치는 테스트 파일 넷은 모두 새 동작(P1 승인)을 단언하므로 변경 전 코드에서 실패해야 한다. 예외가 필요해졌다면 테스트가 새 동작을 보지 않는다는 뜻이다.
+- 새 지적의 등록 규칙(등급 내림, 동결, 가득 찬 원장)을 고치지 마라. 이유: 승인된 지적 뒤에 나온 새 지적이 막는지는 있던 규칙이 정한다. 이 step은 그 규칙을 바꾸지 않는다.
 - `.github/workflows/`와 `harness.config.json`을 고치지 마라. 이유: 필요 없다. 워크플로는 제작자가 적용한다.
