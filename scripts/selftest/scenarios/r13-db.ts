@@ -28,6 +28,7 @@ export default {
       'cockroach sql -e "select 1"', // 설정의 dbClients
       'npx drizzle-kit --config "team config.ts" migrate', // 설정의 dbCommands: 값에 공백이 든 플래그 뒤의 금지 하위 명령
       'npx drizzle-kit@latest --config x push', // 코어의 기본 항목: 버전을 붙이고 플래그가 앞에 온 호출
+      'npx drizzle-kit > out.txt --config x migrate', // 리다이렉션은 인자가 아니다
     ])
       assertBlocked(bash(command), /R13/, command);
     // 대조군: 같은 도구의 읽기 명령

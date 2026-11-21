@@ -918,12 +918,14 @@ test('guard 프로세스: guard.dbCommands는 메인 체크아웃의 설정으�
 
   // 메인의 설정이 틀리면 조용히 꺼지지 않고 Bash 호출을 막는다(fail-closed). 금지 호출이 아니어도 막힌다
   put(main, [{ tool: '-knex', forbidden: ['migrate:latest'] }]);
-  for (const cwd of [main, wt]) {
-    const bad = bash(cwd, 'ls');
-    assert.equal(bad.code, 2);
-    assert.match(bad.stderr, /설정을 읽지 못해/);
-    assert.match(bad.stderr, /guard\.dbCommands\[0\]\.tool/);
-  }
+  // 인자가 없는 명령(할당뿐, 주석뿐)도 막힌다: 설정 검사는 명령의 내용과 무관하게 돈다
+  for (const cwd of [main, wt])
+    for (const command of ['ls', 'REVIEW_SAMPLE=1', '# 주석뿐이다', ':']) {
+      const bad = bash(cwd, command);
+      assert.equal(bad.code, 2, command);
+      assert.match(bad.stderr, /설정을 읽지 못해/);
+      assert.match(bad.stderr, /guard\.dbCommands\[0\]\.tool/);
+    }
   // Bash가 아닌 도구는 이 설정을 읽지 않는다: 설정을 읽고 고칠 길이 남는다
   const read = runGuard({
     tool_name: 'Read',

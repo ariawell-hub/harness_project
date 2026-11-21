@@ -522,7 +522,7 @@ const DB_COMMANDS: DbCommandRule[] = [
   { tool: 'prisma', forbidden: ['db push', 'migrate reset'] },
 ];
 
-function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
+function dbRules(c: SimpleCommand, ctx: GuardContext, commands: DbCommandRule[]): Problem | null {
   const clients = new Set([...DB_CLIENTS, ...ctx.dbClients]);
   const hit = c.argv.find((x) => clients.has(commandName(x)));
   if (hit) {
@@ -544,7 +544,8 @@ function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
       `${D} R13, 14.3절`,
     );
   }
-  const cmd = matchDbCommand(c.argv, [...DB_COMMANDS, ...(ctx.dbCommands?.() ?? [])]);
+  // 셸이 명령에 넘기는 인자로 본다: 리다이렉션(`tool > out.txt push`)은 인자가 아니다
+  const cmd = matchDbCommand(c.args ?? c.argv, commands);
   if (cmd) {
     return v(
       'R13 DB 위험 작업',
@@ -914,6 +915,9 @@ export function evaluateBash(
   ctx: GuardContext,
   dialect: Dialect = 'posix',
 ): Problem | null {
+  // 설정(guard.dbCommands)은 명령의 내용과 무관하게 Bash 호출마다 한 번 읽는다. 틀린 설정이면 여기서 던져
+  // 훅이 그 호출을 막는다: 인자가 없는 명령(할당뿐, 주석뿐)이나 앞의 규칙에 걸린 명령도 지나치지 않는다
+  const dbCommands = [...DB_COMMANDS, ...(ctx.dbCommands?.() ?? [])];
   const raw = rawRules(command);
   if (raw) return raw;
   let procedural: Problem | null = null;
@@ -923,7 +927,7 @@ export function evaluateBash(
       secretRules(c, ctx) ??
       (head === 'git' ? gitRules(c, cwd, ctx) : null) ??
       (head === 'gh' ? ghRules(c, cwd, ctx) : null) ??
-      (c.argv.length ? dbRules(c, ctx) : null) ??
+      (c.argv.length ? dbRules(c, ctx, dbCommands) : null) ??
       (c.argv.length ? rmRule(c, cwd, ctx) : null) ??
       (c.argv.length ? externalRules(c) : null);
     // 금지 규칙(R…)이 먼저다. 승인 요청 순서 같은 절차 안내는 뒤 명령의 금지 규칙과 검사 순서 규칙을 가리지 않는다
@@ -1169,6 +1173,8 @@ export function evaluateMcp(input: GuardInput, ctx: GuardContext): Problem | nul
 
 export function evaluate(input: GuardInput, ctx: GuardContext): Problem | null {
   if (input.kind === 'mcp') return evaluateMcp(input, ctx);
+  // 빈 명령도 Bash 호출이다: 설정(guard.dbCommands) 검사는 지나치지 않는다
+  if (input.kind === 'bash' && !input.command) ctx.dbCommands?.();
   if (input.kind === 'bash' && input.command) {
     for (const d of input.dialects ?? ['posix']) {
       const r = evaluateBash(input.command, input.cwd, ctx, d);

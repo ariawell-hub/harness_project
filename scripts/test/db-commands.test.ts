@@ -5,9 +5,10 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ConfigError } from '../lib/config.ts';
 import { matchDbCommand, type DbCommandRule } from '../hooks/db-commands.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
-import { parseShell } from '../hooks/shell.ts';
+import { parseShell, type Dialect } from '../hooks/shell.ts';
 
 const DRIZZLE: DbCommandRule[] = [{ tool: 'drizzle-kit', forbidden: ['migrate', 'push', 'drop'] }];
 
@@ -306,4 +307,162 @@ test('최악 입력(인자 20,000개)에서도 판정이 시간 안에 끝난다
   );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, '0');
+});
+
+// ---------- 리다이렉션 (구현 판정 F9) ----------
+// 셸은 리다이렉션(연산자와 대상)을 명령에 넘기지 않는다. 그대로 두면 연산자가 하위 명령 자리로 읽혀 금지 호출이 통과한다.
+
+const argsOf = (command: string, dialect: Dialect = 'posix') =>
+  parseShell(command, dialect).map((s) => s.args ?? s.argv);
+
+test('parseShell의 args: 셸이 명령에 넘기는 인자다(리다이렉션의 연산자와 대상을 뺀다)', () => {
+  for (const cmd of [
+    'tool > out.txt sub',
+    'tool >out.txt sub',
+    'tool >> out.log sub',
+    'tool 2>&1 sub',
+    'tool 2> err.log sub',
+    'tool 2>/dev/null sub >&2',
+    'tool &> all.log sub',
+    'tool &>> all.log sub',
+    'tool >& all.log sub',
+    'tool < in.txt sub',
+    'tool <> both.txt sub',
+    'tool <<< word sub',
+    'tool >| out.txt sub',
+    'tool sub>out.txt',
+    'tool sub 2>err.log>out.txt',
+    '> out.txt tool sub',
+    '2>/dev/null tool sub',
+    'tool >a >b sub <c',
+    'tool >a> b sub',
+    'tool << EOF sub\nbody > x\nEOF',
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd);
+});
+
+test('parseShell의 args: 따옴표로 묶거나 이스케이프한 글자는 인자다. 연산자와 떨어진 숫자도 인자다', () => {
+  assert.deepEqual(argsOf("tool '>' sub"), [['tool', '>', 'sub']]);
+  assert.deepEqual(argsOf('tool ">" sub'), [['tool', '>', 'sub']]);
+  assert.deepEqual(argsOf('tool \\> sub'), [['tool', '>', 'sub']]);
+  assert.deepEqual(argsOf('tool "2>&1" sub'), [['tool', '2>&1', 'sub']]);
+  assert.deepEqual(argsOf('tool "a>b" sub'), [['tool', 'a>b', 'sub']]);
+  assert.deepEqual(argsOf("tool --flag '<' sub"), [['tool', '--flag', '<', 'sub']]);
+  assert.deepEqual(argsOf('tool 2 > out.txt sub'), [['tool', '2', 'sub']]);
+  assert.deepEqual(argsOf('tool a2>out.txt sub'), [['tool', 'a2', 'sub']]);
+  // 따옴표로 묶은 대상은 대상이다
+  assert.deepEqual(argsOf('tool > "my out.txt" sub'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool >"my out.txt" sub'), [['tool', 'sub']]);
+});
+
+test('parseShell의 args: 리다이렉션이 없으면 두지 않고, argv는 리다이렉션을 낱말 그대로 담는다', () => {
+  assert.equal(parseShell('tool --flag value sub')[0].args, undefined);
+  assert.equal(parseShell("tool '>' sub")[0].args, undefined);
+  const [c] = parseShell('tool > out.txt sub 2>&1');
+  assert.deepEqual(c.argv, ['tool', '>', 'out.txt', 'sub', '2>&1']);
+  assert.deepEqual(c.args, ['tool', 'sub']);
+  // 앞의 할당과 래퍼를 벗긴 뒤의 인자다
+  const [w] = parseShell('A=1 sudo tool > out.txt sub');
+  assert.deepEqual(w.argv, ['tool', '>', 'out.txt', 'sub']);
+  assert.deepEqual(w.args, ['tool', 'sub']);
+  // 셸 래퍼 안의 명령도 같다
+  assert.ok(argsOf('bash -c "tool > out.txt sub"').some((a) => a.join(' ') === 'tool sub'));
+});
+
+test('parseShell의 args: PowerShell·cmd 방언의 리다이렉션과 이스케이프', () => {
+  assert.deepEqual(argsOf('tool > out.txt sub', 'powershell'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool *> all.txt sub', 'powershell'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool 2>&1 sub', 'powershell'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool `> sub', 'powershell'), [['tool', '>', 'sub']]);
+  assert.deepEqual(argsOf('tool > out.txt sub', 'cmd'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool 2>nul sub', 'cmd'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool < in.txt sub', 'cmd'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('tool ^> sub', 'cmd'), [['tool', '>', 'sub']]);
+});
+
+test('리다이렉션이 끼어도 금지 하위 명령은 막히고, 따옴표로 묶은 글자와 대상 파일의 이름은 하위 명령이 아니다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    'drizzle-kit > report.txt migrate',
+    'drizzle-kit >report.txt migrate',
+    'drizzle-kit 2>&1 migrate',
+    'drizzle-kit 2> err.log migrate',
+    'drizzle-kit --config x >> out.log migrate',
+    '> out.txt drizzle-kit migrate',
+    'drizzle-kit migrate>out.txt',
+    'drizzle-kit &> all.log migrate',
+    'drizzle-kit < in.txt migrate',
+    'drizzle-kit >| out.txt migrate',
+    'drizzle-kit <<< x migrate',
+    'drizzle-kit>out.txt migrate',
+    // 따옴표로 묶은 글자는 플래그의 값이다
+    "drizzle-kit --config '>' migrate",
+    'bash -c "drizzle-kit > out.txt migrate"',
+    'npx drizzle-kit@latest > out.txt --config "a b.ts" migrate',
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  for (const cmd of [
+    // 하위 명령 자리의 인자가 글자 그대로 `>`다
+    "drizzle-kit '>' migrate",
+    'drizzle-kit "2>&1" migrate',
+    // 대상 파일의 이름이 금지 이름과 같다
+    'drizzle-kit generate > migrate',
+    'drizzle-kit --name > migrate generate',
+    'drizzle-kit generate 2>&1',
+    // 도구 이름이 대상 파일의 이름이다(도구를 부르지 않는다)
+    'echo hi > drizzle-kit migrate',
+  ])
+    assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+  // 있던 정규식 규칙은 argv의 글을 그대로 본다: 리다이렉션이 붙어도 전처럼 막는다
+  for (const cmd of ['prisma db push > out.txt', 'npx prisma migrate reset --force 2>&1'])
+    assert.ok(bash(cmd, ctx())?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  // 코어 기본 항목: 낱말이 둘인 금지 항목 사이의 리다이렉션
+  for (const cmd of ['prisma db > out.txt push', 'npx prisma 2>&1 migrate >out.txt reset'])
+    assert.ok(bash(cmd, ctx())?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+});
+
+test('다른 방언에서도 리다이렉션이 낀 금지 하위 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const dialect of ['powershell', 'cmd'] as const) {
+    const r = evaluate(
+      {
+        kind: 'bash',
+        command: 'drizzle-kit > out.txt migrate',
+        cwd: 'C:\\work\\repo',
+        dialects: [dialect],
+      },
+      c,
+    );
+    assert.ok(r?.rule.startsWith('R13'), dialect);
+  }
+});
+
+// ---------- 틀린 설정 (구현 판정 F8) ----------
+// 설정 검사는 명령의 내용과 무관하게 Bash 호출마다 돈다. 인자가 없는 명령(할당뿐, 주석뿐)도 지나치지 않는다.
+
+test('틀린 설정이면 인자가 없는 명령을 포함해 모든 Bash 명령의 판정이 ConfigError로 끝난다', () => {
+  const broken: GuardContext = {
+    ...ctx(),
+    dbCommands: () => {
+      throw new ConfigError('harness.config.json 검증 실패: guard.dbCommands는 배열이어야 한다');
+    },
+  };
+  for (const cmd of ['ls', 'REVIEW_SAMPLE=1', 'A=1 B=2', '# 주석뿐이다', ':', 'true && false', ''])
+    assert.throws(() => bash(cmd, broken), ConfigError, JSON.stringify(cmd));
+});
+
+test('설정은 Bash 호출 하나에 한 번만 읽는다(단순 명령의 수와 무관하다)', () => {
+  let calls = 0;
+  const counting: GuardContext = {
+    ...ctx(),
+    dbCommands: () => {
+      calls += 1;
+      return DRIZZLE;
+    },
+  };
+  assert.equal(bash('echo a; echo b && echo c | cat; X=1; drizzle-kit generate', counting), null);
+  assert.equal(calls, 1);
+  calls = 0;
+  assert.equal(bash('X=1', counting), null);
+  assert.equal(calls, 1);
 });

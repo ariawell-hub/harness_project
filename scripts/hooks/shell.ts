@@ -9,7 +9,13 @@ export type Dialect = 'posix' | 'powershell' | 'cmd';
 const ESCAPE: Record<Dialect, string> = { posix: '\\', powershell: '`', cmd: '^' };
 
 export interface SimpleCommand {
+  /** 낱말을 그대로 담는다. 리다이렉션(`>`, `out.txt`, `2>&1`)도 낱말로 들어 있다(명령의 글을 보는 규칙이 쓴다) */
   argv: string[];
+  /**
+   * 셸이 명령에 넘기는 인자: argv에서 리다이렉션의 연산자와 대상을 뺀 것. 인자의 자리를 보는 규칙이 쓴다.
+   * 리다이렉션이 없으면 두지 않는다(argv와 같다). 따옴표로 묶거나 이스케이프한 `>`·`<`는 인자이므로 남는다
+   */
+  args?: string[];
   /** 명령 앞에 붙은 VAR=값 할당과 env VAR=값 */
   assigns: Record<string, string>;
   /** env -u NAME, unset NAME */
@@ -31,9 +37,40 @@ const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 const POWERSHELLS = new Set(['powershell', 'pwsh']);
 const MAX_DEPTH = 6;
 
+/** 낱말에 든 리다이렉션(따옴표·이스케이프 밖의 `>`·`<`) */
+interface Redir {
+  /** 연산자 앞에 붙은 인자(`sub>out`의 `sub`). 없거나 파일 디스크립터 번호(`2>`)면 null */
+  arg: string | null;
+  /** 낱말이 연산자로 끝난다: 대상은 다음 낱말이다(`> out`) */
+  needsTarget: boolean;
+}
+
 interface Token {
   kind: 'word' | 'op';
   value: string;
+  redir?: Redir;
+}
+
+/** 낱말 목록에서 리다이렉션을 뺀다. 리다이렉션이 없으면 undefined */
+function shellArgs(words: string[], redirs: (Redir | undefined)[]): string[] | undefined {
+  if (!redirs.some((r) => r !== undefined)) return undefined;
+  const out: string[] = [];
+  let target = false;
+  for (let k = 0; k < words.length; k++) {
+    const r = redirs[k];
+    if (target) {
+      // 앞 연산자의 대상이다. 대상에 연산자가 붙어 있으면(`> a>`) 그 연산자의 대상이 또 이어진다
+      target = r?.needsTarget ?? false;
+      continue;
+    }
+    if (!r) {
+      out.push(words[k]);
+      continue;
+    }
+    if (r.arg !== null) out.push(r.arg);
+    target = r.needsTarget;
+  }
+  return out;
 }
 
 /** 단어·연산자 토큰화. 치환($(...)·백틱)의 내용은 subs로 따로 모은다 */
@@ -43,10 +80,31 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   const tokens: Token[] = [];
   let word = '';
   let inWord = false;
+  /** 이 낱말에서 따옴표 밖의 첫 리다이렉션 연산자가 시작한 자리(없으면 -1)와, 마지막 연산자 글자 바로 뒤의 자리 */
+  let redirAt = -1;
+  let redirEnd = -1;
+  /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
+  const redirOp = (ch: string) => {
+    if (redirAt < 0) redirAt = word.length;
+    word += ch;
+    redirEnd = word.length;
+    inWord = true;
+  };
   const push = () => {
-    if (inWord) tokens.push({ kind: 'word', value: word });
+    if (inWord) {
+      const t: Token = { kind: 'word', value: word };
+      if (redirAt >= 0) {
+        const pre = word.slice(0, redirAt);
+        // 연산자 바로 앞의 숫자는 파일 디스크립터다(`2>`). PowerShell의 `*>`는 모든 스트림이다
+        const fd = /^\d+$/.test(pre) || (dialect === 'powershell' && pre === '*');
+        t.redir = { arg: pre !== '' && !fd ? pre : null, needsTarget: redirEnd === word.length };
+      }
+      tokens.push(t);
+    }
     word = '';
     inWord = false;
+    redirAt = -1;
+    redirEnd = -1;
   };
   const heredocs: string[] = [];
   let i = 0;
@@ -154,6 +212,14 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       i = end < 0 ? src.length : end;
       continue;
     }
+    // here-string(`<<< 낱말`)은 heredoc이 아니다: 연산자 하나로 읽는다(대상은 뒤의 낱말)
+    if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] === '<') {
+      redirOp('<');
+      redirOp('<');
+      redirOp('<');
+      i += 3;
+      continue;
+    }
     if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
       push();
       let j = i + 2;
@@ -189,13 +255,28 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         continue;
       }
       if (c === '&' && (src[i - 1] === '>' || src[i + 1] === '>')) {
-        word += c;
-        inWord = true;
+        // `&>`의 시작이거나 연산자 글자 바로 뒤(`>&`)면 리다이렉션 연산자의 글자다
+        if (src[i + 1] === '>' || (redirAt >= 0 && redirEnd === word.length)) redirOp(c);
+        else {
+          word += c;
+          inWord = true;
+        }
+        i++;
+        continue;
+      }
+      // `>|`(noclobber를 무시하는 출력)는 파이프가 아니다
+      if (posix && c === '|' && redirAt >= 0 && redirEnd === word.length && word.endsWith('>')) {
+        redirOp(c);
         i++;
         continue;
       }
       push();
       tokens.push({ kind: 'op', value: c });
+      i++;
+      continue;
+    }
+    if (c === '>' || c === '<') {
+      redirOp(c);
       i++;
       continue;
     }
@@ -278,7 +359,13 @@ function powershellScript(args: string[]): string | null {
   return null;
 }
 
-function normalize(words: string[], out: SimpleCommand[], depth: number, dialect: Dialect): void {
+function normalize(
+  words: string[],
+  out: SimpleCommand[],
+  depth: number,
+  dialect: Dialect,
+  redirs?: (Redir | undefined)[],
+): void {
   const assigns: Record<string, string> = {};
   const unsets: string[] = [];
   let i = 0;
@@ -342,10 +429,13 @@ function normalize(words: string[], out: SimpleCommand[], depth: number, dialect
     if (Object.keys(assigns).length) out.push({ argv: [], assigns, unsets });
     return;
   }
+  const args = redirs ? shellArgs(argv, redirs.slice(i)) : undefined;
+  /** argv와, 리다이렉션이 있을 때만 args */
+  const base = args ? { argv, args } : { argv };
   const head = commandName(argv[0]);
   if (head === 'unset') {
     out.push({
-      argv,
+      ...base,
       assigns,
       unsets: [...unsets, ...argv.slice(1).filter((a) => !a.startsWith('-'))],
     });
@@ -363,10 +453,10 @@ function normalize(words: string[], out: SimpleCommand[], depth: number, dialect
       const mm = ASSIGN_RE.exec(x);
       if (mm) a[mm[1]] = mm[2];
     }
-    out.push({ argv, assigns: a, unsets });
+    out.push({ ...base, assigns: a, unsets });
     return;
   }
-  out.push({ argv, assigns, unsets });
+  out.push({ ...base, assigns, unsets });
   if (depth >= MAX_DEPTH) return;
   // 재귀: bash -c "...", eval ..., powershell -Command ..., cmd /c ..., iex ...
   if (SHELLS.has(head)) {
@@ -395,13 +485,18 @@ function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Di
   const subs: string[] = [];
   const tokens = tokenize(src, subs, dialect);
   let cur: string[] = [];
+  let curRedirs: (Redir | undefined)[] = [];
   for (const t of tokens) {
     if (t.kind === 'op') {
-      if (cur.length) normalize(cur, out, depth, dialect);
+      if (cur.length) normalize(cur, out, depth, dialect, curRedirs);
       cur = [];
-    } else cur.push(t.value);
+      curRedirs = [];
+    } else {
+      cur.push(t.value);
+      curRedirs.push(t.redir);
+    }
   }
-  if (cur.length) normalize(cur, out, depth, dialect);
+  if (cur.length) normalize(cur, out, depth, dialect, curRedirs);
   if (depth < MAX_DEPTH) for (const s of subs) parseInto(s, out, depth + 1, dialect);
 }
 
