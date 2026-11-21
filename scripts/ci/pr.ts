@@ -65,9 +65,11 @@ export async function resolvePr(o: {
       throw new Error(`PR 조회 응답이 PR #${fromEvent.number}이 아니다`);
     const info = toInfo(cur, o.repo);
     if (info) return info;
-    // head 저장소가 이 리포가 아니면(지워졌으면 null) 포크 PR이다. 그 밖에는 응답의 형식이 틀린 것이다
+    // head 저장소가 지워졌거나(null) 이름이 다른 리포로 확인되면 포크 PR이다. 이름이 없거나 글이 아니면
+    // 포크인지 알 수 없다: 응답의 형식이 틀린 것으로 보고 실패한다(건너뛰면 상태가 조용히 빠진다)
     const headRepo = cur.head && typeof cur.head === 'object' ? cur.head.repo : undefined;
-    if (headRepo === null || (typeof headRepo === 'object' && headRepo.full_name !== o.repo))
+    const name = headRepo && typeof headRepo === 'object' ? headRepo.full_name : undefined;
+    if (headRepo === null || (typeof name === 'string' && name !== '' && name !== o.repo))
       return fork;
     throw new Error(`PR 조회 응답의 형식이 틀렸다(PR #${fromEvent.number})`);
   }

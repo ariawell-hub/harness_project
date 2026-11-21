@@ -245,6 +245,13 @@ test('resolvePr: pull_request_target의 조회 응답이 이벤트의 PR과 맞�
     prObj({ head: { sha: 'zzz', ref: BRANCH, repo: { full_name: REPO } } }),
     prObj({ head: { sha: NEW_H, ref: 7, repo: { full_name: REPO } } }),
     prObj({ base: { sha: 'zzz' } }),
+    // head 저장소의 이름이 없거나 글이 아니면 포크인지 알 수 없다: 건너뛰지 않고 실패한다(F2)
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: {} } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 7 } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: '' } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: 'x/r' } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH } }),
+    prObj({ head: null }),
   ]) {
     await assert.rejects(
       prTarget(ev, async () => res),

@@ -2,7 +2,7 @@
 id: 20261122-gates-current-head
 issue: 181 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -44,6 +44,10 @@ claimed_at: 2026-11-22T00:07:49+09:00
 - 2026-11-22 구현: `resolvePr`, `gatesMissing`, `pr-state` 명령의 안내 줄을 넣었다. 두 파일의 테스트 41건이 통과한다.
 - 2026-11-22 문서: 설계서 10.4절·버전 이력(v0.7.72), 절차서 5절, `architecture.md`, CHANGELOG.
 - 2026-11-22T00:55:52+09:00 step 재작업: 구현 판정 1회차(Codex 수정 요청). F1(P0): `pr-state`의 안내 줄이 PR 브랜치 이름을 인용 없이 셸 명령에 넣는다. F2(P1): 조회 응답의 head 저장소에 이름이 없으면(빈 객체) 포크로 보고 조용히 건너뛴다. 둘 다 맞는 지적이라 고친다.
+- 2026-11-22 구현 판정 1회차: Claude 승인(지적 없음), Codex 수정 요청(P0 하나, P1 하나).
+  - F1(P0): `pr-state`의 안내 줄이 PR 브랜치 이름(`pr.head`, GitHub에서 온 값)을 인용 없이 `gh run list … --branch` 명령에 넣는다. git은 셸의 특수 문자가 든 브랜치 이름을 받으므로, 안내를 복사해 실행하면 이름의 일부가 명령으로 읽힐 수 있다. 맞는 지적이다. 안내 줄을 함수(`gatesMissingLine`)로 빼고 브랜치 이름을 있는 `shellQuote`로 낱말 하나로 인용했다. 제어 문자가 든 이름은 넣지 않는다. 테스트 먼저: 특수 문자가 든 이름 여덟 개로 인용의 꼴을 보고, 실제 `sh`가 그 낱말을 이름 그대로 읽는지(다른 명령이 실행되지 않는지) 본다. 구현 전에는 함수가 없어 실패했다.
+  - F2(P1, 재현됨): 조회 응답의 head 저장소가 이름 없는 객체(`{}`)면 포크로 보고 건너뛰었다. 형식이 틀린 응답은 실패로 드러나야 한다는 이 계획의 기준과 어긋난다. 맞는 지적이다. head 저장소가 `null`이거나 이름이 다른 리포로 **확인될 때만** 포크로 본다. 이름이 없거나 글이 아니거나 빈 글이면 예외다. 테스트 먼저: 그 응답 여섯 가지를 "건너뛰지 않고 실패한다" 테스트에 넣어 실패를 확인한 뒤 고쳤다.
+  - 완료 처리 뒤라 `reopenStep`으로 step을 다시 열고 고쳤다.
 
 ## 의사결정 로그
 
@@ -64,4 +68,5 @@ claimed_at: 2026-11-22T00:07:49+09:00
 
 - 2026-11-22: `node --test scripts/test/risk-gate.test.ts scripts/test/pr-state.test.ts` 통과(41건). `node scripts/harness.ts check` 통과(test 전체 포함), `node scripts/harness.ts self-test` 통과(시나리오 10개).
 - 수용 기준 "이전 head를 담은 `pull_request_target` 이벤트로 돌려도 현재 head가 나온다"는 `risk-gate.test.ts`의 "resolvePr: pull_request_target은 이벤트의 PR 번호로 API를 조회해 실행 시점의 head를 낸다"가 본다.
+- 2026-11-22(판정 1회차의 수정 뒤): 같은 두 파일 통과(42건). `node scripts/harness.ts check`, `node scripts/harness.ts self-test` 통과.
 - 병합 뒤 확인(Issue의 수용 기준): 실제 PR에서 본문 수정 직후 push해 새 head에 게이트 상태가 기록되는지 보고 Issue #181에 남긴다. `gates`는 main의 스크립트로 돌므로 병합 전에는 확인할 수 없다.
