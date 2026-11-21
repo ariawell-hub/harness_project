@@ -9,7 +9,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ledgerData, parseLedger, parseLedgerData } from '../ci/ledger.ts';
 import { reviewLogLines } from '../ci/record.ts';
-import { GATE_CONTEXTS, type GateResult } from '../ci/results.ts';
+import { RECORDED_CONTEXTS, serializeResults, type GateResult } from '../ci/results.ts';
 import { decodeSelfTest, mergeSelfTest, validateSelfTest } from '../ci/selftest-result.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
@@ -580,6 +580,11 @@ test('계획 검증(G1): 계획만 담은 커밋의 승인이 원장에 남고, 
       { GH_TOKEN: 'read-token', GITHUB_REPOSITORY: 'o/r' },
     );
     assert.equal(r.code, 0, r.out);
+    // 결과 크기의 상한(fitWarnings)은 이 명령이 파일에 쓰는 글자 그대로를 잰다
+    assert.equal(
+      readFileSync(out, 'utf8'),
+      serializeResults(JSON.parse(readFileSync(out, 'utf8'))),
+    );
     const results = JSON.parse(readFileSync(out, 'utf8')).results as {
       context: string;
       state: string;
@@ -854,7 +859,7 @@ function gatesFile(guard: Partial<GateResult> = {}): string {
     JSON.stringify({
       version: 1,
       headSha: HEAD,
-      results: GATE_CONTEXTS.map((context) =>
+      results: RECORDED_CONTEXTS.map((context) =>
         context === 'harness-guard'
           ? { ...GUARD_OK, ...guard }
           : { context, state: 'success', description: '통과', details: [] },
@@ -893,13 +898,65 @@ test('record-status: 보호 경로 PR인데 자체 테스트 보고서가 없거
     reset();
     const r = await run(statusArgs(gatesFile(), needed), { ...env, SELFTEST_B64: '', ...extra });
     assert.equal(r.code, 0, r.out);
-    assert.equal(state.statuses.length, GATE_CONTEXTS.length);
+    assert.equal(state.statuses.length, RECORDED_CONTEXTS.length);
     assert.equal(guardStatus().state, 'error', JSON.stringify([needed, extra]));
     assert.match(guardStatus().description, /^자체 테스트 결과가 없다/);
     assert.equal(guardStatus().sha, HEAD);
     // 다른 기계 판정은 그대로다
     assert.deepEqual([...new Set(otherStates())], ['success']);
   }
+});
+
+test('record-status: 경고 판정은 success와 경고 설명 그대로 기록하고, 결과에 빠져 있으면 그것만 error다', async () => {
+  const env = { GH_TOKEN: 'app-token', SELFTEST_B64: '' };
+  const WARN = '경고: 변경 500줄이 상한 400줄을 넘는다(생성 파일·테스트·문서 제외)';
+  const file = (keep: (context: string) => boolean) => {
+    const f = path.join(tmp(), 'gates.json');
+    writeFileSync(
+      f,
+      JSON.stringify({
+        version: 1,
+        headSha: HEAD,
+        results: RECORDED_CONTEXTS.filter(keep).map((context) =>
+          context === 'pr-size'
+            ? { context, state: 'success', description: WARN, details: ['   500  src/a.ts'] }
+            : { context, state: 'success', description: '통과', details: [] },
+        ),
+      }),
+    );
+    return f;
+  };
+  reset();
+  const r = await run(
+    statusArgs(
+      file(() => true),
+      'false',
+    ),
+    env,
+  );
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(
+    state.statuses.map((s) => [s.context, s.state]),
+    RECORDED_CONTEXTS.map((c) => [c, 'success']),
+  );
+  const size = state.statuses.find((s) => s.context === 'pr-size')!;
+  assert.equal(size.description, WARN);
+  assert.equal(size.sha, HEAD);
+
+  // 판정 job이 경고 판정을 내지 못한 결과: 그 context만 error이고 필수 판정은 결과대로 기록된다
+  reset();
+  const m = await run(
+    statusArgs(
+      file((c) => c !== 'pr-size'),
+      'false',
+    ),
+    env,
+  );
+  assert.equal(m.code, 0, m.out);
+  assert.deepEqual(
+    state.statuses.map((s) => [s.context, s.state]),
+    RECORDED_CONTEXTS.map((c) => [c, c === 'pr-size' ? 'error' : 'success']),
+  );
 });
 
 test('record-status: 실패한 시나리오가 있으면 failure, 모두 통과면 success. 필요 없으면 harness-guard 결과 그대로다', async () => {

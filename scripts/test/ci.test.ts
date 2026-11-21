@@ -12,6 +12,7 @@ import { planReview } from '../ci/review-plan.ts';
 import { pinnedPrompt, promptFiles } from '../ci/review-round.ts';
 import {
   GATE_CONTEXTS,
+  RECORDED_CONTEXTS,
   toStatuses,
   validateResults,
   type GateResults,
@@ -85,7 +86,7 @@ function results(over: Partial<GateResults> = {}): GateResults {
   return {
     version: 1,
     headSha: SHA,
-    results: GATE_CONTEXTS.map((context) => ({
+    results: RECORDED_CONTEXTS.map((context) => ({
       context,
       state: 'success' as const,
       description: '통과',
@@ -132,19 +133,24 @@ test('runGates: 검사가 예외를 던지면 그 context만 error', async () =>
   assert.ok(pg.description.length > 0);
   assert.deepEqual(
     r.results.map((x) => x.context),
-    [...GATE_CONTEXTS],
+    [...RECORDED_CONTEXTS],
+  );
+  // 다른 판정은 error가 아니다(경고 판정 포함)
+  assert.deepEqual(
+    r.results.filter((x) => x.state === 'error').map((x) => x.context),
+    ['plan-gate'],
   );
 });
 
 // ---------- validateResults / toStatuses ----------
 
 test('validateResults: 정상 결과는 통과', () => {
-  const v = validateResults(results(), { headSha: SHA, contexts: GATE_CONTEXTS });
+  const v = validateResults(results(), { headSha: SHA, contexts: RECORDED_CONTEXTS });
   assert.equal(v.ok, true);
 });
 
 test('validateResults: 형식·context·state·head SHA가 어긋나면 거부', () => {
-  const o = { headSha: SHA, contexts: GATE_CONTEXTS };
+  const o = { headSha: SHA, contexts: RECORDED_CONTEXTS };
   const bad: unknown[] = [
     null,
     'text',
@@ -207,7 +213,7 @@ test('toStatuses: description은 제어 문자를 공백으로, 140자로 자른
         { context: 'plan-gate', state: 'failure', description: `a\nb\u0007c${long}`, details: [] },
       ],
     }),
-    GATE_CONTEXTS,
+    RECORDED_CONTEXTS,
     'x',
   ).find((x) => x.context === 'plan-gate')!;
   assert.ok(s.description.length <= 140);
@@ -230,7 +236,23 @@ test('recordStatuses: 정상 결과를 그대로 기록한다', async () => {
   assert.deepEqual(r, { ok: true, reason: null });
   assert.deepEqual(
     p.posted.map((s) => [s.context, s.state]),
-    GATE_CONTEXTS.map((c) => [c, 'success']),
+    RECORDED_CONTEXTS.map((c) => [c, 'success']),
+  );
+});
+
+test('recordStatuses: 결과에 경고 판정만 빠져 있으면 그것만 error이고 필수 판정은 결과대로다', async () => {
+  const p = poster();
+  const only = results();
+  only.results = only.results.filter((g) => g.context !== 'pr-size');
+  only.results[1] = { ...only.results[1], state: 'failure' };
+  const r = await recordStatuses({ ...REC, raw: JSON.stringify(only), post: p.post });
+  assert.deepEqual(r, { ok: true, reason: null });
+  assert.deepEqual(
+    p.posted.map((s) => [s.context, s.state]),
+    RECORDED_CONTEXTS.map((c) => [
+      c,
+      c === 'pr-size' ? 'error' : c === GATE_CONTEXTS[1] ? 'failure' : 'success',
+    ]),
   );
 });
 
@@ -242,7 +264,7 @@ test('recordStatuses: 결과가 없거나 깨졌으면 모든 context error + ok
     assert.ok(r.reason);
     assert.deepEqual(
       p.posted.map((s) => [s.context, s.state]),
-      GATE_CONTEXTS.map((c) => [c, 'error']),
+      RECORDED_CONTEXTS.map((c) => [c, 'error']),
     );
   }
 });
