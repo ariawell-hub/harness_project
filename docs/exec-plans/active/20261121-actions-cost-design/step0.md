@@ -58,7 +58,9 @@ export function runnerRate(labels: string[]): {
 export interface CostReport {
   /* 합계(분, 실제 초, 달러), 올림으로 붙은 분, 1분 미만 job의 수와 청구 분,
      워크플로별·job별·날짜별·PR별 행, PR 밖 실행의 합계, PR을 찾지 못한 실행의 합계,
-     PR head의 수와 PR head 하나당 평균, 30일 환산(분, 달러), 단가를 모르는 러너와 self-hosted 러너의 분 */
+     PR head의 수와 PR head 하나당 평균, 30일 환산(분, 달러), 단가를 모르는 러너와 self-hosted 러너의 분.
+     전체 금액은 밀리달러 정수로도 낸다(`usdMilli`. 단가가 밀리달러 정수라 분 × 단가의 합이 정수다).
+     예산과 견줄 때는 나눈 값이 아니라 이 정수를 쓴다(step1) */
 }
 export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames): CostReport;
 export function renderCost(report: CostReport, period: Period): string;
