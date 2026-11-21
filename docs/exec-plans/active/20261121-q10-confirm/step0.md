@@ -18,7 +18,7 @@
 
 `node lab/q10-db/run.ts [--skip-fmt] [--out <파일>]`. 리포의 루트에서 돌린다.
 
-- 단계(기본): ① 새 임시 폴더를 만들어(`fs.mkdtempSync`, 지우지 않는다) `node lab/q10-db/trial.ts <폴더>` ② `node scripts/harness.ts fmt` ③ `node lab/q10-db/check-results.ts <platform>-<arch>`(이 머신의 `process.platform`·`process.arch`) ④ `node --test lab/q10-db/test/check-results.test.ts`.
+- 단계(기본): ① 새 임시 폴더를 만들어(`fs.mkdtempSync`, 지우지 않는다) `node lab/q10-db/trial.ts <폴더>` ② `node scripts/harness.ts fmt` ③ `node lab/q10-db/check-results.ts <platform>-<arch>`(이 머신의 `process.platform`·`process.arch`) ④ `node --test lab/q10-db/test/check-results.test.ts lab/q10-db/test/out-file.test.ts`(검사 스크립트의 테스트와 `--out` 경로 검사의 테스트. `check`는 `scripts/test/` 아래만 돌리므로 `lab/q10-db/test/`의 테스트는 이 단계가 돌린다. CI의 워크플로가 이 명령을 부르므로 Linux와 Windows 러너에서도 돈다. `--skip-fmt`와 `--out`에서도 ④는 같다).
 - `--skip-fmt`: ②를 뺀다.
 - `--out <파일>`: ①에 `--out <파일>`을 넘기고 ②를 빼고 ③을 `node lab/q10-db/check-results.ts --file <파일>`로 바꾼다. 파일은 아래 "`--out` 경로 검사"를 통과해야 한다. 통과하지 못하면 이유를 표준 오류에 내고 종료 코드 2로 끝나며 단계를 하나도 돌리지 않는다(자식 프로세스를 띄우지 않는다).
 - 한 단계가 0이 아닌 종료 코드로 끝나거나 실행하지 못하면 뒤 단계를 돌리지 않고, 실패한 단계의 이름을 표준 오류에 내고 종료 코드 1로 끝난다. 모든 단계가 통과하면 0이다.
@@ -44,20 +44,21 @@
     4. 연 뒤 붙잡은 폴더(`statSync('.')`)와 2에서 읽은 경로의 폴더(`statSync(경로)`)가 여전히 같은 폴더인지(`dev`·`ino`) 본다. 그 경로에 폴더가 없거나 다른 폴더면 디스크립터를 닫고 실패한다(아래 "남는 한계"). `process.cwd()`를 다시 읽는 것으로는 알 수 없다: Node가 그 값을 기억해 두어 폴더가 옮겨져도 바뀌지 않는다(확인함. 진행 로그).
     5. 성공하든 실패하든 처음의 현재 폴더로 돌아간다(`finally`).
     6. 디스크립터와 고정한 경로(2에서 읽은 폴더 경로에 이름을 붙인 것)를 낸다.
-  - `--out`은 POSIX(macOS, Linux)에서만 받는다. Windows(`process.platform === 'win32'`)에서는 `run.ts`와 `trial.ts`가 `--out`을 거부한다(`run.ts`는 2, `trial.ts`는 0이 아닌 코드. 아무것도 실행하거나 만들지 않는다). 이유: 위 1~3이 기대는 것(상대 경로가 붙잡은 현재 폴더 기준으로 열린다)을 Windows에서는 확인하지 못했다. CI의 워크플로와 결과를 리포에 쓰는 기본 절차는 `--out`을 쓰지 않으므로 Windows의 실측에는 영향이 없다.
+  - `--out`은 POSIX(macOS, Linux)에서만 받는다. Windows(`process.platform === 'win32'`)에서는 `run.ts`와 `trial.ts`가 `--out`을 거부한다(`run.ts`는 2, `trial.ts`는 0이 아닌 코드. 아무것도 실행하거나 만들지 않는다). 이유: 위 1~3이 기대는 것(상대 경로가 붙잡은 현재 폴더 기준으로 열린다)을 Windows에서는 확인하지 못했다. CI의 워크플로와 결과를 리포에 쓰는 기본 절차는 `--out`을 쓰지 않으므로 Windows의 실측에는 영향이 없다. `outFileProblem`·`pinOutFile`·`openOutFile`과 `run.ts`의 인자 해석은 `platform`을 인자로 받는다(기본값 `process.platform`). `win32`이면 경로가 무엇이든(리포 밖의 있는 폴더 아래의 새 이름이어도) 다른 검사보다 먼저 거부하고 아무것도 만들지 않는다.
   - 결과는 연 디스크립터에 쓴다. 경로로 다시 열지 않는다. 그래서 연 뒤에 경로가 가리키는 곳이 바뀌어도 결과는 처음 연 파일에 쓰인다.
   - 남는 한계(적어 둔다): 붙잡은 폴더 **자체를** 누가 리포 안으로 옮기는 경우(`mv 그폴더 리포/…`)다. 2와 3 사이에 옮기면 그 폴더 안에 빈 파일이 생기고 4에서 실패로 드러난다. 이것은 경로의 링크를 바꾸는 것이 아니라 옮기는 쪽이 리포의 작업 트리에 폴더를 직접 넣는 것이다(이 도구가 리포 안의 자리를 고르는 것이 아니다). "리포 밖"은 경로의 성질이라 폴더를 붙잡은 뒤에도 폴더가 옮겨지는 것까지 한 번의 호출로 막는 방법은 없다. 부모 경로의 심볼릭 링크가 바뀌는 경우(검사 전, 검사와 여는 것 사이, 연 뒤)는 모두 막는다.
 - `run.ts`: `--out`이 있으면 단계 목록을 만들기 전에 `pinOutFile`을 부른다. 걸리면 2로 끝난다. 통과하면 받은 경로가 아니라 **고정한 경로**를 `trial.ts`의 `--out`과 `check-results.ts --file`에 넘긴다.
 - `trial.ts`: `--out`이 있으면 인자를 읽은 직후(폴더 안에 무엇을 만들거나 패키지를 설치하기 전)에 `openOutFile`로 결과 파일을 열고, 걸리면 이유를 내고 0이 아닌 종료 코드로 끝난다(넘겨받은 빈 폴더에는 아무것도 만들지 않는다). 실측이 끝나면 결과를 그 디스크립터에 쓰고 닫는다. 실측이 실패하면 결과를 쓰지 않으므로 열어 둔 파일은 빈 채로 남는다(경로로 지우지 않는다. 지우는 것도 경로가 바뀌면 다른 파일을 지울 수 있다). 빈 파일은 `check-results.ts --file`을 통과하지 못한다(JSON이 아니다). 부모 폴더를 만들던 것(`mkdirSync(…, { recursive: true })`)은 `--out`이 없을 때(리포의 `results/`)만 한다. `trial.ts`의 확인 항목과 결과의 내용은 바꾸지 않는다.
-- 테스트(`out-file.test.ts`. 임시 폴더는 `mkdtempSync`로 만들고 지우지 않는다): 리포 밖 새 폴더의 새 이름은 통과한다. 거부하는 것: 리포 안의 있는 파일(`package.json`), 리포 안의 새 이름(`lab/q10-db/results/x.json`), 리포 루트 바로 아래의 새 이름, 리포 밖의 있는 파일, 리포 밖 폴더에 있는 심볼릭 링크(리포 안의 파일을 가리키는 것, 끊어진 것), 리포 안의 폴더를 가리키는 심볼릭 링크 폴더 아래의 새 이름, 없는 부모 폴더, 부모가 파일인 경로. 거부한 뒤 대상이 그대로다(있던 파일과 링크가 가리키는 파일의 내용이 같고, 새 파일이 생기지 않았다). 심볼릭 링크를 만들 수 없는 환경(권한 없는 Windows)에서는 링크 사례만 건너뛴다.
+- 테스트(`out-file.test.ts`. 임시 폴더는 `mkdtempSync`로 만들고 지우지 않는다. 통과 사례와 아래의 거부 사례는 macOS·Linux에서 본다. Windows에서 볼 것은 다음 항목에 따로 있다): 리포 밖 새 폴더의 새 이름은 통과한다. 거부하는 것: 리포 안의 있는 파일(`package.json`), 리포 안의 새 이름(`lab/q10-db/results/x.json`), 리포 루트 바로 아래의 새 이름, 리포 밖의 있는 파일, 리포 밖 폴더에 있는 심볼릭 링크(리포 안의 파일을 가리키는 것, 끊어진 것), 리포 안의 폴더를 가리키는 심볼릭 링크 폴더 아래의 새 이름, 없는 부모 폴더, 부모가 파일인 경로. 거부한 뒤 대상이 그대로다(있던 파일과 링크가 가리키는 파일의 내용이 같고, 새 파일이 생기지 않았다). macOS·Linux에서는 링크 사례를 건너뛰지 않는다(링크를 만들지 못하면 실패다).
+- 테스트(같은 파일. Windows의 거부. 모든 OS에서 돈다): `platform`을 `win32`로 주면 리포 밖의 있는 폴더 아래의 새 이름도 `outFileProblem`·`pinOutFile`·`openOutFile`이 거부하고, 그 경로에 파일이 생기지 않으며 현재 폴더가 그대로다. 실제 Windows에서는(`process.platform === 'win32'`) `platform`을 주지 않아도 같다. 이 사례는 어느 OS에서도 건너뛰지 않는다.
 - 테스트(같은 파일. 고정. Windows에서는 건너뛴다): 리포 역할의 임시 폴더와 리포 밖 역할의 임시 폴더를 만들고, 리포 밖 폴더를 가리키는 심볼릭 링크 폴더 아래의 새 이름으로 `openOutFile`을 부른다. 고정한 경로가 링크를 거치지 않는 실제 경로다. 링크를 바꾸는 때를 셋으로 나눠 본다(`openOutFile`이 테스트용으로 받는 함수 `beforeOpen`을 2와 3 사이에 부른다): (가) 2와 3 사이에 링크를 리포 역할의 폴더를 가리키게 바꾼다 — 여는 것이 성공하고 파일은 리포 밖 폴더에 생기며 리포 역할의 폴더에는 아무 항목도 생기지 않는다. (나) 연 뒤에 링크를 바꾸고 디스크립터에 결과를 쓴다 — 결과는 리포 밖 폴더의 파일에 쓰이고 리포 역할의 폴더에는 아무 항목도 생기지 않는다. (다) 부르기 전에 링크가 리포 역할의 폴더를 가리킨다 — 거부하고 리포 역할의 폴더에 아무 항목도 생기지 않는다. 그리고: 2와 3 사이에 붙잡은 폴더 자체를 리포 역할의 폴더 안으로 옮기면(`renameSync`) 실패로 끝나고 결과를 쓰지 않는다(남는 한계가 드러나는 것을 본다). 부른 뒤 현재 폴더(`process.cwd()`)가 부르기 전과 같다(성공, 거부, 실패 모두). `pinOutFile`이 낸 경로로 다시 부르면 같은 경로가 나온다. 이미 있는 이름으로 `openOutFile`을 부르면 실패하고 있던 파일이 그대로다. 디스크립터에 쓰지 않고 닫으면 빈 파일이 남고, 그 파일은 `check-results.ts`의 파일 검사를 통과하지 못한다. `win32`인 척하면(`platform`을 인자로 준다) `pinOutFile`과 `openOutFile`이 거부한다.
-- `run.test.ts`에 더한다: `--out`이 검사에 걸리면 2를 내고 `exec`가 한 번도 불리지 않는다(리포 안의 있는 파일, 리포 밖의 있는 파일). 심볼릭 링크 폴더 아래의 경로를 주면 단계의 인자에는 고정한 경로(실제 경로)가 들어간다.
+- `run.test.ts`에 더한다: `--out`이 검사에 걸리면 2를 내고 `exec`가 한 번도 불리지 않는다(리포 안의 있는 파일, 리포 밖의 있는 파일). 심볼릭 링크 폴더 아래의 경로를 주면 단계의 인자에는 고정한 경로(실제 경로)가 들어간다(이 둘은 macOS·Linux에서 본다). `platform`이 `win32`이면 리포 밖의 유효한 새 경로를 `--out`으로 줘도 2를 내고 `exec`가 한 번도 불리지 않으며 그 경로에 파일이 생기지 않는다(모든 OS에서 본다). 세 가지 단계 목록(기본, `--skip-fmt`, `--out`)의 마지막 단계의 인자에 `check-results.test.ts`와 `out-file.test.ts`가 모두 있다.
 
 ### 2. `lab/q10-db/README.md`
 
 - "절차" 절의 셸 블록 둘(Bash, PowerShell)을 명령 하나로 바꾼다: `node lab/q10-db/run.ts`. 실패하면 그 자리에서 멈춘다는 것, `trial.ts`가 실패하면 결과 파일을 새로 쓰지 않는다는 것은 남긴다. "PowerShell 절차는 아직 Windows에서 돌려 보지 않았다" 줄은 지운다(그 블록이 없어진다).
 - 작업 트리를 바꾸지 않고 돌려 보는 법을 `node lab/q10-db/run.ts --out <리포 밖 파일>`로 고친다. 파일은 리포 밖의 있는 폴더 아래의 새 이름이어야 한다는 것(리포 안의 경로와 이미 있는 파일은 실행하기 전에 거부한다)과, `--out`으로 돌린 실측이 실패하면 그 이름의 빈 파일이 남는다는 것, `--out`은 macOS와 Linux에서만 받는다는 것을 적는다.
-- "CI 러너에서 돌리기" 항목을 더한다: 워크플로 `q10-trial`을 손으로 돌린다(`gh workflow run q10-trial.yml --ref main`), 실행 산출물(`q10-result-<os>`)을 받는다(`gh run download <실행 번호> --dir <새 임시 폴더>`), 받은 폴더의 `<platform>-<arch>.json`을 `lab/q10-db/results/`에 복사하고 `node scripts/harness.ts fmt`와 `node lab/q10-db/check-results.ts <이름>`을 돌린다. 러너에서는 포맷을 건너뛴다는 것과 이유(하네스의 의존성을 설치하지 않는다)를 적는다. 받은 파일의 내용을 손으로 고치지 않는다.
+- "CI 러너에서 돌리기" 항목을 더한다: 워크플로 `q10-trial`을 손으로 돌린다(`gh workflow run q10-trial.yml --ref main`), 실행 산출물(`q10-result-<os>`)을 받는다(`gh run download <실행 번호> --dir <새 임시 폴더>`), 받은 폴더의 `<platform>-<arch>.json`을 `lab/q10-db/results/`에 복사하고 `node scripts/harness.ts fmt`와 `node lab/q10-db/check-results.ts <이름>`을 돌린다. 러너에서는 포맷을 건너뛴다는 것과 이유(하네스의 의존성을 설치하지 않는다)를 적는다. 러너에서도 마지막 단계가 검사 스크립트와 `--out` 경로 검사의 테스트를 돌린다는 것(Linux에서는 링크를 바꾸는 사례, Windows에서는 `--out`을 거부하는 사례)을 적는다. 받은 파일의 내용을 손으로 고치지 않는다.
 - 파일 표에 `run.ts`, `out-file.ts`와 패치 파일을 더한다.
 
 ### 3. 워크플로 패치 `lab/q10-db/q10-trial-workflow.patch`
@@ -116,6 +117,8 @@ D=$(mktemp -d) && B=$(git hash-object package.json) && { node lab/q10-db/trial.t
 - 일곱째~아홉째 줄: 워크플로 파일이 패치와 같고(새 파일을 만드는 패치는 내용이 글자 그대로 같아야 거꾸로 적용된다), 이 PR이 `.github/` 아래에서 바꾼 파일이 그 하나뿐이며, 패치가 파일 하나만 다룬다. `origin/main`이 필요하다(`git fetch origin`).
 - 구조의 세부는 셋째 줄의 테스트가 본다.
 - 끝의 세 줄: `--out` 경로 검사의 테스트, 그리고 작업 트리의 있는 파일(`package.json`)을 `--out`으로 주면 `run.ts`가 2로 끝나고 `trial.ts`가 0이 아닌 코드로 끝나며 그 파일의 내용이 그대로인 것. `trial.ts`는 넘긴 빈 폴더에 아무것도 만들지 않고 끝난다(설치를 시작하기 전에 거부한다).
+- 이 AC는 macOS나 Linux에서 돌린다(이 step은 Mac에서 실행한다). 다섯째 줄(`--out`으로 돌리는 실측)과 끝의 두 줄은 `--out`을 받는 OS의 기준이다. Windows의 기준은 "`--out`을 거부하고 자식 프로세스를 띄우지 않으며 파일을 만들지 않는다"이고, `out-file.test.ts`와 `run.test.ts`의 `win32` 사례가 본다(이 AC의 첫 줄과 끝에서 셋째 줄이 어느 OS에서든 돌린다).
+- Linux와 Windows에서의 실행: `out-file.test.ts`는 `run.ts`의 마지막 단계로 돌므로, 워크플로 `q10-trial`의 두 러너에서 돈다(Linux에서 링크를 바꾸는 사례, Windows에서 거부 사례). 워크플로는 이 step이 병합된 뒤 step1에서 돌린다. step1이 두 job의 로그에서 그 테스트가 돌았고 실패가 없는 것을 확인한다(step1의 "실측").
 
 ## 금지사항
 
