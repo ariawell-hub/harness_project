@@ -63,7 +63,19 @@ export function globToRegExp(glob: string): RegExp {
     else if ('\\^$+.()|{}[]'.includes(c)) re += '\\' + c;
     else re += c;
   }
-  return new RegExp(`^${re}$`);
+  // `s`: `**`는 줄바꿈이 든 경로에도 맞아야 한다(git 경로에는 줄바꿈이 올 수 있다). `*`와 `?`는 `/`만 넘지 못한다
+  return new RegExp(`^${re}$`, 's');
+}
+
+/**
+ * 경로를 한 줄로 보여 준다. 역슬래시는 둘로 겹쳐 적고, 제어 문자와 줄 나눔 문자는 보이는 표기(`\n`, `\r`, `\t`, `\u{…}`)로 바꾼다.
+ * 판정 상세와 요약에 쓴다: 파일 이름이 줄을 늘리거나 요약의 코드 블록을 닫지 못한다. 견줄 때는 쓰지 않는다
+ */
+export function showPath(p: string): string {
+  const short: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+  return p
+    .replace(/\\/g, '\\\\')
+    .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => short[c] ?? `\\u{${c.codePointAt(0)!.toString(16)}}`);
 }
 
 export function matchesAny(file: string, globs: string[]): boolean {

@@ -2,7 +2,7 @@
 // 생성 파일·테스트·문서는 세지 않는다. 설정(cfg)은 main 쪽이다. git은 root에서 읽기만 한다.
 import type { HarnessConfig } from '../lib/config.ts';
 import { git } from '../lib/git.ts';
-import { capDetails, globToRegExp, WARN_PREFIX } from '../lib/util.ts';
+import { capDetails, globToRegExp, showPath, WARN_PREFIX } from '../lib/util.ts';
 
 const DOC = 'docs/harness/design.md 10.2절 (1), R15';
 /** details에 적는 파일 수 상한 */
@@ -38,7 +38,7 @@ export interface PrSizeResult {
   over: boolean;
 }
 
-/** 바뀐 파일 목록으로 판정한다(순수 함수). 경로는 git이 준 글자 그대로 glob과 견준다(`\`를 `/`로 바꾸지 않는다) */
+/** 바뀐 파일 목록으로 판정한다(순수 함수). 경로는 git이 준 글자 그대로 glob과 견준다(`\`를 `/`로 바꾸지 않고, 줄바꿈이 든 경로도 맞는다) */
 export function prSizeOf(
   files: SizedFile[],
   cfg: Pick<HarnessConfig, 'prSize' | 'deps'>,
@@ -57,7 +57,8 @@ export function prSizeOf(
           `근거: ${DOC}`,
         ]
       : []),
-    ...top.slice(0, FILE_LIMIT).map((f) => `${String(f.lines).padStart(6)}  ${f.path}`),
+    // 경로는 보이는 표기로 적는다(파일 이름의 줄바꿈이 줄을 늘리지 않는다). 견줄 때는 위에서 원래 글자를 썼다
+    ...top.slice(0, FILE_LIMIT).map((f) => `${String(f.lines).padStart(6)}  ${showPath(f.path)}`),
     ...(top.length > FILE_LIMIT ? [`… 외 ${top.length - FILE_LIMIT}개`] : []),
   ]);
   const description = over

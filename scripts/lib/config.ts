@@ -358,8 +358,9 @@ export function resolvePrSize(raw: unknown): PrSizeConfig {
     string,
     unknown
   > | null;
-  const maxLines = r?.maxLines ?? DEFAULT_PR_SIZE.maxLines;
-  const exclude = r?.exclude ?? DEFAULT_PR_SIZE.exclude;
+  // 생략한 항목만 기본값이다. 적어 놓은 null은 잘못된 값이다
+  const maxLines = r && 'maxLines' in r ? r.maxLines : DEFAULT_PR_SIZE.maxLines;
+  const exclude = r && 'exclude' in r ? r.exclude : DEFAULT_PR_SIZE.exclude;
   const ok =
     r !== null &&
     Object.keys(r).every((k) => k === 'maxLines' || k === 'exclude') &&
