@@ -13,7 +13,7 @@ import {
 
 export const REVIEWERS = ['claude', 'codex'] as const;
 export type Reviewer = (typeof REVIEWERS)[number];
-/** accepted: 제작자가 남은 위험을 받아들인 P0·P1(owner-accept.ts만 만든다). 검증자의 판정으로 바뀌지 않는다 */
+/** accepted: 제작자가 남은 위험을 받아들인 P0(owner-accept.ts만 만든다). 검증자의 판정으로 바뀌지 않는다 */
 export const ENTRY_STATUSES = ['open', 'fixed', 'rejected', 'deferred', 'accepted'] as const;
 export type EntryStatus = (typeof ENTRY_STATUSES)[number];
 export const REPRO_RESULTS = ['', 'reproduced', 'not-reproduced', 'error'] as const;
@@ -239,7 +239,7 @@ export function applyPlanReview(l: Ledger, o: PlanReviewOptions): Ledger {
 /**
  * review-ledger 판정(R16): open인 P0·P1이 없어야 한다.
  * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다.
- * accepted(제작자 승인)인 P0·P1도 막지 않고 수를 적는다
+ * accepted(제작자 승인)인 P0도 막지 않고 수를 적는다
  */
 export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; description: string } {
   const open = l.findings.filter((e) => BLOCKING.includes(e.severity) && e.status === 'open');
