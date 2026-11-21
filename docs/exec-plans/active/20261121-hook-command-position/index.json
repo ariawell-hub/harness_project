@@ -1,0 +1,10 @@
+{
+  "plan": "20261121-hook-command-position",
+  "steps": [
+    {
+      "step": 0,
+      "name": "command-name",
+      "status": "in_progress"
+    }
+  ]
+}
