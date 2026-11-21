@@ -1,0 +1,7 @@
+{
+  "plan": "20261121-merge-leftovers",
+  "steps": [
+    { "step": 0, "name": "conflict-markers", "status": "pending" },
+    { "step": 1, "name": "design-version", "status": "pending" }
+  ]
+}

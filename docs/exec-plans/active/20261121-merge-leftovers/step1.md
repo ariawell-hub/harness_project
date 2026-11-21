@@ -1,0 +1,78 @@
+# Step 1: design-version
+
+## 읽어야 할 파일
+
+- `ARCHITECTURE.md`, `docs/harness/architecture.md`(`gates/*` 행)
+- `scripts/gates/doc-lint.ts`(전체), `scripts/lib/util.ts`(`Problem`, `matchesAny`)
+- `scripts/metrics/local.ts`의 `localMetrics`(`docLint`의 경고만 센다), `scripts/test/metrics-allow.ts`(지표 집계가 실행하는 `git` 호출의 허용 목록)
+- `scripts/test/helpers.ts`, `scripts/test/doc-lint-gate.test.ts`(임시 리포와 CLI 실행 방식), `scripts/test/gates.test.ts`의 `doc-lint` 테스트
+- `docs/harness/design.md`의 머리말(제목 아래 `> 버전 …` 줄)과 0절의 `- **변경 이력**` 목록, `docs/harness/workflow.md` 5절 "main에 뒤처지거나 충돌한 PR 갱신", `docs/exec-plans/tech-debt-tracker.md`의 TD-33 행
+
+## 작업
+
+테스트를 먼저 쓰고, 구현 전에 실패하는 것을 확인해 진행 로그에 적는다(R5). 테스트만 담은 커밋을 구현 커밋보다 먼저 만든다.
+
+### 1. `scripts/gates/doc-lint.ts`
+
+```ts
+/** 설계서 본문에서 머리말의 버전·최종 갱신과 변경 이력이 맞는지 본다. 문제가 없으면 빈 배열 */
+export function designVersionProblems(text: string): Problem[];
+```
+
+- 순수 함수다. 파일을 읽지 않고 `git`을 실행하지 않는다. 줄은 LF로 나누고 줄 끝의 CR 하나는 뗀 뒤 본다.
+- **머리말 줄**: 본문에서 처음 나오는 `> 버전 v`로 시작하는 줄이다. 형식은 `> 버전 v<버전> · <임의의 글자> 최종 갱신: <날짜>`이고 날짜 뒤에는 공백만 올 수 있다. `<버전>`은 십진수 마디를 점으로 이은 것(마디 하나 이상), `<날짜>`는 `YYYY-MM-DD` 모양의 숫자다.
+- **변경 이력**: 본문에서 처음 나오는 `- **변경 이력**`으로 시작하는 줄의 바로 다음 줄부터, 공백 두 개로 시작하는 줄이 이어지는 동안이 목록이다. 공백 두 개로 시작하지 않는 줄(빈 줄 포함)에서 목록이 끝난다.
+  - 목록의 줄 가운데 공백 두 개, 붙임표(`-`), 공백 한 개로 시작하는 줄이 항목이다. 항목은 그 뒤에 `v<버전>`, 공백 한 개, `(<날짜>):`, 공백 한 개가 차례로 온다(예: 공백 두 개 뒤에 `- v0.7.68 (2026-11-21): 내용`).
+  - 그 밖의 목록 줄(더 깊이 들여쓴 줄)은 앞 항목에 딸린 줄로 보고 건너뛴다.
+- 돌려주는 문제는 모두 `rule`이 `R8 설계서 버전`이고 `doc`은 이 파일의 다른 오류와 같은 값이다. `how`에는 머리말의 버전·최종 갱신을 변경 이력의 마지막 항목과 맞추라는 것과, main을 병합하다 버전이 겹쳤으면 이 PR의 항목을 다음 번호로 올리라는 것이 있다.
+  - 머리말 줄이 없거나 형식이 틀리다: 한 건. `what`에 `머리말`이라는 글자가 있다.
+  - `- **변경 이력**` 줄이 없거나 항목이 하나도 없다: 한 건. `what`에 `변경 이력`이라는 글자가 있다.
+  - 형식이 틀린 항목: 항목마다 한 건. `what`에 그 줄의 줄 번호(1부터)가 있다. 줄 내용은 넣지 않는다.
+  - 위 셋 가운데 하나라도 있으면 아래 비교는 하지 않는다(읽은 값이 온전하지 않다).
+  - 머리말의 버전이 마지막 항목의 버전과 다르다: 한 건. `what`에 두 버전이 `v<버전>` 모양으로 있다.
+  - 머리말의 최종 갱신이 마지막 항목의 날짜와 다르다: 한 건. `what`에 두 날짜가 있다.
+  - 버전이 바로 앞 항목보다 크지 않은 항목: 항목마다 한 건. `what`에 그 줄의 줄 번호와 두 버전이 있다. 버전은 마디를 수로 바꿔 왼쪽부터 견주고, 앞 마디가 모두 같으면 마디가 더 많은 쪽이 크다. 버전의 글자가 달라도 수가 같으면 같은 버전이다(`v0.7` = `v0.07`).
+- `docLint`: 문서 목록(`docLint.exclude`를 뺀 뒤의 목록)에 `docs/harness/design.md`가 있으면 그 파일을 읽어 `designVersionProblems`의 결과를 오류에 더한다. 목록에 없으면 아무것도 하지 않는다. 자리는 AGENTS.md 줄 수 검사 뒤다. 다른 검사와 `git` 호출은 그대로다.
+
+### 2. 테스트 `scripts/test/doc-lint-design-version.test.ts`(새 파일)
+
+`designVersionProblems`는 글자를 넘겨 직접 부른다. `docLint`와 CLI는 임시 `git` 리포로 본다(`scripts/test/helpers.ts`). 설계서 글자는 테스트 안에서 만든다(머리말 줄, `- **변경 이력**` 줄, 항목 서너 개, 그 뒤의 다른 목록 줄과 본문).
+
+- **맞는 설계서**: 머리말 `v0.7.3`·`2026-11-21`, 항목 `v0.4`(2026-11-10), `v0.4.1`(2026-11-10), `v0.7.2`(2026-11-20), `v0.7.3`(2026-11-21). 결과는 빈 배열이다. 줄 끝이 CRLF여도 빈 배열이다. 항목 사이에 더 깊이 들여쓴 줄(공백 넷으로 시작)이 있어도 빈 배열이다.
+- **머리말 버전이 뒤처졌다**: 머리말이 `v0.7.2`·`2026-11-21`이고 마지막 항목이 `v0.7.3`. 한 건이고 `rule`이 `R8 설계서 버전`, `what`에 `v0.7.2`와 `v0.7.3`이 있다.
+- **최종 갱신이 다르다**: 머리말이 `v0.7.3`·`2026-11-20`. 한 건이고 `what`에 `2026-11-20`과 `2026-11-21`이 있다. 버전과 날짜가 모두 다르면 두 건이다.
+- **같은 버전이 두 번**: 항목이 … `v0.7.3`, `v0.7.3` 순이고 머리말이 `v0.7.3`. 한 건이고 `what`에 뒤 항목의 줄 번호가 있다. 뒤 항목이 앞 항목보다 작은 경우(`v0.7.3` 뒤에 `v0.7.2`. 머리말은 `v0.7.2`)도 한 건이다.
+- **마디 수가 다른 버전**: `v0.4` 뒤의 `v0.4.1`은 크다(문제 없음). `v0.4.1` 뒤의 `v0.4`는 크지 않다(한 건). `v0.7` 뒤의 `v0.07`은 같은 버전이라 크지 않다(한 건).
+- **읽지 못한다**: 머리말 줄이 없다(한 건, `what`에 `머리말`). 머리말 줄에 최종 갱신이 없다(한 건, `what`에 `머리말`). `- **변경 이력**` 줄이 없다(한 건, `what`에 `변경 이력`). 그 줄 바로 뒤가 빈 줄이라 항목이 없다(한 건). 항목 하나의 형식이 틀리다(날짜가 없다: 한 건, `what`에 그 줄 번호). 읽지 못한 경우에는 비교 문제가 함께 나오지 않는다.
+- **`docLint`에 이어진다**: 임시 리포에 `docs/harness/design.md`(머리말 버전이 뒤처진 것)와 그것을 링크한 색인을 둔다. `docLint`의 오류에 `R8 설계서 버전`이 있다. 설정 `docLint.exclude`에 그 경로를 넣으면 없다. 그 파일을 지우면 없다(이때는 색인의 링크도 지운다).
+- **CLI**: 같은 리포에서 `node scripts/harness.ts doc-lint`와 `check --only doc-lint --no-cache`가 종료 코드 1이고 출력(표준 출력과 표준 오류를 합친 것)에 `R8 설계서 버전`이 있다. `check`의 출력에는 `✗ doc-lint`도 있다. 머리말을 마지막 항목에 맞추면 두 명령 모두 종료 코드 0이다.
+
+### 3. 문서
+
+- `docs/harness/workflow.md` 5절 "main에 뒤처지거나 충돌한 PR 갱신"의 "완료 커밋 뒤에 충돌 해결로 코드가 바뀌면 …" 항목 바로 앞에 아래 한 항목을 더한다(글자 그대로. step0이 더한 충돌 표식 항목의 바로 뒤가 된다). 4절은 고치지 않는다.
+
+  ```text
+  - 설계서(`docs/harness/design.md`)를 고친 PR은 병합 뒤에 머리말의 버전·최종 갱신을 변경 이력의 마지막 항목과 맞춘다. main이 같은 버전을 먼저 썼으면 이 PR의 항목을 다음 번호로 올린다. 어긋나면 `doc-lint`가 `R8 설계서 버전`으로 막는다.
+  ```
+
+- `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)"에 한 줄: 무엇이 바뀌었는지, 검사를 약화하지 않고 강화한다는 것, 설계서가 없는 리포에서는 하지 않는다는 것, 설계서 본문은 바뀌지 않는다는 것.
+- `docs/exec-plans/tech-debt-tracker.md`: TD-33 행의 상태를 `해결(#<이 PR 번호>: …)`로 바꾼다. 다른 행은 고치지 않는다. 표의 다른 행이 다시 정렬되지 않게 열 폭 안으로 쓴다.
+
+## Acceptance Criteria
+
+```bash
+node --test scripts/test/doc-lint-design-version.test.ts scripts/test/doc-lint-gate.test.ts scripts/test/gates.test.ts scripts/test/codeowners.test.ts scripts/test/metrics-command.test.ts scripts/test/metrics-local.test.ts
+node scripts/harness.ts doc-lint
+grep -qxF -e '- 설계서(`docs/harness/design.md`)를 고친 PR은 병합 뒤에 머리말의 버전·최종 갱신을 변경 이력의 마지막 항목과 맞춘다. main이 같은 버전을 먼저 썼으면 이 PR의 항목을 다음 번호로 올린다. 어긋나면 `doc-lint`가 `R8 설계서 버전`으로 막는다.' docs/harness/workflow.md
+grep -q "^| TD-33 .*| 해결(" docs/exec-plans/tech-debt-tracker.md
+```
+
+## 금지사항
+
+- `docLint` 안에서 `git` 호출을 더하지 마라. 이유: 지표 집계가 실행하는 `git` 호출의 허용 목록(`scripts/test/metrics-allow.ts`)과 호출 순서 테스트가 바뀐다.
+- `doc-lint`의 다른 검사 항목과 판정 기준(링크, 색인, frontmatter, 줄 수, "검토 필요", 읽기 실패)을 바꾸지 마라. 이유: 이 step은 검사 하나를 더할 뿐이다.
+- 머리말 줄이나 변경 이력을 읽지 못한 경우를 통과로 넘기지 마라. 이유: 형식이 바뀌면 검사가 조용히 꺼진다.
+- 설계서(`docs/harness/design.md`)를 고치지 마라. 이유: 지금 설계서는 이 검사를 통과하고, 다른 세션의 PR이 버전을 올리는 중이다.
+- `scripts/metrics/`, `scripts/test/metrics-*.ts`를 고치지 마라. 이유: 지표 집계의 동작과 그 테스트는 그대로여야 한다.
+- 기존 테스트 파일의 단언을 지우거나 약하게 하지 마라(R4). 이유: 다른 검사의 결과가 같다는 증거다.
+- `scripts/hooks/`, `scripts/lib/config.ts`, `harness.config.json`, `profiles/`, `scripts/runner/`, `.github/`, 절차서 4절을 고치지 마라. 이유: 범위 밖이고 다른 세션이 고치는 파일이 있다.
