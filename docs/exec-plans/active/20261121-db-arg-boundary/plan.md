@@ -2,7 +2,7 @@
 id: 20261121-db-arg-boundary
 issue: 172 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -104,6 +104,7 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
   - 대조를 넓히며 찾아 함께 고친 것: `&>` 앞의 숫자(`2&>out`)를 디스크립터로 버리던 것(bash는 인자로 넘긴다), 공백 없이 닫힌 중괄호 낱말(`{}`, `{x}`)을 묶음 괄호로 읽어 명령을 나누던 것(`find … -exec tool --flag {} sub`의 인자가 갈라졌다). 묶음 괄호(`{ 명령; }`)와 zsh의 `{명령 인자}`는 전처럼 읽는다.
   - 로컬 대조 결과: bash 3.2로 5,000건(씨앗 둘) 다른 것 0건. zsh로 5,000건 가운데 221건이 다르고, 모두 두 꼴이다: `2&>파일`(zsh는 숫자를 디스크립터로 읽는다), 띄어 쓴 `{이름} >파일`(zsh는 `{이름}`을 디스크립터 변수로 읽는다). 두 셸의 뜻이 달라 한쪽으로만 읽을 수 있다. 훅은 bash의 해석을 따르고 설계서에 남는 틈으로 적었다.
   - 테스트 먼저: 테스트 4개를 더하고 대조 테스트에 꼴을 더한 뒤, 고치기 전에 돌려 5개가 실패하는 것을 봤다(대조는 87건이 달랐다). 고친 뒤 테스트 4개 파일 89개 통과.
+- 2026-11-21T17:16:23+09:00 step0 재작업: 구현 판정 4라운드(codex F13): 변수 첨자가 든 배열 원소 디스크립터에서 명령이 갈라진다. 제작자 선택 A(한 번 더 고친다)
 
 ## 의사결정 로그
 
