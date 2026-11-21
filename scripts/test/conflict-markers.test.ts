@@ -124,6 +124,20 @@ test('conflict-markers: 경로를 그대로 내고 파일마다 한 건을 경�
   assert.ok(p[2].what.startsWith('c/한글 이름.md:2'), p[2].what);
 });
 
+test('conflict-markers: 표식 줄이 아주 많은 파일도 한 건으로 알린다', () => {
+  const root = repo();
+  const count = 200_000;
+  write(root, 'big.txt', `x\n${`${START} a\n`.repeat(count)}`);
+  write(root, 'small.txt', `${END} b\n`);
+  commitAll(root);
+  const p = conflictMarkers(root);
+  assert.equal(p.length, 2);
+  assert.equal(p[0].rule, RULE);
+  assert.ok(p[0].what.startsWith('big.txt:2'), p[0].what.slice(0, 80));
+  assert.ok(p[0].what.includes(`표식 ${count}줄`), p[0].what.slice(0, 80));
+  assert.ok(p[1].what.startsWith('small.txt:1'), p[1].what);
+});
+
 test('conflict-markers: 커밋이 없는 리포의 새 파일도 본다', () => {
   const root = repo();
   write(root, 'new.txt', BLOCK);
