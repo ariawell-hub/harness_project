@@ -76,12 +76,19 @@ interface Redir {
   needsTarget: boolean;
   /** 연산자 앞의 글 그대로(파일 디스크립터여도 담는다). 앞에 중괄호가 붙으면 디스크립터가 아니라 인자다(`{2>out`) */
   pre: string;
+  /**
+   * 이 낱말에 붙은 대상(`<a>b`의 a와 b). 토큰화가 따옴표 밖의 연산자가 끝난 자리부터 다음 연산자까지를 하나씩 낸다.
+   * 따옴표·이스케이프 안의 `<`·`>`는 대상의 글자다(`<'a>b'`의 대상은 `a>b` 하나). here-string(`<<<글`)의 글은 파일이 아니라 넣지 않는다
+   */
+  targets?: string[];
 }
 
 interface Token {
   kind: 'word' | 'op';
   value: string;
   redir?: Redir;
+  /** 이 낱말에 따옴표·이스케이프·치환으로 들어온 글이 있다(`"[["`는 예약어가 아니다) */
+  quoted?: boolean;
   /** 연산자 `{`·`}` 바로 뒤에 공백 없이 낱말이 이어진다: bash에서는 그 낱말의 앞 글자다(`{a`, `}a`) */
   glue?: boolean;
 }
@@ -125,6 +132,7 @@ function braceTail(tokens: Token[], k: number): Tail {
             arg: pending + tk.redir.pre,
             needsTarget: tk.redir.needsTarget,
             pre: pending + tk.redir.pre,
+            targets: tk.redir.targets,
           }
         : tk.redir,
     );
@@ -263,6 +271,13 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
    * 그 안에서 다시 시도하지 않는다. 그래서 시도한 구간이 겹치지 않고 전체 시간이 입력 길이에 비례한다
    */
   let noSubBefore = 0;
+  /**
+   * 이 낱말에서 따옴표 밖의 연산자가 이어진 구간들: [시작, 끝, 시작, 끝, …](낱말 안의 자리). 대상은 구간의 끝부터 다음 구간의 시작까지다.
+   * 따옴표를 벗긴 낱말을 `<`·`>`로 다시 나누지 않으려고 읽으면서 적는다(따옴표 안의 `>`는 파일 이름의 글자다)
+   */
+  let runs: number[] = [];
+  /** here-string(`<<<`) 연산자의 구간이 runs에서 시작하는 자리. 그 뒤의 글은 파일이 아니다 */
+  let hereRuns: number[] = [];
   /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
   const redirOp = (ch: string) => {
     if (redirAt < 0) {
@@ -270,6 +285,8 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       preQuoted = wordQuoted;
       redirAmp = ch === '&';
     }
+    if (runs.length && redirEnd === word.length) runs[runs.length - 1] = word.length + 1;
+    else runs.push(word.length, word.length + 1);
     word += ch;
     redirEnd = word.length;
     inWord = true;
@@ -277,6 +294,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   const push = () => {
     if (inWord) {
       const t: Token = { kind: 'word', value: word };
+      if (wordQuoted) t.quoted = true;
       if (redirAt >= 0) {
         const pre = word.slice(0, redirAt);
         // 연산자 바로 앞의, 따옴표 밖의 글이 파일 디스크립터면 인자가 아니다(`2>`, `{이름}>`)
@@ -284,11 +302,20 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         // 따옴표로 묶은 앞부분은 빈 글이어도 인자다(`''>out`)
         const arg = fd ? null : preQuoted || pre !== '' ? pre : null;
         t.redir = { arg, needsTarget: redirEnd === word.length, pre };
+        const targets: string[] = [];
+        for (let k = 0; k < runs.length; k += 2) {
+          if (hereRuns.includes(k)) continue;
+          const piece = word.slice(runs[k + 1], runs[k + 2] ?? word.length);
+          if (piece) targets.push(piece);
+        }
+        if (targets.length) t.redir.targets = targets;
       }
       tokens.push(t);
     }
     word = '';
     inWord = false;
+    runs = [];
+    hereRuns = [];
     redirAt = -1;
     redirEnd = -1;
     wordQuoted = false;
@@ -464,6 +491,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       redirOp('<');
       redirOp('<');
       redirOp('<');
+      hereRuns.push(runs.length - 2);
       i += 3;
       continue;
     }
@@ -775,7 +803,12 @@ function normalize(
     own = argv.map(() => undefined);
   } else {
     /** 붙어 있던 낱말에서 뗀 리다이렉션 */
-    const detached = (r: Redir): Redir => ({ arg: null, needsTarget: r.needsTarget, pre: '' });
+    const detached = (r: Redir): Redir => ({
+      arg: null,
+      needsTarget: r.needsTarget,
+      pre: '',
+      targets: r.targets,
+    });
     /** 명령 이름이 든 낱말의 원래 자리. 이름이 없으면 끝 */
     const n = i < words.length ? at[i] : source.length;
     // 이름 앞: 벗긴 낱말은 버리고, 리다이렉션(연산자와 대상, 벗긴 낱말에 붙어 있던 것)은 차례대로 모아 끝으로 옮긴다
@@ -831,15 +864,9 @@ function normalize(
     const words = [...argv, ...tail.words];
     args = shellArgs(words, [...own, ...tail.redirs]) ?? words;
   }
-  // 낱말에 붙은 리다이렉션의 대상: 연산자 글자에서 나눈 조각(`<a>b`는 a와 b)
+  // 낱말에 붙은 리다이렉션의 대상: 토큰화가 연산자의 경계로 낸 것(`<a>b`는 a와 b, `<'a>b'`는 `a>b` 하나)
   const targets: string[] = [];
-  if (hasRedirs)
-    for (let k = 0; k < argv.length; k++) {
-      const r = own[k];
-      if (!r) continue;
-      for (const piece of argv[k].slice(r.pre.length).split(/[<>]+[&|]?/))
-        if (piece) targets.push(piece);
-    }
+  if (hasRedirs) for (const r of own) if (r?.targets) targets.push(...r.targets);
   /** argv와, 셸이 넘기는 인자가 argv와 다를 때만 args. 붙은 대상이 있을 때만 targets */
   const base: Pick<SimpleCommand, 'argv' | 'args' | 'targets'> = args ? { argv, args } : { argv };
   if (targets.length) base.targets = targets;
@@ -893,6 +920,9 @@ function normalize(
   }
 }
 
+/** 이 낱말들만 앞에 있으면 그 뒤의 `[[`는 명령의 첫 낱말 자리에 있다(조건식의 시작) */
+const BEFORE_COND = new Set(['if', 'while', 'until', 'elif', 'then', 'do', 'else', '!', 'time']);
+
 /** 이 낱말들 뒤의 `{`가 묶음 괄호인가: 예약어 하나뿐이거나(`then {`, `do {`), 함수·코프로세스 선언이다 */
 function beforeGroup(cur: string[]): boolean {
   if (cur.length === 1 && BEFORE_GROUP.has(cur[0])) return true;
@@ -907,15 +937,15 @@ function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Di
   /** 이 자리 앞의 토큰은 앞 조각의 args에 이미 담았다(조각마다 다시 모으지 않는다) */
   let tailEnd = 0;
   /**
-   * 이 단순 명령에 `[[`가 나왔다. 그 뒤의 `]]` 낱말마다 명령을 나눈다: zsh는 `if [[ … ]] 명령`의 명령을 실행한다.
-   * 따옴표로 묶은 `"]]"`와 구별할 수 없으므로 `]]`마다 나눈다(어느 것이 진짜든 그 뒤의 명령을 놓치지 않는다).
+   * 조건식 `[[ … ]]` 안이다. zsh는 `if [[ … ]] 명령`의 명령을 실행하므로 조건식이 끝난 자리에서 명령을 나눈다.
+   * 시작: 따옴표가 없고 리다이렉션이 붙지 않은 `[[`가 명령의 첫 낱말 자리에 있을 때만이다(인자 자리의 `[[`, `"[["`는 예약어가 아니다).
+   * 끝: 따옴표 없는 `]]`. 따옴표로 묶은 `"]]"`는 피연산자다. 조건식 안의 연산자(`&&`, `||`, 괄호, 줄바꿈)는 조건식을 끝내지 않는다.
    * bash에서는 `[[ … ]]` 뒤에 연산자가 와야 하므로 바른 bash 명령의 조각은 달라지지 않는다
    */
   let cond = false;
   for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k];
     if (t.kind === 'op') {
-      cond = false;
       if (cur.length) {
         // bash는 명령의 첫 낱말 자리가 아닌 곳의 `{`·`}`를 낱말로 넘긴다. 명령은 전처럼 여기서 나누고(argv는 그대로다),
         // 첫 조각의 args에 bash가 넘기는 인자를 진짜 구분자 앞까지 담는다
@@ -934,15 +964,24 @@ function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Di
       cur = [];
       curRedirs = [];
     } else {
+      if (
+        dialect === 'posix' &&
+        !cond &&
+        t.value === '[[' &&
+        !t.quoted &&
+        !t.redir &&
+        cur.every((w) => BEFORE_COND.has(w))
+      )
+        cond = true;
       cur.push(t.value);
       curRedirs.push(t.redir);
-      if (dialect === 'posix') {
-        if (t.value === '[[') cond = true;
-        else if (cond && t.value === ']]') {
-          normalize(cur, out, depth, dialect, curRedirs);
-          cur = [];
-          curRedirs = [];
-        }
+      // 조건식의 끝: `]]`, 또는 `]]`에 리다이렉션이 붙은 낱말(`]]>out`)
+      if (cond && (t.redir ? t.redir.pre === ']]' : t.value === ']]' && !t.quoted)) {
+        normalize(cur, out, depth, dialect, curRedirs);
+        cur = [];
+        curRedirs = [];
+        // 리다이렉션이 붙은 낱말에 따옴표가 있으면 `]]`가 따옴표 안이었을 수 있다: 나누기만 하고 조건식은 끝내지 않는다
+        if (!t.quoted) cond = false;
       }
     }
   }
