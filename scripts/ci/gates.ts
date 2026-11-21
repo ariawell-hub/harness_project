@@ -2,9 +2,10 @@
 // main(base/)의 이 스크립트가 PR head 체크아웃(pr/)을 데이터로만 읽는다. PR 코드를 실행하지 않고 비밀이 없다.
 // 설정(cfg)은 반드시 main 쪽에서 읽는다. PR이 판정 기준을 함께 바꿀 수 있기 때문이다.
 import type { HarnessConfig } from '../lib/config.ts';
-import { formatProblem, matchesAny } from '../lib/util.ts';
+import { formatProblem, matchesAny, WARN_PREFIX } from '../lib/util.ts';
 import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
+import { prSize } from '../gates/pr-size.ts';
 import { planGate, type PlanG1 } from '../gates/plan-gate.ts';
 import {
   revertCheck,
@@ -21,7 +22,14 @@ import {
 } from '../gates/risk-gate.ts';
 import { REVIEWERS, type PlanReview } from './ledger.ts';
 import { planHashes } from './plan-hash.ts';
-import { GATE_CONTEXTS, type GateResult, type GateResults } from './results.ts';
+import {
+  GATE_CONTEXTS,
+  WARN_CONTEXTS,
+  fitWarnings,
+  serializeResults,
+  type GateResult,
+  type GateResults,
+} from './results.ts';
 
 export interface RunGatesOptions {
   /** PR head 체크아웃(데이터) */
@@ -201,10 +209,32 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
     };
   const results: GateResult[] = [];
   for (const c of GATE_CONTEXTS) results.push(await byContext[c]());
+  // 경고 판정(R15·R18). 확인된 revert PR은 보지 않는다: 크기와 범위는 되돌리는 대상이 정한다
+  const warn: Record<(typeof WARN_CONTEXTS)[number], () => Omit<GateResult, 'context'>> = {
+    'pr-size': () => {
+      const r = prSize({ root: o.root, base: o.base, cfg: o.cfg });
+      return { state: r.state, description: r.description, details: r.details };
+    },
+  };
+  for (const c of WARN_CONTEXTS)
+    results.push(
+      revert?.verified
+        ? { context: c, state: 'success', description: 'revert PR: 보지 않는다', details: [] }
+        : guarded(c, warn[c]),
+    );
   return { version: 1, headSha: o.headSha, results, ...(risk ? { risk } : {}) };
 }
 
 const STATE_MARK: Record<string, string> = { success: '통과', failure: '실패', error: '오류' };
+
+/** 경고 판정이 경고를 냈는가(state는 success이고 설명이 `경고: `로 시작한다) */
+export function isWarning(g: GateResult): boolean {
+  return (
+    (WARN_CONTEXTS as readonly string[]).includes(g.context) &&
+    g.state === 'success' &&
+    g.description.startsWith(WARN_PREFIX)
+  );
+}
 
 /** 판정 job의 $GITHUB_STEP_SUMMARY용 Markdown */
 export function summaryMarkdown(r: GateResults): string {
@@ -214,11 +244,22 @@ export function summaryMarkdown(r: GateResults): string {
     '',
     '| 체크 | 결과 | 설명 |',
     '| --- | --- | --- |',
-    ...r.results.map((g) => `| ${g.context} | ${STATE_MARK[g.state]} | ${esc(g.description)} |`),
+    ...r.results.map(
+      (g) =>
+        `| ${g.context} | ${isWarning(g) ? '경고' : STATE_MARK[g.state]} | ${esc(g.description)} |`,
+    ),
   ];
   for (const g of r.results) {
     if (!g.details.length) continue;
     lines.push('', `### ${g.context}`, '', '```text', ...g.details, '```');
   }
   return lines.join('\n') + '\n';
+}
+
+/**
+ * `gates` 명령이 내는 두 가지. 결과 파일(기록 job으로 넘어간다)에는 크기를 맞춘 결과를 쓰고,
+ * 판정 job 요약은 원래 결과로 만든다: 크기 때문에 결과 파일에서 뺀 경고와 상세도 요약에는 남는다
+ */
+export function gatesOutput(r: GateResults): { file: string; summary: string } {
+  return { file: serializeResults(fitWarnings(r)), summary: summaryMarkdown(r) };
 }
