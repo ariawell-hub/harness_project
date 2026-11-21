@@ -2,7 +2,7 @@
 id: 20261121-db-arg-boundary
 issue: 172 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -88,6 +88,7 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
   - 테스트 먼저: 테스트를 더하고 고치기 전에 돌려 `db-commands.test.ts` 8개와 `guard.test.ts`의 프로세스 테스트 1개가 실패하는 것을 봤다(`REVIEW_SAMPLE=1`이 종료 코드 0). 고친 뒤 테스트 4개 파일(`shell.test.ts` 포함) 80개 통과.
   - 완료 처리 뒤라 step을 `in_progress`로 되돌렸다(재작업 커밋).
 - 2026-11-21 PR #173이 먼저 병합되어(`6dc7475`) `origin/main`을 병합했다. `CHANGELOG`의 충돌은 main의 줄 뒤에 이 PR의 줄을 두어 풀었다. 기술 부채 번호 TD-61은 #173이 가졌다(계획 수정 절차의 남은 일). 이 계획의 글에 적힌 "TD-61"은 PR #169가 등록할 DB 규칙의 부채를 가리키며, #169가 다음 번호로 바꿔 등록한다. 묶인 섹션의 글은 고칠 수 없어 그대로 두고, `CHANGELOG`의 이 PR 줄에서는 번호를 뺐다.
+- 2026-11-21T14:50:02+09:00 step0 재작업: 구현 판정 2라운드(codex F10·F11): 입력 디스크립터 복제(<&)를 명령 구분자로 읽고, 따옴표로 묶은 숫자를 파일 디스크립터로 버린다
 
 ## 의사결정 로그
 
