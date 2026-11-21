@@ -72,6 +72,15 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
 - 2026-11-21 판정을 기다리는 동안 step0을 로컬에서 구현했다(push하지 않았다. 계획 승인 뒤에 올린다).
   - 테스트 먼저: `scripts/test/db-commands.test.ts`를 쓰고 규칙에 잇기 전에 돌려 11개 가운데 5개가 실패하는 것을 봤다(훅 판정을 거치는 다섯: 막혀야 하는 호출이 통과, 차단 메시지, 경계, 알려진 대가, 코어 기본 항목). 판정 모듈만 부르는 여섯은 모듈과 함께 써서 실패를 따로 보지 못했다(모듈이 없던 변경 전 코드에서는 실패한다. `test-effect`가 확인한다). `guard.test.ts`·`lib.test.ts`에 더한 테스트는 구현 뒤에 썼다.
   - 로컬 `node scripts/harness.ts check` 통과(test 326초, test-effect 통과).
+- 2026-11-21 계획 검증 5라운드(PR #174, head `a33fc8a`): `review/claude`·`review/codex` 모두 승인. F6이 닫혔다. 원장에 `계획 검증(G1): … 승인: claude, codex`가 남았다. 이 뒤에 구현을 올렸다.
+- 2026-11-21 step0 자체 검증(구현을 올리기 전):
+  - AC 블록의 명령을 한 줄씩 돌려 모두 통과했다(테스트 3개 파일 60개 통과, `self-test` 통과, 문서 AC 통과).
+  - 새 모듈의 테스트가 단언으로 실패하는지 변이로 확인했다(체크리스트의 R5 항목). `scripts/hooks/db-commands.ts`를 한 군데씩 틀리게 바꾸고 `scripts/test/db-commands.test.ts`를 돌린 뒤 되돌렸다(되돌린 파일이 원본과 같은지 `cmp`로 봤다).
+    - 도구 자리를 찾지 못하게 함 → 8개 실패(판정 모듈만 부르는 테스트 셋 포함).
+    - 허용된 하위 명령에서 걷기를 끝내지 않게 함 → 4개 실패(통과해야 하는 호출이 막힘, 경계, 기준 구현과의 비교).
+    - 낱말이 둘 이상인 금지 항목을 첫 낱말만 비교하게 함 → 5개 실패(읽은 횟수 한도와 시간 제한 테스트 포함).
+    - 도구 이름을 앞부분만 비교하게 함(`drizzle-kitx`) → 1개 실패.
+  - 한 번만 걷는다는 조건(금지사항 "도구 자리마다 다시 걷지 마라")을 깨는 변이는 따로 만들지 않았다. 읽은 횟수 테스트의 한도(규칙 수 × 인자 수 × 4)가 그 경우를 잡는다: 도구 자리가 빽빽한 입력에서 다시 걸으면 읽기가 인자 수의 제곱으로 는다.
 
 ## 의사결정 로그
 
@@ -85,6 +94,7 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
 
 - 이 계획이 TD-61에서 닫는 것: 공백이 든 플래그 값(인자의 경계), 코어의 플래그가 앞에 오는 호출과 버전을 붙인 호출(`drizzle-kit`, `prisma`). 남는 것: 금지 낱말 사이에 플래그가 끼는 호출(`prisma db --schema x push`), 코어의 다른 도구(정규식으로만 본다), 셸 안의 셸. TD-61 행은 PR #169에 있으므로 그 PR이 이 내용으로 행을 맞춘다. → 처리: #166(PR #169에서 TD-61 행을 고친다)
 - 있던 `guard.dbPatterns`·`dbClients`는 작업 worktree의 설정에서 읽는다(`scripts/hooks/guard.ts`의 `buildContext`). worktree에서 그 목록을 비우면 프로파일이 더한 차단이 그 worktree에서 풀린다(코어 목록은 코드에 있어 남는다). `guard.mcp`와 새 `guard.dbCommands`는 메인에서 읽는다. 이 계획은 있던 동작을 바꾸지 않는다. → 처리: #166(PR #169에서 TD-61 행에 더한다. 제작자에게 별도 Issue를 제안한다)
+- 도구 자리는 인자의 경로 조각으로 찾으므로(계획의 판정 규칙), 도구와 이름이 같은 디렉터리를 가리키는 인자 뒤에 금지 이름과 같은 인자가 오면 도구를 부르지 않는 명령도 막힌다. 실제로 확인했다: `git -C repos/drizzle-kit push`의 인자 배열이 금지로 판정된다(`git -C repos/drizzle-kit status`는 통과). 도구 자체의 리포를 그 이름의 폴더에서 다룰 때만 생기고, 그 폴더로 옮겨 가서 실행하면 통과한다. 놓치는 쪽이 아니라 더 막는 쪽이라 규칙은 그대로 두고 설계서에 알려진 대가로 적었다. → 처리: [docs/harness/design.md](../../../harness/design.md) 13.1절 "알려진 대가"
 
 ## 열린 질문
 
@@ -96,8 +106,9 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
 - 수용 기준 5: 위 테스트와 `node scripts/harness.ts self-test`(`check`의 `test`에 들어 있다), AC의 "줄을 지우지 않았다" 확인.
 - 수용 기준 7: `node --test scripts/test/lib.test.ts`와 훅을 프로세스로 부르는 테스트.
 - 수용 기준 8: AC의 14.3절 비교와 `node scripts/harness.ts check`.
+- 결과(2026-11-21, 구현을 올리기 전 로컬): AC 블록 전부 통과. `node scripts/harness.ts check` 통과(fmt, lint, test, test-effect, doc-lint, bypass-scan, secret-scan).
 
 ## 다음 할 일
 
-- 계획만 담은 커밋을 push하고 초안 PR을 열어 계획 검증(G1)을 받는다. 승인 뒤 step0을 구현한다.
+- step0의 구현을 올려 구현 판정을 받는다. 위험도 높음이라 초안으로 두고, 판정이 끝나면 `pr-ready`로 제작자 승인을 요청한다.
 - 이 계획이 병합되면 PR #169(브랜치 `feat/20261120-q10-db-decision-s1`)가 main을 병합하고, 웹 프로파일의 Drizzle 정규식을 `guard.dbCommands` 항목으로 옮겨 수용 기준 5를 채운 뒤 TD-61 행을 맞춘다. 그 계획의 step1 지시("`guard.dbPatterns`에 더한다")와 어긋나므로 계획 수정이 필요하다(제작자에게 알리고 계획만 담은 커밋으로 다시 검증받는다).
