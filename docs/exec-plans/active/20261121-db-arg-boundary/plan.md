@@ -2,7 +2,7 @@
 id: 20261121-db-arg-boundary
 issue: 172 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -114,6 +114,7 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
   - 테스트 먼저: 테스트를 두 번에 나눠 더했고(배열 첨자 4개, 인자 자리의 중괄호 3개와 대조의 꼴), 고치기 전에 돌려 각각 3개, 4개가 실패하는 것을 봤다(대조는 115건이 달랐다). 고친 뒤 테스트 4개 파일 96개 통과. 시간 제한 테스트에 중괄호가 빽빽한 입력을 넣었다.
   - 실패 횟수: `review` 4회째다. 다음 판정에서 또 수정 요청이 나오면 5회라 멈추고 보고한다.
 - 2026-11-21 기술 부채 번호: 다른 세션의 전달(제작자가 대화로 알렸다)에 따라 이 작업의 번호를 **TD-62**로 쓴다(TD-61은 main에서 PR #173의 항목이다). Issue #172의 제목·본문, PR #174의 제목·본문, 이 계획의 고칠 수 있는 섹션(의사결정 로그, 발견 사항, 다음 할 일)을 TD-62로 바꿨다. 묶인 섹션(제목 줄, "범위 / 비범위")의 "TD-61"은 고칠 수 없어 그대로다. PR #169의 행은 그 PR을 다시 작업할 때 TD-62로 바꾼다(그 PR에 댓글로 남겼다).
+- 2026-11-21T17:56:38+09:00 step0 재작업: 구현 판정 5라운드(codex F14): 배열 첨자의 큰따옴표 안에서 작은따옴표 뒤의 명령 치환을 놓친다. 제작자 선택 A(한 번 더 고친다)
 
 ## 의사결정 로그
 
