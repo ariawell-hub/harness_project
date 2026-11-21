@@ -28,9 +28,6 @@ const state = {
   statuses: [] as { sha: string; context: string; state: string; description: string }[],
   auth: [] as string[],
   failComments: false,
-  /** 편집 이력(GraphQL) 요청 수. 열렸거나 accepted인 P0·P1이 있는 원장을 기록할 때 읽는다 */
-  gqlCalls: 0,
-  gqlFail: false,
 };
 let server: Server;
 let api = '';
@@ -50,12 +47,6 @@ before(async () => {
       if (req.method === 'POST' && status) {
         state.statuses.push({ sha: status[1], ...JSON.parse(body) });
         return json(201, {});
-      }
-      if (req.method === 'POST' && url === '/graphql') {
-        state.gqlCalls++;
-        if (state.gqlFail) return json(500, { message: 'graphql down' });
-        const comments = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
-        return json(200, { data: { repository: { pullRequest: { comments } } } });
       }
       if (req.method === 'GET' && url === '/repos/o/r/pulls/7')
         return json(200, { user: { login: 'writer-bot' } });
@@ -90,8 +81,6 @@ function reset() {
   state.statuses = [];
   state.auth = [];
   state.failComments = false;
-  state.gqlCalls = 0;
-  state.gqlFail = false;
 }
 
 /** 서버가 같은 프로세스에 있어 동기 실행은 쓸 수 없다 */
@@ -207,32 +196,6 @@ test('record-review: 판정을 원장 댓글에 반영하고 review/*와 review-
   );
   assert.equal(state.comments.length, 1);
   assert.equal(parseLedger(state.comments[0].body)?.findings[0].status, 'fixed');
-  // 1라운드는 원장이 비어 있어 읽지 않고, 2라운드는 열린 P1(F1)이 있어 제작자 승인을 보려고 편집 이력을 한 번 읽는다
-  assert.equal(state.gqlCalls, 1);
-});
-
-test('record-review: 열린 P1이 있는 원장에서 편집 이력을 읽지 못하면 원장을 쓰지 않고 review-ledger가 error다', async () => {
-  reset();
-  const v = verdictFile({ verdict: 'request_changes', findings: [finding()] });
-  const r = await run(recordArgs(v, ledgerArgs), tokens);
-  assert.equal(r.code, 0, r.out);
-  assert.equal(state.gqlCalls, 0);
-  const before = state.comments[0].body;
-  state.gqlFail = true;
-  const v2 = verdictFile({ resolutions: [{ id: 'F1', status: 'fixed', note: 'a1b2c3d' }] });
-  const r2 = await run(recordArgs(v2, ledgerArgs), tokens);
-  assert.equal(r2.code, 0, r2.out);
-  assert.equal(state.gqlCalls, 1);
-  assert.deepEqual(
-    state.statuses.slice(2).map((s) => [s.context, s.state]),
-    [
-      ['review/claude', 'success'],
-      ['review-ledger', 'error'],
-    ],
-  );
-  // 승인을 확인하지 못했으므로 이 판정(fixed)도 저장하지 않는다
-  assert.equal(state.comments[0].body, before);
-  assert.equal(parseLedger(state.comments[0].body)?.findings[0].status, 'open');
 });
 
 test('record-review: 원장 토큰이 없거나 댓글 API가 막혀도 review/*는 기록하고 review-ledger만 error', async () => {

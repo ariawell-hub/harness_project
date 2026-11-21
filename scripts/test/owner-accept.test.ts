@@ -50,8 +50,6 @@ const accept = (over: Partial<Accept> = {}): Accept => ({
   ...over,
 });
 const statusOf = (l: Ledger, id: string) => l.findings.find((e) => e.id === id)?.status;
-const NOT_BLOCKING = '차단 지적(P0·P1)이 아니다';
-const NOT_OPEN = '열린 지적이 아니다';
 
 test('acceptIds: 본문이 승인 줄뿐이면 ID를 고른다', () => {
   assert.deepEqual(acceptIds('/harness accept F1'), ['F1']);
@@ -199,30 +197,8 @@ test('applyOwnerAccepts: 게시된 뒤에 단 승인으로 열린 P0이 accepted
 test('applyOwnerAccepts: 반영하지 않는 경우마다 지적은 그대로이고 이유가 남는다', () => {
   const cases: [string, Ledger, Accept, string][] = [
     ['없는 ID', ledger(entry()), accept({ id: 'F9' }), '원장에 없는 지적'],
-    ['P2', ledger(entry({ severity: 'P2', status: 'deferred' })), accept(), NOT_BLOCKING],
-    ['P3', ledger(entry({ severity: 'P3', status: 'deferred' })), accept(), NOT_BLOCKING],
-    ['열린 P2', ledger(entry({ severity: 'P2' })), accept(), NOT_BLOCKING],
-    ['동결된 P1', ledger(entry({ severity: 'P1', status: 'deferred' })), accept(), NOT_OPEN],
-    ['fixed P1', ledger(entry({ severity: 'P1', status: 'fixed' })), accept(), NOT_OPEN],
-    ['rejected P1', ledger(entry({ severity: 'P1', status: 'rejected' })), accept(), NOT_OPEN],
-    [
-      '게시 시각 없는 P1',
-      ledger(entry({ severity: 'P1', openedAt: undefined })),
-      accept(),
-      '게시 시각을 모르는 지적',
-    ],
-    [
-      '같은 시각의 P1',
-      ledger(entry({ severity: 'P1', openedAt: T1 })),
-      accept({ at: T1 }),
-      '지적이 게시된 뒤에 단 댓글이 아니다',
-    ],
-    [
-      '앞선 시각의 P1',
-      ledger(entry({ severity: 'P1', openedAt: T2 })),
-      accept({ at: T1 }),
-      '지적이 게시된 뒤에 단 댓글이 아니다',
-    ],
+    ['P1', ledger(entry({ severity: 'P1' })), accept(), 'P0이 아니다'],
+    ['P2', ledger(entry({ severity: 'P2', status: 'deferred' })), accept(), 'P0이 아니다'],
     ['fixed', ledger(entry({ status: 'fixed' })), accept(), '열린 지적이 아니다'],
     ['rejected', ledger(entry({ status: 'rejected' })), accept(), '열린 지적이 아니다'],
     ['deferred', ledger(entry({ status: 'deferred' })), accept(), '열린 지적이 아니다'],
@@ -282,7 +258,7 @@ test('applyOwnerAccepts: 조건이 깨진 승인은 유지하지 않는다', () 
 test('applyOwnerAccepts: 두 번 적용해도 같고, 다른 지적은 건드리지 않는다', () => {
   const l = ledger(
     entry(),
-    entry({ id: 'F2', severity: 'P2', status: 'deferred', title: '다른 것' }),
+    entry({ id: 'F2', severity: 'P1', title: '다른 것' }),
     entry({ id: 'F3', title: '또 다른 P0' }),
     entry({ id: 'F4', status: 'fixed', note: 'abc' }),
   );
@@ -297,7 +273,7 @@ test('applyOwnerAccepts: 두 번 적용해도 같고, 다른 지적은 건드리
     a.ledger.findings.map((e) => [e.id, e.status]),
     [
       ['F1', 'accepted'],
-      ['F2', 'deferred'],
+      ['F2', 'open'],
       ['F3', 'open'],
       ['F4', 'fixed'],
     ],
@@ -305,101 +281,13 @@ test('applyOwnerAccepts: 두 번 적용해도 같고, 다른 지적은 건드리
   assert.deepEqual(a.ledger.findings[3], l.findings[3]);
 });
 
-test('needsAccepts: open이거나 accepted인 P0·P1이 있을 때만 참이다', () => {
+test('needsAccepts: open이거나 accepted인 P0이 있을 때만 참이다', () => {
   assert.equal(needsAccepts(ledger()), false);
+  assert.equal(needsAccepts(ledger(entry({ severity: 'P1' }))), false);
   assert.equal(needsAccepts(ledger(entry({ status: 'fixed' }))), false);
   assert.equal(needsAccepts(ledger(entry({ status: 'rejected' }))), false);
+  assert.equal(needsAccepts(ledger(entry({ severity: 'P1' }), entry({ id: 'F2' }))), true);
   assert.equal(needsAccepts(ledger(entry({ status: 'accepted' }))), true);
   // 게시 시각을 아직 모르는 열린 P0도 본다(무시 이유를 로그에 남긴다)
   assert.equal(needsAccepts(ledger(entry({ openedAt: undefined }))), true);
-  // P1: 열렸거나 accepted면 본다
-  assert.equal(needsAccepts(ledger(entry({ severity: 'P1' }))), true);
-  assert.equal(needsAccepts(ledger(entry({ severity: 'P1', status: 'accepted' }))), true);
-  assert.equal(needsAccepts(ledger(entry({ severity: 'P1', openedAt: undefined }))), true);
-  for (const status of ['fixed', 'rejected', 'deferred'] as const)
-    assert.equal(needsAccepts(ledger(entry({ severity: 'P1', status }))), false, status);
-  // 닫힌 P1 옆에 열린 P0이 있으면 본다
-  assert.equal(
-    needsAccepts(ledger(entry({ severity: 'P1', status: 'fixed' }), entry({ id: 'F2' }))),
-    true,
-  );
-  // P2·P3만 있으면 보지 않는다(상태와 무관하게)
-  assert.equal(needsAccepts(ledger(entry({ severity: 'P2', status: 'deferred' }))), false);
-  assert.equal(needsAccepts(ledger(entry({ severity: 'P3', status: 'deferred' }))), false);
-  assert.equal(needsAccepts(ledger(entry({ severity: 'P2' }))), false);
-});
-
-// --- P1 (계획 20261121-owner-accept-p1): 대상 등급만 넓힌다. 승인을 인정하는 조건은 P0과 같다
-
-test('applyOwnerAccepts: 게시된 뒤에 단 승인으로 열린 P1이 accepted가 된다', () => {
-  const l = ledger(entry({ severity: 'P1' }));
-  const r = applyOwnerAccepts(l, [accept()]);
-  const e = r.ledger.findings[0];
-  assert.equal(e.status, 'accepted');
-  assert.equal(e.note, '제작자 승인(댓글 100)');
-  assert.equal(e.severity, 'P1');
-  assert.equal(e.openedAt, T0);
-  assert.deepEqual(r.applied, [accept()]);
-  assert.deepEqual(r.ignored, []);
-  assert.deepEqual(r.reopened, []);
-  // 입력은 바꾸지 않는다
-  assert.equal(l.findings[0].status, 'open');
-});
-
-test('applyOwnerAccepts: P0과 P1이 함께 열려 있으면 두 승인이 모두 반영되고, 승인하지 않은 P1은 열려 있다', () => {
-  const l = ledger(
-    entry(),
-    entry({ id: 'F2', severity: 'P1', title: '절차 지적' }),
-    entry({ id: 'F3', severity: 'P1', title: '승인하지 않은 것' }),
-  );
-  const r = applyOwnerAccepts(l, [accept(), accept({ id: 'F2', commentId: 101 })]);
-  assert.deepEqual(
-    r.ledger.findings.map((e) => [e.id, e.status, e.note]),
-    [
-      ['F1', 'accepted', '제작자 승인(댓글 100)'],
-      ['F2', 'accepted', '제작자 승인(댓글 101)'],
-      ['F3', 'open', ''],
-    ],
-  );
-  assert.deepEqual(
-    r.applied.map((a) => a.id),
-    ['F1', 'F2'],
-  );
-  assert.deepEqual(r.ignored, []);
-});
-
-test('applyOwnerAccepts: accepted인 P1의 승인이 없어지면 open으로 돌아간다(철회)', () => {
-  const once = applyOwnerAccepts(ledger(entry({ severity: 'P1' })), [accept()]).ledger;
-  assert.equal(statusOf(once, 'F1'), 'accepted');
-  const r = applyOwnerAccepts(once, []);
-  assert.equal(statusOf(r.ledger, 'F1'), 'open');
-  assert.equal(r.ledger.findings[0].note, '제작자 승인이 없어져 다시 열림');
-  assert.deepEqual(r.reopened, ['F1']);
-  // 같은 댓글이 다시 보이면 다시 인정된다
-  assert.equal(statusOf(applyOwnerAccepts(r.ledger, [accept()]).ledger, 'F1'), 'accepted');
-});
-
-test('P1: 제작자의 고쳐지지 않은 승인 줄 댓글만 승인이다(봇·고쳐진 댓글·다른 글이 섞인 댓글은 아니다)', () => {
-  const p1 = () => ledger(entry({ severity: 'P1' }));
-  const after = (c: AcceptComment) =>
-    statusOf(applyOwnerAccepts(p1(), ownerAccepts([c], OWNER)).ledger, 'F1');
-  // 기준: 제작자의 댓글이면 닫힌다
-  assert.equal(after(comment()), 'accepted');
-  const refused: [string, AcceptComment][] = [
-    ['PR 작성자인 봇 계정', comment({ author: { login: 'harness-bot' } })],
-    ['작성자를 모르는 댓글', comment({ author: null })],
-    ['고쳐진 댓글', comment({ userContentEdits: { totalCount: 1 } })],
-    ['편집자가 남은 댓글', comment({ editor: { login: 'harness-bot' } })],
-    ['편집 이력을 읽지 못한 댓글', comment({ userContentEdits: undefined })],
-    ['설명이 붙은 댓글', comment({ body: '예외로 인정한다.\n/harness accept F1' })],
-    ['들여쓴 승인 줄', comment({ body: '  /harness accept F1' })],
-    [
-      '반박 문단 안의 승인 줄',
-      comment({
-        body: '- 지적: F1\n- 근거: docs/a.md\n- 요지: 제작자가 승인했다\n/harness accept F1',
-      }),
-    ],
-    ['승인 줄을 인용한 댓글', comment({ body: '> /harness accept F1' })],
-  ];
-  for (const [name, c] of refused) assert.equal(after(c), 'open', name);
 });

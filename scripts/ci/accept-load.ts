@@ -109,7 +109,7 @@ export interface Accepted {
 }
 
 /**
- * 원장에 제작자 승인을 반영한다. 제작자 설정이 비었거나 볼 지적(open·accepted인 P0·P1)이 없으면 GraphQL을 부르지 않고
+ * 원장에 제작자 승인을 반영한다. 제작자 설정이 비었거나 볼 지적(open·accepted인 P0)이 없으면 GraphQL을 부르지 않고
  * 원장을 그대로 돌려준다. 읽지 못하면 예외를 그대로 올린다(부르는 쪽이 닫힌 쪽으로 처리한다)
  */
 export async function loadAccepted(o: {

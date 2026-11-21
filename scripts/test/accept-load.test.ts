@@ -464,12 +464,11 @@ test('recordLedger: 편집 이력을 읽지 못하면 저장하지 않고 error�
 });
 
 test('recordLedger: 볼 지적이 없거나 제작자 설정·GraphQL이 없으면 편집 이력을 읽지 않는다', async () => {
-  // 열렸거나 accepted인 P0·P1이 없다(닫힌 P1, 닫힌 P0, 미뤄진 P2뿐이다)
+  // 열린 P0도 accepted도 없다
   const none = world({
     ledger: ledgerOf(
-      entry({ severity: 'P1', status: 'fixed', openedAt: at(1) }),
+      entry({ severity: 'P1', openedAt: at(1) }),
       entry({ id: 'F2', status: 'fixed' }),
-      entry({ id: 'F3', severity: 'P2', status: 'deferred', title: 'c' }),
     ),
     ledgerAt: at(1),
     gql: [accept('F1', 5)],
@@ -477,11 +476,7 @@ test('recordLedger: 볼 지적이 없거나 제작자 설정·GraphQL이 없으�
   none.gqlFail = new Error('부르면 안 된다');
   await record(none, 10);
   assert.equal(none.gqlCalls, 0);
-  assert.equal(none.status()?.state, 'success');
-  assert.deepEqual(
-    none.stored().findings.map((e) => e.status),
-    ['fixed', 'fixed', 'deferred'],
-  );
+  assert.equal(none.status()?.state, 'failure');
   // 제작자 설정이 비었다: 승인을 보지 않고, 이미 accepted인 지적도 건드리지 않는다
   const noOwner = world({
     ledger: ledgerOf(entry({ status: 'accepted', openedAt: at(1) })),
@@ -554,15 +549,12 @@ test('listAcceptComments: 여러 쪽을 끝까지 읽고, 끝을 확인하지 �
 
 test('loadAccepted: 볼 지적이 없거나 제작자가 비면 GraphQL을 부르지 않는다', async () => {
   const w = world({ gql: [accept('F1', 5)] });
-  for (const quiet of [
-    ledgerOf(entry({ severity: 'P1', status: 'fixed', openedAt: at(1) })),
-    ledgerOf(entry({ severity: 'P1', status: 'deferred' })),
-    ledgerOf(entry({ severity: 'P2', status: 'deferred' })),
-  ])
-    assert.deepEqual(
-      await loadAccepted({ ledger: quiet, owner: OWNER, graphql: w.graphql, ...where }),
-      { ledger: quiet, outcome: null, accepts: [] },
-    );
+  const p1 = ledgerOf(entry({ severity: 'P1', openedAt: at(1) }));
+  assert.deepEqual(await loadAccepted({ ledger: p1, owner: OWNER, graphql: w.graphql, ...where }), {
+    ledger: p1,
+    outcome: null,
+    accepts: [],
+  });
   const p0 = ledgerOf(entry({ openedAt: at(1) }));
   const skipped = await loadAccepted({ ledger: p0, owner: '', graphql: w.graphql, ...where });
   assert.equal(skipped.outcome, null);
@@ -710,103 +702,4 @@ test('githubGraphql: 오류 응답의 본문과 문구를 예외에 넣지 않�
   await assert.rejects(githubGraphql('t', 'http://127.0.0.1:9')('query { ok }', {}), {
     message: 'GraphQL 요청 실패: 응답 없음',
   });
-});
-
-// --- P1 (계획 20261121-owner-accept-p1)
-
-test('loadAccepted: 열린 P1만 있는 원장에서도 편집 이력을 읽어 승인을 반영한다', async () => {
-  const w = world({ gql: [accept('F1', 5)] });
-  const p1 = ledgerOf(entry({ severity: 'P1', openedAt: at(1) }));
-  const got = await loadAccepted({ ledger: p1, owner: OWNER, graphql: w.graphql, ...where });
-  assert.equal(w.gqlCalls, 1);
-  assert.equal(got.ledger.findings[0].status, 'accepted');
-  assert.deepEqual(got.outcome?.applied, [{ id: 'F1', commentId: CID + 5, at: at(5) }]);
-  assert.equal(p1.findings[0].status, 'open');
-  // 읽지 못하면 예외가 그대로 올라온다(부르는 쪽이 닫힌 쪽으로 처리한다)
-  w.gqlFail = new Error(SECRET);
-  await assert.rejects(loadAccepted({ ledger: p1, owner: OWNER, graphql: w.graphql, ...where }));
-});
-
-test('recordLedger: 열린 P1의 제작자 승인이 저장되고 review-ledger가 통과한다. 철회되면 다시 막는다', async () => {
-  const w = world({
-    ledger: ledgerOf(entry({ severity: 'P1', openedAt: at(1) })),
-    ledgerAt: at(1),
-    gql: [accept('F1', 5)],
-  });
-  await record(w, 10);
-  assert.equal(w.gqlCalls, 1);
-  assert.equal(w.stored().findings[0].status, 'accepted');
-  assert.equal(w.stored().findings[0].note, `제작자 승인(댓글 ${CID + 5})`);
-  assert.equal(w.status()?.state, 'success');
-  assert.match(w.status()?.description ?? '', /제작자 승인 1/);
-  // 승인 댓글이 사라졌다
-  w.gql = [];
-  await record(w, 20);
-  assert.equal(w.stored().findings[0].status, 'open');
-  assert.equal(w.status()?.state, 'failure');
-});
-
-test('recordLedger: P1에도 제작자가 아닌 계정·고쳐진 댓글·게시 전의 댓글은 승인이 아니다', async () => {
-  const cases: [string, Node][] = [
-    ['PR 작성자인 봇 계정', accept('F1', 5, { author: { login: 'writer-bot' } })],
-    ['고쳐진 댓글', accept('F1', 5, { userContentEdits: { totalCount: 1 } })],
-    ['다른 글이 섞인 댓글', accept('F1', 5, { body: '예외로 인정한다\n/harness accept F1' })],
-    ['게시와 같은 시각의 댓글', accept('F1', 1)],
-  ];
-  for (const [name, node] of cases) {
-    const w = world({
-      ledger: ledgerOf(entry({ severity: 'P1', openedAt: at(1) })),
-      ledgerAt: at(1),
-      gql: [node],
-    });
-    await record(w, 10);
-    assert.equal(w.stored().findings[0].status, 'open', name);
-    assert.equal(w.status()?.state, 'failure', name);
-  }
-});
-
-test('recordLedger: 열린 P1만 있는 원장에서 편집 이력을 읽지 못하면 저장하지 않고 error다', async () => {
-  const w = world({
-    ledger: ledgerOf(entry({ severity: 'P1', openedAt: at(1) })),
-    ledgerAt: at(1),
-    gql: [accept('F1', 5)],
-  });
-  w.gqlFail = new Error(SECRET);
-  await record(w, 10, { verdict: verdict() });
-  assert.equal(w.sends, 0);
-  assert.equal(w.status()?.state, 'error');
-  assert.doesNotMatch(JSON.stringify(w.statuses), new RegExp(SECRET));
-  assert.equal(w.stored().findings[0].status, 'open');
-});
-
-test('readRoundLedger: 승인된 P1은 판정 job에 accepted로 넘어가고 반박 대상이 아니다', async () => {
-  const w = world({
-    ledger: ledgerOf(entry({ severity: 'P1' }), entry({ id: 'F2', severity: 'P1', title: 'b' })),
-    ledgerAt: at(1),
-    gql: [accept('F1', 5)],
-  });
-  const sha = 'c'.repeat(40);
-  const rebut = (id: string) => `- 지적: ${id}\n- 근거: ${sha}\n- 요지: 이미 확인한다`;
-  w.rest.push(
-    { id: 600, user: { login: 'writer-bot' }, body: rebut('F1') },
-    { id: 601, user: { login: 'writer-bot' }, body: rebut('F2') },
-  );
-  const r = await readRoundLedger({
-    get: w.api.get,
-    graphql: w.graphql,
-    ...where,
-    recorderBot: BOT,
-    owner: OWNER,
-  });
-  assert.deepEqual(
-    r.ledger?.findings.map((e) => [e.id, e.status]),
-    [
-      ['F1', 'accepted'],
-      ['F2', 'open'],
-    ],
-  );
-  assert.deepEqual(
-    r.rebuttals.map((x) => x.id),
-    ['F2'],
-  );
 });
