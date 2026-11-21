@@ -92,6 +92,11 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
   - F6(P1, codex) 수용 기준 3이 읽을 수 없는 추적 파일에서 늘 `git diff` 실패가 나온다고 적었는데, R4 검사가 작업 트리를 읽지 않는 실행(`--ci`, 비교 기준 없음)에서는 R4 검사가 지나가고 이 검사가 실행되어 `R7 충돌 표식 검사 실패`가 나온다 → 수용. 이번에는 계획을 고치기 전에 테스트로 먼저 확인했다(임시 리포, 세 경우 모두 지적대로다). 수용 기준 3을 "R4 검사가 예외로 끝나는 실행"과 "예외 없이 끝나는 실행"으로 나눠 적고, step0의 사례를 셋으로 나눴다(작업 트리를 견주는 실행, `--ci`, 비교 기준이 없는 리포).
   - 같은 갈래(읽을 수 없는 파일)에서 세 라운드째 새 P1이 나왔다(F1 → F5 → F6. 매번 실제로 재현되고 매번 더 좁은 경우다). 다음 라운드에도 이 갈래의 새 P1이 나오면 더 고치지 않고 제작자에게 묻는다(읽을 수 없는 파일을 수용 기준에서 "통과로 끝나지 않는다"까지만 요구하도록 좁힐지).
 
+- 2026-11-21 17:51 PR #176 계획 검증 4라운드(head `298f3a8`): 두 검증자 승인. F6은 닫혔다(fixed). 계획 승인(G1) 해시 `5078d531037f`.
+  - F7(P2, codex. 미룸) 수용 기준 3의 "R4 검사가 작업 트리를 읽지 않는 실행"이라는 표현이 넓다. R4 검사는 그 실행에서도 격리 주석을 찾느라 작업 트리를 읽고(`git grep`, 실패해도 예외를 던지지 않는다), 하지 않는 것은 작업 트리와 비교 기준을 견주는 `git diff`다. 기대하는 결과는 맞다. 승인이 묶인 섹션이라 지금은 고치지 않는다(`CHANGELOG`에는 "작업 트리를 비교 기준과 견주다"로 적었다).
+- 2026-11-21 17:51 step0 테스트를 먼저 올렸다(`bd7c9fe`, 테스트 파일만). 구현 전 `node --test scripts/test/conflict-markers.test.ts`는 실패한다(종료 코드 1: `../gates/conflict-markers.ts`가 없다, `ERR_MODULE_NOT_FOUND`).
+- 2026-11-21 17:52 구현을 올렸다. 같은 명령이 통과한다(15건). 절차서 5절에 한 항목, `CHANGELOG`에 한 줄을 더하고 TD-30을 해결로 바꿨다.
+
 ## 의사결정 로그
 
 - 결정: 충돌 표식 검사를 `check`의 `bypass-scan` 단계와 `bypass-scan` 명령 안에서 한다. 함수는 따로 둔다(`scripts/gates/conflict-markers.ts`). / 이유: 단계 이름을 늘리면 실패 키와 캐시, `--only`의 값, 단계를 나열한 문서가 함께 바뀐다. 기존 단계 가운데 "커밋되면 안 되는 표시를 찾는다"는 뜻이 가장 가까운 것이 `bypass-scan`이다. 규칙 이름은 R4가 아니라 `R7 충돌 표식`으로 내어 구분한다. / 버린 대안: 새 단계 `conflict-scan`, `doc-lint` 단계 안에서 보기(문서가 아닌 파일도 대상이다), `bypassScan` 함수 안에 넣기(R4 검사와 섞인다).
@@ -119,6 +124,14 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 각 step의 Acceptance Criteria.
 - `node scripts/harness.ts check`.
 
+step0 결과(2026-11-21 17:52, 구현 커밋의 작업 트리):
+
+- `node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scripts/test/cli.test.ts scripts/test/check-skip.test.ts`: 종료 코드 0. 56건 가운데 56건 통과, 실패 0, 건너뜀 0. 새 테스트는 15건이다.
+- `node scripts/harness.ts bypass-scan`: 종료 코드 0(`bypass-scan: 통과`). 이 리포에는 충돌 표식 줄이 없다.
+- 절차서의 문장을 글자 그대로 견주는 `grep -qxF` 명령: 종료 코드 0.
+- `grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
+
 ## 다음 할 일
 
-- 계획만 담은 커밋을 올려 계획 검증(G1)을 받는다. 승인 뒤 step0의 테스트를 먼저 올린다.
+- step0의 구현 판정이 통과하면 `pr-ready`로 제작자 승인을 요청한다.
+- step0이 병합되면 `new-task --plan 20261121-merge-leftovers --step 1`로 step1(설계서 버전 검사)을 이어 간다.
