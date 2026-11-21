@@ -55,7 +55,10 @@ export function conflictMarkers(root: string): Problem[];
 - **경로**: 이름에 공백, 콜론, 한글이 든 파일의 경로가 `what`에 그대로 있다(Windows는 파일 이름에 콜론을 쓸 수 없어 그 플랫폼에서는 콜론을 붙임표로 바꾼 이름을 쓴다). 파일 셋에 표식이 있으면 문제가 세 건이고 경로 순이다.
 - **커밋이 없는 리포**: `git init`만 한 리포의 새 파일에 든 표식이 걸린다.
 - **`git` 설정**: 리포에 `grep.patternType=fixed`, `grep.column=true`, `color.grep=always`를 설정해도 "완전한 충돌 블록" 사례의 결과가 설정 전과 같다(깊은 비교).
-- **읽을 수 없는 파일**: 커밋한 리포에서 표식이 든 파일의 읽기 권한을 없앤다(`chmod 000`). 다른 파일에는 표식이 없다. `conflictMarkers`의 결과는 문제 한 건이고 `rule`이 `R7 충돌 표식 검사 실패`다(빈 배열이 아니다). 권한을 되돌리면 `R7 충돌 표식` 한 건이다. 이 사례의 CLI는 계획의 수용 기준 3대로다: 권한을 없앤 상태에서 `bypass-scan` 명령과 `check --only bypass-scan --no-cache`는 종료 코드 1이고 출력에 `git diff`가 있다(먼저 도는 R4 검사가 그 파일을 읽지 못해 예외로 끝난다. `R7 충돌 표식 검사 실패` 문구는 요구하지 않는다).
+- **읽을 수 없는 파일**: 커밋한 리포에서 표식이 든 추적 파일의 읽기 권한을 없앤다(`chmod 000`). 다른 파일에는 표식이 없다. `conflictMarkers`의 결과는 문제 한 건이고 `rule`이 `R7 충돌 표식 검사 실패`다(빈 배열이 아니다). 권한을 되돌리면 `R7 충돌 표식` 한 건이다. 같은 상태의 리포에서 CLI는 계획의 수용 기준 3대로 실행 방식에 따라 다르다.
+  - R4 검사가 작업 트리를 견주는 실행(브랜치가 `main`이라 비교 기준이 있고 `--ci`가 아니다): `bypass-scan`과 `check --only bypass-scan --no-cache`가 종료 코드 1이고 출력에 `git diff`가 있다(R4 검사의 예외. `R7 충돌 표식 검사 실패` 문구는 요구하지 않는다).
+  - `--ci`를 붙인 실행: `bypass-scan --ci`와 `check --only bypass-scan --ci`가 종료 코드 1이고 출력에 `R7 충돌 표식 검사 실패`가 있다.
+  - 비교 기준이 없는 리포(브랜치 이름을 `work`로 바꿔 `main`도 `origin/main`도 없다): `bypass-scan`과 `check --only bypass-scan --no-cache`가 종료 코드 1이고 출력에 `R7 충돌 표식 검사 실패`가 있다.
 - **읽을 수 없는 폴더**: 커밋한 리포에 새 폴더와 그 안의 표식이 든 파일을 만들고(커밋하지 않는다) 폴더의 권한을 없앤다. `conflictMarkers`의 결과는 `R7 충돌 표식 검사 실패` 한 건이다. `bypass-scan` 명령과 `check --only bypass-scan --no-cache`는 종료 코드 1이고 출력에 `R7 충돌 표식 검사 실패`가 있다. 권한을 되돌리면 `conflictMarkers`의 결과는 그 파일의 `R7 충돌 표식` 한 건이다.
 - 위 두 사례는 권한으로 읽기를 막을 수 없는 환경(Windows, 관리자 권한 실행)에서는 하지 않는다.
 - **검사 실패**: `git` 리포가 아닌 폴더에서 결과는 문제 한 건이고 `rule`이 `R7 충돌 표식 검사 실패`, `what`에 `git grep`, `how`에 `git status`가 있다.
