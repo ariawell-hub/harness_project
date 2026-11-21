@@ -5,7 +5,7 @@
 - `ARCHITECTURE.md`, `docs/harness/architecture.md`(`gates/*`, `ci/*` 행)
 - `docs/harness/design.md` 5절(R18 행), 8.2절(계획 파일 구성), 10.2절 (1), 10.3절의 필수 체크 표와 그 아래 목록, 14.6절 "범위 이탈 표시", 0절의 머리말과 변경 이력
 - step0이 만든·바꾼 파일: `scripts/gates/pr-size.ts`, `scripts/ci/results.ts`(`WARN_CONTEXTS`, `RECORDED_CONTEXTS`), `scripts/ci/gates.ts`(`runGates`의 경고 판정 부분, `isWarning`), `scripts/ci/results.ts`의 `fitWarnings`, `scripts/ci/gates.ts`의 `gatesOutput`, `scripts/lib/util.ts`(`WARN_PREFIX`, `capDetails`, `DETAILS_CUT`, `showPath`), `scripts/test/pr-size.test.ts`
-- `scripts/gates/risk-gate.ts`의 `changedFiles`, `scripts/lib/plan.ts`(`parseBranch`, `findPlan`, `planCandidates`, `parseDoc`, `stripHtmlComments`, 그리고 `sections`가 코드 블록을 가리는 방식), `scripts/lib/plan.ts`의 `STEP_BOUND_SECTIONS`, `scripts/ci/plan-hash.ts`(`hashFrom`, `normalize`, `PLAN_SECTIONS`)와 `scripts/test/plan-hash.test.ts`, `docs/harness/architecture.md`의 "레이어", `scripts/lib/util.ts`(`globToRegExp`, `matchesAny`가 파일 경로의 `\`를 `/`로 바꾸는 것)
+- `scripts/gates/risk-gate.ts`의 `changedFiles`, `scripts/lib/plan.ts`(`parseBranch`, `findPlan`, `planCandidates`, `parseDoc`, `stripHtmlComments`, 그리고 `sections`가 코드 블록을 가리는 방식), `scripts/lib/plan.ts`의 `STEP_BOUND_SECTIONS`, `scripts/ci/plan-hash.ts`(`hashFrom`, `normalize`, `PLAN_SECTIONS`)와 `scripts/test/plan-hash.test.ts`, `docs/harness/architecture.md`의 "레이어", `scripts/lib/util.ts`(`globToRegExp`, `matchesAny`가 파일 경로의 `\`를 `/`로 바꾸는 것), `scripts/lib/git.ts`(`git`)
 - `docs/harness/workflow.md` 2절·5절, `docs/exec-plans/TEMPLATE.md`, `docs/exec-plans/TEMPLATE-small.md`, `scripts/cross-review/checklist.md`(R18 항목)
 - `docs/exec-plans/tech-debt-tracker.md`의 TD-6 행, `scripts/metrics/render.ts`의 `UNMEASURED_TD`(읽기만)
 - `scripts/test/helpers.ts`, `scripts/test/risk-gate.test.ts`, `scripts/test/revert-check.test.ts`
@@ -53,6 +53,8 @@ export interface ScopeResult {
 }
 /** 계획 자신의 파일을 뺀 바뀐 파일과 범위 경로로 판정한다(순수 함수) */
 export function judgeScope(changed: string[], paths: string[]): ScopeResult;
+/** 계획을 HEAD 커밋에서 찾아 읽는다(없으면 null). 추적된 일반 파일만 읽는다 */
+export function readPlanAtHead(root: string, id: string): { ref: PlanRef; text: string } | null;
 export function scopeCheck(o: { root: string; base: string; branch: string }): ScopeResult;
 ```
 
@@ -72,23 +74,37 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
   - 경로에서 끝의 `/`를 뗀 것이 비어 있지 않고, `file`이 그것에 `/`를 붙인 글자로 시작한다(폴더 아래). `scripts/ci`는 `scripts/ci/a.ts`를 덮고 `scripts/ci-x/a.ts`는 덮지 않는다.
 - `judgeScope`: 순수 함수다. `state`는 늘 `success`다. `changed`는 경로 순서로 정렬해 쓴다.
   1. `changed`가 비어 있으면 `description`은 `통과 (계획 파일만 바뀌었다)`이고 `details`·`outside`는 비어 있다.
-  2. `paths`가 비어 있으면 경고다: `description`은 `WARN_PREFIX`로 시작하고 범위를 `견줄 수 없다`는 말과 바뀐 파일 수를 담는다(경로는 넣지 않는다). `outside`는 `changed` 전부다. `details`는 경로를 백틱으로 감싸 적으라는 줄과 아래 고정 줄 둘이다.
+  2. `paths`가 비어 있으면 경고다: `description`은 `WARN_PREFIX`로 시작하고 범위를 `견줄 수 없다`는 말과 바뀐 파일 수를 담는다(경로는 넣지 않는다). `outside`는 `changed` 전부다. `details`는 경로를 백틱으로 감싸 적으라는 줄, 아래 고정 줄 둘, 그 뒤에 `changed` 전부를 아래 4의 파일 줄과 같은 규칙으로 적은 줄들(`- ` 뒤에 `showPath(경로)`, 30개까지, 나머지는 수)에 `capDetails`를 적용한 것이다. 이유: `runGates`는 `outside`를 넘기지 않으므로, 어느 파일이 범위 밖인지는 `details`에 있어야 요약에서 보인다.
   3. `inScope`가 거짓인 파일이 `outside`다. 비어 있으면 `통과 (바뀐 파일 <N>개가 모두 계획의 관련 파일 안)`이다(`<N>`은 `changed`의 수).
   4. `outside`가 있으면 경고다. `description`은 `WARN_PREFIX`로 시작하고 `outside`의 수와 앞의 두 경로를 담는다(셋 이상이면 `외 <나머지 수>개`도 적는다). `description`에 넣는 경로 하나는 `showPath`(step0의 `scripts/lib/util.ts`)로 한 줄의 보이는 표기로 바꾼 뒤 60자까지다(넘으면 59자로 자르고 `…`). `details`는 아래 순서의 줄들에 `capDetails`를 적용한 것이다.
      1. 고정 줄 둘: `고치는 법`으로 시작하는 줄(의도한 변경이면 PR 본문에 이유를 적는다, 검증자가 확인한다, 경고이며 병합을 막지 않는다)과 `근거`로 시작하는 줄(설계서 14.6절, R18).
      2. `outside`를 한 줄에 하나씩, `- ` 뒤에 `showPath(경로)`를 적는다. 30개까지만 적고 나머지는 수만 적는다. 이유: 파일 이름은 PR이 정한다. `showPath`가 줄바꿈과 제어 문자를 보이는 표기로 바꾸므로 경로 하나가 한 줄에 머물고, 목록 표식이 앞에 있으므로 이름이 펜스 글자뿐인 파일(` ``` `, `~~~`)의 줄도 판정 job 요약의 코드 블록을 닫지 못한다. 견줄 때(`inScope`)와 `outside`에는 `git`이 준 글자를 그대로 쓴다.
 - `scopeCheck`:
-  1. `parseBranch(branch)`가 없거나 `findPlan(root, id)`가 없으면 `description`은 `계획이 없어 범위를 보지 않는다`이고 `details`·`outside`는 비어 있다(`state`는 `success`).
+  1. `parseBranch(branch)`가 없거나 `readPlanAtHead(root, id)`가 `null`이면 `description`은 `계획이 없어 범위를 보지 않는다`이고 `details`·`outside`는 비어 있다(`state`는 `success`).
   2. 바뀐 파일은 `changedFiles(root, base)`의 경로다(삭제 포함). 그 가운데 계획 자신의 파일은 뺀다: `planCandidates(id)`의 네 자리. 폴더 꼴(`active`·`completed`의 `<id>/`)은 그 폴더에 `/`를 붙인 글자로 시작하는 경로이고, 단일 파일 꼴(`<id>.md`)은 글자가 같은 경로다.
-  3. 남은 파일이 없으면 `judgeScope([], [])`의 결과다(계획 파일을 읽지 않는다).
-  4. 남은 파일이 있으면 계획 파일(PR 트리의 것)을 읽어 `judgeScope(남은 파일, planScopePaths(계획 파일의 글))`의 결과를 돌려준다.
+  3. 남은 파일이 없으면 `judgeScope([], [])`의 결과다(범위 경로를 뽑지 않는다).
+  4. 남은 파일이 있으면 `judgeScope(남은 파일, planScopePaths(readPlanAtHead가 준 글))`의 결과를 돌려준다.
   - 계획 파일을 읽지 못하면 예외다(통과로 넘기지 않는다). `runGates`가 그 context만 `error`로 만든다.
-  - 계획은 `root`(PR 트리)의 것만 읽는다. merge-base의 계획과 견주지 않는다("관련 파일·문서"는 계획 검증의 해시에 묶여 있다).
+  - 계획은 `root`(PR 트리)의 HEAD 커밋의 것만 읽는다. merge-base의 계획과 견주지 않는다("관련 파일·문서"는 계획 검증의 해시에 묶여 있다).
+- `readPlanAtHead`: 계획을 작업 폴더에서 읽지 않는다(`findPlan`, `existsSync`, `readFileSync`를 쓰지 않는다). `git`으로 HEAD 커밋의 트리 항목을 보고 추적된 일반 파일만 읽는다. `planCandidates(id)`의 순서로 후보마다 아래를 한다.
+  1. `git ls-tree -z HEAD -- <후보 경로와 그 위의 폴더 경로 전부>`로 항목(모드, 종류, 해시)을 읽는다. 경로는 계획 id로 만든 것이라(`parseBranch`가 형식을 본다) pathspec 글자가 없다.
+  2. 후보 경로 위의 폴더 자리 가운데 하나라도 모드가 `120000`(심볼릭 링크)이나 `160000`(서브모듈)이면 예외다.
+  3. 후보 경로의 항목이 없으면 다음 후보로 간다(폴더 자리에 일반 파일이 있어 그 아래가 없는 것도 같다).
+  4. 후보 경로의 항목이 일반 파일(종류 `blob`, 모드 `100644`나 `100755`)이 아니면 예외다(심볼릭 링크, 폴더).
+  5. 일반 파일이면 `git cat-file blob <해시>`로 읽은 글과 그 후보를 돌려준다. 후보가 모두 없으면 `null`이다.
+  - 이유: 판정 job은 PR 트리를 체크아웃해 읽는다. 작업 폴더의 경로를 따라 읽으면 계획 자리에 둔 심볼릭 링크가 체크아웃 밖의 파일을 가리킬 수 있고, 소규모 계획에는 해시가 없어 계획 검증도 그것을 묶지 않는다. 커밋의 blob으로 읽으면 링크를 따라가지 않는다(링크의 blob은 대상의 내용이 아니라 대상의 경로다).
+  - 예외는 통과로 넘기지 않는다. `runGates`가 `scope`만 `error`로 만든다.
+  - 커밋하지 않은 작업 폴더의 변경은 보지 않는다. 바뀐 파일(`changedFiles`)도 `base...HEAD`의 커밋으로 읽으므로 둘이 같은 것을 본다.
 
 ### 3. 판정 묶음에 잇기
 
 - `scripts/ci/results.ts`: `WARN_CONTEXTS`를 `['pr-size', 'scope']`로 한다(이 순서). `RECORDED_CONTEXTS`는 그에 따라 늘어난다.
 - `scripts/ci/gates.ts`의 `runGates`: `scope` 판정은 `scopeCheck({ root, base, branch })`의 `state`·`description`·`details`를 쓴다. 감싸기(`guarded`)와 확인된 revert PR의 처리는 step0이 만든 경고 판정의 틀 그대로다.
+- `scripts/ci/gates.ts`의 `summaryMarkdown`: 표의 설명 칸을 새 함수 `cellCode(description)`(`scripts/ci/gates.ts`에서 내보낸다)로 적는다. 모든 context에 같다.
+  - `cellCode(s)`: 줄 나눔 글자(`\r`, `\n`, U+2028, U+2029)의 이어진 묶음을 공백 하나로 바꾼다. 남은 글자가 공백뿐이면 빈 문자열이다. 아니면 코드 스팬이다: 구분 백틱은 글자 안의 가장 긴 백틱 줄보다 하나 길고, 여는 백틱 뒤와 닫는 백틱 앞에 공백을 하나씩 두며, 글자 안의 `|`는 `\|`로 적는다(표가 칸을 가를 때 되돌린다). 그 밖의 글자는 바꾸지 않는다.
+  - 이유: 설명에는 PR이 정하는 글자(파일 이름)가 들어간다. `showPath`는 줄바꿈과 제어 문자만 바꾸므로 `**approved**.md` 같은 이름이 표에서 굵게 보이고, 링크·HTML·멘션 모양의 이름도 그렇게 읽힌다. 코드 스팬 안의 글자는 Markdown으로 읽히지 않는다. 역슬래시로 구두점을 막는 방법은 쓰지 않는다(GitHub이 렌더링한 뒤에 처리하는 멘션·이모지·자동 링크까지 막는다고 보장할 수 없다).
+  - 커밋 상태에 쓰는 `description`은 바꾸지 않는다(평문 그대로다). 결과 파일의 값도 그대로다. 바뀌는 것은 판정 job 요약의 표에서 설명이 코드 글꼴로 보이는 것뿐이다. 상세의 코드 블록은 그대로다.
+  - step0의 `scripts/test/pr-size.test.ts`에는 요약 표의 행을 정규식으로 보는 단언이 둘 있다(`| pr-size | 경고 | 경고: `, `| pr-size | 통과 | 통과 (`). 설명 앞에 여는 백틱과 공백이 오게 정규식을 맞춘다. 단언을 지우지 않고, 보는 내용(context, 결과 표기, 설명의 첫 글자들)은 그대로다.
 - `scripts/ci/record.ts`와 `scripts/harness.ts`는 고치지 않는다.
 
 ### 4. 테스트 `scripts/test/scope.test.ts`(새 파일)
@@ -110,12 +126,23 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
 - **`inScope`**: 글자 그대로의 경로, glob(`scripts/ci/**`, `docs/*.md`), 폴더(`scripts/ci/`와 `scripts/ci` 둘 다 `scripts/ci/a/b.ts`를 덮는다), 비슷한 접두어(`scripts/ci`는 `scripts/ci-x/a.ts`를 덮지 않는다), 범위 경로가 없으면 거짓. 역슬래시가 든 파일 이름 `src\a.ts`는 범위 경로 `src/a.ts`에도 `src/`에도 들지 않고, 범위 경로 `src\a.ts`에는 든다.
 - **긴 경로**(`judgeScope`에 직접 넘긴다. 파일 시스템을 거치지 않는다): 경로가 4,000자(한글)인 범위 밖 파일 40개에서 `description`이 200자 이하이고, `description`과 `details`를 JSON으로 만든 것의 UTF-8 크기가 16,000바이트보다 작다. `details`의 모든 줄이 200자 이하이고, 앞의 두 줄(고치는 법, 근거)이 남아 있으며, 끝 줄이 `DETAILS_CUT`이다. `outside`의 길이는 40이다.
 - **파일 이름의 줄바꿈·펜스 글자**(`judgeScope`에 직접 넘긴다): 범위 밖 파일의 이름이 ` ``` `, `~~~~`, 줄바꿈 뒤에 펜스 줄과 `# 제목` 줄이 오는 것, `\r\n`이 든 것, U+2028이 든 것, 역슬래시가 든 것일 때 `details`는 고정 줄 둘과 파일마다 한 줄이다. 파일 줄은 모두 `- `로 시작하고 제어 문자·U+2028·U+2029가 없다. `description`에도 없다. 그 결과로 만든 `summaryMarkdown`에서 `scope`의 코드 블록은 상세가 끝난 자리에서 닫히고, 첫 줄 뒤에 `#`나 `##` 제목 줄이 새로 생기지 않는다. `outside`는 원래 글자 그대로다. 줄바꿈이 든 파일 `src/a\nb.ts`는 범위 경로 `src/`와 `src/**`에 든다.
+- **범위 경로가 없을 때의 파일 목록**(`judgeScope`에 직접 넘긴다): 범위 경로가 없고 바뀐 파일이 셋(하나는 줄바꿈이 든 이름, 하나는 이름이 백틱 셋)이면 `details`는 안내 줄, 고정 줄 둘, 경로 순서의 `- <showPath(경로)>` 줄 셋이다. `description`에는 경로가 없다. 바뀐 파일이 31개면 파일 줄은 30개이고 `… 외 1개`가 있다. 4,000자 경로 40개에서 모든 줄이 200자 이하이고 끝 줄이 `DETAILS_CUT`이며 `details`의 JSON이 16,000바이트보다 작다.
+- **요약 표의 설명**(`summaryMarkdown`, `cellCode`): 범위 밖 파일의 이름이 `**approved**.md`, `_x_.ts`, 링크 모양(`[a](…)`), HTML 태그 모양, `a|b`, 백틱이 든 것(하나, 둘 이어진 것), `~~f~~`, `&amp;`, `@someone`, `#1`, `:tada:`, URL, 역슬래시 뒤에 `|`가 오는 것일 때 각각:
+  - `| scope | 경고 | `로 시작하는 행의 설명 칸이 `cellCode(description)`과 같다.
+  - 그 칸은 백틱 줄과 공백으로 시작하고 공백과 같은 길이의 백틱 줄로 끝난다. 안의 `\|`를 `|`로 되돌린 글자가 `description`과 같다. 안의 글자에 구분 백틱만큼 긴 백틱 줄이 없고, 역슬래시 없이 적힌 `|`가 없다.
+  - 상세의 코드 블록에 `- <showPath(이름)>` 줄이 있다.
+  - `cellCode`의 값: 줄바꿈과 `|`가 든 글자, `\r\n`과 U+2028이 이어진 글자, 빈 문자열, 공백뿐인 글자, 백틱 하나. 필수 판정(`check`)의 설명도 코드 스팬으로 나온다.
+- **계획 읽기**(임시 `git` 리포. 심볼릭 링크는 실제로 만들고 커밋한다. 링크의 대상은 리포 밖의 폴더에 둔 계획 글이고, 그 "관련 파일·문서"는 바뀐 파일을 덮는다):
+  - 네 꼴 각각에서 `git ls-tree`의 모드가 `120000`인지 먼저 단언한다: 소규모 계획 파일(`active/<id>.md`)이 링크, 계획 폴더(`active/<id>`)가 링크, 폴더 안의 `plan.md`가 링크, `completed/<id>`가 링크.
+  - 네 꼴 모두 `readPlanAtHead`와 `scopeCheck`가 예외를 내고, `runGates`의 결과에서 `scope`는 `error`이며 `pr-size`는 `success`다.
+  - 커밋한 뒤 작업 폴더의 계획에만 범위 경로를 더하면(커밋하지 않는다) 그 파일은 여전히 `outside`다.
+  - 계획 폴더 자리에 일반 파일이 있으면(링크가 아니다) `계획이 없어 범위를 보지 않는다`이다.
 - **`scopeCheck`**(임시 `git` 리포. 계획 폴더와 "관련 파일·문서"를 테스트 안에서 만든다):
   - 바뀐 파일이 모두 범위 안이면 `통과 (바뀐 파일 N개가 모두 계획의 관련 파일 안)`이고 `outside`와 `details`가 비어 있다.
   - 범위 밖 파일이 셋 이상(그 가운데 하나는 base에 있던 파일을 지운 것, 하나는 `읽기만` 항목에만 있는 파일, 하나는 다른 섹션에만 적힌 파일)이면 `description`이 `경고: `로 시작하고 `outside`의 수와 경로 순서로 앞의 두 경로, `외 <나머지 수>개`가 들어 있다. `details`의 앞 두 줄은 고치는 법과 근거이고 그 뒤가 경로 순서의 `outside`를 `- <경로>`로 적은 줄들이다. `state`는 `success`다.
   - 계획 자신의 파일(`plan.md`, `index.json`, `step0.md`)은 "관련 파일·문서"에 없어도 범위 안이다. base에서 `active/`에 있던 계획을 `completed/`로 옮긴 PR에서 `active/` 쪽의 삭제와 `completed/` 쪽의 추가도 범위 안이다. 이름이 비슷한 다른 경로(`<id>-x/plan.md`, `<id>.md.bak`)는 계획 자신의 파일이 아니다.
   - 계획 파일만 바뀐 PR은 `통과 (계획 파일만 바뀌었다)`이다. "관련 파일·문서"가 비어 있거나 없어도 같다.
-  - "관련 파일·문서"에 경로가 없는데(섹션이 없는 경우, 주석만 있는 경우, 백틱 없이 적은 경우) 다른 파일이 바뀌면 경고이고 `outside`가 그 파일들이다.
+  - "관련 파일·문서"에 경로가 없는데(섹션이 없는 경우, 주석만 있는 경우, 백틱 없이 적은 경우) 다른 파일이 바뀌면 경고이고 `outside`가 그 파일들이며, `details`의 끝 줄들이 그 파일들의 `- <경로>` 줄이다.
   - 소규모 계획(단일 파일 `<id>.md`, 브랜치에 `-sN`이 없다)도 같은 규칙이다.
   - 브랜치가 `revert/…`나 `claim/1`이면, 또는 브랜치는 계획 꼴인데 계획 파일이 없으면 `계획이 없어 범위를 보지 않는다`이다.
   - 범위 밖 파일이 31개면 `details`에 30개만 적히고 나머지 1개는 수로 적힌다. `outside`의 길이는 31이다.
@@ -143,14 +170,14 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
   ```
 
 - `docs/exec-plans/TEMPLATE.md`: "관련 파일·문서" 아래의 안내 주석을, 경로를 백틱으로 감싸 적는다는 것과 읽기만 할 파일은 `읽기만`으로 시작하는 항목에 적는다는 것을 담게 고친다. `docs/exec-plans/TEMPLATE-small.md`의 같은 제목 아래에 같은 뜻의 주석을 더한다. 두 파일의 제목과 그 밖의 줄은 바꾸지 않는다.
-- `docs/harness/architecture.md`: `gates/*` 행에 `scope.ts`의 한 문장을 더한다.
+- `docs/harness/architecture.md`: `gates/*` 행에 `scope.ts`의 한 문장을 더한다(계획을 HEAD 커밋의 일반 파일로만 읽는다는 것을 담는다).
 - `docs/harness/design.md`:
   - 10.2절 (1)의 목록에 한 항목: `pr-size`의 구현(센 줄 수의 기준, 설정 `prSize`, 경고 표현).
   - 10.3절의 필수 체크 표 아래 목록에 한 항목: `pr-size`·`scope`는 경고 판정이고 필수 체크로 등록하지 않는다는 것, 기록 job이 커밋 상태로 쓰되 경고여도 `success`이고 설명이 `경고: `로 시작한다는 것.
   - 14.6절 "범위 이탈 표시" 항목: 범위 경로를 읽는 규칙(백틱, 폴더, `읽기만` 항목, 계획 자신의 파일)을 한두 문장으로 더한다. "`읽기만`으로 시작하는 항목"이라는 말을 그대로 쓴다.
   - 0절의 변경 이력에 새 항목을 더하고 머리말의 버전·최종 갱신을 그 항목과 맞춘다. 버전은 push 직전에 `origin/main`을 병합한 뒤의 마지막 버전 다음 번호다(`doc-lint`의 `R8 설계서 버전`이 확인한다).
   - 5절의 R15·R18 행과 그 밖의 절은 바꾸지 않는다.
-- `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)"에 한 줄: `scope` 판정, "관련 파일·문서"를 적는 형식, 템플릿 주석, 필수 체크와 워크플로는 바뀌지 않는다는 것, 검사를 약화하지 않는다는 것.
+- `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)"에 한 줄: `scope` 판정, "관련 파일·문서"를 적는 형식, 템플릿 주석, 판정 job 요약의 표가 설명을 코드 스팬으로 적는다는 것, 필수 체크와 워크플로는 바뀌지 않는다는 것, 검사를 약화하지 않는다는 것.
 - `docs/exec-plans/tech-debt-tracker.md`:
   - TD-6 행의 내용을 고친다: R15 `pr-size`와 R18 `scope`는 경고 판정으로 구현했다는 것(이 계획의 두 PR 번호)과, 남은 것이 R11 구조 테스트와 R19 보안 린트·SAST라는 것. 상태는 `열림` 그대로다.
   - 새 행 하나(push 직전에 `origin/main`을 병합한 뒤의 마지막 번호 다음, 상태 `열림`): 경고 판정의 남은 일 넷. (1) 지표가 두 경고의 수를 세지 않고 지표 출력이 "게이트가 없다"고 적는다(`scripts/metrics/render.ts`의 `UNMEASURED_TD.gates`). (2) `pr-state`가 경고를 보여 주지 않는다. (3) 경고를 차단으로 바꾸는 스위치가 없다(Q9). (4) 필수 판정 다섯의 `details`에는 크기 상한(`capDetails`)을 적용하지 않았다.
