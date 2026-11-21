@@ -128,6 +128,9 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
   - step0을 `in_progress`로 되돌렸다(코드를 다시 올린 뒤 완료 처리한다).
 - 2026-11-21 20:57 PR #176 계획 재검증(범위 조정) 1라운드(head `072c8e4`): claude 승인(P2 1), codex 수정 요청(P1 1). 두 검증자가 같은 것을 지적했다.
   - F13(P1, codex)·F12(P2, claude) 계획이 TD-63을 남긴다고 적었는데 그 행을 더하는 step과 AC가 없다(step0은 TD-30 행만 고치라고 한다. 앞서 더한 행은 되돌리기로 빠졌다) → 수용. step0의 문서 작업에 TD-63 행 추가를 넣고 AC에 그 행을 확인하는 `grep`을 더했다. 관련 파일에도 적었다.
+- 2026-11-21 21:01 PR #176 계획 재검증(범위 조정) 2라운드(head `6aa71ca`): 두 검증자 승인(지적 없음). F13은 닫혔다. 계획 승인(G1) 해시 `285b4d62fa73`.
+- 2026-11-21 21:01 step0 테스트를 다시 올렸다(`0efe879`, 테스트 파일만. 내용은 `ecfcc0c`의 것과 같다). 구현 전 `node --test scripts/test/conflict-markers.test.ts`는 실패한다(종료 코드 1: `../gates/conflict-markers.ts`가 없다, `ERR_MODULE_NOT_FOUND`).
+- 2026-11-21 21:01 구현과 문서(절차서 5절 한 항목, `CHANGELOG` 한 줄, TD-30 해결, TD-63 새 행)를 다시 올렸다. 코드는 `ecfcc0c`의 것과 같다. 같은 명령이 통과한다(17건).
 
 ## 의사결정 로그
 
@@ -160,12 +163,13 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 각 step의 Acceptance Criteria.
 - `node scripts/harness.ts check`.
 
-step0 결과(2026-11-21 19:02, 계획 재검증 뒤 다시 올린 구현의 작업 트리):
+step0 결과(2026-11-21 21:01, 범위 조정 뒤 다시 올린 구현의 작업 트리):
 
 - `node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scripts/test/cli.test.ts scripts/test/check-skip.test.ts`: 종료 코드 0. 58건 가운데 58건 통과, 실패 0, 건너뜀 0. 새 테스트는 17건이다(큰 파일 사례 둘은 각각 1초 안팎이다).
 - `node scripts/harness.ts bypass-scan`: 종료 코드 0(`bypass-scan: 통과`). 이 리포에는 충돌 표식 줄이 없다.
 - 절차서의 문장을 글자 그대로 견주는 `grep -qxF` 명령: 종료 코드 0.
 - `grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
+- `grep -q "^| TD-63 .*UTF-8.*runSync.*| 열림 " docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
 
 ## 다음 할 일
 

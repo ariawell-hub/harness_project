@@ -58,6 +58,7 @@ import { prReady } from './commands/pr-ready.ts';
 import { prState } from './commands/pr-state.ts';
 import { TaskError, claimHeartbeat, completeStep, newTask } from './commands/task.ts';
 import { bypassScan } from './gates/bypass-scan.ts';
+import { conflictMarkers } from './gates/conflict-markers.ts';
 import { CODEOWNERS_FILE, codeownersProblems, codeownersText } from './gates/codeowners.ts';
 import { revertCheck, revertTarget, type RevertCheck } from './gates/revert-check.ts';
 import { docLintGate, printDocLint } from './gates/doc-lint.ts';
@@ -366,7 +367,10 @@ async function main(argv: string[]): Promise<number> {
         str('base') ?? defaultBase(info.root, cfg.github.remote, cfg.github.defaultBranch);
       const list =
         cmd === 'bypass-scan'
-          ? bypassScan(info.root, cfg, { base, committedOnly: flag('ci') })
+          ? [
+              ...bypassScan(info.root, cfg, { base, committedOnly: flag('ci') }),
+              ...conflictMarkers(info.root),
+            ]
           : secretScan(info.root, { base, committedOnly: flag('ci') });
       for (const p of list) process.stderr.write(formatProblem(p) + '\n');
       log(list.length ? `${cmd}: ${list.length}건` : `${cmd}: 통과`);
