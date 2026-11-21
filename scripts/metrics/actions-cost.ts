@@ -161,9 +161,17 @@ function dayOf(iso: string): string {
 
 /** job마다 계산에 드는 값만 옮긴다. 이름과 라벨을 거르고 head SHA를 순번으로 바꾼다 */
 export function toSaved(jobs: JobRecord[], known: KnownNames): SavedJob[] {
-  // head 순번(구현 전): 커밋만으로 센다. PR과 커밋의 쌍으로 세는 것은 테스트의 실패를 확인한 뒤 넣는다
-  const shas = [...new Set(jobs.flatMap((j) => (j.pr !== null && j.head ? [j.head] : [])))].sort();
-  const order = new Map(shas.map((sha, i) => [sha, i + 1]));
+  // head는 PR과 커밋의 쌍이다: 같은 커밋을 두 PR이 함께 가지면 PR마다 따로 센다.
+  // PR 번호, SHA 순의 순번이라 fromSaved가 되돌린 입력에서도 같은 순번이 나온다
+  const pairKey = (pr: number, head: string) => `${pr}\n${head}`;
+  const pairs = new Map<string, { pr: number; head: string }>();
+  for (const j of jobs)
+    if (j.pr !== null && j.head) pairs.set(pairKey(j.pr, j.head), { pr: j.pr, head: j.head });
+  const order = new Map(
+    [...pairs.entries()]
+      .sort(([, a], [, b]) => a.pr - b.pr || (a.head < b.head ? -1 : a.head > b.head ? 1 : 0))
+      .map(([key], i) => [key, i + 1]),
+  );
   return jobs.map((j) => {
     const [workflow, job] = shownNames(j.workflow, j.job, known);
     return {
@@ -175,7 +183,7 @@ export function toSaved(jobs: JobRecord[], known: KnownNames): SavedJob[] {
       seconds: ranSeconds(j),
       labels: j.labels.map(keptLabel),
       pr: j.pr,
-      head: j.pr !== null && j.head ? (order.get(j.head) ?? null) : null,
+      head: j.pr !== null && j.head ? (order.get(pairKey(j.pr, j.head)) ?? null) : null,
       offPr: j.pr === null && j.offPr,
     };
   });
