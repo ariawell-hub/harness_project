@@ -52,9 +52,9 @@ export function matchDbCommand(
 - `guard`의 타입에 `dbCommands: DbCommandRule[]`를 더한다.
 - 검사 함수 `resolveDbCommands(raw: unknown): DbCommandRule[]`를 `guard.mcp`의 것(`resolveMcpGuard`)과 같은 모양으로 둔다(문제가 있으면 `ConfigError`). 키가 없으면(`undefined`) 빈 목록이다. 아래는 모두 문제다:
   - 값이 배열이 아니다. 항목이 객체가 아니다(`null`, 배열, 글 포함). `tool`·`forbidden` 밖의 키가 있다. `tool`이나 `forbidden`이 없다.
-  - `tool`이 글이 아니다. 앞뒤 공백을 뗀 `tool`이 비었거나 공백·`/`·`\`·`@`를 담는다.
-  - `forbidden`이 배열이 아니다. 비었다. 글이 아닌 항목이 있다. 항목을 공백으로 나눈 낱말이 하나도 없다(빈 글, 공백만 있는 글).
-  - 돌려주는 값은 정규화한 것이다: `tool`은 앞뒤 공백을 떼고 소문자로, `forbidden`의 항목은 낱말을 공백 하나로 이은 소문자 글로. 정규화한 항목은 모두 `matchDbCommand`가 실제로 걸 수 있는 글이다(검사를 통과했는데 걸리지 않는 항목이 없다).
+  - `tool`이 글이 아니다. 앞뒤 공백을 떼고 소문자로 바꾼 `tool`이 `^[a-z0-9][a-z0-9._-]*$`에 맞지 않는다(허용하는 글자를 정해 두고 나머지를 모두 거부한다. 그래서 빈 글, 공백·`/`·`\`·`@`가 든 글, `-`로 시작하는 글이 거부된다. `-`로 시작하는 인자는 플래그로 읽혀 도구 자리가 될 수 없다). `tool`이 실행 파일 확장자(`.exe`·`.cmd`·`.bat`·`.com`)로 끝난다(도구 자리를 찾을 때 그 확장자를 떼고 비교하므로 어떤 인자와도 같아질 수 없다).
+  - `forbidden`이 배열이 아니다. 비었다. 글이 아닌 항목이 있다. 항목을 공백으로 나눈 낱말이 하나도 없다(빈 글, 공백만 있는 글). 항목의 첫 낱말이 `-`로 시작한다(걷기는 `-`로 시작하는 인자를 플래그로 넘기므로 그 자리에서 비교하지 않는다. 둘째 낱말부터는 `-`로 시작해도 된다).
+  - 돌려주는 값은 정규화한 것이다: `tool`은 앞뒤 공백을 떼고 소문자로, `forbidden`의 항목은 낱말을 공백 하나로 이은 소문자 글로. **불변식**: 검사를 통과한 규칙의 `tool`과 `forbidden`의 항목 하나로 만든 가장 단순한 호출(인자 배열 `[tool, ...항목의 낱말들]`)은 `matchDbCommand`에서 반드시 걸린다. 검사를 통과했는데 걸 수 없는 항목이 없다(테스트가 이 불변식을 단언한다).
 - **설정의 출처는 메인 체크아웃이다**: L1 훅(`guard.ts`)은 `guard.dbCommands`를 `guard.mcp`와 같이 메인 체크아웃(`repo.mainRoot`)의 `harness.config.json`에서 읽는다. 작업 worktree의 설정은 보지 않는다. worktree에서 목록을 비우거나 옛 설정이 남아 있어도 메인의 차단이 풀리지 않는다. (있던 `dbPatterns`·`dbClients`는 지금처럼 worktree의 설정에서 읽는다. 이 step은 그 출처를 바꾸지 않는다.)
 - **틀린 설정**: 메인 체크아웃의 `guard.dbCommands`가 틀리면 Bash 명령의 판정에서 `ConfigError`가 나고 훅은 지금의 길(fail-closed, 종료 코드 2, "설정을 읽지 못해 차단했다" 메시지)로 그 Bash 호출을 막는다. 틀린 항목만 버리고 나머지로 판정하지 않는다. Bash가 아닌 도구(Read, Edit, Write)의 판정에서는 이 설정을 읽지 않으므로 막히지 않는다(설정을 읽고 고칠 길이 남는다). 틀린 설정이 main에 들어가는 것은 `check`가 막는다(설정 로더가 같은 검사 함수를 쓴다).
 - `harness.config.json`과 `profiles/core/profile.json`의 `guard`에 `"dbCommands": []`를 더한다.
@@ -72,7 +72,7 @@ export function matchDbCommand(
   - 선형 시간(읽은 횟수로 본다. 시간으로 재지 않는다): 인자를 읽는 횟수를 세는 배열(`Proxy`)을 넘겨, 최악 입력 둘(인자 전부가 도구 자리인 것, 도구 자리와 플래그가 번갈아 끝까지 이어지는 것)에서 읽은 횟수가 "규칙 수 × 인자 수 × (1 + 가장 긴 금지 항목의 낱말 수)" 이하인지 인자 1,000개와 10,000개에서 단언한다.
   - 시간 제한: 위 최악 입력을 인자 20,000개로 만들어 자식 프로세스에서 시간 제한(20초)을 걸어 돌린다. 큰 입력은 표준 입력으로 넘긴다(환경 변수·인자는 OS의 길이 한도에 걸린다).
 - `scripts/test/guard.test.ts`: 규칙 표에 플래그가 앞에 오는 코어 사례를 더한다. 있던 줄은 지우거나 고치지 않는다.
-- `scripts/test/lib.test.ts`: `guard.dbCommands` 검사. 키 없음(빈 목록), 바른 값(정규화한 결과), 그리고 위 "문제" 목록의 경우마다 하나씩(배열 아님, 객체 아닌 항목, 모르는 키, `tool` 없음, `forbidden` 없음, 글이 아닌 `tool`, 빈 `tool`, 공백·`/`·`\`·`@`가 든 `tool`, 배열이 아닌 `forbidden`, 빈 `forbidden`, 글이 아닌 항목, 빈 글 항목, 공백만 있는 항목) `ConfigError`가 난다. 검사를 통과한 항목은 `matchDbCommand`로 실제로 걸린다(앞뒤·사이에 공백이 더 있고 대문자가 섞인 설정으로 확인한다).
+- `scripts/test/lib.test.ts`: `guard.dbCommands` 검사. 키 없음(빈 목록), 바른 값(정규화한 결과), 그리고 위 "문제" 목록의 경우마다 하나씩(배열 아님, 객체 아닌 항목, 모르는 키, `tool` 없음, `forbidden` 없음, 글이 아닌 `tool`, 빈 `tool`, 공백·`/`·`\`·`@`가 든 `tool`, 배열이 아닌 `forbidden`, 빈 `forbidden`, 글이 아닌 항목, 빈 글 항목, 공백만 있는 항목) `ConfigError`가 난다. 더 있는 문제 경우: `-`로 시작하는 `tool`(`-tool`, `--x`), 실행 파일 확장자로 끝나는 `tool`(`drizzle-kit.exe`, `x.cmd`, `x.bat`, `x.com`. 대문자 확장자 포함), 허용 글자 밖의 글자가 든 `tool`(`a b`, `a/b`, `a\\b`, `a@1`, `a:b`, 한글), 첫 낱말이 `-`로 시작하는 `forbidden` 항목(`--force`, `-f push`). **불변식 테스트**: 바른 설정 여러 개(앞뒤·사이에 공백이 더 있는 것, 대문자가 섞인 것, 점·밑줄·하이픈이 든 이름, 낱말이 둘·셋인 항목, 둘째 낱말이 `-`로 시작하는 항목)를 `resolveDbCommands`에 넣어 나온 규칙마다, 항목마다 인자 배열 `[tool, ...항목의 낱말들]`을 만들어 `matchDbCommand`가 그 도구와 항목으로 걸리는지 단언한다. 문제 목록의 틀린 설정은 하나도 규칙을 돌려주지 않는다(던진다).
 - 훅을 프로세스로 부르는 테스트(`scripts/test/guard.test.ts`. 메인 체크아웃과 별도 worktree가 있는 임시 리포):
   - 메인 체크아웃의 설정에 `guard.dbCommands` 항목이 있으면, worktree 안에서 부른 금지 호출이 종료 코드 2로 막힌다.
   - **worktree의 설정이 `"dbCommands": []`이거나 키가 없어도**(메인에는 항목이 있다) 같은 호출이 막힌다. worktree의 설정에만 항목이 있고 메인에는 없으면 그 항목은 적용되지 않는다(출처가 메인임을 양쪽에서 확인한다).
@@ -86,8 +86,9 @@ export function matchDbCommand(
   - 12.4절의 `r13-db` 행에 `guard.dbCommands`를 더한다.
   - 머리의 버전 줄(`> 버전 v…`)을 올리고 변경 기록에 `- v<번호> (<날짜>): …` 줄을 더한다(번호는 올릴 때 main의 다음 번호). 그 줄에 `guard.dbCommands`를 적는다.
   - **14.3절은 고치지 않는다.**
-- `docs/harness/architecture.md`: `hooks/*` 행에 `db-commands.ts`를 더한다.
-- `docs/harness/CHANGELOG.md`에 `guard.dbCommands`를 적은 한 줄을 더한다.
+- `docs/harness/architecture.md`: 모듈 표의 `hooks/*` 행(`| \`hooks/*\``로 시작하는 줄)에 `db-commands.ts`와 `guard.dbCommands`를 적는다.
+- `docs/harness/CHANGELOG.md`의 `## 다음 버전 (미배포)` 절에 `guard.dbCommands`를 적은 한 줄을 더한다.
+- 설계서의 버전은 갈라진 지점(merge-base)의 버전보다 커야 한다(패치 자리를 올린다). 변경 기록에는 새 버전 번호로 시작하는 줄(`- v<새 번호> (<날짜>): …`)이 있고 그 줄에 `guard.dbCommands`가 있다.
 
 ## Acceptance Criteria
 
@@ -98,10 +99,12 @@ b=$(git merge-base HEAD origin/main) && t=$(mktemp -d) && git show "$b:docs/harn
 b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- profiles/web scripts/test/profile-web.test.ts docs/exec-plans/tech-debt-tracker.md .github)"
 awk '/^### 13\.1 /{s=1;next} /^### 13\.2 /{s=0} s' docs/harness/design.md | grep -q "guard.dbCommands"
 grep -F '`r13-db`' docs/harness/design.md | grep -q "guard.dbCommands"
-b=$(git merge-base HEAD origin/main) && git diff "$b" -- docs/harness/design.md | grep -q "^+> 버전 v[0-9]"
-b=$(git merge-base HEAD origin/main) && git diff "$b" -- docs/harness/design.md | grep -E "^\+ *- v[0-9]+\.[0-9]+\.[0-9]+ \(20[0-9]{2}-[0-9]{2}-[0-9]{2}\)" | grep -q "guard.dbCommands"
+b=$(git merge-base HEAD origin/main) && old=$(git show "$b:docs/harness/design.md" | sed -n 's/^> 버전 v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\) .*/\1/p' | head -n 1) && new=$(sed -n 's/^> 버전 v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\) .*/\1/p' docs/harness/design.md | head -n 1) && test -n "$old" && test -n "$new" && test "$old" != "$new" && test "$(printf '%s\n%s\n' "$old" "$new" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$new"
+new=$(sed -n 's/^> 버전 v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\) .*/\1/p' docs/harness/design.md | head -n 1) && test -n "$new" && grep -E "^ *- v[0-9]+\.[0-9]+\.[0-9]+ \(20[0-9]{2}-[0-9]{2}-[0-9]{2}\):" docs/harness/design.md | grep -F -- "- v$new (" | grep -q "guard.dbCommands"
+b=$(git merge-base HEAD origin/main) && test "$(git show "$b:docs/harness/design.md" | grep -c "guard.dbCommands")" -eq 0
+awk '/^## 다음 버전/{s=1;next} /^## /{s=0} s' docs/harness/CHANGELOG.md | grep -q "guard.dbCommands"
 b=$(git merge-base HEAD origin/main) && git diff "$b" -- docs/harness/CHANGELOG.md | grep "^+" | grep -q "guard.dbCommands"
-b=$(git merge-base HEAD origin/main) && git diff "$b" -- docs/harness/architecture.md | grep "^+" | grep -q "db-commands"
+grep -F '| `hooks/*`' docs/harness/architecture.md | grep "db-commands.ts" | grep -q "guard.dbCommands"
 node scripts/harness.ts self-test
 node scripts/harness.ts check
 ```
