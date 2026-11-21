@@ -20,10 +20,10 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 
 수용 기준:
 
-1. 실물 확인의 절차가 OS와 무관한 명령 하나다: `node lab/q10-db/run.ts`. 실행, 포맷, 결과 검사, 검사 스크립트의 테스트를 차례로 돌리고, 하나가 실패하면 그 자리에서 멈추고 0이 아닌 종료 코드로 끝난다(뒤 단계를 돌리지 않는다. 테스트가 본다). `--skip-fmt`는 포맷 단계를 뺀다(하네스의 의존성을 설치하지 않은 CI 러너용). `--out <파일>`은 결과를 리포 밖에 쓰고 그 파일을 검사한다(작업 트리를 바꾸지 않는다).
+1. 실물 확인의 절차가 OS와 무관한 명령 하나다: `node lab/q10-db/run.ts`. 실행, 포맷, 결과 검사, 검사 스크립트의 테스트를 차례로 돌리고, 하나가 실패하면 그 자리에서 멈추고 0이 아닌 종료 코드로 끝난다(뒤 단계를 돌리지 않는다. 테스트가 본다). `--skip-fmt`는 포맷 단계를 뺀다(하네스의 의존성을 설치하지 않은 CI 러너용). `--out <파일>`은 결과를 리포 밖에 쓰고 그 파일을 검사한다(작업 트리를 바꾸지 않는다). `--out`의 경로가 리포 안을 가리키거나(심볼릭 링크를 거친 것 포함) 이미 있는 항목이면 `run.ts`와 `trial.ts`가 아무것도 실행하기 전에 거부한다. 있는 파일을 덮어쓰지 않는다(테스트와 AC가 본다).
 2. 워크플로 `.github/workflows/q10-trial.yml`이 있다. 손으로만 실행되고(`workflow_dispatch`), `ubuntu-latest`와 `windows-latest`에서 `node lab/q10-db/run.ts --skip-fmt`를 돌려 `lab/q10-db/results/`를 실행 산출물로 올린다. 비밀·environment·캐시를 쓰지 않고, 권한은 `contents: read`뿐이며, 액션은 커밋 SHA로 고정한다. 구조를 단언하는 테스트가 `check`에 든다(워크플로 파일이 없거나 다르면 실패한다). 워크플로 파일의 내용은 리포의 패치(`lab/q10-db/q10-trial-workflow.patch`)와 같다(테스트가 본다).
-3. `lab/q10-db/results/`에 `linux-<arch>.json`과 `win32-<arch>.json`이 있다. 둘 다 워크플로의 실행 산출물이고(실행 주소를 README의 "잰 머신" 표에 적는다), 각각 `node lab/q10-db/check-results.ts <이름>`을 통과한다. `node lab/q10-db/check-results.ts --confirm`이 종료 코드 0이다.
-4. ADR-0007의 상태가 채택이고, 세 환경의 실측(어디서 쟀는지 포함)과 남은 한계(Windows는 CI 러너에서 쟀다. 제작자의 Windows PC에서는 TD-14의 실기 검증 때 다시 돌린다)가 적혀 있다. 설계서 18절의 Q10 행과 19절 "현재 위치"가 확정으로 적혀 있다. 기술 부채 표 TD-14의 `lab/q10-db` 항목이 결과에 맞게 고쳐져 있다. `profiles/web/README.md`의 "잠정" 문구가 확정에 맞게 고쳐져 있다.
+3. `lab/q10-db/results/`에 `linux-<arch>.json`과 `win32-<arch>.json`이 있다. 둘 다 워크플로의 실행 산출물이고(실행 주소를 README의 "잰 머신" 표에 적는다. `node lab/q10-db/verify-artifacts.ts`가 그 실행이 `main`의 `q10-trial` 실행이고 두 OS의 job이 성공했으며 그 산출물의 결과가 커밋한 결과 파일과 값으로 같은 것을 확인한다), 각각 `node lab/q10-db/check-results.ts <이름>`을 통과한다. `node lab/q10-db/check-results.ts --confirm`이 종료 코드 0이다.
+4. ADR-0007의 상태가 채택이고, 세 환경의 실측(어디서 쟀는지 포함)과 남은 한계(Windows는 CI 러너에서 쟀다. 제작자의 Windows PC에서는 TD-14의 실기 검증 때 다시 돌린다)가 적혀 있다. 설계서 18절의 Q10 행과 19절 "현재 위치"가 확정으로 적혀 있다. 기술 부채 표 TD-14의 `lab/q10-db` 항목이 결과에 맞게 고쳐져 있다. `profiles/web/README.md`의 "잠정" 문구가 확정에 맞게 고쳐져 있다. 이 문서들과 ADR 목록(`docs/decisions/index.md`), `lab/q10-db/README.md`가 같은 확정 상태를 말하는지 테스트(`lab/q10-db/test/confirmed.test.ts`)가 본다.
 5. 어느 환경에서든 실측이 통과하지 못하면 확정하지 않는다. 그때 step1은 결과 파일을 더하지 않고 멈춰 원인을 진행 로그에 적고 제작자에게 묻는다(제작자의 기준대로 "DB 없이 시작"으로 되돌릴지).
 6. `node scripts/harness.ts check` 통과. 14.3절의 규칙은 바꾸지 않는다.
 
@@ -32,9 +32,11 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 범위:
 
 - `lab/q10-db/run.ts`(새 파일)와 그 테스트, `lab/q10-db/README.md`(절차를 명령 하나로, CI에서 돌리는 법, "잰 머신" 표), 워크플로 패치 `lab/q10-db/q10-trial-workflow.patch`.
+- `--out` 경로 검사 `lab/q10-db/out-file.ts`(새 파일)와 그 테스트, `lab/q10-db/trial.ts`의 `--out` 처리(경로 검사, 새 파일로만 쓰기).
 - `.github/workflows/q10-trial.yml`(새 파일. 제작자가 올린다. `docs/SECURITY.md`의 "워크플로 변경 절차").
 - 워크플로의 구조를 단언하는 테스트 `scripts/test/q10-trial-workflow.test.ts`(새 파일).
 - 결과 파일 `lab/q10-db/results/linux-<arch>.json`, `lab/q10-db/results/win32-<arch>.json`.
+- 결과 파일의 출처 확인 `lab/q10-db/verify-artifacts.ts`(새 파일)와 그 테스트, 확정 상태의 테스트 `lab/q10-db/test/confirmed.test.ts`(새 파일).
 - ADR-0007, 설계서 18절 Q10 행·19절 "현재 위치"·0절 버전 이력, `docs/harness/CHANGELOG.md`, 기술 부채 표의 TD-14 행, `profiles/web/README.md`의 DB 절 첫 문단.
 
 비범위:
@@ -48,7 +50,10 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 ## 관련 파일·문서
 
 - `lab/q10-db/run.ts`, `lab/q10-db/test/run.test.ts`, `lab/q10-db/README.md`, `lab/q10-db/q10-trial-workflow.patch`, `lab/q10-db/results/**`
-- `lab/q10-db/trial.ts`, `lab/q10-db/check-results.ts`(실측에서 어긋난 점이 나오면 고친다. 판정 기준은 바꾸지 않는다)
+- `lab/q10-db/out-file.ts`, `lab/q10-db/test/out-file.test.ts`
+- `lab/q10-db/verify-artifacts.ts`, `lab/q10-db/test/verify-artifacts.test.ts`, `lab/q10-db/test/confirmed.test.ts`
+- `lab/q10-db/trial.ts`(`--out`의 경로 검사와 새 파일로만 쓰기. 그 밖에는 실측에서 어긋난 점이 나오면 고친다. 확인 항목과 판정 기준은 바꾸지 않는다), `lab/q10-db/check-results.ts`(실측에서 어긋난 점이 나오면 고친다. 판정 기준은 바꾸지 않는다)
+- `docs/decisions/index.md`, `lab/q10-db/README.md`(확정 상태의 문구)
 - `.github/workflows/q10-trial.yml`
 - `scripts/test/q10-trial-workflow.test.ts`
 - `docs/decisions/ADR-0007-db-postgres-drizzle.md`, `docs/decisions/index.md`(상태를 적는 칸이 있으면)
@@ -70,6 +75,11 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-21 step0 (가) 워크플로 패치와 구조 테스트: 워크플로 초안을 포매터에 넣어 바뀌는 곳이 없는 것을 확인하고, 임시 인덱스로 패치(`lab/q10-db/q10-trial-workflow.patch`)를 만들었다. 구조 테스트(`scripts/test/q10-trial-workflow.test.ts`, 5건)를 써서 워크플로 파일이 없는 지금은 5건 모두 실패하고, 패치를 로컬에 적용하면 5건 모두 통과하는 것을 확인했다. 그 뒤 로컬 적용을 되돌렸다(`git apply --reverse`). 구조 테스트는 아직 올리지 않는다(리포 밖에 두었다). PR도 열지 않는다. 기준 커밋의 SHA는 이 커밋을 올린 뒤 Issue #180의 요청 댓글과 다음 커밋의 진행 로그에 적는다.
 - 2026-11-22 절차 실수와 다시 시작: 위의 (가)는 계획 검증을 받지 않는 계획의 순서였다. 이 계획은 중규모라 계획만 담은 초안 PR로 계획 검증(G1)을 먼저 받아야 하는데, PR 없이 계획과 코드(`run.ts`, 테스트, README, 패치)를 브랜치 `feat/20261121-q10-confirm-s0`에 함께 올리고(커밋 `887ca3a`) 제작자에게 워크플로 커밋을 요청했다. 제작자가 워크플로 커밋(`6fbdaa2`)을 올렸고, 트리 비교는 "같다"였다(기준 `887ca3a`의 트리에 패치를 적용한 것과 받은 head의 트리가 같다). 그런데 계획 검증은 PR의 변경이 계획 폴더뿐인 head의 판정으로만 남고, 봇은 워크플로 파일을 지우는 커밋을 올릴 수 없어 그 브랜치를 계획만 남긴 상태로 되돌릴 수 없다. 그 브랜치로는 `plan-gate`의 G1을 통과할 수 없다.
 - 2026-11-22 제작자에게 물었다(선택지: 새 브랜치로 다시 / 같은 브랜치에서 제작자가 워크플로를 지우고 다시 올린다 / 보류). 답: "새 브랜치로 다시". main에서 새 브랜치 `chore/20261121-q10-confirm-s0`을 만들고 계획 폴더만 옮겼다(`git worktree add -b`. 같은 계획·같은 step이라 접두어만 다르게 했다. 계획의 `type`도 맞췄다). 순서를 SECURITY.md의 계획 검증을 받는 계획의 순서로 고쳤다(step0의 "작업" 첫머리와 "금지사항"). 옛 브랜치는 쓰지 않고 그대로 둔다(PR을 연 적이 없다). 옛 브랜치의 `run.ts`·테스트·README·패치는 계획 검증 승인 뒤 그대로 가져온다(`git restore --source 887ca3a`). 제작자의 워크플로 커밋은 새 브랜치에 한 번 더 필요하다.
+- 2026-11-22 계획 검증 1회차(PR #188): Claude 승인(지적 없음), Codex 수정 요청(P0 하나, P1 둘, P2 하나). 넷 다 맞는 지적이라 계획을 고쳤다.
+  - F1(P0): step0이 "`--out`의 파일이 리포 밖인지는 `trial.ts`가 검사한다"고 전제했는데, `trial.ts`는 실험 폴더만 검사하고 `--out`의 경로는 그대로 쓴다(코드를 다시 읽어 확인했다). `--out package.json`이면 작업 트리의 파일을 결과로 덮어쓴다. → 경로 검사(`lab/q10-db/out-file.ts`)를 step0의 작업·범위·관련 파일에 넣었다. 리포 안의 경로(심볼릭 링크를 거친 것 포함)와 이미 있는 항목을 `run.ts`와 `trial.ts`가 실행 전에 거부하고, `trial.ts`는 새 파일로만 쓴다. 거부할 때 자식 프로세스가 뜨지 않고 대상이 그대로인지 보는 테스트와 AC 세 줄을 더했다.
+  - F2(P1): step1의 검사는 결과 파일의 내용과 README에 실행 주소가 있는지만 봐서, 다른 실행의 파일을 넣어도 통과한다. → 출처 확인 명령(`lab/q10-db/verify-artifacts.ts`)과 테스트를 step1에 넣었다. README가 가리키는 실행이 `main`의 `q10-trial`이고 두 OS의 job이 성공했는지, 그 산출물의 결과가 커밋한 파일과 값으로 같은지(JSON으로 읽어 견준다. 포맷 차이는 빠진다) 본다. 출력은 진행 로그와 PR 본문에 옮긴다.
+  - F3(P1): ADR의 상태 줄만 고치고 설계서·웹 프로파일 README에 잠정 상태를 남겨도 통과한다. → 확정 상태의 테스트(`confirmed.test.ts`)에 ADR의 확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`의 단언을 더했다.
+  - F4(P2): `lab/q10-db/test/confirmed.test.ts`가 관련 파일 목록에 없었다. → 더했다(새로 생긴 파일들과 함께).
 
 ## 의사결정 로그
 
@@ -95,10 +105,10 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 ## 검증 방법과 결과
 
 - 각 step의 AC 명령과 `node scripts/harness.ts check`.
-- 수용 기준 1: `node --test lab/q10-db/test/run.test.ts`와, `node lab/q10-db/run.ts --out <리포 밖 파일>`을 실제로 돌린 결과(step0 AC).
+- 수용 기준 1: `node --test lab/q10-db/test/run.test.ts`와 `node --test lab/q10-db/test/out-file.test.ts`, `node lab/q10-db/run.ts --out <리포 밖 파일>`을 실제로 돌린 결과, 작업 트리의 있는 파일을 `--out`으로 주면 거부되고 그 파일이 그대로인 것(step0 AC).
 - 수용 기준 2: `node --test scripts/test/q10-trial-workflow.test.ts`, 받은 브랜치의 트리가 기준 커밋에 패치를 적용한 트리와 같은지(SECURITY.md의 비교 명령, 진행 로그에 적는다).
-- 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`(step1 AC).
-- 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트와 `doc-lint`(step1 AC).
+- 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`, 출처 확인 `node lab/q10-db/verify-artifacts.ts`(step1 AC. 출력을 진행 로그와 PR 본문에 옮긴다).
+- 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
 - 결과는 step을 진행하며 적는다.
 
 ## 다음 할 일

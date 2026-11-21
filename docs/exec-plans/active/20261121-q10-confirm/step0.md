@@ -20,19 +20,32 @@
 
 - 단계(기본): ① 새 임시 폴더를 만들어(`fs.mkdtempSync`, 지우지 않는다) `node lab/q10-db/trial.ts <폴더>` ② `node scripts/harness.ts fmt` ③ `node lab/q10-db/check-results.ts <platform>-<arch>`(이 머신의 `process.platform`·`process.arch`) ④ `node --test lab/q10-db/test/check-results.test.ts`.
 - `--skip-fmt`: ②를 뺀다.
-- `--out <파일>`: ①에 `--out <파일>`을 넘기고 ②를 빼고 ③을 `node lab/q10-db/check-results.ts --file <파일>`로 바꾼다. 파일은 리포 밖이어야 한다(그 검사는 `trial.ts`가 한다).
+- `--out <파일>`: ①에 `--out <파일>`을 넘기고 ②를 빼고 ③을 `node lab/q10-db/check-results.ts --file <파일>`로 바꾼다. 파일은 아래 "`--out` 경로 검사"를 통과해야 한다. 통과하지 못하면 이유를 표준 오류에 내고 종료 코드 2로 끝나며 단계를 하나도 돌리지 않는다(자식 프로세스를 띄우지 않는다).
 - 한 단계가 0이 아닌 종료 코드로 끝나거나 실행하지 못하면 뒤 단계를 돌리지 않고, 실패한 단계의 이름을 표준 오류에 내고 종료 코드 1로 끝난다. 모든 단계가 통과하면 0이다.
 - 모르는 인자, `--out`에 값이 없는 경우는 사용법을 내고 종료 코드 2로 끝난다(아무 단계도 돌리지 않는다).
 - 자식 프로세스는 `process.execPath`로 띄운다(셸을 거치지 않는다. OS와 무관하다). 출력은 그대로 흘려보낸다.
 - 구조: 단계 목록을 만드는 순수 함수(`planSteps(opts)` — 이름과 인자 배열의 목록)와 목록을 차례로 돌리는 함수(`runSteps(steps, exec)` — `exec`를 주입한다)를 내보낸다. 파일을 직접 실행했을 때만 실제로 돈다.
 - 테스트(`node:test`, 네트워크를 쓰지 않는다): 기본·`--skip-fmt`·`--out`의 단계 목록(순서와 인자), 가운데 단계가 실패하면 뒤 단계가 불리지 않고 1을 낸다, 모두 통과하면 0이다, 실행하지 못한 단계(`exec`가 던진다)도 실패다, 잘못된 인자는 2이고 단계가 하나도 불리지 않는다.
 
+#### `--out` 경로 검사: `lab/q10-db/out-file.ts`(새 파일)와 테스트 `lab/q10-db/test/out-file.test.ts`
+
+지금 `trial.ts`의 `--out`은 경로를 검사하지 않고 그대로 쓴다(`--out package.json`이면 실측이 끝난 뒤 작업 트리의 `package.json`을 결과로 덮어쓴다). 쓰는 쪽(`trial.ts`)과 부르는 쪽(`run.ts`)이 같은 검사를 쓴다.
+
+- `outFileProblem(repoRoot, file)`: 문제가 없으면 `null`, 있으면 이유(글)를 낸다. 파일이나 폴더를 만들거나 고치지 않는다.
+  - 부모 폴더가 없거나 폴더가 아니면 거부한다(폴더를 만들어 주지 않는다).
+  - 부모 폴더의 실제 경로(`realpathSync`. 심볼릭 링크를 따라간 경로)가 리포 루트의 실제 경로 자체이거나 그 안이면 거부한다(`check-results.ts`의 `isOutsideDir`로 판정한다). 리포 안을 가리키는 심볼릭 링크 폴더를 거친 경로도 여기서 걸린다.
+  - 그 이름의 항목이 이미 있으면 거부한다(`lstatSync`. 파일, 폴더, 심볼릭 링크 — 끊어진 링크와 리포 안의 파일을 가리키는 링크 포함). 있는 파일을 덮어쓰지 않는다.
+- `run.ts`: `--out`이 있으면 단계 목록을 만들기 전에 이 검사를 부른다.
+- `trial.ts`: `--out`이 있으면 인자를 읽은 직후(폴더 안에 무엇을 만들거나 패키지를 설치하기 전)에 이 검사를 부르고, 걸리면 이유를 내고 0이 아닌 종료 코드로 끝난다. `--out`의 결과는 새 파일로만 쓴다(`writeFileSync`의 `flag: 'wx'`. 검사와 쓰기 사이에 그 이름이 생겼어도 덮어쓰지 않고 실패한다). 부모 폴더를 만들던 것(`mkdirSync(…, { recursive: true })`)은 `--out`이 없을 때(리포의 `results/`)만 한다. `trial.ts`의 확인 항목과 결과의 내용은 바꾸지 않는다.
+- 테스트(`out-file.test.ts`. 임시 폴더는 `mkdtempSync`로 만들고 지우지 않는다): 리포 밖 새 폴더의 새 이름은 통과한다. 거부하는 것: 리포 안의 있는 파일(`package.json`), 리포 안의 새 이름(`lab/q10-db/results/x.json`), 리포 루트 바로 아래의 새 이름, 리포 밖의 있는 파일, 리포 밖 폴더에 있는 심볼릭 링크(리포 안의 파일을 가리키는 것, 끊어진 것), 리포 안의 폴더를 가리키는 심볼릭 링크 폴더 아래의 새 이름, 없는 부모 폴더, 부모가 파일인 경로. 거부한 뒤 대상이 그대로다(있던 파일과 링크가 가리키는 파일의 내용이 같고, 새 파일이 생기지 않았다). 심볼릭 링크를 만들 수 없는 환경(권한 없는 Windows)에서는 링크 사례만 건너뛴다.
+- `run.test.ts`에 더한다: `--out`이 검사에 걸리면 2를 내고 `exec`가 한 번도 불리지 않는다(리포 안의 있는 파일, 리포 밖의 있는 파일).
+
 ### 2. `lab/q10-db/README.md`
 
 - "절차" 절의 셸 블록 둘(Bash, PowerShell)을 명령 하나로 바꾼다: `node lab/q10-db/run.ts`. 실패하면 그 자리에서 멈춘다는 것, `trial.ts`가 실패하면 결과 파일을 새로 쓰지 않는다는 것은 남긴다. "PowerShell 절차는 아직 Windows에서 돌려 보지 않았다" 줄은 지운다(그 블록이 없어진다).
-- 작업 트리를 바꾸지 않고 돌려 보는 법을 `node lab/q10-db/run.ts --out <리포 밖 파일>`로 고친다.
+- 작업 트리를 바꾸지 않고 돌려 보는 법을 `node lab/q10-db/run.ts --out <리포 밖 파일>`로 고친다. 파일은 리포 밖의 있는 폴더 아래의 새 이름이어야 한다는 것(리포 안의 경로와 이미 있는 파일은 실행하기 전에 거부한다)을 적는다.
 - "CI 러너에서 돌리기" 항목을 더한다: 워크플로 `q10-trial`을 손으로 돌린다(`gh workflow run q10-trial.yml --ref main`), 실행 산출물(`q10-result-<os>`)을 받는다(`gh run download <실행 번호> --dir <새 임시 폴더>`), 받은 폴더의 `<platform>-<arch>.json`을 `lab/q10-db/results/`에 복사하고 `node scripts/harness.ts fmt`와 `node lab/q10-db/check-results.ts <이름>`을 돌린다. 러너에서는 포맷을 건너뛴다는 것과 이유(하네스의 의존성을 설치하지 않는다)를 적는다. 받은 파일의 내용을 손으로 고치지 않는다.
-- 파일 표에 `run.ts`와 패치 파일을 더한다.
+- 파일 표에 `run.ts`, `out-file.ts`와 패치 파일을 더한다.
 
 ### 3. 워크플로 패치 `lab/q10-db/q10-trial-workflow.patch`
 
@@ -81,11 +94,15 @@ node lab/q10-db/check-results.ts darwin-arm64
 node scripts/harness.ts lint
 node scripts/harness.ts doc-lint
 node scripts/harness.ts fmt --check
+node --test lab/q10-db/test/out-file.test.ts
+B=$(git hash-object package.json) && { node lab/q10-db/run.ts --out package.json; test $? = 2; } && test "$(git hash-object package.json)" = "$B"
+D=$(mktemp -d) && B=$(git hash-object package.json) && { node lab/q10-db/trial.ts "$D" --out package.json; test $? != 0; } && test "$(git hash-object package.json)" = "$B" && test -z "$(ls -A "$D")"
 ```
 
 - 다섯째 줄은 절차를 이 머신에서 실제로 돌린다(네트워크로 패키지를 설치한다). 결과는 리포 밖에 쓰고, 리포의 결과 폴더가 바뀌지 않았는지 본다.
 - 일곱째~아홉째 줄: 워크플로 파일이 패치와 같고(새 파일을 만드는 패치는 내용이 글자 그대로 같아야 거꾸로 적용된다), 이 PR이 `.github/` 아래에서 바꾼 파일이 그 하나뿐이며, 패치가 파일 하나만 다룬다. `origin/main`이 필요하다(`git fetch origin`).
 - 구조의 세부는 셋째 줄의 테스트가 본다.
+- 끝의 세 줄: `--out` 경로 검사의 테스트, 그리고 작업 트리의 있는 파일(`package.json`)을 `--out`으로 주면 `run.ts`가 2로 끝나고 `trial.ts`가 0이 아닌 코드로 끝나며 그 파일의 내용이 그대로인 것. `trial.ts`는 넘긴 빈 폴더에 아무것도 만들지 않고 끝난다(설치를 시작하기 전에 거부한다).
 
 ## 금지사항
 
