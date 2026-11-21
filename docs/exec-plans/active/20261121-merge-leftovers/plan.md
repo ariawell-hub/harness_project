@@ -146,6 +146,9 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
   - 다시 확인한 것(git 2.50.1, `assume-unchanged`로 표시한 파일 둘: 하나는 작업 트리에만 표식, 하나는 색인에만 표식): `--untracked` 없이 부르면 색인에만 표식이 있는 파일이 나오고, `--untracked`를 주면(게이트의 인자) 작업 트리에만 표식이 있는 파일이 나온다.
   - 내 잘못: F14를 확인할 때(21:18) `--untracked`를 빼고 실행했다. 그 결과로 "지적대로 놓친다"고 적었고, 반박이 거절되자 틀린 전제로 수용 기준과 비범위를 고쳤다. 원장의 재현 표시("재현 안 됨")가 맞았다. F14는 처음부터 이 구현에 해당하지 않는 지적이었다. 위 21:18과 그 다음 항목의 "`git grep`은 그 파일의 표식을 찾지 못한다"는 게이트의 인자에서는 사실이 아니다.
   - 바로잡은 것: 수용 기준 1을 실제 동작으로 고쳤다(`assume-unchanged` 파일도 작업 트리를 본다). 비범위에서 그 항목을 뺐다(하위 모듈만 남긴다). step0의 테스트 명세에 두 방향의 사례를 넣었다. 발견 사항과 의사결정 로그를 고쳤다. 코드는 바뀌지 않는다(테스트 한 건이 는다).
+- 2026-11-21 21:41 PR #176 계획 재검증(F15) 2라운드(head `9ffc796`): 두 검증자 승인(지적 없음). F15는 닫혔다. 계획 승인(G1) 해시 `b6c5225c437f`.
+- 2026-11-21 21:41 step0 테스트를 다시 올렸다(`786ce74`, 테스트 파일만. `assume-unchanged` 사례 한 건이 늘었다). 구현 전 `node --test scripts/test/conflict-markers.test.ts`는 실패한다(종료 코드 1: `../gates/conflict-markers.ts`가 없다, `ERR_MODULE_NOT_FOUND`).
+- 2026-11-21 21:41 구현과 문서(절차서 5절 한 항목, `CHANGELOG` 한 줄, TD-30 해결, TD-63 새 행)를 다시 올렸다. 구현 코드는 `e17b0b0`의 것과 같다. 같은 명령이 통과한다(18건).
 
 ## 의사결정 로그
 
@@ -181,9 +184,9 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 각 step의 Acceptance Criteria.
 - `node scripts/harness.ts check`.
 
-step0 결과(2026-11-21 21:01, 범위 조정 뒤 다시 올린 구현의 작업 트리):
+step0 결과(2026-11-21 21:41, 마지막 계획 재검증 뒤 다시 올린 구현의 작업 트리):
 
-- `node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scripts/test/cli.test.ts scripts/test/check-skip.test.ts`: 종료 코드 0. 58건 가운데 58건 통과, 실패 0, 건너뜀 0. 새 테스트는 17건이다(큰 파일 사례 둘은 각각 1초 안팎이다).
+- `node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scripts/test/cli.test.ts scripts/test/check-skip.test.ts`: 종료 코드 0. 59건 가운데 59건 통과, 실패 0, 건너뜀 0. 새 테스트는 18건이다(큰 파일 사례 둘은 각각 1초 안팎이다).
 - `node scripts/harness.ts bypass-scan`: 종료 코드 0(`bypass-scan: 통과`). 이 리포에는 충돌 표식 줄이 없다.
 - 절차서의 문장을 글자 그대로 견주는 `grep -qxF` 명령: 종료 코드 0.
 - `grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
