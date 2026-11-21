@@ -1,0 +1,11 @@
+{
+  "plan": "20261121-hook-command-position",
+  "steps": [
+    {
+      "step": 0,
+      "name": "command-name",
+      "status": "completed",
+      "completed_at": "2026-11-22T02:54:14+09:00"
+    }
+  ]
+}
