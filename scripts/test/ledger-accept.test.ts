@@ -12,6 +12,7 @@ import {
   type Entry,
   type Ledger,
 } from '../ci/ledger.ts';
+import { applyOwnerAccepts } from '../ci/owner-accept.ts';
 import type { Finding, Resolution, Verdict } from '../ci/verdict.ts';
 
 const BASE = 'a'.repeat(40);
@@ -211,4 +212,70 @@ test('applyVerdict: 닫힌 지적이 다시 열리면 openedAt을 지우고, 열
   assert.equal(fixed.findings[0].status, 'fixed');
   // 입력은 바꾸지 않는다
   assert.equal(closed.findings[0].openedAt, T0);
+});
+
+// --- P1 (계획 20261121-owner-accept-p1). 입력은 손으로 적은 accepted가 아니라 열린 P1에 승인을 반영한 원장이다
+
+const T1 = '2026-11-20T01:00:01Z';
+/** codex가 낸 열린 P1(F1)에 제작자 승인을 반영한 원장. `more`는 함께 있는 다른 지적 */
+const acceptedP1 = (...more: Entry[]): Ledger =>
+  applyOwnerAccepts(ledger(entry({ severity: 'P1', openedAt: T0 }), ...more), [
+    { id: 'F1', commentId: 100, at: T1 },
+  ]).ledger;
+
+test('ledgerStatus: 제작자가 승인한 P1은 막지 않고 수를 적는다. 다른 열린 P1은 그대로 막는다', () => {
+  const only = ledgerStatus(acceptedP1());
+  assert.equal(only.state, 'success');
+  assert.match(only.description, /제작자 승인 1/);
+  const withOpen = ledgerStatus(
+    acceptedP1(entry({ id: 'F2', severity: 'P1', title: '다른 것', openedAt: T0 })),
+  );
+  assert.equal(withOpen.state, 'failure');
+  assert.match(withOpen.description, /열린 차단 지적 1건: F2, 제작자 승인 1/);
+});
+
+test('applyVerdict: 제작자가 승인한 P1은 그 지적을 낸 검증자의 판정으로 바뀌지 않는다', () => {
+  for (const status of ['open', 'fixed', 'rejected'] as const) {
+    const l = apply(acceptedP1(), 'codex', verdict([], [{ id: 'F1', status, note: '판정' }]));
+    assert.deepEqual(
+      [l.findings[0].status, l.findings[0].note],
+      ['accepted', '제작자 승인(댓글 100)'],
+      status,
+    );
+  }
+  // 같은 위치·제목의 재등록도 새 지적을 만들지 않고 상태를 바꾸지 않는다
+  const again = apply(acceptedP1(), 'codex', verdict([finding({ severity: 'P1' })]));
+  assert.deepEqual(
+    again.findings.map((e) => [e.id, e.status]),
+    [['F1', 'accepted']],
+  );
+  assert.equal(ledgerStatus(again).state, 'success');
+});
+
+test('applyVerdict: 승인된 P1 뒤의 새 지적은 있던 등록 규칙(동결 포함)을 따른다', () => {
+  // codex의 2라운드다(ledger()의 rounds에 codex의 1라운드가 있다). 직전 판정 이후 바뀐 파일은 src/a.ts뿐이다
+  const l = apply(
+    acceptedP1(),
+    'codex',
+    verdict([
+      // (가) 바뀐 파일의, 제목이 다른 새 P1: 다시 막는다
+      finding({ severity: 'P1', file: 'src/a.ts', title: '같은 문제를 다르게 적은 것' }),
+      // (나) 바뀌지 않은 파일의 재현되지 않은 새 P1: 동결돼 미뤄진다
+      finding({ severity: 'P1', file: 'src/old.ts', title: '옛 코드의 것' }),
+      // (다) 바뀌지 않은 파일의 새 P0: 막는다
+      finding({ severity: 'P0', file: 'src/old.ts', title: '치명' }),
+    ]),
+  );
+  assert.deepEqual(
+    l.findings.map((e) => [e.id, e.severity, e.status]),
+    [
+      ['F1', 'P1', 'accepted'],
+      ['F2', 'P1', 'open'],
+      ['F3', 'P1', 'deferred'],
+      ['F4', 'P0', 'open'],
+    ],
+  );
+  const s = ledgerStatus(l);
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /열린 차단 지적 2건: F2, F4, 제작자 승인 1/);
 });
