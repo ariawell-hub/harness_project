@@ -51,6 +51,50 @@ interface Token {
   redir?: Redir;
 }
 
+/** bash가 디스크립터를 골라 변수에 넣는 꼴의 앞부분: `{이름}`, `{이름[첨자]}` */
+const FD_VAR = /^\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\}$/;
+
+/**
+ * 리다이렉션 연산자(`<`·`>`로 시작하는 것과 heredoc) 바로 앞에 붙은, 따옴표 밖의 글이 파일 디스크립터인가.
+ * 일반 리다이렉션과 heredoc이 같은 판별을 쓴다. 숫자(`2>`), POSIX 셸의 `{이름}>`, PowerShell의 `*>`(모든 스트림)
+ */
+function isFdPrefix(pre: string, dialect: Dialect): boolean {
+  if (/^\d+$/.test(pre)) return true;
+  if (dialect === 'posix') return FD_VAR.test(pre);
+  return dialect === 'powershell' && pre === '*';
+}
+
+/**
+ * 자리 i의 `{`가 공백 없이 `}`로 닫히는 낱말의 시작인가(`{}`, `{x}`, `{fd}>out`의 `{fd}`).
+ * 그런 낱말은 인자이거나 디스크립터 변수다. 묶음 괄호(`{ 명령; }`)와 zsh의 `{명령 인자}`는 여기에 들지 않는다.
+ * 안에 `{`·`$`·백틱이 있으면 아니라고 본다(전처럼 연산자로 읽는다). 낱말 하나만 읽으므로 전체 시간은 입력 길이에 비례한다
+ */
+function braceWordAt(src: string, i: number): boolean {
+  let j = i + 1;
+  let closed = false;
+  while (j < src.length) {
+    const ch = src[j];
+    if (/\s/.test(ch) || ';&|()<>'.includes(ch)) break;
+    if (ch === '{' || ch === '$' || ch === '`') return false;
+    if (ch === '\\') {
+      j += 2;
+      closed = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      j++;
+      while (j < src.length && src[j] !== ch) j += ch === '"' && src[j] === '\\' ? 2 : 1;
+      if (j >= src.length) return false;
+      j++;
+      closed = false;
+      continue;
+    }
+    closed = ch === '}';
+    j++;
+  }
+  return closed;
+}
+
 /** 낱말 목록에서 리다이렉션을 뺀다. 리다이렉션이 없으면 undefined */
 function shellArgs(words: string[], redirs: (Redir | undefined)[]): string[] | undefined {
   if (!redirs.some((r) => r !== undefined)) return undefined;
@@ -87,11 +131,14 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   let wordQuoted = false;
   /** 첫 연산자 앞부분에 그런 글이 있었는가: 있으면 숫자여도 파일 디스크립터가 아니라 인자다(`'2'>out`) */
   let preQuoted = false;
+  /** 첫 연산자가 `&`로 시작하는가(`&>`): 이 연산자는 디스크립터 번호를 받지 않아 앞의 글이 인자다(`2&>out`) */
+  let redirAmp = false;
   /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
   const redirOp = (ch: string) => {
     if (redirAt < 0) {
       redirAt = word.length;
       preQuoted = wordQuoted;
+      redirAmp = ch === '&';
     }
     word += ch;
     redirEnd = word.length;
@@ -102,13 +149,8 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       const t: Token = { kind: 'word', value: word };
       if (redirAt >= 0) {
         const pre = word.slice(0, redirAt);
-        // 연산자 바로 앞의, 따옴표 밖의 숫자는 파일 디스크립터다(`2>`). `{이름}>`은 셸이 디스크립터를 골라
-        // 변수에 넣는 꼴이고, PowerShell의 `*>`는 모든 스트림이다
-        const fd =
-          !preQuoted &&
-          (/^\d+$/.test(pre) ||
-            (posix && /^\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(pre)) ||
-            (dialect === 'powershell' && pre === '*'));
+        // 연산자 바로 앞의, 따옴표 밖의 글이 파일 디스크립터면 인자가 아니다(`2>`, `{이름}>`)
+        const fd = !preQuoted && !redirAmp && isFdPrefix(pre, dialect);
         // 따옴표로 묶은 앞부분은 빈 글이어도 인자다(`''>out`)
         const arg = preQuoted || (pre !== '' && !fd) ? pre : null;
         t.redir = { arg, needsTarget: redirEnd === word.length };
@@ -121,6 +163,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
     redirEnd = -1;
     wordQuoted = false;
     preQuoted = false;
+    redirAmp = false;
   };
   const heredocs: string[] = [];
   let i = 0;
@@ -242,8 +285,9 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       continue;
     }
     if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
-      // heredoc 연산자 앞에 붙은, 따옴표 밖의 숫자(`3<<EOF`)는 파일 디스크립터다: 인자에서 뺀다
-      if (inWord && !wordQuoted && redirAt < 0 && /^\d+$/.test(word)) redirAt = 0;
+      // heredoc 연산자 앞에 붙은, 따옴표 밖의 파일 디스크립터(`3<<EOF`, `{fd}<<EOF`)는 인자에서 뺀다.
+      // 일반 리다이렉션과 같은 판별이다
+      if (inWord && !wordQuoted && redirAt < 0 && isFdPrefix(word, dialect)) redirAt = 0;
       push();
       let j = i + 2;
       if (src[j] === '-') j++;
@@ -290,13 +334,8 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         i++;
         continue;
       }
-      // `{이름}>` 꼴의 리다이렉션은 묶음 괄호가 아니다
-      if (
-        posix &&
-        c === '{' &&
-        !inWord &&
-        /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/.test(src.slice(i, i + 96))
-      ) {
+      // 공백 없이 `}`로 닫히는 낱말(`{}`, `{x}`, `{fd}>out`의 `{fd}`)은 묶음 괄호가 아니라 낱말이다
+      if (posix && c === '{' && !inWord && braceWordAt(src, i)) {
         word += c;
         inWord = true;
         i++;

@@ -536,6 +536,75 @@ test('디스크립터 복제, `{이름}>`, 프로세스 치환, heredoc 앞의 �
   assert.ok(bash('cat <(drizzle-kit migrate)', c)?.rule.startsWith('R13'));
 });
 
+// ---------- 파일 디스크립터 판별을 한 곳에서 (구현 판정 F12) ----------
+
+test('parseShell의 args: `{이름}`이 붙은 heredoc·here-string, 긴 이름, 배열 원소도 파일 디스크립터다', () => {
+  const long = `v${'a'.repeat(300)}`;
+  for (const cmd of [
+    'tool {fd}<<EOF sub\nbody\nEOF',
+    'tool {fd}<<-EOF sub\n\tbody\n\tEOF',
+    "tool {fd}<<'EOF' sub\nbody\nEOF",
+    'tool {fd}<<<word sub',
+    'tool {fd}<&0 sub',
+    'tool {fd}<>both.txt sub',
+    `tool {${long}}>out.txt sub`,
+    `tool {${long}}<<EOF sub\nbody\nEOF`,
+    'tool {fds[0]}>out.txt sub',
+    'tool {fds[0]}<<EOF sub\nbody\nEOF',
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd.slice(0, 60));
+  // 따옴표로 묶거나 이스케이프한 이름은 인자다
+  for (const cmd of [
+    'tool "{fd}"<<EOF sub\nbody\nEOF',
+    "tool '{fd}'<<EOF sub\nbody\nEOF",
+    'tool \\{fd}<<EOF sub\nbody\nEOF',
+    'tool {f"d"}<<EOF sub\nbody\nEOF',
+    "tool '{fd}'>out.txt sub",
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', '{fd}', 'sub'], cmd);
+  // 이름이 아닌 글은 디스크립터가 아니다
+  assert.deepEqual(argsOf('tool {1x}>out.txt sub')[0], ['tool', '{1x}', 'sub']);
+  assert.deepEqual(argsOf('tool x{fd}>out.txt sub')[0], ['tool', 'x{fd}', 'sub']);
+});
+
+test('parseShell의 args: `&>` 앞의 숫자는 디스크립터가 아니라 인자다', () => {
+  assert.deepEqual(argsOf('tool 2&>out.txt sub'), [['tool', '2', 'sub']]);
+  assert.deepEqual(argsOf('tool 2&> out.txt sub'), [['tool', '2', 'sub']]);
+  assert.deepEqual(argsOf('tool x&>out.txt sub'), [['tool', 'x', 'sub']]);
+  assert.deepEqual(argsOf('tool 2>out.txt sub'), [['tool', 'sub']]);
+});
+
+test('parseShell의 args: 공백 없이 닫힌 중괄호 낱말(`{}`, `{x}`)은 인자이고 명령을 나누지 않는다', () => {
+  assert.deepEqual(argsOf('tool --flag {} sub'), [['tool', '--flag', '{}', 'sub']]);
+  assert.deepEqual(argsOf('tool {x} sub'), [['tool', '{x}', 'sub']]);
+  assert.deepEqual(argsOf('find . -exec tool {} sub ;'), [
+    ['find', '.', '-exec', 'tool', '{}', 'sub'],
+  ]);
+  // 묶음 괄호(공백으로 떨어진 `{`·`}`)는 전처럼 명령을 나눈다
+  assert.deepEqual(argsOf('{ tool sub; }'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('a && { b; c; }'), [['a'], ['b'], ['c']]);
+  assert.deepEqual(argsOf('f() { tool sub; }'), [['f'], ['tool', 'sub']]);
+});
+
+test('변수 디스크립터가 붙은 heredoc과 중괄호 낱말이 끼어도 금지 하위 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    'drizzle-kit {fd}<<EOF migrate\nx\nEOF',
+    'drizzle-kit {fd}<<<x migrate',
+    `drizzle-kit {v${'a'.repeat(200)}}>out.txt migrate`,
+    'drizzle-kit --config {} migrate',
+    'find . -exec drizzle-kit --config {} migrate ;',
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd.slice(0, 60)}`);
+  for (const cmd of [
+    // 하위 명령 자리의 인자가 글자 그대로 {fd}, 2, {}다
+    'drizzle-kit "{fd}"<<EOF migrate\nx\nEOF',
+    'drizzle-kit 2&>out.txt migrate',
+    'drizzle-kit {} migrate',
+  ])
+    assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+});
+
 // 손으로 고른 사례는 빠진 꼴을 모른다(구현 판정에서 꼴이 하나씩 드러났다). 리다이렉션과 인자를 무작위로 섞은 명령을
 // 실제 bash로 돌려, bash가 명령에 넘긴 인자와 parseShell의 args를 비교한다. 돌리는 명령은 인자를 파일에 적는
 // 셸 함수 `tool`과 임시 폴더 안의 파일로 가는 리다이렉션뿐이다. bash가 없는 환경(Windows 네이티브)은 건너뛴다.
@@ -565,6 +634,9 @@ test('parseShell의 args는 실제 bash가 명령에 넘기는 인자와 같다(
     '12',
     's"u"b',
     '\\2',
+    '{}',
+    '{x}',
+    'x{y}',
   ];
   // bash 3.2(macOS 기본)와 그 뒤 버전이 같은 뜻으로 읽는 꼴만 둔다(`{이름}>`, `&>>`는 4부터라 뺐다)
   const REDIRS = [
@@ -606,8 +678,34 @@ test('parseShell의 args는 실제 bash가 명령에 넘기는 인자와 같다(
     '\\2>o16',
     '2\\>o17',
     '<in.txt>o19',
+    '2&>o20',
+    'x&>o20',
+    '2&> o20',
   ];
-  const HEREDOCS = ['<<EOF', '<< EOF', '<<-EOF', "<<'EOF'", '3<<EOF', "'3'<<EOF"];
+  // bash 4.1부터 있는 꼴(`{이름}`으로 디스크립터를 받는 리다이렉션, `&>>`)은 그 버전에서만 넣는다. macOS 기본 bash(3.2)는
+  // 이 꼴을 다르게 읽는다. CI(Linux)의 bash에서 돈다
+  const v = spawnSync('bash', ['-c', 'echo "${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}"'], {
+    encoding: 'utf8',
+  })
+    .stdout.trim()
+    .split(' ')
+    .map(Number);
+  const modern = v[0] > 4 || (v[0] === 4 && v[1] >= 1);
+  if (modern)
+    REDIRS.push(
+      '{fd}>o21',
+      '{fd}> o21',
+      '{fd}>>o21',
+      '{fd}<in.txt',
+      '{fd}<<<w',
+      '{fd}<>o22',
+      '"{fd}">o21',
+      "'{fd}'>o21",
+      '&>>o23',
+      '&>> o23',
+    );
+  const HEREDOCS = ['<<EOF', '<< EOF', '<<-EOF', "<<'EOF'", '3<<EOF', "'3'<<EOF", '"{fd}"<<EOF'];
+  if (modern) HEREDOCS.push('{fd}<<EOF', '{fd}<<-EOF');
   const next = rng(20261121);
   const pick = (xs: string[]) => xs[Math.floor(next() * xs.length)];
   // 프로세스 치환은 셸이 경로로 바꿔 넘긴다. 양쪽을 같은 표시로 맞춘다
