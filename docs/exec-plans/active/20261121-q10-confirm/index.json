@@ -1,0 +1,15 @@
+{
+  "plan": "20261121-q10-confirm",
+  "steps": [
+    {
+      "step": 0,
+      "name": "ci-trial",
+      "status": "in_progress"
+    },
+    {
+      "step": 1,
+      "name": "confirm",
+      "status": "pending"
+    }
+  ]
+}
