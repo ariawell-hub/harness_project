@@ -32,6 +32,8 @@ import {
   DETAIL_LINE_MAX,
   DETAILS_CUT,
   DETAILS_MAX_BYTES,
+  globToRegExp,
+  matchesAny,
   WARN_PREFIX,
 } from '../lib/util.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
@@ -453,6 +455,27 @@ test('prSizeOf: 줄바꿈이 든 경로도 제외 glob과 lockfile glob에 맞�
     assert.equal(r.lines, 401, JSON.stringify(f));
     assert.equal(r.over, true, JSON.stringify(f));
   }
+});
+
+test('globToRegExp: `**`는 줄바꿈이 든 경로에도 맞고, `*`와 `?`는 `/`만 넘지 못한다', () => {
+  // 보호 경로·위험도 경로·제외 목록이 모두 이 함수로 견준다: 줄바꿈이 든 파일 이름으로 빠져나가지 못한다
+  assert.equal(globToRegExp('scripts/**').test('scripts/a\nb.ts'), true);
+  assert.equal(globToRegExp('scripts/**').test('scripts/x\n/y/z.ts'), true);
+  assert.equal(globToRegExp('**/*.md').test('a\n/b.md'), true);
+  assert.equal(globToRegExp('**/*.md').test('a/b\nc.md'), true);
+  assert.equal(globToRegExp('docs/**/x.md').test('docs/a\nb/x.md'), true);
+  assert.equal(matchesAny('scripts/a\nb.ts', ['scripts/**']), true);
+  assert.equal(matchesAny('.github/workflows/a\r\nb.yml', ['.github/**']), true);
+  // 줄바꿈이 있다고 다른 폴더의 파일이 맞지는 않는다
+  assert.equal(globToRegExp('scripts/**').test('src/a\nscripts/b.ts'), false);
+  assert.equal(globToRegExp('scripts/**').test('x\nscripts/b.ts'), false);
+  assert.equal(globToRegExp('docs/*.md').test('docs/a/b\n.md'), false);
+  assert.equal(globToRegExp('docs/?.md').test('docs//.md'), false);
+  // 줄바꿈이 없는 경로의 판정은 그대로다
+  assert.equal(globToRegExp('docs/**').test('docs/a/b.md'), true);
+  assert.equal(globToRegExp('docs/*.md').test('docs/a.md'), true);
+  assert.equal(globToRegExp('docs/*.md').test('docs/a/b.md'), false);
+  assert.equal(globToRegExp('a.b').test('axb'), false);
 });
 
 test('prSizeOf: 파일 이름의 줄바꿈·제어 문자는 상세에서 보이는 표기로 바뀌어 경로 하나가 한 줄에 머문다', () => {
