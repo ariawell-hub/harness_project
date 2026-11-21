@@ -13,7 +13,7 @@
   - `vitest`는 대상 리포의 devDependency다. 테스트 위치나 실행 도구가 다르면 그 리포의 `harness.config.json`에서 `testEffect`를 고친다. 그 변경은 `harness-guard`가 신호로 올린다.
   - 실제 Vitest로 확인한 기록: [lab/pilot-prep](../../lab/pilot-prep/README.md).
 - **verify**: `node scripts/harness.ts verify`가 앱을 띄우고 Playwright 시나리오를 돌려 판정한다. 아래 "verify" 절.
-- **DB 금지 명령**: 코어 목록에 `guard.dbPatterns`를 더한다. Drizzle의 명령 가운데 DB에 접속하는 것과 마이그레이션 파일을 지우는 것을 막는다. 아래 "DB" 절.
+- **DB 금지 명령**: 코어 목록에 `guard.dbPatterns`(정규식)와 `guard.dbCommands`(도구의 금지 하위 명령)를 더한다. Drizzle의 명령 가운데 DB에 접속하는 것과 마이그레이션 파일을 지우는 것은 `guard.dbCommands`의 항목으로 막는다. 아래 "DB" 절.
 
 ## verify
 
@@ -125,17 +125,19 @@ node scripts/harness.ts verify -- e2e/login.spec.ts  # 지정한 파일만(여�
 | `migrate`, `studio`, `introspect`, `pull` | 금지 | 설정이 가리키는 DB에 접속한다. 그 DB가 일회용인지 훅은 알 수 없다                  |
 | `drop`                                    | 금지 | 마이그레이션 파일을 지운다(14.3절의 이력 변경)                                     |
 
-- 금지 명령은 L1 훅이 막는다(R13). 플래그가 하위 명령 앞에 오는 형태(`drizzle-kit --config <파일> <하위 명령>`), 버전을 붙여 받아 실행하는 형태(`drizzle-kit@<버전> <하위 명령>`), 패키지의 실행 파일을 직접 부르는 형태(`node node_modules/drizzle-kit/bin.cjs <하위 명령>`)도 막는다.
+- 금지 명령은 L1 훅이 막는다(R13). 목록은 `profiles/web/profile.json`의 `guard.dbCommands`에 있다(`scripts/test/profile-web-db.test.ts`가 이 표와 설정을 견준다).
 - 마이그레이션의 적용은 에이전트가 명령으로 하지 않는다. 표준 명령 안에서 앱의 마이그레이션 코드(`drizzle-orm`의 migrator)가 일회용 DB에 적용한다.
 - `drizzle-kit`은 되돌리는 마이그레이션을 만들지 않는다. 14.3절이 요구하는 "적용 → 롤백 → 재적용" 증거의 롤백 SQL은 손으로 쓴다.
 
 ### 훅이 보는 것과 보지 못하는 것
 
-- 훅은 명령 전체를 이어 붙인 글에서 찾는다. 그래서 금지 명령이 커밋 메시지나 다른 인자에 글자로 들어 있어도 막힌다. 플래그의 값이 금지 명령의 이름인 호출(`drizzle-kit --name migrate generate`)도 막힌다. 엄한 쪽의 오탐이다. 이름을 바꿔 다시 실행한다.
-- 하위 명령 뒤의 인자에 든 이름은 보지 않는다(`drizzle-kit generate --name add-migrate-log`는 허용된다).
-- 플래그의 값에 공백이 들어 있으면 놓친다(`--config "a b.ts"`처럼 따옴표로 묶은 값. 훅은 따옴표를 푼 인자를 공백으로 이어 붙인 글을 보므로 값이 둘로 보인다). 프로파일의 패턴으로는 고칠 수 없다: 인자가 다른 두 호출이 같은 글이 되어(`--config "a generate" --name <이름>`과 `--config a generate --name <이름>`), 값을 여러 토막 건너뛰면 허용된 호출이 막히거나 금지 호출을 여전히 놓친다(`scripts/test/profile-web-db.test.ts`의 "한계" 테스트). 인자의 경계를 보는 판정은 코어 규칙의 일이다(기술 부채 표의 TD-61). 그때까지 설정 파일의 경로에 공백을 쓰지 않는다. 훅은 빠른 피드백이고(설계서 14.3절의 강제 장치 표), 그런 호출은 리뷰에서 본다(절차 수준).
-- 패키지 스크립트 안에 든 명령은 보지 못한다(`pnpm db:migrate` 같은 이름으로 감싼 경우). 그런 스크립트를 더하는 변경은 리뷰에서 본다(절차 수준).
-- 코어 목록의 패턴은 도구 이름 바로 뒤의 하위 명령만 본다(기술 부채 표). `drizzle-kit`은 이 프로파일의 패턴이 플래그가 앞에 오는 형태까지 막는다.
+- 훅은 설정 `guard.dbCommands`의 항목으로 인자의 자리를 본다(설계서 13.1절). 명령의 인자에서 `drizzle-kit` 자리를 찾고, 그 뒤에서 플래그를 건너뛴 다음의 낱말이 금지 목록에 있으면 막는다. 인자를 이어 붙인 글이 아니라 인자 하나하나를 본다.
+- 플래그가 하위 명령 앞에 오는 호출, 버전을 붙인 호출, 실행 파일을 직접 부르는 호출, 플래그의 값에 공백이 든 호출을 막는다(`drizzle-kit --config <파일> <하위 명령>`, `drizzle-kit@<버전> <하위 명령>`, `node node_modules/drizzle-kit/bin.cjs <하위 명령>`, `drizzle-kit --config "<공백이 든 경로>" <하위 명령>`).
+- 하위 명령 자리가 아닌 곳의 이름은 보지 않는다. 허용된 하위 명령 뒤의 인자(`drizzle-kit generate --name add-migrate-log`)와 플래그 값 안의 낱말(`drizzle-kit --config "team migrate config.ts" generate`)은 통과한다.
+- 이 설정은 메인 체크아웃의 `harness.config.json`에서 읽는다. worktree에서 목록을 비워도 풀리지 않는다. 목록을 바꾸는 변경은 병합되어 메인 체크아웃에 들어온 뒤에 적용된다.
+- 알려진 대가(더 막는 쪽): 플래그의 값이 금지 명령의 이름과 같으면 막힌다. 훅은 플래그 바로 뒤의 낱말이 값인지 하위 명령인지 알 수 없어 양쪽으로 따진다. `drizzle-kit --name migrate generate`가 막히고, 값을 받지 않는 플래그가 하위 명령 앞에 오는 `drizzle-kit --verbose generate --name migrate`도 막힌다. `--이름=값`으로 붙여 쓰면 통과한다(`--name=migrate`). 다른 명령의 인자에 `drizzle-kit`과 금지 명령의 이름이 차례로 있어도 막힌다(`echo drizzle-kit migrate`). 설계서 13.1절의 "알려진 대가"를 본다.
+- 패키지 스크립트 안에 든 명령은 훅이 보지 못한다(`pnpm db:migrate` 같은 이름으로 감싼 경우). 그런 스크립트를 더하는 변경은 리뷰에서 본다(절차 수준).
+- 그 밖에 남는 틈은 설계서 13.1절의 "남는 틈"에 있다. 훅은 빠른 피드백이고, 보장은 권한과 L3이 한다(설계서 14.3절의 강제 장치 표).
 
 ### 한계
 

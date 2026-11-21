@@ -31,10 +31,15 @@
         "\\btypeorm\\s+schema:(drop|sync)\\b",
         "\\bsequelize\\s+db:drop\\b",
         "\\bknex\\s+migrate:rollback\\b.*--all",
-        "\\bsupabase\\s+db\\s+reset\\b",
-        "\\bdrizzle-kit(?:[@/]\\S*)?(?:\\s+-\\S*(?:\\s+[^-\\s]\\S*)?)*\\s+(?:migrate|studio|introspect|pull|drop|push)(?![\\w-])"
+        "\\bsupabase\\s+db\\s+reset\\b"
       ],
       "dbClients": ["supabase-db"],
+      "dbCommands": [
+        {
+          "tool": "drizzle-kit",
+          "forbidden": ["migrate", "studio", "introspect", "pull", "drop", "push"]
+        }
+      ],
       "mcp": {
         "denyWords": ["delete", "trash", "remove", "destroy", "purge", "erase", "wipe", "cancel"],
         "denyTools": ["mcp__*Gmail__send_message", "mcp__*Gmail__reply", "mcp__*Gmail__forward"],
