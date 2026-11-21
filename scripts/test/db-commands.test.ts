@@ -2,6 +2,7 @@
 // 인자를 이은 글에 정규식을 돌리면 인자의 경계가 사라진다(PR #169의 F1·F3). 여기서는 인자의 자리로 본다.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -9,6 +10,7 @@ import { ConfigError } from '../lib/config.ts';
 import { matchDbCommand, type DbCommandRule } from '../hooks/db-commands.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
 import { parseShell, type Dialect } from '../hooks/shell.ts';
+import { tmp } from './helpers.ts';
 
 const DRIZZLE: DbCommandRule[] = [{ tool: 'drizzle-kit', forbidden: ['migrate', 'push', 'drop'] }];
 
@@ -435,6 +437,227 @@ test('다른 방언에서도 리다이렉션이 낀 금지 하위 명령을 막�
     );
     assert.ok(r?.rule.startsWith('R13'), dialect);
   }
+});
+
+// ---------- 리다이렉션의 나머지 꼴 (구현 판정 F10·F11) ----------
+
+test('parseShell의 args: 디스크립터 복제·닫기(`<&`, `>&`)는 명령을 나누지 않는다', () => {
+  for (const cmd of [
+    'tool <&0 sub',
+    'tool <& 0 sub',
+    'tool 3<&0 sub',
+    'tool <&- sub',
+    'tool 0<&3- sub',
+    'tool >&2 sub',
+    'tool >& 2 sub',
+    'tool 2>&- sub',
+    'tool 1>&2- sub',
+    'tool sub <&0',
+    'tool sub<&0',
+    'tool <&0 >&2 sub 2>&1',
+  ])
+    assert.deepEqual(argsOf(cmd), [['tool', 'sub']], cmd);
+  // 연산자와 떨어진 `&`는 전처럼 명령을 나눈다
+  assert.deepEqual(argsOf('tool < in.txt & sub'), [['tool'], ['sub']]);
+  assert.deepEqual(argsOf('tool <in.txt& sub'), [['tool'], ['sub']]);
+  assert.deepEqual(argsOf('tool & sub'), [['tool'], ['sub']]);
+  assert.deepEqual(argsOf('tool >&2 && sub'), [['tool'], ['sub']]);
+});
+
+test('parseShell의 args: 따옴표로 묶거나 이스케이프한 숫자는 파일 디스크립터가 아니라 인자다', () => {
+  for (const cmd of [
+    "tool '2'>out.txt sub",
+    'tool "2">out.txt sub',
+    'tool \\2>out.txt sub',
+    "tool '2'>&1 sub",
+    "tool ''2>out.txt sub",
+    "tool 2''>out.txt sub",
+    "tool '2'<<EOF sub\nbody\nEOF",
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', '2', 'sub'], cmd);
+  // 따옴표로 묶은 빈 글도 인자다
+  assert.deepEqual(argsOf("tool ''>out.txt sub"), [['tool', '', 'sub']]);
+  // 따옴표 밖의 숫자는 파일 디스크립터다
+  for (const cmd of [
+    'tool 2>out.txt sub',
+    'tool 12>out.txt sub',
+    'tool 3<<EOF sub\nbody\nEOF',
+    'tool 3<<<word sub',
+    'tool 3<<-EOF sub\n\tbody\n\tEOF',
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd);
+  // PowerShell의 `*>`도 따옴표로 묶으면 인자다
+  assert.deepEqual(argsOf("tool '*'>out.txt sub", 'powershell'), [['tool', '*', 'sub']]);
+  assert.deepEqual(argsOf('tool *>out.txt sub', 'powershell'), [['tool', 'sub']]);
+});
+
+test('parseShell의 args: `{이름}>` 꼴의 리다이렉션과 프로세스 치환', () => {
+  for (const cmd of [
+    'tool {fd}>out.txt sub',
+    'tool {fd}<in.txt sub',
+    'tool {log_fd}>>out.txt sub',
+    'tool {fd}>&- sub',
+    'tool {fd}> out.txt sub',
+  ])
+    assert.deepEqual(argsOf(cmd), [['tool', 'sub']], cmd);
+  // 따옴표로 묶으면 인자다
+  assert.deepEqual(argsOf('tool "{fd}">out.txt sub'), [['tool', '{fd}', 'sub']]);
+  // 묶음 괄호는 전처럼 명령을 나눈다
+  assert.deepEqual(argsOf('{ tool sub; }'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('{ tool; } > out.txt'), [['tool'], []]);
+  // 프로세스 치환은 인자 하나다(셸이 경로로 바꿔 넘긴다). 안의 명령은 따로 본다
+  assert.deepEqual(argsOf('tool --flag <(echo x y) sub')[0], ['tool', '--flag', '<(…)', 'sub']);
+  assert.deepEqual(argsOf('tool >(tee log.txt) sub')[0], ['tool', '>(…)', 'sub']);
+  assert.deepEqual(argsOf('tool < <(echo x y) sub')[0], ['tool', 'sub']);
+  assert.ok(argsOf('tool --flag <(echo x y) sub').some((a) => a.join(' ') === 'echo x y'));
+});
+
+test('디스크립터 복제, `{이름}>`, 프로세스 치환, heredoc 앞의 숫자가 끼어도 금지 하위 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    'drizzle-kit <&0 migrate',
+    'drizzle-kit <& 0 migrate',
+    'drizzle-kit 3<&0 migrate',
+    'drizzle-kit {fd}>out.txt migrate',
+    'drizzle-kit --config <(echo x) migrate',
+    'drizzle-kit 3<<EOF migrate\nx\nEOF',
+    'drizzle-kit 2>out.txt migrate',
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  for (const cmd of [
+    // 하위 명령 자리의 인자가 글자 그대로 2다
+    "drizzle-kit '2'>out.txt migrate",
+    // 하위 명령 자리의 인자가 프로세스 치환이다
+    'drizzle-kit <(echo x) migrate',
+    'drizzle-kit generate <&0',
+  ])
+    assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+  // 프로세스 치환 안의 명령도 본다
+  assert.ok(bash('cat <(drizzle-kit migrate)', c)?.rule.startsWith('R13'));
+});
+
+// 손으로 고른 사례는 빠진 꼴을 모른다(구현 판정에서 꼴이 하나씩 드러났다). 리다이렉션과 인자를 무작위로 섞은 명령을
+// 실제 bash로 돌려, bash가 명령에 넘긴 인자와 parseShell의 args를 비교한다. 돌리는 명령은 인자를 파일에 적는
+// 셸 함수 `tool`과 임시 폴더 안의 파일로 가는 리다이렉션뿐이다. bash가 없는 환경(Windows 네이티브)은 건너뛴다.
+test('parseShell의 args는 실제 bash가 명령에 넘기는 인자와 같다(무작위 대조)', (t) => {
+  const probe = spawnSync('bash', ['-c', 'exit 0'], { encoding: 'utf8' });
+  if (process.platform === 'win32' || probe.error || probe.status !== 0) {
+    t.skip('bash가 없다');
+    return;
+  }
+  const work = tmp('harness-shell-args-');
+  writeFileSync(path.join(work, 'in.txt'), 'input\n');
+  const out = path.join(work, 'argv.out');
+  const ARGS = [
+    'sub',
+    'x',
+    '2',
+    "'2'",
+    '"a b"',
+    '--flag',
+    "''",
+    "'>'",
+    '\\>',
+    '"2>&1"',
+    "'<'",
+    'a=b',
+    '--',
+    '12',
+    's"u"b',
+    '\\2',
+  ];
+  // bash 3.2(macOS 기본)와 그 뒤 버전이 같은 뜻으로 읽는 꼴만 둔다(`{이름}>`, `&>>`는 4부터라 뺐다)
+  const REDIRS = [
+    '>o1',
+    '> o1',
+    '>>o1',
+    '2>o2',
+    '2> o2',
+    '2>&1',
+    '>&2',
+    '<&0',
+    '<& 0',
+    '3<&0',
+    '<in.txt',
+    '< in.txt',
+    '<>o3',
+    '&>o4',
+    '&> o4',
+    '>|o5',
+    '>| o5',
+    '<<<w',
+    '<<< w',
+    '3<<<w',
+    '2>&-',
+    '<&-',
+    "'2'>o6",
+    '"2">o6',
+    'x>o7',
+    'x2>o7',
+    "''>o8",
+    '> "o 9"',
+    ">'o>10'",
+    '<(echo p)',
+    '< <(echo p)',
+    '>o1>o2',
+    '>&o13',
+    '>& o13',
+    '--flag=<in.txt',
+    '\\2>o16',
+    '2\\>o17',
+    '<in.txt>o19',
+  ];
+  const HEREDOCS = ['<<EOF', '<< EOF', '<<-EOF', "<<'EOF'", '3<<EOF', "'3'<<EOF"];
+  const next = rng(20261121);
+  const pick = (xs: string[]) => xs[Math.floor(next() * xs.length)];
+  // 프로세스 치환은 셸이 경로로 바꿔 넘긴다. 양쪽을 같은 표시로 맞춘다
+  const norm = (a: string) =>
+    /^\/dev\/fd\/\d+$|^\/proc\/self\/fd\/\d+$/.test(a) || a === '<(…)' ? '<procsub>' : a;
+  let same = 0;
+  const diffs: string[] = [];
+  for (let n = 0; n < 500; n++) {
+    const parts: string[] = [];
+    let heredoc = false;
+    const len = 1 + Math.floor(next() * 5);
+    for (let k = 0; k < len; k++) {
+      const r = next();
+      if (r < 0.45) parts.push(pick(ARGS));
+      else if (r < 0.95 || heredoc) parts.push(pick(REDIRS));
+      else {
+        parts.push(pick(HEREDOCS));
+        heredoc = true;
+      }
+    }
+    // 리다이렉션이 명령 이름 앞에 오는 꼴도 낸다
+    const before = next() < 0.15 ? `${pick(REDIRS)} ` : '';
+    const line = `${before}tool ${parts.join(' ')}`;
+    const cmd = heredoc ? `${line}\nbody > x\nEOF` : line;
+    if (existsSync(out)) unlinkSync(out);
+    const r = spawnSync(
+      'bash',
+      ['-c', `tool() { printf '%s\\0' "$#" "$@" > "$ARGV_OUT"; }\n${cmd}\n`],
+      {
+        cwd: work,
+        encoding: 'utf8',
+        input: 'stdin\n',
+        timeout: 10_000,
+        env: { PATH: process.env.PATH, ARGV_OUT: out },
+      },
+    );
+    // bash가 받아들이지 않은 조합(문법 오류, 없는 디스크립터)은 비교할 것이 없다
+    if (r.status !== 0 || !existsSync(out)) continue;
+    const raw = readFileSync(out, 'utf8').split('\0');
+    const real = raw.slice(1, 1 + Number(raw[0])).map(norm);
+    const [first] = parseShell(cmd).filter((c) => (c.args ?? c.argv)[0] === 'tool');
+    const ours = first ? (first.args ?? first.argv).slice(1).map(norm) : null;
+    if (ours && JSON.stringify(ours) === JSON.stringify(real)) same += 1;
+    else
+      diffs.push(
+        `${JSON.stringify(cmd)}: bash ${JSON.stringify(real)} / 훅 ${JSON.stringify(ours)}`,
+      );
+  }
+  assert.deepEqual(diffs.slice(0, 5), [], `다른 것 ${diffs.length}건`);
+  assert.ok(same >= 350, `비교한 것이 너무 적다: ${same}`);
 });
 
 // ---------- 틀린 설정 (구현 판정 F8) ----------

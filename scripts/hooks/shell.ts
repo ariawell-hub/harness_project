@@ -83,9 +83,16 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   /** 이 낱말에서 따옴표 밖의 첫 리다이렉션 연산자가 시작한 자리(없으면 -1)와, 마지막 연산자 글자 바로 뒤의 자리 */
   let redirAt = -1;
   let redirEnd = -1;
+  /** 이 낱말에 따옴표·이스케이프·치환으로 들어온 글이 있는가(빈 따옴표 포함) */
+  let wordQuoted = false;
+  /** 첫 연산자 앞부분에 그런 글이 있었는가: 있으면 숫자여도 파일 디스크립터가 아니라 인자다(`'2'>out`) */
+  let preQuoted = false;
   /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
   const redirOp = (ch: string) => {
-    if (redirAt < 0) redirAt = word.length;
+    if (redirAt < 0) {
+      redirAt = word.length;
+      preQuoted = wordQuoted;
+    }
     word += ch;
     redirEnd = word.length;
     inWord = true;
@@ -95,9 +102,16 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       const t: Token = { kind: 'word', value: word };
       if (redirAt >= 0) {
         const pre = word.slice(0, redirAt);
-        // 연산자 바로 앞의 숫자는 파일 디스크립터다(`2>`). PowerShell의 `*>`는 모든 스트림이다
-        const fd = /^\d+$/.test(pre) || (dialect === 'powershell' && pre === '*');
-        t.redir = { arg: pre !== '' && !fd ? pre : null, needsTarget: redirEnd === word.length };
+        // 연산자 바로 앞의, 따옴표 밖의 숫자는 파일 디스크립터다(`2>`). `{이름}>`은 셸이 디스크립터를 골라
+        // 변수에 넣는 꼴이고, PowerShell의 `*>`는 모든 스트림이다
+        const fd =
+          !preQuoted &&
+          (/^\d+$/.test(pre) ||
+            (posix && /^\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(pre)) ||
+            (dialect === 'powershell' && pre === '*'));
+        // 따옴표로 묶은 앞부분은 빈 글이어도 인자다(`''>out`)
+        const arg = preQuoted || (pre !== '' && !fd) ? pre : null;
+        t.redir = { arg, needsTarget: redirEnd === word.length };
       }
       tokens.push(t);
     }
@@ -105,6 +119,8 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
     inWord = false;
     redirAt = -1;
     redirEnd = -1;
+    wordQuoted = false;
+    preQuoted = false;
   };
   const heredocs: string[] = [];
   let i = 0;
@@ -133,6 +149,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       }
       word += src[i + 1];
       inWord = true;
+      wordQuoted = true;
       i += 2;
       continue;
     }
@@ -149,6 +166,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       const stop = end < 0 ? src.length : end;
       word += src.slice(i + 1, stop);
       inWord = true;
+      wordQuoted = true;
       i = stop + 1;
       continue;
     }
@@ -186,6 +204,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       }
       word += buf;
       inWord = true;
+      wordQuoted = true;
       i = j + 1;
       continue;
     }
@@ -194,6 +213,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       subs.push(inner);
       word += '$(…)';
       inWord = true;
+      wordQuoted = true;
       i = next;
       continue;
     }
@@ -203,6 +223,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       subs.push(src.slice(i + 1, stop));
       word += '`…`';
       inWord = true;
+      wordQuoted = true;
       i = stop + 1;
       continue;
     }
@@ -221,6 +242,8 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       continue;
     }
     if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
+      // heredoc 연산자 앞에 붙은, 따옴표 밖의 숫자(`3<<EOF`)는 파일 디스크립터다: 인자에서 뺀다
+      if (inWord && !wordQuoted && redirAt < 0 && /^\d+$/.test(word)) redirAt = 0;
       push();
       let j = i + 2;
       if (src[j] === '-') j++;
@@ -254,13 +277,28 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         i++;
         continue;
       }
-      if (c === '&' && (src[i - 1] === '>' || src[i + 1] === '>')) {
-        // `&>`의 시작이거나 연산자 글자 바로 뒤(`>&`)면 리다이렉션 연산자의 글자다
-        if (src[i + 1] === '>' || (redirAt >= 0 && redirEnd === word.length)) redirOp(c);
-        else {
-          word += c;
-          inWord = true;
-        }
+      // 연산자 글자 바로 뒤(`>&`, `<&`: 디스크립터 복제·닫기)이거나 `&>`의 시작이면 리다이렉션 연산자의 글자다
+      if (c === '&' && ((redirAt >= 0 && redirEnd === word.length) || src[i + 1] === '>')) {
+        redirOp(c);
+        i++;
+        continue;
+      }
+      // 따옴표로 묶은 `>` 바로 뒤의 `&`는 전처럼 낱말의 글자로 둔다
+      if (c === '&' && src[i - 1] === '>') {
+        word += c;
+        inWord = true;
+        i++;
+        continue;
+      }
+      // `{이름}>` 꼴의 리다이렉션은 묶음 괄호가 아니다
+      if (
+        posix &&
+        c === '{' &&
+        !inWord &&
+        /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/.test(src.slice(i, i + 96))
+      ) {
+        word += c;
+        inWord = true;
         i++;
         continue;
       }
@@ -273,6 +311,16 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       push();
       tokens.push({ kind: 'op', value: c });
       i++;
+      continue;
+    }
+    // 프로세스 치환 `<(…)`·`>(…)`은 리다이렉션이 아니라 인자 하나다(셸이 경로로 바꿔 넘긴다). 안의 명령은 따로 본다
+    if (posix && (c === '>' || c === '<') && src[i + 1] === '(') {
+      const [inner, next] = readParen(src, i + 2);
+      subs.push(inner);
+      word += `${c}(…)`;
+      inWord = true;
+      wordQuoted = true;
+      i = next;
       continue;
     }
     if (c === '>' || c === '<') {
