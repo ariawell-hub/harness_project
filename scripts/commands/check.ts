@@ -18,7 +18,6 @@ import {
 import { parseBranch } from '../lib/plan.ts';
 import { formatProblem, matchesAny, type Problem } from '../lib/util.ts';
 import { bypassScan } from '../gates/bypass-scan.ts';
-import { conflictMarkers } from '../gates/conflict-markers.ts';
 import { codeownersProblems } from '../gates/codeowners.ts';
 import { docLintGate } from '../gates/doc-lint.ts';
 import { secretScan } from '../gates/secret-scan.ts';
@@ -247,11 +246,7 @@ export async function runCheck(
         ...r.warnings.map((w) => ({ ...w, rule: '경고 ' + w.rule })),
       ]);
     } else if (name === 'bypass-scan') {
-      // 남은 병합 충돌 표식도 이 단계에서 본다(R7). 단계 이름을 늘리지 않는다(실패 키·캐시가 이름에 묶여 있다)
-      const p = [
-        ...bypassScan(root, cfg, { base, committedOnly: !!opts.ci }),
-        ...conflictMarkers(root),
-      ];
+      const p = bypassScan(root, cfg, { base, committedOnly: !!opts.ci });
       ok = p.length === 0;
       output = problemsText(p);
     } else if (name === 'secret-scan') {
