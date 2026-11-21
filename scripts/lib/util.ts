@@ -8,6 +8,38 @@ export interface Problem {
   doc: string;
 }
 
+/** 경고 판정(pr-size, scope)이 경고를 낼 때 설명의 머리말. 요약과 지표가 이 글자로 경고를 가린다 */
+export const WARN_PREFIX = '경고: ';
+
+/** 판정 상세(details) 한 줄의 글자 수 상한 */
+export const DETAIL_LINE_MAX = 200;
+/** 판정 하나의 상세 전체의 바이트 상한(UTF-8, 줄마다 줄바꿈 1바이트 포함) */
+export const DETAILS_MAX_BYTES = 12_000;
+/** 상세를 줄였을 때 끝에 더하는 줄 */
+export const DETAILS_CUT = '… (상세를 줄였다)';
+
+/**
+ * 판정 상세의 크기를 묶는다. 판정 결과는 job 출력과 환경 변수 하나로 기록 job에 넘어가므로(10.4절),
+ * PR이 정하는 값(파일 경로)이 그 크기를 키우게 두지 않는다.
+ * 한 줄은 DETAIL_LINE_MAX자까지다(넘으면 잘라 끝에 `…`). 앞에서부터 담다가 합이 DETAILS_MAX_BYTES를 넘게 되는 줄부터는 버리고
+ * 끝에 DETAILS_CUT 한 줄을 더한다(이 줄은 상한에 세지 않는다).
+ * 줄의 크기는 JSON 문자열로 적었을 때의 UTF-8 바이트 수에 1을 더한 값이다(제어 문자·따옴표·역슬래시는 JSON에서 길어진다)
+ */
+export const detailBytes = (line: string): number =>
+  Buffer.byteLength(JSON.stringify(line), 'utf8') + 1;
+
+export function capDetails(lines: string[]): string[] {
+  const out: string[] = [];
+  let bytes = 0;
+  for (const line of lines) {
+    const t = line.length > DETAIL_LINE_MAX ? line.slice(0, DETAIL_LINE_MAX - 1) + '…' : line;
+    bytes += detailBytes(t);
+    if (bytes > DETAILS_MAX_BYTES) return [...out, DETAILS_CUT];
+    out.push(t);
+  }
+  return out;
+}
+
 export function formatProblem(p: Problem): string {
   return `[${p.rule}] ${p.what}\n  고치는 법: ${p.how}\n  근거: ${p.doc}`;
 }
@@ -31,7 +63,19 @@ export function globToRegExp(glob: string): RegExp {
     else if ('\\^$+.()|{}[]'.includes(c)) re += '\\' + c;
     else re += c;
   }
-  return new RegExp(`^${re}$`);
+  // `s`: `**`는 줄바꿈이 든 경로에도 맞아야 한다(git 경로에는 줄바꿈이 올 수 있다). `*`와 `?`는 `/`만 넘지 못한다
+  return new RegExp(`^${re}$`, 's');
+}
+
+/**
+ * 경로를 한 줄로 보여 준다. 역슬래시는 둘로 겹쳐 적고, 제어 문자와 줄 나눔 문자는 보이는 표기(`\n`, `\r`, `\t`, `\u{…}`)로 바꾼다.
+ * 판정 상세와 요약에 쓴다: 파일 이름이 줄을 늘리거나 요약의 코드 블록을 닫지 못한다. 견줄 때는 쓰지 않는다
+ */
+export function showPath(p: string): string {
+  const short: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+  return p
+    .replace(/\\/g, '\\\\')
+    .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => short[c] ?? `\\u{${c.codePointAt(0)!.toString(16)}}`);
 }
 
 export function matchesAny(file: string, globs: string[]): boolean {

@@ -67,6 +67,8 @@ export interface HarnessConfig {
   failure: { switchAt: number; stopAt: number };
   commands: Record<StandardName, CommandDef | null>;
   docLint: { agentsMdMaxLines: number; exclude: string[] };
+  /** PR 크기 경고 기준(R15, 10.2절 (1)). pr-size가 쓴다. 키가 없으면 기본값 */
+  prSize: PrSizeConfig;
   bypass: { extraPatterns: string[]; excludeExtensions: string[] };
   guard: {
     dbPatterns: string[];
@@ -203,6 +205,27 @@ export const DEFAULT_DEPS: HarnessConfig['deps'] = {
 
 export const CONFIG_FILE = 'harness.config.json';
 
+export interface PrSizeConfig {
+  /** 변경 줄 수(추가 + 삭제) 상한. 넘으면 경고한다 */
+  maxLines: number;
+  /** 세지 않는 경로(glob, 리포 루트 기준): 생성 파일·테스트·문서. lockfile(`deps.lockfiles`)은 늘 세지 않는다 */
+  exclude: string[];
+}
+
+export const DEFAULT_PR_SIZE: PrSizeConfig = {
+  maxLines: 400,
+  exclude: [
+    '**/*.md',
+    'docs/**',
+    '**/*.test.*',
+    '**/*.spec.*',
+    '**/test/**',
+    '**/tests/**',
+    '**/__tests__/**',
+    '**/generated/**',
+  ],
+};
+
 export class ConfigError extends Error {}
 
 /** MCP 도구 호출의 L1 규칙(13.1절). 막는 것만 적는다: 그 밖의 MCP 도구는 통과한다 */
@@ -328,6 +351,30 @@ export function resolveMcpGuard(raw: unknown): McpGuardConfig {
   return out;
 }
 
+/** `prSize`를 검증해 기본값을 채운다. 키가 없으면 기본값이다(옛 설정 파일과 호환). 준 항목만 기본값을 대신한다 */
+export function resolvePrSize(raw: unknown): PrSizeConfig {
+  if (raw === undefined) return { ...DEFAULT_PR_SIZE, exclude: [...DEFAULT_PR_SIZE.exclude] };
+  const r = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null) as Record<
+    string,
+    unknown
+  > | null;
+  // 생략한 항목만 기본값이다. 적어 놓은 null은 잘못된 값이다
+  const maxLines = r && 'maxLines' in r ? r.maxLines : DEFAULT_PR_SIZE.maxLines;
+  const exclude = r && 'exclude' in r ? r.exclude : DEFAULT_PR_SIZE.exclude;
+  const ok =
+    r !== null &&
+    Object.keys(r).every((k) => k === 'maxLines' || k === 'exclude') &&
+    Number.isSafeInteger(maxLines) &&
+    (maxLines as number) > 0 &&
+    Array.isArray(exclude) &&
+    exclude.every(relPath);
+  if (!ok)
+    throw new ConfigError(
+      `${CONFIG_FILE} 검증 실패:\n- prSize는 { maxLines(양의 정수, 생략 가능), exclude(리포 안 상대 경로 glob 배열, 생략 가능) }`,
+    );
+  return { maxLines: maxLines as number, exclude: [...(exclude as string[])] };
+}
+
 export function loadConfig(repoRoot: string): HarnessConfig {
   const file = path.join(repoRoot, CONFIG_FILE);
   if (!existsSync(file)) {
@@ -392,6 +439,7 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   cfg.planReview ??= { required: false };
   cfg.guard.mcp = resolveMcpGuard(cfg.guard.mcp);
   cfg.guard.dbCommands = resolveDbCommands(cfg.guard.dbCommands);
+  cfg.prSize = resolvePrSize(cfg.prSize);
   const ci: Partial<HarnessConfig['ci']> = cfg.ci ?? {};
   cfg.ci = {
     environments: ci.environments ?? [...DEFAULT_ENVIRONMENTS],

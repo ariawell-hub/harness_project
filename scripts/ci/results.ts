@@ -13,6 +13,23 @@ export const GATE_CONTEXTS = [
   'deps-guard',
 ] as const;
 
+/**
+ * 경고 판정 context(R15·R18, 10.2절 (1)). 병합을 막지 않는다: 필수 체크가 아니고, 경고여도 state는 success다.
+ * 경고는 description이 `경고: `로 시작한다
+ */
+export const WARN_CONTEXTS = ['pr-size'] as const;
+
+/** 기록 job이 커밋 상태로 쓰는 context 전부(필수 판정 뒤에 경고 판정) */
+export const RECORDED_CONTEXTS = [...GATE_CONTEXTS, ...WARN_CONTEXTS] as const;
+
+/**
+ * 판정 결과 파일의 크기 상한(바이트). 파일은 Base64로 job 출력과 환경 변수 하나(Linux에서 131,072바이트)에 실려
+ * 기록 job으로 간다(gates.yml의 results·RESULTS_B64). 넘으면 기록 step이 시작되지 못해 필수 판정까지 기록되지 않는다
+ */
+export const RESULTS_MAX_BYTES = 90_000;
+/** 결과가 커서 경고 판정의 상세를 뺐을 때 그 자리에 두는 한 줄 */
+export const WARN_DETAILS_DROPPED = '… (판정 결과가 커서 상세를 뺐다)';
+
 /** 검증자 판정 context(R12). 판정 워크플로의 기록 job이 쓴다 */
 export const REVIEW_CONTEXTS = ['review/claude', 'review/codex'] as const;
 
@@ -37,6 +54,34 @@ export interface GateResults {
   results: GateResult[];
   /** risk-gate가 정한 위험도. 이후 검증자 수를 정하는 데 쓴다(10.1절) */
   risk?: 'low' | 'normal' | 'high';
+}
+
+/** 판정 명령(`gates`)이 결과 파일에 쓰는 글자 */
+export function serializeResults(r: GateResults): string {
+  return JSON.stringify(r, null, 2) + '\n';
+}
+
+/** 결과 파일의 UTF-8 바이트 수 */
+export function resultsBytes(r: GateResults): number {
+  return Buffer.byteLength(serializeResults(r), 'utf8');
+}
+
+/**
+ * 경고 판정이 결과 파일을 RESULTS_MAX_BYTES 너머로 키우지 않게 한다. 필수 판정의 결과는 건드리지 않는다.
+ * 넘으면 경고 판정의 상세를 한 줄로 바꾸고, 그래도 넘으면 경고 판정을 결과에서 뺀다(기록 job이 그 context만 error로 쓴다).
+ * 그래서 돌려주는 결과는 상한 이하이거나, 경고 판정이 없던 때의 결과와 같다
+ */
+export function fitWarnings(r: GateResults): GateResults {
+  if (resultsBytes(r) <= RESULTS_MAX_BYTES) return r;
+  const isWarn = (g: GateResult) => (WARN_CONTEXTS as readonly string[]).includes(g.context);
+  const slim: GateResults = {
+    ...r,
+    results: r.results.map((g) =>
+      isWarn(g) && g.details.length ? { ...g, details: [WARN_DETAILS_DROPPED] } : g,
+    ),
+  };
+  if (resultsBytes(slim) <= RESULTS_MAX_BYTES) return slim;
+  return { ...r, results: r.results.filter((g) => !isWarn(g)) };
 }
 
 export interface StatusPayload {

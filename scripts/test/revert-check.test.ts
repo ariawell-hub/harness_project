@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { runGates } from '../ci/gates.ts';
 import { ACTIONS_APP_ID } from '../ci/protection.ts';
-import { GATE_CONTEXTS, toStatuses, validateResults } from '../ci/results.ts';
+import { GATE_CONTEXTS, RECORDED_CONTEXTS, toStatuses, validateResults } from '../ci/results.ts';
 import { targetCheckOf } from '../ci/revert-evidence.ts';
 import { planReview } from '../ci/review-plan.ts';
 import { revertCheck, revertTarget, type TargetCheck } from '../gates/revert-check.ts';
@@ -320,8 +320,12 @@ test('runGates: 확인된 revert PR은 계획 없이 plan-gate success, 작성�
   const { r, by, asked } = await gates(root, target, 'failure');
   assert.deepEqual(
     r.results.map((x) => x.context),
-    [...GATE_CONTEXTS],
+    [...RECORDED_CONTEXTS],
   );
+  // 경고 판정은 확인된 revert PR에서 보지 않는다(크기와 범위는 되돌리는 대상이 정한다)
+  assert.equal(by('pr-size').state, 'success');
+  assert.equal(by('pr-size').description, 'revert PR: 보지 않는다');
+  assert.deepEqual(by('pr-size').details, []);
   assert.equal(r.results[0].context, 'revert-check');
   assert.equal(by('revert-check').state, 'success', by('revert-check').details.join('\n'));
   assert.equal(asked(), 1);
