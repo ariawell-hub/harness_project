@@ -8,6 +8,7 @@
 - `scripts/cross-review/ledger.md`(원장 형식, "제작자 승인" 절, "규칙" 절), `scripts/cross-review/prompt.md`(읽기만)
 - `scripts/ci/owner-accept.ts`(`refusal`, `applyOwnerAccepts`, `needsAccepts`), `scripts/ci/accept-load.ts`(`loadAccepted`), `scripts/ci/ledger.ts`(`ENTRY_STATUSES`, `ledgerStatus`), `scripts/ci/ledger-store.ts`(읽기만)
 - `scripts/test/owner-accept.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/accept-cli.test.ts`, `scripts/test/ledger-accept.test.ts`, `scripts/test/ledger.test.ts`(읽기만)
+- `scripts/test/record.test.ts`(기록 명령의 다른 테스트. 가짜 서버가 `/graphql`을 모른다)
 - `scripts/gates/test-effect.ts`(읽기만. 고친 테스트 파일마다 변경 전 코드에서 실패해야 한다), `scripts/ci/ledger.ts`의 `applyVerdict`(새 지적의 등록과 동결)
 
 ## 작업
@@ -53,6 +54,10 @@
   - `ledgerStatus`: 승인이 반영된 P1만 있으면 `success`이고 설명에 `제작자 승인 1`이 있다. 승인이 반영된 P1과 `open`인 다른 P1이 함께 있으면 `failure`다.
   - 승인이 반영된 P1은 그 지적을 낸 검증자의 판정(`resolutions`의 `open`·`fixed`·`rejected`, 같은 위치·제목의 재등록)으로 바뀌지 않는다.
   - 새 지적은 있던 등록 규칙(동결 포함)을 그대로 따른다. 승인이 반영된 P1을 낸 검증자의 2라운드 이후 판정에서: (가) 직전 판정 이후 **바뀐 파일**에 대한, 위치나 제목이 다른 새 P1은 새 ID로 등록되고 `open`이다(다시 막는다). (나) 직전 판정 이후 **바뀌지 않은 파일**에 대한 재현되지 않은 새 P1은 새 ID로 등록되지만 `deferred`다(막지 않는다. 설계서 10.2절 (5)의 동결). (다) 새 P0은 파일이 바뀌었든 아니든 `open`이다.
+- `scripts/test/record.test.ts`(기록 명령의 있던 테스트 파일): 이 파일의 가짜 서버에는 `/graphql`이 없다. 열린 P1이 있는 원장을 기록하면 이제 편집 이력을 읽으므로, 그대로 두면 있던 테스트 `record-review: 판정을 원장 댓글에 반영하고 review/*와 review-ledger를 head에 기록한다`의 2라운드가 `review-ledger` `error`로 실패한다(읽기 실패는 닫힌 쪽이다).
+  - 가짜 서버에 `/graphql` 응답(빈 댓글 목록)과 요청 수를 세는 값, 실패하게 하는 스위치를 더한다. 있던 단언은 고치지 않는다.
+  - 위의 있던 테스트 끝에 단언을 더한다: 두 라운드 동안 `/graphql` 요청이 정확히 한 번이다(1라운드는 원장이 비어 있어 읽지 않고, 2라운드는 열린 P1이 있어 읽는다). 변경 전 코드에서는 0번이라 실패한다.
+  - 새 테스트: 열린 P1이 있는 원장에서 `/graphql`이 실패하면(HTTP 500) `review/*`는 기록되고 `review-ledger`는 `error`이며, 원장 댓글은 실행 전과 같다(그 실행의 판정도 저장하지 않는다). 변경 전 코드에서는 읽지 않으므로 `success`라 실패한다.
 - 있던 단언 가운데 고치는 것은 **"P1은 승인되지 않는다"를 전제한 것뿐**이다(예: `owner-accept.test.ts`의 "반영하지 않는 경우" 표의 P1 행과 문구 `'P0이 아니다'`, `needsAccepts` 테스트의 P1 줄, `accept-load.test.ts`의 "볼 지적이 없으면 GraphQL을 부르지 않는다"의 P1 원장, `accept-cli.test.ts`의 "P0이 아닌 지적" 사례). 그 자리의 P1을 P2로 바꾸거나 기대값을 새 동작으로 바꾼다. 고친 테스트의 파일과 이름을 진행 로그에 적는다. 그 밖의 있던 단언은 지우거나 약하게 하지 않는다.
 
 ### 4. 문서
@@ -74,7 +79,8 @@
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/owner-accept.test.ts scripts/test/accept-load.test.ts scripts/test/accept-cli.test.ts scripts/test/ledger-accept.test.ts scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts
+node --test scripts/test/owner-accept.test.ts scripts/test/accept-load.test.ts scripts/test/accept-cli.test.ts scripts/test/ledger-accept.test.ts scripts/test/record.test.ts scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts
+b=$(git merge-base HEAD origin/main) && test "$(git diff "$b" -- scripts/test/record.test.ts | grep -c '^-[^-]')" -eq 0 && grep -q "gqlCalls" scripts/test/record.test.ts
 node scripts/harness.ts test-effect
 b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- scripts/test/ledger.test.ts scripts/test/ledger-store.test.ts)"
 grep -qF "차단 지적(P0·P1)이 아니다" scripts/test/accept-cli.test.ts && grep -q "applyOwnerAccepts" scripts/test/ledger-accept.test.ts && test "$(grep -c "^- test-effect 예외:" docs/exec-plans/active/20261121-owner-accept-p1/plan.md)" -eq 0
@@ -99,6 +105,8 @@ node scripts/harness.ts check
 - 제작자 계정의 댓글 글을 검증자 입력에 넣지 마라. 이유: 자유 글이 검증자에게 가는 길이 생긴다(10.2절 (4) "반박 형식"). 제작자가 고르지 않은 방법이다.
 - 반박(`scripts/ci/rebuttal.ts`)과 runner(`scripts/runner/**`), `pr-state`의 동작을 고치지 마라. 이유: 범위 밖이다. runner의 교착 보고 문구에 승인 선택지를 더하는 일은 발견 사항으로 남긴다.
 - "P1은 승인되지 않는다"를 전제한 것 말고는 있던 테스트의 단언을 지우거나 약하게 하지 마라. 이유: R4.
-- `test-effect` 예외 줄을 쓰지 마라. 이유: 고치는 테스트 파일 넷은 모두 새 동작(P1 승인)을 단언하므로 변경 전 코드에서 실패해야 한다. 예외가 필요해졌다면 테스트가 새 동작을 보지 않는다는 뜻이다.
+- `scripts/test/record.test.ts`에서 줄을 지우거나 고치지 마라(더하기만 한다. AC가 본다). 이유: 그 파일의 있던 테스트는 P1 승인과 무관한 기록 명령의 동작을 본다. 실패를 없애려고 기대값을 바꾸면 닫힌 쪽 동작이 가려진다.
+- 편집 이력을 읽지 못했을 때 열린 P1을 그대로 통과시키거나 읽기를 건너뛰게 고치지 마라. 이유: 읽지 못하면 닫힌 쪽이어야 한다(설계서 10.2절 (4)). 가짜 서버가 `/graphql`을 모르는 테스트는 테스트 쪽을 고친다.
+- `test-effect` 예외 줄을 쓰지 마라. 이유: 고치는 테스트 파일 다섯은 모두 새 동작(P1 승인, 열린 P1이 있으면 편집 이력을 읽는다)을 단언하므로 변경 전 코드에서 실패해야 한다. 예외가 필요해졌다면 테스트가 새 동작을 보지 않는다는 뜻이다.
 - 새 지적의 등록 규칙(등급 내림, 동결, 가득 찬 원장)을 고치지 마라. 이유: 승인된 지적 뒤에 나온 새 지적이 막는지는 있던 규칙이 정한다. 이 step은 그 규칙을 바꾸지 않는다.
 - `.github/workflows/`와 `harness.config.json`을 고치지 마라. 이유: 필요 없다. 워크플로는 제작자가 적용한다.
