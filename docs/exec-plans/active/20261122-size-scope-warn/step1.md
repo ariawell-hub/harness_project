@@ -4,8 +4,8 @@
 
 - `ARCHITECTURE.md`, `docs/harness/architecture.md`(`gates/*`, `ci/*` 행)
 - `docs/harness/design.md` 5절(R18 행), 8.2절(계획 파일 구성), 10.2절 (1), 10.3절의 필수 체크 표와 그 아래 목록, 14.6절 "범위 이탈 표시", 0절의 머리말과 변경 이력
-- step0이 만든·바꾼 파일: `scripts/gates/pr-size.ts`, `scripts/ci/results.ts`(`WARN_CONTEXTS`, `RECORDED_CONTEXTS`), `scripts/ci/gates.ts`(`runGates`의 경고 판정 부분, `isWarning`), `scripts/ci/results.ts`의 `fitWarnings`, `scripts/lib/util.ts`(`WARN_PREFIX`, `capDetails`, `DETAILS_CUT`), `scripts/test/pr-size.test.ts`
-- `scripts/gates/risk-gate.ts`의 `changedFiles`, `scripts/lib/plan.ts`(`parseBranch`, `findPlan`, `planCandidates`, `parseDoc`, `stripHtmlComments`, 그리고 `sections`가 코드 블록을 가리는 방식), `scripts/ci/plan-hash.ts`(`hashFrom`, `normalize`, `PLAN_SECTIONS`)와 `scripts/test/plan-hash.test.ts`, `scripts/lib/util.ts`(`globToRegExp`, `matchesAny`가 파일 경로의 `\`를 `/`로 바꾸는 것)
+- step0이 만든·바꾼 파일: `scripts/gates/pr-size.ts`, `scripts/ci/results.ts`(`WARN_CONTEXTS`, `RECORDED_CONTEXTS`), `scripts/ci/gates.ts`(`runGates`의 경고 판정 부분, `isWarning`), `scripts/ci/results.ts`의 `fitWarnings`, `scripts/ci/gates.ts`의 `gatesOutput`, `scripts/lib/util.ts`(`WARN_PREFIX`, `capDetails`, `DETAILS_CUT`), `scripts/test/pr-size.test.ts`
+- `scripts/gates/risk-gate.ts`의 `changedFiles`, `scripts/lib/plan.ts`(`parseBranch`, `findPlan`, `planCandidates`, `parseDoc`, `stripHtmlComments`, 그리고 `sections`가 코드 블록을 가리는 방식), `scripts/lib/plan.ts`의 `STEP_BOUND_SECTIONS`, `scripts/ci/plan-hash.ts`(`hashFrom`, `normalize`, `PLAN_SECTIONS`)와 `scripts/test/plan-hash.test.ts`, `docs/harness/architecture.md`의 "레이어", `scripts/lib/util.ts`(`globToRegExp`, `matchesAny`가 파일 경로의 `\`를 `/`로 바꾸는 것)
 - `docs/harness/workflow.md` 2절·5절, `docs/exec-plans/TEMPLATE.md`, `docs/exec-plans/TEMPLATE-small.md`, `scripts/cross-review/checklist.md`(R18 항목)
 - `docs/exec-plans/tech-debt-tracker.md`의 TD-6 행, `scripts/metrics/render.ts`의 `UNMEASURED_TD`(읽기만)
 - `scripts/test/helpers.ts`, `scripts/test/risk-gate.test.ts`, `scripts/test/revert-check.test.ts`
@@ -14,16 +14,25 @@
 
 테스트를 먼저 쓰고, 구현 전에 실패하는 것을 확인해 진행 로그에 적는다(R5). 테스트만 담은 커밋을 구현 커밋보다 먼저 만든다.
 
-### 1. `scripts/ci/plan-hash.ts`: 해시에 들어가는 섹션의 글자를 내보낸다
+### 1. 해시에 들어가는 섹션의 글자를 `scripts/lib/plan.ts`로 옮긴다
+
+`scripts/lib/plan.ts`에 더한다(`STEP_BOUND_SECTIONS` 곁에).
 
 ```ts
-export const PLAN_SECTIONS = ['목표와 수용 기준', '범위', '관련 파일'] as const;
+/** 계획 검증의 해시에 넣는 plan.md의 섹션(제목이 이 말로 시작한다) */
+export const PLAN_BOUND_SECTIONS = ['목표와 수용 기준', '범위', '관련 파일'] as const;
+/** 해시에 넣는 섹션 글자의 정규화: 줄 끝 공백과 섹션 앞뒤 빈 줄을 뗀다 */
+export function normalizeBound(content: string | null): string;
 /** 해시에 넣는 plan.md 한 섹션의 글자 그대로(섹션이 없으면 ''). body는 frontmatter를 뗀 본문이다 */
-export function boundPlanSection(body: string, s: (typeof PLAN_SECTIONS)[number]): string;
+export function boundPlanSection(body: string, s: (typeof PLAN_BOUND_SECTIONS)[number]): string;
 ```
 
-- `boundPlanSection`은 지금 `hashFrom`이 섹션마다 계산하는 값(`normalize(section(body, s))`) 그대로다. `hashFrom`은 그 값을 이 함수로 구한다. 해시 값은 어느 계획에서도 달라지지 않는다(`scripts/test/plan-hash.test.ts`를 고치지 않고 통과한다).
-- 이유: `scope`가 범위 경로를 **해시에 들어가는 글자에서만** 읽게 한다. 범위 경로가 그 글자의 순수 함수이면, 계획 승인 뒤에 범위 경로가 달라지는 수정은 반드시 해시를 바꾼다. `scope`가 섹션을 따로 읽으면 두 읽기가 어긋나는 글(긴 펜스 안의 짧은 펜스와 `## ` 줄)에서 해시에 묶이지 않은 경로가 범위에 들어온다.
+- `PLAN_BOUND_SECTIONS`와 `normalizeBound`는 지금 `scripts/ci/plan-hash.ts` 안에 있는 `PLAN_SECTIONS`와 `normalize`를 글자 그대로 옮긴 것이다(값·순서·정규화 규칙이 같다). `boundPlanSection`은 `normalizeBound(section(body, s))`다.
+- `scripts/ci/plan-hash.ts`: 자기 안의 `PLAN_SECTIONS`와 `normalize`를 지우고 `scripts/lib/plan.ts`의 것을 쓴다. plan.md의 섹션은 `boundPlanSection`으로, step의 섹션은 `normalizeBound(section(text, s))`로 구한다. 해시에 넣는 값과 순서는 그대로라서 해시 값은 어느 계획에서도 달라지지 않는다(`scripts/test/plan-hash.test.ts`를 고치지 않고 통과한다).
+- `sections`·`section`과 `scripts/lib/plan.ts`의 다른 함수는 고치지 않는다.
+- 이유 둘.
+  - `scope`가 범위 경로를 **해시에 들어가는 글자에서만** 읽게 한다. 범위 경로가 그 글자의 순수 함수이면, 계획 승인 뒤에 범위 경로가 달라지는 수정은 반드시 해시를 바꾼다. `scope`가 섹션을 따로 읽으면 두 읽기가 어긋나는 글(긴 펜스 안의 짧은 펜스와 `## ` 줄)에서 해시에 묶이지 않은 경로가 범위에 들어온다.
+  - 레이어(`docs/harness/architecture.md`): 의존은 위에서 아래로만 흐르고 `ci/`는 `gates/`보다 위다. `scripts/gates/scope.ts`가 `scripts/ci/plan-hash.ts`를 import하면 거꾸로다. 그래서 둘이 함께 쓰는 것을 `lib/`에 둔다.
 
 ### 2. `scripts/gates/scope.ts`(새 파일)
 
@@ -49,6 +58,7 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
 
 - **코드 블록의 판별**(`scopePaths`가 쓴다): 여는 펜스는 줄 머리의 공백 뒤에 백틱 셋 이상 또는 물결표 셋 이상이 오는 줄이다. 백틱 펜스인데 그 뒤의 글자에 백틱이 있으면 펜스가 아니다(한 줄 안의 인라인 코드다). 여는 펜스의 글자와 길이를 기억하고, **같은 글자가 그 길이 이상이고 그 밖에는 공백뿐인 줄**에서만 닫는다. 그래서 백틱 넷으로 연 블록 안의 백틱 셋 줄, 물결표 줄, 정보 문자열이 붙은 펜스 줄은 블록을 닫지 않는다. 닫히지 않은 블록은 글의 끝까지다. 펜스 줄 자신도 코드 블록 안이다.
 - `planScopePaths`: `scopePaths(boundPlanSection(parseDoc(planText).body, '관련 파일'))`이다. 섹션의 글자를 다른 방법으로 읽지 않는다(`scripts/lib/plan.ts`의 `section`을 직접 부르지도, 섹션을 따로 추출하지도 않는다). 섹션이 없으면 빈 목록이다.
+  - `scripts/gates/scope.ts`는 `scripts/lib/`와 같은 층의 `scripts/gates/risk-gate.ts`만 import한다. `scripts/ci/`의 것은 import하지 않는다.
   - 소규모 계획(단일 파일)은 계획 해시가 없다(지금도 그렇다). 같은 함수로 읽는다.
 - `scopePaths`: 순수 함수다. 받은 글자만 본다. 아래 순서로 한다.
   1. 줄마다 코드 블록 안인지 가린다.
@@ -110,6 +120,8 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
   - 범위 밖 파일이 31개면 `details`에 30개만 적히고 나머지 1개는 수로 적힌다. `outside`의 길이는 31이다.
   - 해시에 묶이지 않는 자리(긴 펜스 안의 `## 예시` 줄 뒤, 바깥 블록이 닫힌 뒤)에 `` `late.ts` ``를 적은 계획과 적지 않은 계획: 두 리포의 `planHash`가 같고, `late.ts`를 바꾼 PR에서 둘 다 `outside`가 `late.ts`이며 경고다.
 - **`runGates`**: 결과의 context 순서가 `RECORDED_CONTEXTS`와 같고 끝의 둘이 `pr-size`, `scope`다. 범위 밖 파일이 있는 PR에서 `scope`가 `success`이고 `isWarning`이 참이며, 필수 판정 다섯의 `state`는 범위 밖 파일이 없는 같은 모양의 PR과 같다. 계획 파일 자리에 폴더가 있어 읽을 수 없으면 `scope`는 `error`이고 `pr-size`는 `success`다.
+- **요약에 남는 범위 경고**(`gatesOutput`에 만든 결과 값을 직접 넘긴다): `judgeScope`가 낸 범위 밖 파일 셋의 경고를 `scope`의 결과로 두고, 필수 판정의 상세를 채워 (가) `scope`의 상세만 빠지는 크기와 (나) 경고 판정이 통째로 빠지는 크기의 결과를 만든다. 두 경우 모두 `file`은 `RESULTS_MAX_BYTES` 이하이고, (가)의 `file`에는 모든 context가 있되 범위 밖 파일의 줄이 없으며 (나)의 `file`에는 `GATE_CONTEXTS`만 있다. 두 경우 모두 `summary`에는 `| scope | 경고 |` 행과 `### scope` 제목, 범위 밖 파일 셋이 한 줄씩 들어 있다.
+- **레이어**: `scripts/gates/scope.ts`의 글에 `../ci/`가 없다.
 - `scripts/test/revert-check.test.ts`: 확인된 revert PR의 `runGates` 테스트에 `scope`가 `success`·`revert PR: 보지 않는다`인 단언을 더한다.
 
 ### 5. 문서
@@ -145,6 +157,7 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
 ```bash
 node --test scripts/test/scope.test.ts scripts/test/plan-hash.test.ts scripts/test/pr-size.test.ts scripts/test/ci.test.ts scripts/test/record.test.ts scripts/test/risk-gate.test.ts scripts/test/revert-check.test.ts scripts/test/ops-check.test.ts scripts/test/protection.test.ts scripts/test/metrics-local.test.ts
 node scripts/harness.ts doc-lint
+test -f scripts/gates/scope.ts && ! grep -q "\.\./ci/" scripts/gates/scope.ts
 grep -qxF -e '- 경고 판정 `scope`도 필수 체크가 아니다. PR이 바꾼 파일 가운데 계획의 "관련 파일·문서"에 없는 것이 있으면 커밋 상태의 설명이 `경고: `로 시작하고, 판정 job 요약에 그 파일들이 나온다(계획 자신의 파일은 늘 범위 안이다). 의도한 변경이면 PR 본문에 이유를 적는다. 검증자가 확인한다(R18).' docs/harness/workflow.md
 grep -qxF -e '- "관련 파일·문서"에는 바꿀 파일·폴더의 경로를 백틱으로 감싸 적는다(glob을 쓸 수 있고, 폴더는 그 아래 전부다). 읽기만 할 파일은 `읽기만`으로 시작하는 항목에 따로 적는다. 그 항목의 경로는 범위에 넣지 않는다(`scope`, R18).' docs/harness/workflow.md
 grep -q '읽기만' docs/exec-plans/TEMPLATE.md
@@ -161,7 +174,8 @@ grep -q "^| TD-[0-9]* .*UNMEASURED_TD.*pr-state.*Q9.*capDetails.*| 열림 " docs
 
 - `GATE_CONTEXTS`에 `scope`를 넣지 마라. 이유: `ops-check`가 그 목록을 브랜치 보호의 필수 체크 요구로 쓴다. 경고 판정은 필수 체크가 아니다.
 - 경고를 `failure`나 `error`로 내지 마라. 이유: 필수 체크 설정이 없는 리포의 `pr-state`는 체크 요약으로 분류하므로 실패로 읽힌다. `error`는 판정하지 못했을 때만이다.
-- `scripts/lib/plan.ts`를 고치지 마라. `scripts/ci/plan-hash.ts`에서는 `PLAN_SECTIONS`를 내보내고 `boundPlanSection`을 더하는 것 말고는 바꾸지 마라(`normalize`와 해시에 넣는 값·순서는 그대로다). `scripts/test/plan-hash.test.ts`를 고치지 마라. 이유: 해시가 달라지면 이미 승인된 계획의 승인이 모두 무효가 된다.
+- `scripts/lib/plan.ts`의 `sections`·`section`을 고치지 마라. `scripts/lib/plan.ts`에는 작업 1의 셋(`PLAN_BOUND_SECTIONS`, `normalizeBound`, `boundPlanSection`)만 더하고, `scripts/ci/plan-hash.ts`에서는 그 셋을 쓰게 바꾸는 것 말고는 고치지 마라(해시에 넣는 값·순서와 정규화 규칙은 그대로다). `scripts/test/plan-hash.test.ts`를 고치지 마라. 이유: 해시가 달라지면 이미 승인된 계획의 승인이 모두 무효가 된다.
+- `scripts/gates/`의 파일이 `scripts/ci/`의 파일을 import하게 하지 마라. 이유: 레이어 규칙(`docs/harness/architecture.md`)을 어긴다.
 - `scope`가 범위 경로를 `boundPlanSection`이 준 글자 밖에서 읽게 하지 마라(계획 파일의 다른 부분, merge-base의 계획, PR 본문). 이유: 해시에 묶이지 않은 글자로 범위를 넓힐 수 있게 된다.
 - `matchesAny`로 파일 경로를 견주지 마라. 이유: 파일 경로의 `\`를 `/`로 바꿔, 이름에 `\`가 든 파일이 다른 경로로 판정된다.
 - 백틱으로 감싸지 않은 글자를 경로로 추측하지 마라. 이유: 문장 속의 말("설계서 6절")과 경로를 가를 수 없다. 형식은 절차서 2절에 적는다.

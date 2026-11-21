@@ -8,7 +8,7 @@
 - `scripts/gates/risk-gate.ts`의 `changedFiles`(`git diff --numstat -z --no-renames`를 읽는 방식), `scripts/gates/harness-guard.ts`의 `CONFIG_KEYS`와 그것을 쓰는 곳
 - `scripts/lib/config.ts`(`HarnessConfig`, `relPath`, `resolveDbCommands`, `loadConfig`), `scripts/lib/util.ts`(`globToRegExp`, `matchesAny`가 파일 경로의 `\`를 `/`로 바꾸는 것), `scripts/lib/git.ts`(`git`)
 - `scripts/commands/ops-check.ts`의 `requiredChecks`(`GATE_CONTEXTS`를 필수 체크 요구 목록으로 쓴다)
-- `scripts/harness.ts`의 `gates`·`record-status` 명령(읽기만. 고치지 않는다), `.github/workflows/gates.yml`(읽기만)
+- `scripts/harness.ts`의 `gates` 명령(결과 파일과 요약을 쓰는 끝부분)과 `record-status` 명령(읽기만), `.github/workflows/gates.yml`(읽기만)
 - `scripts/test/helpers.ts`, `scripts/test/ci.test.ts`, `scripts/test/risk-gate.test.ts`(임시 리포로 PR 트리를 만드는 방식), `scripts/test/record.test.ts`, `scripts/test/revert-check.test.ts`, `scripts/test/harness-guard.test.ts`
 
 ## 작업
@@ -52,7 +52,9 @@
   export const RESULTS_MAX_BYTES = 90_000;
   /** 결과가 커서 경고 판정의 상세를 뺐을 때 그 자리에 두는 한 줄 */
   export const WARN_DETAILS_DROPPED = '… (판정 결과가 커서 상세를 뺐다)';
-  /** `gates` 명령이 결과 파일에 쓰는 글자(`JSON.stringify(r, null, 2) + '\n'`)의 UTF-8 바이트 수 */
+  /** `gates` 명령이 결과 파일에 쓰는 글자: `JSON.stringify(r, null, 2) + '\n'` */
+  export function serializeResults(r: GateResults): string;
+  /** `serializeResults(r)`의 UTF-8 바이트 수 */
   export function resultsBytes(r: GateResults): number;
   export function fitWarnings(r: GateResults): GateResults;
   ```
@@ -70,7 +72,7 @@
   - 경고 판정 하나는 `guarded`로 감싼다. 예외는 그 context만 `error`로 만들고 다른 결과를 바꾸지 않는다.
   - `revert-check`가 확인한 revert PR(`verified`)이면 경고 판정을 실행하지 않고 `state: 'success'`, `description: 'revert PR: 보지 않는다'`, `details: []`를 낸다.
   - 경고 판정은 위험도 신호(`signals`)와 `risk`에 아무것도 더하지 않는다.
-  - 돌려주는 값은 `fitWarnings`를 거친 것이다. `scripts/harness.ts`의 `gates` 명령은 그 값을 그대로 파일과 요약에 쓴다(고치지 않는다).
+  - `runGates`는 `fitWarnings`를 부르지 않는다. 돌려주는 값은 판정별 상한(`capDetails`)만 적용된 원래 결과다.
 - `scripts/ci/gates.ts`:
 
   ```ts
@@ -80,7 +82,19 @@
 
   - `summaryMarkdown`의 표에서 `isWarning`인 행은 결과 칸이 `경고`다. 그 밖의 행은 지금과 같다.
 
-- `scripts/ci/record.ts`의 `recordStatuses`: `contexts`를 주지 않았을 때의 기본값을 `RECORDED_CONTEXTS`로 바꾼다. 그 밖의 동작(형식 검사, 빠진 context는 `error`, 결과가 없거나 깨지면 모두 `error`)은 그대로다. `scripts/harness.ts`는 고치지 않는다(`record-status` 명령은 `contexts`를 주지 않는다).
+- `scripts/ci/gates.ts`에 `gates` 명령의 출력을 만드는 함수를 더한다.
+
+  ```ts
+  /** 결과 파일의 글자(크기를 맞춘 결과)와 판정 job 요약(원래 결과) */
+  export function gatesOutput(r: GateResults): { file: string; summary: string };
+  ```
+
+  - `file`은 `serializeResults(fitWarnings(r))`이고 `summary`는 `summaryMarkdown(r)`이다.
+  - 이유: 크기 상한은 기록 job으로 넘어가는 결과 파일에만 걸린다. 요약은 환경 변수로 넘어가지 않으므로, 결과 파일에서 뺀 경고와 상세도 요약에는 그대로 남아야 한다(경고의 파일 목록은 요약에서 본다).
+
+- `scripts/harness.ts`의 `gates` 명령: 결과 파일과 요약을 쓰는 끝부분만 고친다. `runGates`의 결과로 `gatesOutput`을 한 번 부르고, `--out` 파일에는 `file`을, `--summary` 파일과 표준 출력에는 `summary`를 쓴다. `import` 줄에서 `summaryMarkdown`을 `gatesOutput`으로 바꾼다. 그 밖의 줄(옵션, 도움말, 다른 명령)은 고치지 않는다.
+
+- `scripts/ci/record.ts`의 `recordStatuses`: `contexts`를 주지 않았을 때의 기본값을 `RECORDED_CONTEXTS`로 바꾼다. 그 밖의 동작(형식 검사, 빠진 context는 `error`, 결과가 없거나 깨지면 모두 `error`)은 그대로다. `scripts/harness.ts`의 `record-status` 명령은 고치지 않는다(`contexts`를 주지 않는다).
 
 ### 2. 설정 `prSize` (`scripts/lib/config.ts`)
 
@@ -166,6 +180,10 @@ export function prSize(o: { root: string; base: string; cfg: HarnessConfig }): P
   - 필수 판정의 상세가 80KiB쯤이고 경고 판정의 상세가 더해져 상한을 넘는 결과: 돌려준 값의 `resultsBytes`가 `RESULTS_MAX_BYTES` 이하이고, context와 순서가 그대로이며, 경고 판정의 `details`는 `[WARN_DETAILS_DROPPED]`이고 `state`·`description`은 그대로다(`isWarning`이 참). 필수 판정의 결과와 `risk`는 받은 것과 같다. 받은 값은 바뀌지 않는다.
   - 필수 판정만으로 상한에 200바이트 안쪽까지 찬 결과: 돌려준 값이 경고 판정을 뺀 결과와 글자까지 같다(`JSON.stringify(…, null, 2)`). 그 값을 `toStatuses`(`RECORDED_CONTEXTS`)로 바꾸면 경고 context만 `error`이고 필수 판정은 `success`다.
   - 필수 판정만으로 이미 상한을 넘는 결과: 필수 판정을 줄이지 않고 경고 판정만 뺀다.
+- **`gatesOutput`**(만든 결과 값을 직접 넘긴다):
+  - 작은 결과: `file`이 `serializeResults(r)`이고 `summary`가 `summaryMarkdown(r)`이다.
+  - 경고 판정의 상세만 빠지는 크기의 결과와 경고 판정이 통째로 빠지는 크기의 결과 각각: `file`은 `serializeResults(fitWarnings(r))`이고 `RESULTS_MAX_BYTES` 이하이며 경고 판정의 상세 줄이 들어 있지 않다. `summary`는 `summaryMarkdown(r)`과 같고, 경고 context마다 결과 칸이 `경고`인 행과 `### <context>` 제목, 상세 줄이 들어 있다.
+  - 경고 판정이 통째로 빠지는 크기의 결과: `file`을 읽은 값의 context가 `GATE_CONTEXTS`뿐이다.
 - **긴 경로**(`prSizeOf`에 직접 넘긴다. 파일 시스템을 거치지 않는다): 경로가 4,000자(한글)인 파일 40개로 상한을 넘기면, `description`과 `details`를 JSON으로 만든 것의 UTF-8 크기가 16,000바이트보다 작다. `details`의 모든 줄이 200자 이하이고, 앞의 세 줄(수, 고치는 법, 근거)이 남아 있으며, 끝 줄이 `DETAILS_CUT`이다.
 - **경로의 글자**(`prSizeOf`에 직접 넘긴다): 경로가 `docs\a.ts`(역슬래시가 든 파일 이름)와 `src\test\a.ts`인 파일은 센다. `docs/a.ts`와 `src/test/a.ts`는 세지 않는다.
 - **설정**: 키가 없는 설정 파일을 `loadConfig`로 읽으면 `prSize`가 기본값이다. `{ maxLines: 10 }`이면 `exclude`는 기본 목록이다. `{ exclude: [] }`이면 `maxLines`는 400이다. `ConfigError`(메시지에 `prSize`): `maxLines`가 0, 음수, 1.5, `'400'`인 경우, `exclude`에 `/abs`, `../x`, 수가 든 경우, 모르는 키, 배열, `null`. 돌려받은 `exclude`에 항목을 더해도 `DEFAULT_PR_SIZE.exclude`의 길이는 8이다.
@@ -177,7 +195,7 @@ export function prSize(o: { root: string; base: string; cfg: HarnessConfig }): P
 기존 테스트 파일에서 고칠 곳(단언을 지우지 않는다. context 목록이 늘어난 만큼 기대값을 넓힌다):
 
 - `scripts/test/ci.test.ts`: 정상 결과를 만드는 도우미(`results`)가 `RECORDED_CONTEXTS`의 결과를 모두 담는다. 그 도우미의 결과를 검사·변환하는 호출(`validateResults`, `toStatuses`)과 `runGates`의 context 순서 단언, `recordStatuses`의 두 테스트(정상 결과, 결과가 없거나 깨짐)가 `RECORDED_CONTEXTS`를 기준으로 한다. 더하는 사례: 결과에 `pr-size`만 빠져 있으면 `pr-size`만 `error`로 기록되고 필수 판정은 결과대로(그 가운데 하나를 `failure`로 둔다) 기록된다.
-- `scripts/test/record.test.ts`: `record-status` 명령의 정상 결과 파일을 만드는 도우미(`gatesFile`)가 `RECORDED_CONTEXTS`의 결과를 모두 담는다(그대로 두면 빠진 `pr-size`가 `error`로 기록돼 "다른 기계 판정은 그대로다" 단언이 실패한다). 기록된 상태 수의 단언은 `RECORDED_CONTEXTS.length`를 기준으로 한다. 더하는 사례 둘(`record-status` 명령으로): (1) `pr-size`의 결과가 `success`이고 설명이 `경고: `로 시작하면 그 상태와 설명이 그대로 PR head에 기록되고 모든 context가 `success`다. (2) 결과 파일에 `pr-size`만 빠져 있으면 종료 코드 0이고 `pr-size`만 `error`, 나머지는 `success`로 기록된다. 그리고 `gates` 명령을 실행하는 기존 테스트의 도우미에 단언 하나를 더한다: 명령이 쓴 결과 파일의 UTF-8 바이트 수가 그 내용을 읽어 `resultsBytes`로 잰 값과 같다(상한이 재는 글자와 명령이 쓰는 글자가 같다는 것).
+- `scripts/test/record.test.ts`: `record-status` 명령의 정상 결과 파일을 만드는 도우미(`gatesFile`)가 `RECORDED_CONTEXTS`의 결과를 모두 담는다(그대로 두면 빠진 `pr-size`가 `error`로 기록돼 "다른 기계 판정은 그대로다" 단언이 실패한다). 기록된 상태 수의 단언은 `RECORDED_CONTEXTS.length`를 기준으로 한다. 더하는 사례 둘(`record-status` 명령으로): (1) `pr-size`의 결과가 `success`이고 설명이 `경고: `로 시작하면 그 상태와 설명이 그대로 PR head에 기록되고 모든 context가 `success`다. (2) 결과 파일에 `pr-size`만 빠져 있으면 종료 코드 0이고 `pr-size`만 `error`, 나머지는 `success`로 기록된다. 그리고 `gates` 명령을 실행하는 기존 테스트의 도우미에 단언 하나를 더한다: 명령이 쓴 결과 파일의 글자가 그 내용을 읽어 `serializeResults`로 다시 적은 글자와 같다(상한이 재는 글자와 명령이 쓰는 글자가 같다는 것).
 - `scripts/test/risk-gate.test.ts`: `runGates` 결과를 `validateResults`로 검사하는 단언이 `RECORDED_CONTEXTS`를 쓴다.
 - `scripts/test/revert-check.test.ts`: 확인된 revert PR의 `runGates` 테스트에서 context 순서 단언이 `RECORDED_CONTEXTS`를 기준으로 하고, `pr-size`가 `success`·`revert PR: 보지 않는다`인 단언을 더한다.
 - `scripts/test/harness-guard.test.ts`: main과 PR 트리의 `harness.config.json`에서 `prSize`만 다르면 "판정 관련 설정 변경" 신호에 `prSize`가 있다는 사례를 더한다.
@@ -208,7 +226,9 @@ grep -q 'prSize' docs/harness/CHANGELOG.md
 
 - `GATE_CONTEXTS`에 `pr-size`를 넣지 마라. 이유: `ops-check`가 그 목록을 브랜치 보호의 필수 체크 요구로 쓴다. 경고 판정은 필수 체크가 아니다.
 - 경고를 `failure`나 `error`로 내지 마라. 이유: 필수 체크 설정이 없는 리포의 `pr-state`는 체크 요약으로 분류하므로 실패로 읽힌다. `error`는 판정하지 못했을 때만이다.
-- `harness.config.json`, `profiles/`, `.github/`, `scripts/harness.ts`를 고치지 마라. 이유: 기본값과 기본 context 목록으로 충분하고, 다른 세션의 PR(#171)이 `scripts/harness.ts`를 고치는 중이다.
+- `harness.config.json`, `profiles/`, `.github/`를 고치지 마라. 이유: 기본값과 기본 context 목록으로 충분하다.
+- `scripts/harness.ts`에서는 `gates` 명령의 끝부분(결과 파일과 요약 쓰기)과 `./ci/gates.ts`의 `import` 한 줄 말고는 고치지 마라. 이유: 다른 세션의 PR(#171)이 그 파일의 다른 곳(`import` 목록의 `commands/` 부분, 도움말, 옵션 표, `main`의 뒤쪽)을 고치는 중이다. 겹치지 않는 줄만 고쳐야 병합이 충돌하지 않는다.
+- 요약(`summaryMarkdown`)을 크기를 맞춘 결과로 만들지 마라. 이유: 결과 파일에서 뺀 경고가 요약에서도 사라진다.
 - `scripts/hooks/`, `scripts/ci/pr.ts`, `scripts/commands/pr-state.ts`, `scripts/runner/`, `scripts/metrics/`를 고치지 마라. 이유: 범위 밖이고 다른 세션의 PR(#184, #185, #171)이 고치는 중이다.
 - 필수 판정 다섯(`revert-check`, `plan-gate`, `harness-guard`, `risk-gate`, `deps-guard`)의 판정 기준·순서·결과 문구를 바꾸지 마라. 이유: 이 step은 판정을 더할 뿐이다. `harness-guard`는 `CONFIG_KEYS`의 한 항목만 더한다.
 - PR 트리의 `harness.config.json`으로 상한이나 제외 목록을 정하지 마라. 이유: PR이 판정 기준을 함께 바꿀 수 있다.
