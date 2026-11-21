@@ -417,6 +417,11 @@ export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames
 
   for (const s of saved) {
     runs.add(s.run);
+    // PR과 head의 수는 돌았는지와 무관하게 센다: 돌지 않은 job만 있는 PR도 PR 하나다
+    if (s.pr !== null) {
+      if (!byPr.has(s.pr)) byPr.set(s.pr, acc());
+      if (s.head !== null) heads.add(s.head);
+    }
     if (s.seconds === null) {
       idleJobs++;
       continue;
@@ -454,10 +459,7 @@ export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames
     if (s.pr !== null) {
       at(byPr, s.pr);
       linkedMinutes += minutes;
-      if (s.head !== null) {
-        heads.add(s.head);
-        headMinutes += minutes;
-      }
+      if (s.head !== null) headMinutes += minutes;
     } else add(s.offPr ? offPr : unlinked);
   }
 

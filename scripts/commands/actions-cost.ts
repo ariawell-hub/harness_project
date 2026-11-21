@@ -44,6 +44,16 @@ export interface ActionsCostOptions {
 }
 
 const first = (e: unknown) => (e instanceof Error ? e.message : String(e)).split('\n')[0];
+/**
+ * 오류의 진단 글. 파일 시스템 오류의 글에는 절대 경로가 들어 있어(`ENOENT: … open '/…'`)
+ * 오류 코드만 낸다. 출력에 절대 경로를 넣지 않는다. 그 밖의 진단(형식이 어긋난 줄 등)은 그대로 낸다
+ */
+function diag(e: unknown): string {
+  const code = (e as NodeJS.ErrnoException | null)?.code;
+  return e instanceof Error && typeof code === 'string' && 'syscall' in e
+    ? `파일 시스템 오류 ${code}`
+    : first(e);
+}
 
 /** 명령을 실행한 체크아웃의 워크플로 파일에서 허용 목록을 만든다(실행 기록에서 만들지 않는다) */
 function knownFromCheckout(root: string): KnownNames {
@@ -125,7 +135,14 @@ export function runActionsCost(cwd: string, o: ActionsCostOptions, source?: Acti
   let saved: SavedJob[];
   try {
     // 리포 루트는 필요할 때만 찾는다(허용 목록과 자료 원천을 둘 다 받은 테스트는 리포 밖에서 돈다)
-    const root = () => repoInfo(cwd).root;
+    const root = () => {
+      try {
+        return repoInfo(cwd).root;
+      } catch {
+        // git의 오류 글에는 작업 폴더의 절대 경로가 들어 있다. 옮기지 않는다
+        throw new Error('git 리포를 찾지 못했다. 리포 안에서 실행하라');
+      }
+    };
     known = o.known ?? knownFromCheckout(root());
     if (o.from !== undefined) {
       const file = parseSaved(readFileSync(path.resolve(cwd, o.from), 'utf8'));
@@ -139,7 +156,7 @@ export function runActionsCost(cwd: string, o: ActionsCostOptions, source?: Acti
     jobs = fromSaved(saved);
   } catch (e) {
     const what = o.from !== undefined ? '보존 기록을 읽지 못했다' : '자료를 끝까지 읽지 못했다';
-    err(`actions-cost: ${what}. 값을 내지 않는다 — ${first(e)}`);
+    err(`actions-cost: ${what}. 값을 내지 않는다 — ${diag(e)}`);
     return 2;
   }
 
@@ -152,7 +169,7 @@ export function runActionsCost(cwd: string, o: ActionsCostOptions, source?: Acti
         (e as NodeJS.ErrnoException | null)?.code === 'EEXIST'
           ? '읽는 사이에 --save 파일이 생겼다. 덮어쓰지 않았다(먼저 남긴 기록이 기준이다)'
           : '보존 기록을 쓰지 못했다';
-      err(`actions-cost: ${what}. 값을 내지 않는다 — ${first(e)}`);
+      err(`actions-cost: ${what}. 값을 내지 않는다 — ${diag(e)}`);
       return 2;
     }
   }

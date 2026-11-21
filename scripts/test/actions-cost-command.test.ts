@@ -1,7 +1,7 @@
 // actions-cost 명령과 자료 읽기(계획 20261121-actions-cost-design step0). 네트워크를 쓰지 않는다:
 // 명령은 가짜 ActionsSource로, 자료 읽기는 주입한 `gh` 실행 함수로 본다.
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runActionsCost, type ActionsCostOptions } from '../commands/actions-cost.ts';
@@ -213,6 +213,47 @@ test('--from: 없는 파일과 형식이 어긋난 파일은 종료 코드 2이�
     assert.deepEqual(r.out, []);
     assert.match(r.err, /보존 기록을 읽지 못했다/);
   }
+});
+
+test('오류 문구: 파일을 읽거나 쓰지 못해도 표준 오류에 절대 경로가 없다', () => {
+  // 없는 파일을 상대 경로로 준다: 읽기 실패의 글(ENOENT)에 절대 경로가 들어 있다
+  const cwd = tmp();
+  const missing = run(cwd, { from: 'none.jsonl' });
+  assert.equal(missing.code, 2);
+  assert.deepEqual(missing.out, []);
+  assert.match(missing.err, /보존 기록을 읽지 못했다/);
+  assert.match(missing.err, /ENOENT/, '오류 코드는 남긴다');
+  assert.ok(!missing.err.includes(cwd), missing.err);
+  assert.ok(!/(^|[\s'"])\/[^\s]/.test(missing.err), `절대 경로 꼴이 없다: ${missing.err}`);
+  // 폴더를 준 경우
+  const dirGiven = run(cwd, { from: '.' });
+  assert.equal(dirGiven.code, 2);
+  assert.ok(!dirGiven.err.includes(cwd), dirGiven.err);
+  // 형식이 어긋난 파일의 진단(경로가 없는 글)은 그대로 낸다
+  writeFileSync(path.join(cwd, 'bad.jsonl'), 'x\n');
+  const bad = run(cwd, { from: 'bad.jsonl' });
+  assert.equal(bad.code, 2);
+  assert.match(bad.err, /보존 기록을 읽지 못했다. 값을 내지 않는다 — \S/);
+  assert.ok(!bad.err.includes(cwd), bad.err);
+  // 리포 밖에서 실행했다: git의 오류 글에 작업 폴더의 절대 경로가 들어 있다
+  const outside = run(cwd, { since: DAY, until: DAY, known: undefined });
+  assert.equal(outside.code, 2);
+  assert.deepEqual(outside.out, []);
+  assert.match(outside.err, /git 리포를 찾지 못했다/);
+  assert.ok(!outside.err.includes(cwd), outside.err);
+  // 쓰기 실패: 읽는 사이에 둘 폴더가 없어졌다
+  const gone = path.join(tmp(), 'sub');
+  mkdirSync(gone);
+  const src = fake(() => {
+    rmdirSync(gone);
+    return [job()];
+  });
+  const unwritable = run(cwd, { since: DAY, until: DAY, save: path.join(gone, 'day.jsonl') }, src);
+  assert.equal(unwritable.code, 2);
+  assert.deepEqual(unwritable.out, []);
+  assert.match(unwritable.err, /보존 기록을 쓰지 못했다/);
+  assert.match(unwritable.err, /ENOENT/);
+  assert.ok(!unwritable.err.includes(gone), unwritable.err);
 });
 
 test('--from: 파일에 적힌 이름도 체크아웃의 허용 목록을 다시 거친다', () => {
@@ -694,11 +735,6 @@ test('PR 찾기: 같은 커밋을 가진 두 브랜치의 PR은 실행의 브랜
     // 커밋 상태는 커밋에 붙어 있다. 두 PR의 head인 커밋이 가리키는 실행은 가릴 수 없다
     [20, null, null],
   ]);
-  assert.deepEqual(
-    asked(calls, `commits/${SHA_A}/statuses`),
-    [],
-    '가릴 수 없는 커밋의 상태는 읽지 않는다',
-  );
   // 계산에서도 PR이 둘이고 head도 둘이다
   const report = actionsCost(jobs, PERIOD, KNOWN);
   assert.deepEqual([report.prs, report.heads], [2, 2]);
@@ -787,6 +823,66 @@ test('PR 찾기: PR을 찾지 못한 PR 이벤트 실행이 있는 커밋은 그
     [11, 9, SHA_A],
     [20, 9, SHA_A],
   ]);
+});
+
+test('PR 찾기: 가릴 수 없는 커밋과 다른 커밋이 같은 실행을 가리키면 잇지 않는다', () => {
+  // 커밋 B는 #9만의 head다. 커밋 A도 같은 실행 20을 가리킨다
+  const fx = (runsOnA: RunFx[], prs: PrFx[]): Fx => ({
+    runs: {
+      [DAY]: [
+        ...runsOnA,
+        { id: 12, headSha: SHA_B, branch: 'feat/c' },
+        { id: 20, event: 'workflow_run', headSha: SHA_MAIN, branch: 'main' },
+        { id: 21, event: 'workflow_run', headSha: SHA_MAIN, branch: 'main' },
+      ],
+    },
+    jobs: jobsFor(...runsOnA.map((r) => r.id), 12, 20, 21),
+    prs: [...prs, { number: 9, branch: 'feat/c' }],
+    // 21은 B만 가리킨다
+    statuses: { [SHA_A]: [runUrl(20)], [SHA_B]: [runUrl(20), runUrl(21)] },
+  });
+  const last = (f: Fx) => linked(read(f).jobs).slice(-2);
+  // A가 두 PR(#7, #8)의 head다
+  assert.deepEqual(
+    last(
+      fx(
+        [
+          { id: 10, headSha: SHA_A, branch: 'feat/a' },
+          { id: 11, headSha: SHA_A, branch: 'feat/b' },
+        ],
+        [
+          { number: 7, branch: 'feat/a' },
+          { number: 8, branch: 'feat/b' },
+        ],
+      ),
+    ),
+    [
+      [20, null, null],
+      [21, 9, SHA_B],
+    ],
+    '두 PR의 head인 커밋',
+  );
+  // A에 PR을 찾지 못한 실행(브랜치를 다시 쓴 #7·#8)과 찾은 실행(#6)이 함께 있다
+  assert.deepEqual(
+    last(
+      fx(
+        [
+          { id: 10, headSha: SHA_A, branch: 'feat/x' },
+          { id: 11, headSha: SHA_A, branch: 'feat/d' },
+        ],
+        [
+          { number: 7, branch: 'feat/x', closed: true },
+          { number: 8, branch: 'feat/x' },
+          { number: 6, branch: 'feat/d' },
+        ],
+      ),
+    ),
+    [
+      [20, null, null],
+      [21, 9, SHA_B],
+    ],
+    'PR을 찾지 못한 실행이 있는 커밋',
+  );
 });
 
 test('PR 찾기: 실행보다 늦게 만들어진 PR은 후보가 아니다. 같은 초는 후보다', () => {

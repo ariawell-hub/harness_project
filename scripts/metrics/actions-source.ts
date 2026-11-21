@@ -343,14 +343,12 @@ export function ghActionsSource(o: {
       const headsByRun = new Map<number, Set<string>>();
       const headShas = [...prsByHead.keys()].sort();
       headShas.forEach((sha, i) => {
-        // 커밋 상태는 커밋에 붙어 있다. 그 커밋이 두 PR의 head거나, 그 커밋에 PR을 찾지 못한
-        // PR 이벤트 실행이 있으면(그 실행에서 나온 판정일 수 있다) 어느 PR의 실행인지 가릴 수 없다
-        if (prsByHead.get(sha)!.size === 1 && !unresolved.has(sha))
-          for (const run of statusRuns(sha)) {
-            let set = headsByRun.get(run);
-            if (!set) headsByRun.set(run, (set = new Set()));
-            set.add(sha);
-          }
+        // 가릴 수 없는 커밋의 상태도 읽는다: 그 커밋과 다른 커밋이 같은 실행을 가리키면 그 실행은 잇지 않는다
+        for (const run of statusRuns(sha)) {
+          let set = headsByRun.get(run);
+          if (!set) headsByRun.set(run, (set = new Set()));
+          set.add(sha);
+        }
         if ((i + 1) % 50 === 0)
           o.progress?.(
             `actions-cost: head ${headShas.length}개 가운데 ${i + 1}개의 커밋 상태를 읽었다`,
@@ -366,6 +364,9 @@ export function ghActionsSource(o: {
           // 두 커밋의 상태가 가리키는 실행은 어느 쪽인지 가릴 수 없다
           if (pointing?.size !== 1) return none;
           const [head] = pointing;
+          // 커밋 상태는 커밋에 붙어 있다. 그 커밋이 두 PR의 head거나, 그 커밋에 PR을 찾지 못한
+          // PR 이벤트 실행이 있으면(그 실행에서 나온 판정일 수 있다) 어느 PR의 실행인지 가릴 수 없다
+          if (prsByHead.get(head)!.size !== 1 || unresolved.has(head)) return none;
           const [pr] = prsByHead.get(head)!;
           return { pr, head, offPr: false };
         }

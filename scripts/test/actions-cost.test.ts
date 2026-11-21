@@ -220,6 +220,34 @@ test('PR 하나당 평균: PR에 이어진 실행만 센 값과 PR 밖 포함 �
   assert.equal(none.perPrUsd, null);
 });
 
+test('PR·head 수: 돌지 않은 job만 있는 PR과 head도 분모에 든다', () => {
+  // PR 1은 2분을 썼고, PR 2에는 건너뛴 job만 있다: PR도 head도 둘이고 평균은 1.0분이다
+  const jobs = [
+    job({ seconds: 61, pr: 1, head: SHA_A }),
+    job({ pr: 2, head: SHA_B, conclusion: 'skipped' }),
+  ];
+  const r = cost(jobs);
+  assert.deepEqual([r.prs, r.heads], [2, 2]);
+  assert.deepEqual([r.perPrLinked, r.perPrAll, r.perHead], [1, 1, 1]);
+  assert.equal(r.perPrUsd, 0.006, '전체 $0.012 ÷ PR 2개');
+  assert.deepEqual([r.ranJobs, r.idleJobs, r.minutes], [1, 1, 2], '돈 job과 청구 분은 그대로다');
+  // PR별 표에도 그 PR이 0분으로 나온다(PR 수와 표의 행 수가 같다)
+  assert.deepEqual(
+    r.byPr.map((x) => [x.name, x.jobs, x.minutes]),
+    [
+      ['#1', 1, 2],
+      ['#2', 0, 0],
+    ],
+  );
+  // 같은 PR의 다른 head에 돌지 않은 job만 있어도 head로 센다
+  const more = cost([...jobs, job({ pr: 1, head: SHA_B, steps: 0 })]);
+  assert.deepEqual([more.prs, more.heads, more.perHead], [2, 3, 2 / 3]);
+  // 보존 기록을 거쳐도 같다
+  assert.deepEqual(cost(fromSaved(toSaved(jobs, KNOWN))), r);
+  // PR이 없는 돌지 않은 job은 세지 않는다
+  assert.equal(cost([job({ pr: null, head: null, conclusion: 'skipped' })]).prs, 0);
+});
+
 test('PR별: pr이 없는 job은 offPr에 따라 두 행으로 나뉜다', () => {
   const r = cost([
     job({ seconds: 61, pr: 7 }),
