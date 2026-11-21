@@ -62,20 +62,66 @@ export interface CostReport {
 }
 export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames): CostReport;
 export function renderCost(report: CostReport, period: Period): string;
+
+/** 판단 절차 문서의 "기록" 표에 옮기는 칸 다섯: 기간, 청구 분, PR 하나당 청구 분(PR 밖 포함), PR head 하나당 청구 분, 30일 환산 금액 */
+export function recordCells(report: CostReport, period: Period): string[];
+
+/** 보존 기록의 job 하나. 계산에 드는 값만 담는다. 글자열은 날짜, 허용 목록에 있는 이름, 정해 둔 낱말뿐이다 */
+export interface SavedJob {
+  run: number;
+  attempt: number;
+  /** 허용 목록에 있고 글자 조건에 맞는 이름. 아니면 '(기타)' */
+  workflow: string;
+  job: string;
+  /** 실행이 만들어진 날짜(UTC, YYYY-MM-DD) */
+  day: string;
+  /** 돈 시간(초, 0 이상의 정수). 돌지 않은 job은 null */
+  seconds: number | null;
+  /** 단가표에 있는 라벨과 'self-hosted'만 그대로 둔다. 그 밖의 라벨은 '(기타)' */
+  labels: string[];
+  pr: number | null;
+  /** PR head를 가르는 순번(1부터). SHA가 아니다. `pr`이 null이면 null */
+  head: number | null;
+  offPr: boolean;
+}
+export function toSaved(jobs: JobRecord[], known: KnownNames): SavedJob[];
+export function fromSaved(saved: SavedJob[]): JobRecord[];
+/** 보존 기록 파일의 글. 입력의 순서가 달라도 같은 기록이면 같은 글이다 */
+export function formatSaved(saved: SavedJob[], period: Period): string;
+/** 보존 기록 파일의 글을 읽는다. 형식에 어긋나면 SourceError */
+export function parseSaved(text: string): { period: Period; jobs: SavedJob[] };
 ```
 
 규칙:
 
 - **돌지 않은 job**: `conclusion`이 `skipped`이거나, `startedAt`·`completedAt`이 없거나 날짜로 읽히지 않거나, `steps`가 0이면 0분이다. 수는 "돌지 않은 job"으로 따로 센다.
-- **돈 job**: `completedAt − startedAt`(초, 음수면 0)을 60으로 나눠 올림하고 최소 1분이다.
+- **돈 job**: `completedAt − startedAt`(초, 음수면 0)을 60으로 나눠 올림하고 최소 1분이다. 초는 정수로 센다(GitHub의 시각은 초 단위다. 소수가 있으면 올림한다). 실제 초 합계도 이 정수 초로 낸다.
 - **시도**: 같은 실행의 시도가 다르면 각각 센다. 일부 job만 다시 실행한 경우, 다시 돌지 않은 job은 앞선 시도의 기록 하나만 있으므로 한 번만 센다. 같은 job 기록(job id)이 두 번 들어오면 한 번만 세지 않고 자료 읽기가 오류로 끝낸다(아래 2).
 - **단가**: 표를 코드에 둔다. 확인한 단가만 넣는다: 라벨이 `ubuntu-latest`·`ubuntu-24.04`·`ubuntu-22.04` 가운데 하나뿐이면 분당 $0.006(2코어 Linux x64, 2026-01-01부터). 라벨에 `self-hosted`가 있으면 `self-hosted`(금액 0, 분은 따로 보인다). 그 밖은 `unknown`(금액에 넣지 않고 분을 따로 보인다). 표의 주석에 값의 출처와 확인한 날짜를 적는다.
 - **올림으로 붙은 분**: 돈 job의 청구 분 합계에서 실제 초 합계를 60으로 나눈 값을 뺀다.
 - **PR head 하나당 평균**(push 한 번의 추정값): 분자와 분모를 같은 실행 집합으로 맞춘다. 분자는 `head`가 있는 job의 청구 분 합계, 분모는 그 job들의 서로 다른 `head`의 수다. 같은 head에서 여러 번 돈 실행(PR 다시 열기, 본문 수정으로 다시 돈 게이트, 다시 실행)은 그 head의 비용에 든다. PR 밖 실행(`offPr`)과 PR을 찾지 못한 실행은 분자에 넣지 않고 따로 보인다. 분모가 0이면 "해당 없음"으로 낸다. 출력에 "push를 직접 세지 않고 PR head로 센 추정값"이라고 적는다.
+- **PR 하나당 평균**(예산과 견주는 값): 분모는 `pr`이 있는 job들의 서로 다른 PR 번호의 수다. 분자가 다른 두 값을 이름을 달리해 따로 낸다. (가) "PR에 이어진 실행만": `pr`이 있는 job의 청구 분 합계(분자와 분모가 같은 실행 집합이다). (나) "PR 밖 포함": 전체 청구 분. 병합 뒤 main의 `check`처럼 PR이 일으키지만 PR에 이어지지 않는 실행과 PR을 찾지 못한 실행까지 PR 수로 나눠 얹은 값이다. 예산("PR 하나당 청구 분")은 프로젝트의 모든 Actions 비용을 PR 수로 나눈 것이라 (나)와 견준다. 출력에 (나)가 분자에 PR 밖 실행을 넣은 값이라고 적는다. 분모가 0이면 둘 다 "해당 없음"이다.
 - **PR별**: `pr`이 있는 job을 PR 번호로 합친다. `pr`이 null이고 `offPr`이면 "PR 밖(main 등)", `offPr`이 아니면 "PR을 찾지 못함" 행이다.
 - **30일 환산**: 합계를 기간의 날 수로 나눠 30을 곱한다. 달러는 소수 둘째 자리까지.
+- **기록 칸**(`recordCells`): 글자열 다섯을 이 순서로 낸다. 기간(`<since>~<until>`), 청구 분(정수, 자릿수 구분 없음), PR 하나당 청구 분((나) "PR 밖 포함". 소수 첫째 자리까지, 분모가 0이면 `해당 없음`), PR head 하나당 청구 분(소수 첫째 자리까지 또는 `해당 없음`), 30일 환산 금액(`$` 뒤에 소수 둘째 자리까지). 렌더는 이 다섯 칸을 표의 한 행으로 낸다(칸의 글은 `recordCells`와 같다. 칸 사이의 공백은 표 정렬을 따른다). step1의 문서가 이 행을 "기록" 표에 옮기고 검사 스크립트가 `recordCells`의 값과 대 본다.
 - **렌더**: 마크다운 표다. 같은 입력이면 출력이 같다(행의 순서는 청구 분 내림차순, 같으면 이름·번호 오름차순). prettier를 통과하는 모양으로 낸다.
 - **출력에 넣는 이름**(14.6절): 워크플로·job 이름은 허용 목록(`known`)에 있는 것만 그대로 적는다. 목록에 없는 워크플로는 `(기타)` 행으로, 아는 워크플로의 모르는 job은 `<워크플로> / (기타)` 행으로 합친다. 실행 기록의 이름은 외부가 정할 수 있으므로(공개 리포에서는 포크의 PR이 `pull_request` 워크플로의 job 이름과 워크플로 파일을 정한다) 글자와 길이가 무난해도 목록에 없으면 적지 않는다. 목록에 있는 이름에도 글자 조건(`[A-Za-z0-9_.-]`, 40자 이하)을 한 번 더 건다. PR은 번호만 적는다. 제목, 브랜치 이름, 커밋 SHA, 계정 이름은 적지 않는다.
+
+### 1-1. 보존 기록 (같은 파일 `scripts/metrics/actions-cost.ts`)
+
+기준선을 잰 뒤에 그 기간의 실행을 누가 다시 실행하면 시도가 늘고, 실행 기록이 지워지거나 PR이 닫히면 GitHub이 주는 값이 달라질 수 있다. 그래서 잰 시점의 입력을 파일로 남기고(보존 기록), 그 뒤의 확인은 GitHub을 다시 읽지 않고 그 파일로 한다. 기준은 보존 기록이다.
+
+- **`toSaved`**: job마다 계산에 드는 값만 옮긴다.
+  - `workflow`·`job`: 렌더의 이름 규칙과 같다(허용 목록에 있고 글자 조건에 맞으면 그대로, 아니면 `(기타)`. 워크플로가 `(기타)`면 job도 `(기타)`다).
+  - `day`: `createdAt`의 UTC 날짜.
+  - `seconds`: 돌지 않은 job(위 규칙)은 null, 돈 job은 위 "돈 job"의 정수 초다.
+  - `labels`: 단가표에 있는 라벨과 `self-hosted`는 그대로, 그 밖은 `(기타)`로 바꾼다. 바꾼 뒤에도 `runnerRate`의 결과(`kind`와 단가)가 바꾸기 전과 같아야 한다.
+  - `head`: 입력에 있는 서로 다른 head SHA를 사전순으로 늘어놓은 순번(1부터). SHA는 옮기지 않는다.
+  - `event`, `conclusion`, 시각(시·분·초), `steps`는 옮기지 않는다.
+- **`fromSaved`**: 보존 기록을 계산의 입력(`JobRecord`)으로 되돌린다. 없는 값은 계산 결과가 같아지게 채운다(돌지 않은 job은 `conclusion: 'skipped'`·`steps: 0`·시각 null, 돈 job은 그 날짜의 0시에 시작해 `seconds`초 뒤에 끝난 것으로, `head`는 순번을 글자열로). 지켜야 하는 것은 하나다: 어떤 입력 `jobs`에도 `renderCost(actionsCost(fromSaved(toSaved(jobs, known)), period, known), period)`가 `renderCost(actionsCost(jobs, period, known), period)`와 같은 글이다.
+- **파일 형식**(`formatSaved`, 확장자 `.jsonl`): 첫 줄은 머리 `{"version":1,"since":"<날짜>","until":"<날짜>","count":<job 수>,"columns":["run","attempt","workflow","job","day","seconds","labels","pr","head","offPr"]}`, 이어서 job마다 한 줄(`columns` 순서의 JSON 배열, 공백 없음)이다. 줄은 `run`, `attempt`, 그다음 줄의 글자열 순으로 늘어놓는다. 모든 줄은 `\n`으로 끝난다. 같은 기록이면 입력 순서와 무관하게 같은 글이다.
+- **`parseSaved`**: 아래 가운데 하나라도 어긋나면 `SourceError`다(일부만 읽은 값을 돌려주지 않는다). 머리 줄이 위 형식이다(`version`이 1, `columns`가 위 목록과 같다, `since`·`until`이 `parsePeriod`를 통과한다). 줄 수가 `count`와 같다. 줄마다 길이가 `columns`와 같은 배열이다. `run`·`attempt`는 1 이상의 안전한 정수, `seconds`는 0 이상의 안전한 정수 또는 null, `pr`·`head`는 1 이상의 안전한 정수 또는 null이고 `pr`이 null이면 `head`도 null, `offPr`은 참·거짓이고 `pr`이 있으면 거짓이다. `day`는 기간 안의 날짜다. `workflow`·`job`은 `(기타)`이거나 글자 조건(`[A-Za-z0-9_.-]`, 40자 이하)에 맞는다. `labels`의 원소는 단가표의 라벨, `self-hosted`, `(기타)` 가운데 하나다. 빈 줄이나 남는 글이 없다.
+- `--from`으로 읽은 이름도 렌더에서 체크아웃의 허용 목록을 다시 거친다(파일을 고쳐 허용 목록 밖의 이름을 출력에 넣을 길이 없다).
 
 ### 2. 자료 읽기 (`scripts/metrics/actions-source.ts`, 새 파일)
 
@@ -99,6 +145,10 @@ export function ghActionsSource(o: { cwd: string /* 그 밖은 구현 재량 */ 
 export interface ActionsCostOptions {
   since?: string;
   until?: string;
+  /** 읽은 기록을 보존 기록으로 남길 파일 */
+  save?: string;
+  /** GitHub 대신 읽을 보존 기록 파일 */
+  from?: string;
   /** 테스트용. 주지 않으면 리포 루트의 `.github/workflows/*.yml`·`*.yaml`을 읽어 `knownNamesFrom`으로 만든다 */
   known?: KnownNames;
   now?: Date;
@@ -108,23 +158,30 @@ export interface ActionsCostOptions {
 export function runActionsCost(cwd: string, o: ActionsCostOptions, source?: ActionsSource): number;
 ```
 
-- 순서: 기간 검사 → 자료 읽기 → 계산·렌더 → 출력. 기간의 기본값은 `metrics`와 같다(`until`은 오늘(UTC), `since`는 그 6일 전).
-- 종료 코드: 0 성공, 1 기간이 틀림(GitHub을 읽기 전), 2 자료를 끝까지 읽지 못함(표준 출력에 아무것도 내지 않는다).
+- 순서: 인자·기간 검사 → 자료 읽기 → (`--save`가 있으면) 보존 기록 쓰기 → 계산·렌더 → 출력. 기간의 기본값은 `metrics`와 같다(`until`은 오늘(UTC), `since`는 그 6일 전).
+- 종료 코드: 0 성공, 1 인자나 기간이 틀림(GitHub과 보존 기록을 읽기 전), 2 자료를 끝까지 읽지 못함(표준 출력에 아무것도 내지 않는다).
 - 진행 상황(읽은 실행 수)은 표준 오류로만 낸다.
-- 파일을 쓰지 않는다.
+- **`--save <파일>`**: 자료를 끝까지 읽은 뒤 `formatSaved(toSaved(…), 기간)`을 그 파일에 쓴다. 그 파일이 이미 있으면 GitHub을 읽기 전에 종료 코드 1로 끝나고 파일을 그대로 둔다(남긴 기준을 다시 잰 값으로 덮어쓰지 않는다). 같은 폴더의 임시 파일에 다 쓴 뒤 이름을 바꾼다. 자료 읽기나 쓰기가 실패하면 그 파일은 생기지 않는다.
+- **`--from <파일>`**: 자료 원천을 부르지 않고(GitHub을 읽지 않는다) 그 파일을 `parseSaved`로 읽어 `fromSaved`의 결과로 계산한다. 기간은 파일의 머리 줄의 것이다. `--since`·`--until`·`--save`와 함께 주면 종료 코드 1이다. 파일이 없거나 `parseSaved`가 실패하면 종료 코드 2이고 표준 출력에 아무것도 내지 않는다.
+- GitHub에서 읽은 경로도 계산은 `fromSaved(toSaved(…))`를 거친 입력으로 한다. 그래서 같은 체크아웃에서 `--save`로 낸 출력과 그 파일을 `--from`으로 낸 출력이 같은 글이다.
+- `--save`를 주지 않으면 파일을 쓰지 않는다. `--save`는 그 파일 하나만 쓴다.
 - 허용 목록은 명령을 실행한 체크아웃의 워크플로 파일에서 만든다(실행 기록에서 만들지 않는다). YAML을 읽는 의존성을 더하지 않는다(줄 단위로 읽는다. 읽지 못한 이름은 `(기타)`가 될 뿐이다).
 - `scripts/harness.ts`의 도움말에 한 줄을 더한다.
 
 ### 4. 테스트 (`scripts/test/actions-cost.test.ts`, `scripts/test/actions-cost-command.test.ts`, 새 파일)
 
 - 계산: 59초 job은 1분, 60초는 1분, 61초는 2분, 0초이지만 단계가 있는 job은 1분, 건너뛴 job·단계 0인 job·시각이 없는 job은 0분. 시도 둘은 둘 다 센다. 일부만 다시 실행한 입력(시도 1에서 A·B가 돌고 시도 2에서 B만 다시 돈다)에서 A는 한 번, B는 두 번 청구되고 job별 시도 번호가 맞는지 단언한다. 단가를 모르는 라벨과 `self-hosted`는 금액에 들지 않고 분이 따로 나온다. 올림으로 붙은 분, 30일 환산의 값을 단언한다. PR head 하나당 평균은 섞인 입력으로 단언한다: PR 밖 실행(main의 `push`)과 PR을 찾지 못한 실행이 있어도 값이 변하지 않고, 같은 head에서 실행이 여러 번 돌면 분모는 그대로이고 분자만 는다. `pr`이 null인 job은 `offPr`에 따라 "PR 밖" 행과 "PR을 찾지 못함" 행에 나뉘어 든다.
+- PR 하나당 평균: (가)는 PR 밖 실행과 PR을 찾지 못한 실행이 있어도 값이 변하지 않고, (나)는 그만큼 는다. 두 값의 분모가 같다. `recordCells`의 다섯 칸을 값으로 단언하고(분모 0의 `해당 없음` 포함), 렌더의 표에서 그 행을 찾아 칸의 글이 `recordCells`와 같은지 단언한다.
+- 보존 기록: 섞인 입력(돈 job, 돌지 않은 job 세 가지, 목록에 없는 이름, 모르는 라벨, `self-hosted`, 시도 둘, PR 밖, PR을 찾지 못함, 같은 head의 실행 여럿)에서 `fromSaved(toSaved(…))`로 계산한 렌더가 원래 입력의 렌더와 같은 글이다. `formatSaved`의 글에 입력의 head SHA, 목록에 없는 이름, 모르는 라벨이 나오지 않는다. `formatSaved`는 입력 순서를 바꿔도 같은 글이고 `parseSaved(formatSaved(x))`는 `x`와 같다. `toSaved`가 바꾼 라벨의 `runnerRate`가 바꾸기 전과 같다. `parseSaved`는 어긋난 파일마다 `SourceError`를 던진다: 빈 글, `version`이 다름, `columns`가 다름, 줄 하나가 빠져 `count`와 다름, 줄이 하나 더 있음, 배열 길이가 다름, 수 자리에 글자열, 음수·소수, 기간 밖의 날짜, 날짜 꼴이 아닌 `day`, 글자 조건에 어긋난 이름, 정해 둔 것 밖의 라벨, `pr`이 null인데 `head`가 있음, 끝에 남는 글.
 - 렌더: 같은 입력을 순서만 바꿔 넣어도 출력이 같다. 허용 목록에 없는 이름은 글자와 길이가 무난해도(예: 짧은 영문 낱말, 계정 이름처럼 보이는 글) 출력에 그대로 나오지 않고 `(기타)`로 합쳐진다. 목록에 있어도 글자 조건에 어긋나는 이름(마크다운 문법, 줄바꿈, 41자 이상)은 `(기타)`다. `knownNamesFrom`은 이 리포의 실제 워크플로 파일에서 `check`의 `check`, `gates`의 `evaluate`·`selftest`·`record`를 읽어 낸다. 출력에 PR 제목·브랜치 이름이 들어갈 길이 없다는 것(입력 타입에 그 필드가 없다)을 주석으로 적는다.
 - 명령: 가짜 `ActionsSource`로 종료 코드 0·1·2를 확인한다. 2일 때 `out`이 한 번도 불리지 않는다. 기간이 틀리면 자료 원천을 부르지 않는다.
+- 명령의 보존 기록(임시 폴더에서): `--save`가 파일을 쓰고, 그 파일을 `--from`으로 낸 출력이 `--save` 때의 출력과 같은 글이다. `--from`은 자료 원천을 한 번도 부르지 않는다. `--save`의 파일이 이미 있으면 종료 코드 1이고 자료 원천을 부르지 않으며 파일의 내용이 그대로다. 자료 읽기가 실패한 `--save`는 종료 코드 2이고 파일이 생기지 않는다(임시 파일도 남지 않는다). `--from`을 `--since`·`--until`·`--save`와 함께 주면 종료 코드 1이다. 없는 파일과 형식이 어긋난 파일의 `--from`은 종료 코드 2이고 `out`이 불리지 않는다. `--save`를 주지 않은 실행 뒤에 임시 폴더가 비어 있다.
 - 자료 읽기(`ghActionsSource`)는 `gh`를 가짜 실행 파일이나 주입한 실행 함수로 바꿔, `total_count` 불일치·쪽마다 다른 `total_count`·받은 수는 맞지만 실행 id가 중복된 응답·job id가 중복된 응답·`run_attempt`가 없는 job·조회 실패·쪽 넘김·`filter=all`·일부만 다시 실행한 응답의 시도 번호·PR과 head 찾기(상태의 `target_url`)를 확인한다. 오류 경우마다 명령이 종료 코드 2로 끝나고 표준 출력이 비어 있는지도 확인한다. 네트워크를 쓰지 않는다.
 
 ### 5. 문서
 
 - `docs/harness/architecture.md`: 명령 목록과 `metrics/*` 행에 `actions-cost`를 더한다.
+- `docs/harness/CHANGELOG.md`: "다음 버전" 아래에 한 줄(`actions-cost` 명령). 이 step은 보호 경로(`scripts/**`, `docs/harness/**`)를 바꾸므로 `harness-guard`가 이 줄을 요구한다.
 
 ## Acceptance Criteria
 
@@ -132,14 +189,25 @@ export function runActionsCost(cwd: string, o: ActionsCostOptions, source?: Acti
 node --test scripts/test/actions-cost.test.ts scripts/test/actions-cost-command.test.ts
 node scripts/harness.ts actions-cost --since 2026-13-01; test $? -eq 1
 node scripts/harness.ts actions-cost --since 2026-11-20 --until 2026-11-19; test $? -eq 1
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from "$T/none.jsonl"; test $? -eq 2
+T=$(mktemp -d) && printf 'x\n' > "$T/bad.jsonl" && node scripts/harness.ts actions-cost --from "$T/bad.jsonl"; test $? -eq 2
+T=$(mktemp -d) && printf 'x\n' > "$T/bad.jsonl" && test -z "$(node scripts/harness.ts actions-cost --from "$T/bad.jsonl" 2>/dev/null)"
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from "$T/none.jsonl" --since 2026-11-17; test $? -eq 1
+T=$(mktemp -d) && printf 'x\n' > "$T/have.jsonl" && node scripts/harness.ts actions-cost --since 2026-11-17 --until 2026-11-17 --save "$T/have.jsonl"; test $? -eq 1
+T=$(mktemp -d) && printf '%s\n' '{"version":1,"since":"2026-11-17","until":"2026-11-17","count":1,"columns":["run","attempt","workflow","job","day","seconds","labels","pr","head","offPr"]}' '[1,1,"check","check","2026-11-17",61,["ubuntu-latest"],5,1,false]' > "$T/one.jsonl" && node scripts/harness.ts actions-cost --from "$T/one.jsonl" > "$T/out.md" && grep -Eq '^\| 2026-11-17~2026-11-17 +\| 2 +\| 2\.0 +\| 2\.0 +\| \$0\.36 +\|$' "$T/out.md"
 grep -q "actions-cost" docs/harness/architecture.md
+grep -q "actions-cost" docs/harness/CHANGELOG.md
 node scripts/harness.ts check
 ```
+
+- 보존 기록을 보는 여섯 줄은 GitHub을 읽지 않는다. 앞의 다섯은 읽기 전에 끝나는 경우다. 여섯째는 그 자리에서 만든 보존 기록(61초를 돈 `check` job 하나, PR 하나, head 하나, 기간 하루)을 `--from`으로 계산해 기록 칸 행을 본다: 청구 2분, PR 하나당 2.0분, PR head 하나당 2.0분, 30일 환산 $0.36(2분 × 30일 × $0.006). 실제 기간을 읽어 보존 기록을 남기는 일은 step1이 한다.
 
 ## 금지사항
 
 - GitHub에 쓰는 호출(`POST`·`PATCH`·`PUT`·`DELETE`, `gh run rerun`, 댓글·라벨)을 넣지 마라. 이유: 재는 명령이다. 읽기만 한다.
 - 확인하지 않은 단가를 표에 넣지 마라(1코어, arm64, Windows, macOS 등). 이유: 틀린 금액이 판단 자료가 된다. 모르는 러너는 분만 보인다. 단가를 더하는 일은 step2의 조사에서 출처를 확인한 뒤 한다.
+- 보존 기록에 커밋 SHA, 브랜치 이름, PR 제목, 계정 이름, 허용 목록에 없는 워크플로·job 이름, 정해 둔 것 밖의 라벨을 넣지 마라. 이유: 이 파일은 리포에 남고, 실행 기록의 글자열은 외부가 정할 수 있다(14.6절).
+- 있는 보존 기록 파일을 덮어쓰지 마라. 이유: 그 파일이 기준이다. 다시 잰 값으로 바뀌면 기준선과 문서가 어긋난 것을 알 수 없다.
 - 자료를 일부만 읽고 값을 내지 마라. 이유: 적게 나온 값이 "예산 안"이라는 잘못된 판단을 만든다.
 - 출력에 PR 제목, 브랜치 이름, 커밋 SHA, 계정 이름, 절대 경로를 넣지 마라. 이유: 14.6절(외부 입력을 문서로 옮기지 않는다)과 결과가 문서에 붙는다는 점.
 - `scripts/metrics/source.ts`에 있는 export의 동작과 `metrics` 명령의 출력을 바꾸지 마라. 이유: `docs/QUALITY_SCORE.md`의 집계가 그 출력에 묶여 있다.
