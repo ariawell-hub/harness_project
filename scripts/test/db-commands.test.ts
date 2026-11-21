@@ -605,6 +605,181 @@ test('변수 디스크립터가 붙은 heredoc과 중괄호 낱말이 끼어도 
     assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
 });
 
+// ---------- 배열 원소 디스크립터의 첨자, `$`가 든 중괄호 낱말 (구현 판정 F13) ----------
+
+test('parseShell의 args: 배열 원소 디스크립터는 첨자가 숫자·변수·치환·따옴표여도 리다이렉션의 일부다', () => {
+  for (const cmd of [
+    'tool {fds[0]}>out.txt sub',
+    'tool {fds[i]}>out.txt sub',
+    'tool {fds[$i]}>out.txt sub',
+    'tool {fds[${i}]}>out.txt sub',
+    'tool {fds[$((i+1))]}>out.txt sub',
+    'tool {fds["$i"]}>out.txt sub',
+    "tool {fds['a b']}>out.txt sub",
+    'tool {fds[${m[0]}]}>out.txt sub',
+    'tool {fds[$i]}> out.txt sub',
+    'tool {fds[$i]}>>out.txt sub',
+    'tool {fds[$i]}<in.txt sub',
+    'tool {fds[$i]}<<<word sub',
+    'tool {fds[$i]}<&0 sub',
+    'tool {fds[$i]}<<EOF sub\nbody\nEOF',
+    'tool {fds[$(echo 0)]}>out.txt sub',
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd);
+  // 첨자 안의 명령 치환도 따로 본다
+  assert.ok(argsOf('tool {fds[$(echo 0 1)]}>out.txt sub').some((a) => a.join(' ') === 'echo 0 1'));
+  // 디스크립터 변수의 꼴이 아니면 인자다: 빈 첨자, 첨자 뒤의 글, 이름이 아닌 글, 연산자가 붙지 않은 낱말
+  assert.deepEqual(argsOf('tool {fds[]}>out.txt sub')[0], ['tool', '{fds[]}', 'sub']);
+  assert.deepEqual(argsOf('tool {fds[0]x}>out.txt sub')[0], ['tool', '{fds[0]x}', 'sub']);
+  assert.deepEqual(argsOf('tool {1x[0]}>out.txt sub')[0], ['tool', '{1x[0]}', 'sub']);
+  assert.deepEqual(argsOf('tool {fds[0]} sub'), [['tool', '{fds[0]}', 'sub']]);
+  // 따옴표로 묶은 것은 인자다
+  assert.deepEqual(argsOf('tool "{fds[0]}">out.txt sub')[0], ['tool', '{fds[0]}', 'sub']);
+});
+
+test('parseShell의 args: `$`·치환·겹친 중괄호가 든 중괄호 낱말도 명령을 나누지 않는다', () => {
+  assert.deepEqual(argsOf('tool --flag {$x} sub'), [['tool', '--flag', '{$x}', 'sub']]);
+  assert.deepEqual(argsOf('tool --flag {${x}} sub'), [['tool', '--flag', '{${x}}', 'sub']]);
+  assert.deepEqual(argsOf('tool --flag {a,{b,c}} sub'), [['tool', '--flag', '{a,{b,c}}', 'sub']]);
+  assert.deepEqual(argsOf('tool --flag {$(echo x y)} sub')[0], ['tool', '--flag', '{$(…)}', 'sub']);
+  assert.ok(argsOf('tool --flag {$(echo x y)} sub').some((a) => a.join(' ') === 'echo x y'));
+  // 묶음 괄호와 zsh의 `{명령 인자}`는 전처럼 명령을 나눈다
+  assert.deepEqual(argsOf('{ tool sub; }'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('{tool sub}'), [['tool', 'sub}']]);
+  assert.deepEqual(argsOf('{ a; } && { b; }'), [['a'], ['b']]);
+});
+
+test('중괄호가 빽빽한 입력도 시간 안에 끝난다(낱말 시작마다 끝까지 다시 읽지 않는다)', () => {
+  const started = Date.now();
+  for (const src of [
+    '{'.repeat(60_000),
+    '{a['.repeat(30_000),
+    `tool ${'{x '.repeat(30_000)}`,
+    `{${'{'.repeat(60_000)}}`,
+    `tool {a[${'$('.repeat(2_000)}`,
+    `tool ${'{ a } '.repeat(20_000)}`,
+    `tool ${'}{'.repeat(30_000)}`,
+    `then ${'{ a } b '.repeat(20_000)}`,
+  ])
+    parseShell(src);
+  assert.ok(Date.now() - started < 10_000, `${Date.now() - started}ms`);
+});
+
+test('배열 원소 디스크립터와 `$`가 든 중괄호 낱말이 끼어도 금지 하위 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    'drizzle-kit {fds[$i]}>out.txt migrate',
+    'drizzle-kit {fds[0]}>out.txt migrate',
+    'drizzle-kit {fds[${i}]}<<EOF migrate\nx\nEOF',
+    'drizzle-kit --config {$x} migrate',
+    'drizzle-kit {fds[$(drizzle-kit migrate)]}>out.txt generate',
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  for (const cmd of [
+    'drizzle-kit {fds[$i]}>out.txt generate',
+    // 하위 명령 자리의 인자가 글자 그대로 {fds[]}다
+    'drizzle-kit {fds[]}>out.txt migrate',
+  ])
+    assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+});
+
+// ---------- 인자 자리의 `{`·`}` (구현 판정 F13과 같은 종류) ----------
+// bash는 명령의 첫 낱말 자리가 아닌 곳의 `{`·`}`를 낱말로 넘긴다. 분석기는 전처럼 그 자리에서 명령을 나누고(있던 규칙의
+// 판정은 그대로다), 첫 조각의 args에 bash가 넘기는 인자를 끝까지 담는다
+
+test('parseShell의 args: 인자 자리의 `{`·`}`와 닫히지 않은 중괄호 낱말은 bash가 넘기는 대로 인자다', () => {
+  const first = (cmd: string) => argsOf(cmd)[0];
+  assert.deepEqual(first('tool --flag {a sub'), ['tool', '--flag', '{a', 'sub']);
+  assert.deepEqual(first('tool --flag { sub'), ['tool', '--flag', '{', 'sub']);
+  assert.deepEqual(first('tool --flag } sub'), ['tool', '--flag', '}', 'sub']);
+  assert.deepEqual(first('tool --flag }a sub'), ['tool', '--flag', '}a', 'sub']);
+  assert.deepEqual(first('tool --flag {{a sub'), ['tool', '--flag', '{{a', 'sub']);
+  assert.deepEqual(first('tool --flag }} sub'), ['tool', '--flag', '}}', 'sub']);
+  assert.deepEqual(first('tool --flag {"a b" sub'), ['tool', '--flag', '{a b', 'sub']);
+  assert.deepEqual(first('tool --flag {#x sub'), ['tool', '--flag', '{#x', 'sub']);
+  assert.deepEqual(first('tool {a { b } sub'), ['tool', '{a', '{', 'b', '}', 'sub']);
+  // 리다이렉션이 섞여도 같다
+  assert.deepEqual(first('tool --flag {a>out.txt sub'), ['tool', '--flag', '{a', 'sub']);
+  assert.deepEqual(first('tool --flag {2>out.txt sub'), ['tool', '--flag', '{2', 'sub']);
+  assert.deepEqual(first('tool --flag }{fd}>out.txt sub'), ['tool', '--flag', '}{fd}', 'sub']);
+  assert.deepEqual(first('tool > { sub'), ['tool', 'sub']);
+  assert.deepEqual(first('tool >out.txt { sub'), ['tool', '{', 'sub']);
+  // 진짜 구분자에서 끝난다
+  assert.deepEqual(argsOf('tool --flag {a sub; other x'), [
+    ['tool', '--flag', '{a', 'sub'],
+    ['a', 'sub'],
+    ['other', 'x'],
+  ]);
+  assert.deepEqual(first('tool --flag {a sub && other'), ['tool', '--flag', '{a', 'sub']);
+  assert.deepEqual(first('tool --flag {a sub | other'), ['tool', '--flag', '{a', 'sub']);
+  // argv와 명령의 수는 전과 같다(있던 규칙이 보는 것)
+  assert.deepEqual(
+    parseShell('tool --flag {a sub').map((c) => c.argv),
+    [
+      ['tool', '--flag'],
+      ['a', 'sub'],
+    ],
+  );
+  // 주석은 전처럼 주석이다
+  assert.deepEqual(argsOf('tool --flag # {a sub'), [['tool', '--flag']]);
+});
+
+test('parseShell의 args: 명령의 첫 낱말 자리의 묶음 괄호는 인자가 아니다', () => {
+  assert.deepEqual(argsOf('{ tool sub; }'), [['tool', 'sub']]);
+  assert.deepEqual(argsOf('a && { tool sub; }'), [['a'], ['tool', 'sub']]);
+  assert.deepEqual(argsOf('f() { tool sub; }'), [['f'], ['tool', 'sub']]);
+  for (const cmd of [
+    'if x; then { tool sub; }; fi',
+    'for a in b; do { tool sub; }; done',
+    'if x; then :; else { tool sub; }; fi',
+    'while { tool sub; }; do :; done',
+    '! { tool sub; }',
+    'function f { tool sub; }',
+    'coproc { tool sub; }',
+  ]) {
+    const cmds = parseShell(cmd);
+    assert.ok(
+      cmds.every((c) => c.args === undefined),
+      cmd,
+    );
+    assert.ok(
+      cmds.some((c) => c.argv.join(' ') === 'tool sub'),
+      cmd,
+    );
+  }
+  // 묶음 안의 명령에서 `}`가 인자 자리에 오면(zsh의 닫는 괄호, bash의 인자) 그 명령의 args에 담는다
+  assert.deepEqual(argsOf('if x; then { tool --flag } sub; }; fi')[2], [
+    'tool',
+    '--flag',
+    '}',
+    'sub',
+  ]);
+  // PowerShell과 cmd는 건드리지 않는다
+  assert.ok(parseShell('tool --flag { sub', 'powershell').every((c) => c.args === undefined));
+});
+
+test('인자 자리의 중괄호가 끼어도 금지 하위 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    'drizzle-kit --config {a migrate',
+    'drizzle-kit --config { migrate',
+    'drizzle-kit --config } migrate',
+    'drizzle-kit --config }a migrate',
+    'drizzle-kit --config {#x migrate',
+    'if x; then { drizzle-kit --config } migrate; }; fi',
+    // zsh의 묶음 괄호
+    '{ drizzle-kit migrate }',
+    '{ drizzle-kit --config x migrate }',
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  for (const cmd of [
+    'drizzle-kit --config {a generate',
+    '{ drizzle-kit generate; }',
+    '{ drizzle-kit generate }',
+  ])
+    assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+});
+
 // 손으로 고른 사례는 빠진 꼴을 모른다(구현 판정에서 꼴이 하나씩 드러났다). 리다이렉션과 인자를 무작위로 섞은 명령을
 // 실제 bash로 돌려, bash가 명령에 넘긴 인자와 parseShell의 args를 비교한다. 돌리는 명령은 인자를 파일에 적는
 // 셸 함수 `tool`과 임시 폴더 안의 파일로 가는 리다이렉션뿐이다. bash가 없는 환경(Windows 네이티브)은 건너뛴다.
@@ -637,6 +812,13 @@ test('parseShell의 args는 실제 bash가 명령에 넘기는 인자와 같다(
     '{}',
     '{x}',
     'x{y}',
+    '{a',
+    '{',
+    '}',
+    '}a',
+    '{{a',
+    'a}',
+    '{#x',
   ];
   // bash 3.2(macOS 기본)와 그 뒤 버전이 같은 뜻으로 읽는 꼴만 둔다(`{이름}>`, `&>>`는 4부터라 뺐다)
   const REDIRS = [
@@ -703,9 +885,18 @@ test('parseShell의 args는 실제 bash가 명령에 넘기는 인자와 같다(
       "'{fd}'>o21",
       '&>>o23',
       '&>> o23',
+      '{fds[0]}>o24',
+      '{fds[i]}>o24',
+      '{fds[$i]}>o24',
+      '{fds[${i}]}>o24',
+      '{fds[$((i+1))]}>o24',
+      '{fds["$i"]}>o24',
+      '{fds[$i]}> o24',
+      '{fds[$i]}<in.txt',
+      '{fds[$i]}<<<w',
     );
   const HEREDOCS = ['<<EOF', '<< EOF', '<<-EOF', "<<'EOF'", '3<<EOF', "'3'<<EOF", '"{fd}"<<EOF'];
-  if (modern) HEREDOCS.push('{fd}<<EOF', '{fd}<<-EOF');
+  if (modern) HEREDOCS.push('{fd}<<EOF', '{fd}<<-EOF', '{fds[$i]}<<EOF');
   const next = rng(20261121);
   const pick = (xs: string[]) => xs[Math.floor(next() * xs.length)];
   // 프로세스 치환은 셸이 경로로 바꿔 넘긴다. 양쪽을 같은 표시로 맞춘다
@@ -733,7 +924,7 @@ test('parseShell의 args는 실제 bash가 명령에 넘기는 인자와 같다(
     if (existsSync(out)) unlinkSync(out);
     const r = spawnSync(
       'bash',
-      ['-c', `tool() { printf '%s\\0' "$#" "$@" > "$ARGV_OUT"; }\n${cmd}\n`],
+      ['-c', `i=0\ntool() { printf '%s\\0' "$#" "$@" > "$ARGV_OUT"; }\n${cmd}\n`],
       {
         cwd: work,
         encoding: 'utf8',
