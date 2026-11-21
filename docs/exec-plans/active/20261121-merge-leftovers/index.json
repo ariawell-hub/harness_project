@@ -1,7 +1,16 @@
 {
   "plan": "20261121-merge-leftovers",
   "steps": [
-    { "step": 0, "name": "conflict-markers", "status": "pending" },
-    { "step": 1, "name": "design-version", "status": "pending" }
+    {
+      "step": 0,
+      "name": "conflict-markers",
+      "status": "completed",
+      "completed_at": "2026-11-21T17:59:09+09:00"
+    },
+    {
+      "step": 1,
+      "name": "design-version",
+      "status": "pending"
+    }
   ]
 }
