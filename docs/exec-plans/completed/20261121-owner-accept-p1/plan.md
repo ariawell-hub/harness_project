@@ -2,7 +2,7 @@
 id: 20261121-owner-accept-p1
 issue: 178 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -74,6 +74,12 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
   - 계획을 고쳤다: "관련 파일"과 범위에 `scripts/test/record.test.ts`를 더하고, step0의 작업 3절에 그 파일에서 할 일(가짜 서버에 `/graphql`, 요청 수 단언, 읽기 실패 테스트)을, AC에 그 파일의 실행과 "줄을 지우지 않았다"는 확인을, 금지사항 둘을 더했다. 수용 기준 6을 더했다(뒤 번호는 7이 됐다). 미리 확인했다: 그 변경을 넣으면 구현이 있을 때 그 파일 13개가 통과하고, 구현이 없으면 2개가 실패한다(`test-effect`를 통과한다).
   - 계획 검증을 다시 받으려고 코드를 내렸다(절차서 2절 "코드를 이미 올린 PR에서 계획 검증이 필요해지면"): `scripts/`와 `docs/harness/`를 계획만 있던 커밋(`564e87b`)의 상태로 되돌리는 커밋을 더했다. 테스트·구현·문서 커밋은 이력에 남아 있고, 승인 뒤에 다시 올린다.
 
+- 2026-11-21 계획 검증 4라운드(head `d62e5a3`): 두 검증자 승인(G1 해시 `89b8bb4708e7`). codex가 P2 하나를 냈다(F5, 미룸: `record.test.ts`의 "줄을 지우지 않았다"를 보는 AC가 빈 줄 삭제를 세지 않는다). AC는 고치지 않았고(승인이 무효가 된다), 올릴 때 `git diff --numstat`으로 삭제 줄이 0임을 따로 확인했다(더한 줄 37, 지운 줄 0).
+- 2026-11-21 코드를 다시 올렸다(테스트 → 구현 → 문서 순서의 커밋 셋).
+  - 테스트 커밋 `2935b8b`: 다섯 테스트 파일 77개 가운데 17개가 실패한다(앞서의 15개와 `record.test.ts`의 2개: 있던 테스트에 더한 요청 수 단언, 읽기 실패 테스트).
+  - 구현 커밋 `3d1fa67`: 일곱 테스트 파일 107개가 통과한다. 문서 커밋 `2a2d696`.
+  - AC 16줄과 `check` 통과. step0 완료 처리.
+
 ## 의사결정 로그
 
 - 결정(제작자, 2026-11-21 대화): `/harness accept`를 P1까지 넓힌다. / 이유: 검증자(LLM)를 거치지 않아 결과가 확정적이고, 봇은 쓸 수 없으며, 변경이 작다. / 버린 대안: 제작자 계정의 PR 댓글을 검증자 입력에 넣기(자유 글이 검증자에게 가는 길이 생기고, 닫힐지는 여전히 검증자에 달려 있다).
@@ -85,7 +91,8 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 
 - runner의 교착 보고(Issue에 올리는 A/B/C 선택지)에는 제작자 승인이 선택지로 없다. P0에도 지금 없다. → 처리: 해당 없음(제작자에게 보고한다. 이 계획의 범위 밖이다)
 - 이 변경 뒤에는 열린 P1이 있는 모든 판정 실행이 PR 댓글의 편집 이력을 GraphQL로 읽는다(전에는 열린 P0이 있을 때만). 읽지 못하면 `review-ledger`가 `error`로 남는다. 닫힌 쪽이지만 GraphQL 장애에 걸리는 PR이 늘어난다. → 처리: 해당 없음(설계서 10.2절 (4)에 이미 적힌 닫힌 쪽 동작이다. 문제가 실제로 나오면 그때 다룬다)
-- `scripts/test/record.test.ts`의 가짜 서버처럼 `/graphql`을 모르는 호출 환경에서는 열린 P1이 있는 원장의 기록이 `error`가 된다(닫힌 쪽). 실제 판정 워크플로는 원장 토큰으로 GraphQL을 읽으므로 해당하지 않는다. 계획을 쓸 때 "열린 P1이 있는 모든 실행이 편집 이력을 읽는다"는 것은 적었지만, 있던 테스트 가운데 그 요청을 모르는 가짜 서버가 있는지는 확인하지 않았다. → 처리: 이 계획(step0에 더했다. 진행 로그)
+- `scripts/test/record.test.ts`의 가짜 서버처럼 `/graphql`을 모르는 호출 환경에서는 열린 P1이 있는 원장의 기록이 `error`가 된다(닫힌 쪽). 실제 판정 워크플로는 원장 토큰으로 GraphQL을 읽으므로 해당하지 않는다. 계획을 쓸 때 "열린 P1이 있는 모든 실행이 편집 이력을 읽는다"는 것은 적었지만, 있던 테스트 가운데 그 요청을 모르는 가짜 서버가 있는지는 확인하지 않았다. → 처리: #178(이 계획의 step0에 더해 고쳤다. 진행 로그)
+- 계획 검증 4라운드의 F5(P2, 미룸): `record.test.ts`에 줄을 더하기만 했는지 보는 AC(`grep -c '^-[^-]'`)가 빈 줄 삭제를 세지 않는다. → 처리: 해당 없음(이 PR에서는 `git diff --numstat`으로 삭제 0줄을 따로 확인했다. AC를 고치면 계획 승인이 무효가 돼 고치지 않았다)
 
 ## 열린 질문
 
@@ -94,10 +101,10 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 ## 검증 방법과 결과
 
 - step0의 AC: 테스트 일곱 파일(`record.test.ts` 포함), `test-effect`, 판별 문구, 범위 밖 파일이 바뀌지 않았는지, `ledger.ts`·`accept-load.ts`는 주석만 바뀌었는지, 문서 다섯 곳, `node scripts/harness.ts check`.
-- 결과: (step0 실행 뒤 적는다)
+- 결과(2026-11-21): step0의 AC 16줄 통과(테스트 일곱 파일 107개, `test-effect`, `check` 포함. 전체 테스트 통과). `node scripts/harness.ts plan-gate` 통과.
 
 ## 다음 할 일
 
-- 계획만 담은 커밋을 올려 초안 PR을 열고 계획 검증(G1)을 받는다. 승인되면 step0을 TDD로 구현해 같은 PR에 올린다.
+- step0은 PR #179에서 코드 판정을 기다린다.
 - 위험도 high라 초안으로 두고, 완료 처리·기록·main 병합·`check`가 끝난 뒤 `node scripts/harness.ts pr-ready`로 제작자 head 승인을 한 번 요청한다.
 - 병합되면 PR #171로 돌아간다: worktree `feat/20261121-actions-cost-design-s0`에서 `origin/main`을 병합해 push하고(올리지 않은 기록 커밋 하나가 로컬에 있다), 제작자에게 PR #171에 `/harness accept F28` 댓글을 요청한다. 다음 판정에서 반영되면 `pr-ready`.
