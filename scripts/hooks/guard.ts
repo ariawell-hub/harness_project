@@ -5,7 +5,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { approvalPending, planRiskOf } from '../lib/approval.ts';
-import { ConfigError, resolveMcpGuard } from '../lib/config.ts';
+import {
+  ConfigError,
+  resolveDbCommands,
+  resolveMcpGuard,
+  type DbCommandRule,
+} from '../lib/config.ts';
 import { hasCommits, tryRepoInfo, type RepoInfo } from '../lib/git.ts';
 import { findPlan, parseDoc } from '../lib/plan.ts';
 import { formatProblem } from '../lib/util.ts';
@@ -102,17 +107,19 @@ export function normalize(
 function loadGuardConfig(root: string | null): {
   dbPatterns: string[];
   dbClients: string[];
+  dbCommands?: unknown;
   mcp?: unknown;
 } {
   if (!root) return { dbPatterns: [], dbClients: [] };
   const f = path.join(root, 'harness.config.json');
   if (!existsSync(f)) return { dbPatterns: [], dbClients: [] };
   const cfg = JSON.parse(readFileSync(f, 'utf8')) as {
-    guard?: { dbPatterns?: string[]; dbClients?: string[]; mcp?: unknown };
+    guard?: { dbPatterns?: string[]; dbClients?: string[]; dbCommands?: unknown; mcp?: unknown };
   };
   return {
     dbPatterns: cfg.guard?.dbPatterns ?? [],
     dbClients: cfg.guard?.dbClients ?? [],
+    dbCommands: cfg.guard?.dbCommands,
     mcp: cfg.guard?.mcp,
   };
 }
@@ -148,6 +155,9 @@ export function buildContext(
 ): GuardContext {
   const repo = tryRepoInfo(cwd);
   const { dbPatterns, dbClients } = loadGuardConfig(repo?.root ?? null);
+  // guard.dbCommands도 guard.mcp처럼 메인 체크아웃의 설정으로 판정한다: worktree의 빈 목록이나 옛 설정이
+  // 메인의 차단을 풀 수 없다. Bash 명령을 판정할 때만 읽고(한 번 읽어 다시 쓴다), 틀리면 던져서 그 호출을 막는다
+  let dbCommands: DbCommandRule[] | null = null;
   return {
     repo,
     hasCommits: repo ? hasCommits(repo.root) : undefined,
@@ -159,6 +169,8 @@ export function buildContext(
     planRisk: planRiskOf,
     dbPatterns,
     dbClients,
+    dbCommands: () =>
+      (dbCommands ??= resolveDbCommands(loadGuardConfig(repo?.mainRoot ?? null).dbCommands)),
     // MCP 규칙은 메인 체크아웃의 설정으로 판정한다(훅 코드도 그쪽 것이 돈다):
     // worktree에서 고친, 아직 병합되지 않은 설정으로 규칙을 풀 수 없다. MCP 호출 때만 읽고, 틀리면 던져서 막는다
     mcp: () => resolveMcpGuard(loadGuardConfig(repo?.mainRoot ?? null).mcp),

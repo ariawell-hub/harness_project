@@ -1,0 +1,11 @@
+{
+  "plan": "20261121-db-arg-boundary",
+  "steps": [
+    {
+      "step": 0,
+      "name": "argv-rule",
+      "status": "completed",
+      "completed_at": "2026-11-21T18:16:48+09:00"
+    }
+  ]
+}

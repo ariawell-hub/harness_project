@@ -3,8 +3,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { judge, keyFailures, stepTotals, type Attempt } from '../lib/attempts.ts';
-import { ConfigError, DEFAULT_MCP_GUARD, loadConfig, resolveMcpGuard } from '../lib/config.ts';
+import {
+  ConfigError,
+  DEFAULT_MCP_GUARD,
+  loadConfig,
+  resolveDbCommands,
+  resolveMcpGuard,
+} from '../lib/config.ts';
 import { run } from '../lib/exec.ts';
+import { matchDbCommand } from '../hooks/db-commands.ts';
 import {
   extractCommands,
   openQuestions,
@@ -291,4 +298,124 @@ test('loadConfig: testEffect가 없으면 null이고, 틀리면 ConfigError다',
       JSON.stringify(bad),
     );
   }
+});
+
+// ---------- guard.dbCommands 설정 (계획 20261121-db-arg-boundary) ----------
+
+test('guard.dbCommands: 키가 없으면 빈 목록이고, 바른 값은 정규화해 돌려준다', () => {
+  assert.deepEqual(resolveDbCommands(undefined), []);
+  assert.deepEqual(resolveDbCommands([]), []);
+  assert.deepEqual(
+    resolveDbCommands([
+      { tool: '  Drizzle-Kit ', forbidden: [' Migrate ', 'db   PUSH', 'push'] },
+      { tool: 'my_tool.v2', forbidden: ['schema sync --force'] },
+    ]),
+    [
+      { tool: 'drizzle-kit', forbidden: ['migrate', 'db push', 'push'] },
+      { tool: 'my_tool.v2', forbidden: ['schema sync --force'] },
+    ],
+  );
+});
+
+test('guard.dbCommands: 걸 수 없는 항목과 틀린 형식은 ConfigError다', () => {
+  const ok = { tool: 'x', forbidden: ['y'] };
+  const BAD: [unknown, RegExp][] = [
+    // 형식
+    [{}, /guard\.dbCommands는 배열/],
+    ['drizzle-kit push', /guard\.dbCommands는 배열/],
+    [null, /guard\.dbCommands는 배열/],
+    [['drizzle-kit push'], /guard\.dbCommands\[0\]는 객체/],
+    [[null], /guard\.dbCommands\[0\]는 객체/],
+    [[['x', 'y']], /guard\.dbCommands\[0\]는 객체/],
+    [[ok, { ...ok, allowed: ['z'] }], /guard\.dbCommands\[1\]\.allowed는 모르는 키/],
+    [[{ forbidden: ['y'] }], /\[0\]\.tool은 문자열/],
+    [[{ tool: 'x' }], /\[0\]\.forbidden은 문자열 배열/],
+    [[{ tool: 7, forbidden: ['y'] }], /\[0\]\.tool은 문자열/],
+    [[{ tool: ['x'], forbidden: ['y'] }], /\[0\]\.tool은 문자열/],
+    [[{ tool: 'x', forbidden: 'y' }], /\[0\]\.forbidden은 문자열 배열/],
+    [[{ tool: 'x', forbidden: [] }], /\[0\]\.forbidden이 비어 있다/],
+    [[{ tool: 'x', forbidden: ['y', 3] }], /\[0\]\.forbidden\[1\]은 문자열/],
+    // 걸 수 없는 도구 이름
+    [[{ tool: '', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: '   ', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: 'a b', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: 'a/b', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: 'a\\b', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: 'a@1', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: 'a:b', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: '도구', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: '-tool', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: '--x', forbidden: ['y'] }], /\[0\]\.tool은 영문/],
+    [[{ tool: 'drizzle-kit.exe', forbidden: ['y'] }], /\[0\]\.tool은 실행 파일 확장자/],
+    [[{ tool: 'x.cmd', forbidden: ['y'] }], /\[0\]\.tool은 실행 파일 확장자/],
+    [[{ tool: 'x.bat', forbidden: ['y'] }], /\[0\]\.tool은 실행 파일 확장자/],
+    [[{ tool: 'x.com', forbidden: ['y'] }], /\[0\]\.tool은 실행 파일 확장자/],
+    [[{ tool: 'X.EXE', forbidden: ['y'] }], /\[0\]\.tool은 실행 파일 확장자/],
+    // 걸 수 없는 금지 항목
+    [[{ tool: 'x', forbidden: [''] }], /\[0\]\.forbidden\[0\]이 비어 있다/],
+    [[{ tool: 'x', forbidden: ['y', '  \t '] }], /\[0\]\.forbidden\[1\]이 비어 있다/],
+    [[{ tool: 'x', forbidden: ['--force'] }], /\[0\]\.forbidden\[0\]의 첫 낱말이/],
+    [[{ tool: 'x', forbidden: ['-f push'] }], /\[0\]\.forbidden\[0\]의 첫 낱말이/],
+  ];
+  for (const [raw, message] of BAD)
+    assert.throws(
+      () => resolveDbCommands(raw),
+      (e: unknown) => e instanceof ConfigError && message.test(e.message),
+      JSON.stringify(raw),
+    );
+});
+
+test('guard.dbCommands 불변식: 검사를 통과한 규칙의 도구와 금지 항목으로 만든 가장 단순한 호출은 반드시 걸린다', () => {
+  const GOOD: unknown[] = [
+    [{ tool: 'drizzle-kit', forbidden: ['migrate', 'push', 'drop'] }],
+    [{ tool: '  Drizzle-Kit  ', forbidden: ['  MIGRATE ', 'db    Push'] }],
+    [{ tool: 'my_tool.v2', forbidden: ['schema sync now', 'a'] }],
+    [{ tool: '7zip', forbidden: ['x --force', 'db push --accept-data-loss'] }],
+    [
+      { tool: 'prisma', forbidden: ['db push', 'migrate reset'] },
+      { tool: 'knex', forbidden: ['migrate:latest', 'seed:run'] },
+    ],
+    [{ tool: 'a.b-c_d', forbidden: ['\tone\ttwo\n'] }],
+  ];
+  let checked = 0;
+  for (const raw of GOOD) {
+    const rules = resolveDbCommands(raw);
+    assert.ok(rules.length > 0, JSON.stringify(raw));
+    for (const rule of rules)
+      for (const sub of rule.forbidden) {
+        const argv = [rule.tool, ...sub.split(' ')];
+        assert.deepEqual(
+          matchDbCommand(argv, [rule]),
+          { tool: rule.tool, sub },
+          `걸려야 한다: ${JSON.stringify(argv)}`,
+        );
+        // 훅이 쓰는 꼴(규칙 전체)에서도 걸린다
+        assert.notEqual(matchDbCommand(argv, rules), null);
+        checked += 1;
+      }
+  }
+  assert.ok(checked >= 14, String(checked));
+});
+
+test('loadConfig: guard.dbCommands가 없는 옛 설정은 빈 목록으로 읽고, 틀리면 ConfigError다', () => {
+  const dir = tmp('harness-lib-cfg-');
+  const put = (guard: unknown) =>
+    writeFileSync(path.join(dir, 'harness.config.json'), JSON.stringify(fixtureConfig({ guard })));
+  put({ dbPatterns: [], dbClients: [] });
+  assert.deepEqual(loadConfig(dir).guard.dbCommands, []);
+  put({
+    dbPatterns: [],
+    dbClients: [],
+    dbCommands: [{ tool: 'Knex', forbidden: ['migrate:latest'] }],
+  });
+  assert.deepEqual(loadConfig(dir).guard.dbCommands, [
+    { tool: 'knex', forbidden: ['migrate:latest'] },
+  ]);
+  put({ dbPatterns: [], dbClients: [], dbCommands: [{ tool: '-knex', forbidden: ['x'] }] });
+  assert.throws(
+    () => loadConfig(dir),
+    (e: unknown) => e instanceof ConfigError && /guard\.dbCommands\[0\]\.tool/.test(e.message),
+  );
+  // 이 리포의 설정과 코어 프로파일에는 키가 있다(빈 목록)
+  assert.deepEqual(loadConfig(HARNESS_ROOT).guard.dbCommands, []);
 });
