@@ -69,7 +69,7 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - `scripts/commands/check.ts`(`bypass-scan` 단계의 한 줄과 import), `scripts/harness.ts`(`bypass-scan` 명령의 한 곳과 import)
 - `scripts/gates/doc-lint.ts`, `scripts/test/doc-lint-design-version.test.ts`(새 파일)
 - `docs/harness/workflow.md`(5절 "main에 뒤처지거나 충돌한 PR 갱신"의 두 항목)
-- `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`(TD-30 행, TD-33 행)
+- `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`(TD-30 행, TD-33 행, 새 TD-63 행)
 - 읽기만: `scripts/gates/bypass-scan.ts`, `scripts/lib/git.ts`(`gitTry`), `scripts/lib/util.ts`(`Problem`), `scripts/test/helpers.ts`, `scripts/test/gates.test.ts`, `scripts/test/doc-lint-gate.test.ts`, `scripts/metrics/local.ts`, `docs/harness/design.md`(머리말과 0절 변경 이력의 형식)
 
 ## step 목록
@@ -126,6 +126,8 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
   - 두 번째 반박은 내지 않고 제작자에게 물었다(판정 9회째, 매번 새 P1 하나). 제작자의 답(대화, 같은 날): **범위를 줄인다**. 수용 기준 1에 경로의 한계를 적고(UTF-8로 읽을 수 없는 파일 이름 둘은 한 건으로 묶일 수 있고, 그래도 검사는 실패한다) 비범위에 올렸다. 코드는 바꾸지 않는다.
   - 계획의 묶인 섹션을 고치므로 절차서 2절대로 되돌리는 커밋으로 PR의 변경을 계획만 남겼다(코드와 문서는 커밋 `ecfcc0c`에 있다). 승인 뒤에 테스트, 구현 순으로 다시 올린다. 함께 미뤄 둔 F10의 표현(수용 기준 3: 상한에 닿는 줄 수는 경로 길이에 따라 다르다)도 고쳤다.
   - step0을 `in_progress`로 되돌렸다(코드를 다시 올린 뒤 완료 처리한다).
+- 2026-11-21 20:57 PR #176 계획 재검증(범위 조정) 1라운드(head `072c8e4`): claude 승인(P2 1), codex 수정 요청(P1 1). 두 검증자가 같은 것을 지적했다.
+  - F13(P1, codex)·F12(P2, claude) 계획이 TD-63을 남긴다고 적었는데 그 행을 더하는 step과 AC가 없다(step0은 TD-30 행만 고치라고 한다. 앞서 더한 행은 되돌리기로 빠졌다) → 수용. step0의 문서 작업에 TD-63 행 추가를 넣고 AC에 그 행을 확인하는 `grep`을 더했다. 관련 파일에도 적었다.
 
 ## 의사결정 로그
 

@@ -80,7 +80,10 @@ export function conflictMarkers(root: string): Problem[];
   ```
 
 - `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)"에 한 줄: 무엇이 바뀌었는지, 검사를 약화하지 않고 강화한다는 것, 검사 대상과 걸리지 않는 것, 설계서 본문은 바뀌지 않는다는 것.
-- `docs/exec-plans/tech-debt-tracker.md`: TD-30 행의 상태를 `해결(#<이 PR 번호>: …)`로 바꾼다. 다른 행은 고치지 않는다. 표의 다른 행이 다시 정렬되지 않게 열 폭 안으로 쓴다.
+- `docs/exec-plans/tech-debt-tracker.md`: TD-30 행의 상태를 `해결(#<이 PR 번호>: …)`로 바꾼다. 표의 다른 행이 다시 정렬되지 않게 열 폭 안으로 쓴다.
+- 같은 표의 맨 끝에 TD-63 행을 더한다(계획의 수용 기준 1이 남긴 한계). 있던 다른 행은 고치지 않는다.
+  - 내용: `git` 출력의 경로를 UTF-8로만 읽는다는 것(실행 도우미 `runSync`가 출력을 UTF-8 글자열로 바꾼다), UTF-8로 읽을 수 없는 파일 이름 둘이 같은 글자열이 되면 충돌 표식 검사가 두 파일을 한 건으로 합쳐 알린다는 것(검사는 실패로 끝난다), `git` 출력에서 경로를 받는 다른 게이트도 같은 방식이라는 것, 고치려면 도우미가 바이트로 받는 길을 주어야 한다는 것.
+  - 근거: `scripts/lib/exec.ts`의 `runSync`, `scripts/gates/conflict-markers.ts`, PR #176의 지적 원장(F11). 다시 볼 때: UTF-8이 아닌 파일 이름이 든 리포에 하네스를 붙일 때. 상태: `열림`.
 
 ## Acceptance Criteria
 
@@ -89,6 +92,7 @@ node --test scripts/test/conflict-markers.test.ts scripts/test/gates.test.ts scr
 node scripts/harness.ts bypass-scan
 grep -qxF -e '- 충돌 표식이 남으면 `check`가 막는다. `bypass-scan` 단계가 작업 트리에서 `<<<<<<<`나 `>>>>>>>`로 시작하는 줄을 찾아 `R7 충돌 표식`으로 알린다. `=======`만 있는 줄은 세지 않는다.' docs/harness/workflow.md
 grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md
+grep -q "^| TD-63 .*UTF-8.*runSync.*| 열림 " docs/exec-plans/tech-debt-tracker.md
 ```
 
 ## 금지사항
