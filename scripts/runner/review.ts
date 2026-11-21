@@ -142,6 +142,25 @@ export function openBlocking(ledger: Ledger): Entry[] {
     .sort((a, b) => idNumber(a.id) - idNumber(b.id));
 }
 
+/** 오래 열린 지적으로 보는 재판정 수(9.1절). 대화 세션의 신호다: runner는 실패 횟수와 교착으로 다룬다 */
+export const LONG_OPEN_REJUDGED = 3;
+
+export interface LongOpen {
+  entry: Entry;
+  /** 지적이 등록된 판정 뒤로 그 검증자가 낸 판정 수 */
+  rejudged: number;
+}
+
+/**
+ * 재판정 수가 기준 이상인 열린 차단 지적, ID 번호 순. 원장만으로 센다: 닫혔다 다시 열린 지적도 등록된 판정부터 세고,
+ * 그 지적에 대응하지 않은 push의 판정도 센다. 다른 검증자의 판정은 세지 않는다
+ */
+export function longOpen(ledger: Ledger): LongOpen[] {
+  return openBlocking(ledger)
+    .map((entry) => ({ entry, rejudged: roundsOf(ledger, entry.reviewer) - entry.round }))
+    .filter((x) => x.rejudged >= LONG_OPEN_REJUDGED);
+}
+
 /** 원장의 가장 큰 지적 번호. 지적이 없으면 0 */
 export function maxFindingId(ledger: Ledger): number {
   return ledger.findings.reduce((n, e) => Math.max(n, idNumber(e.id)), 0);
