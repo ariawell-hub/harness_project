@@ -151,6 +151,9 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 2026-11-21 21:41 구현과 문서(절차서 5절 한 항목, `CHANGELOG` 한 줄, TD-30 해결, TD-63 새 행)를 다시 올렸다. 구현 코드는 `e17b0b0`의 것과 같다. 같은 명령이 통과한다(18건).
 - 2026-11-21 22:01 PR #176 구현 판정 1라운드(마지막 재검증 뒤, head `474a3fc`): claude 승인(지적 없음), codex 수정 요청(P1 1).
   - F16(P1, codex) 수용 기준 1의 "하위 모듈 안의 파일은 보지 않는다"를 확인하는 테스트가 없다 → 수용. 고치기 전에 게이트 함수 그대로 임시 리포에서 확인했다: 하위 모듈의 추적 파일과 새 파일에만 표식이 있으면 빈 배열, 상위 리포의 파일에도 표식이 있으면 그 파일 한 건이다. 그 사례를 테스트에 더했다(동작은 바뀌지 않는다. 계획의 묶인 섹션도 고치지 않는다). 완료 커밋 뒤에 테스트 파일을 고치므로 step0을 `in_progress`로 되돌렸다가 다시 완료 처리한다.
+- 2026-11-21 23:13 step0이 병합됐다(PR #176, main `7eb751b`). step1을 새 브랜치(`feat/20261121-merge-leftovers-s1`)에서 시작했다.
+- 2026-11-21 23:13 step1 테스트를 먼저 올렸다(`c835f91`, 테스트 파일만). 구현 전 `node --test scripts/test/doc-lint-design-version.test.ts`는 실패한다(종료 코드 1: `../gates/doc-lint.ts`에 `designVersionProblems`가 없다, `SyntaxError: … does not provide an export named 'designVersionProblems'`).
+- 2026-11-21 23:15 구현을 올렸다. 같은 명령이 통과한다(9건). 이 리포의 설계서(v0.7.70, 변경 이력 항목 80개쯤)는 새 검사를 통과한다. 절차서 5절에 한 항목, `CHANGELOG`에 한 줄을 더하고 TD-33을 해결로 바꿨다.
 
 ## 의사결정 로그
 
@@ -194,7 +197,13 @@ step0 결과(2026-11-21 22:01, 하위 모듈 사례를 더한 작업 트리):
 - `grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
 - `grep -q "^| TD-63 .*UTF-8.*runSync.*| 열림 " docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
 
+step1 결과(2026-11-21 23:15, 구현 커밋의 작업 트리):
+
+- `node --test scripts/test/doc-lint-design-version.test.ts scripts/test/doc-lint-gate.test.ts scripts/test/gates.test.ts scripts/test/codeowners.test.ts scripts/test/metrics-command.test.ts scripts/test/metrics-local.test.ts`: 종료 코드 0. 101건 가운데 101건 통과, 실패 0, 건너뜀 0. 새 테스트는 9건이다.
+- `node scripts/harness.ts doc-lint`: 종료 코드 0(`doc-lint: 통과(경고 6건)`. 경고는 있던 "검토 필요"이고 `R8 설계서 버전`은 없다).
+- 절차서의 문장을 글자 그대로 견주는 `grep -qxF` 명령: 종료 코드 0.
+- `grep -q "^| TD-33 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
+
 ## 다음 할 일
 
-- step0의 구현 판정이 통과하면 `pr-ready`로 제작자 승인을 요청한다.
-- step0이 병합되면 `new-task --plan 20261121-merge-leftovers --step 1`로 step1(설계서 버전 검사)을 이어 간다.
+- step1의 구현 판정이 통과하면 `pr-ready`로 제작자 승인을 요청한다. 병합되면 이 계획은 끝난다(Issue #175를 닫는다).

@@ -1,4 +1,5 @@
-// doc-lint (R8, 7.1~7.2절): 깨진 링크, 색인 누락, frontmatter 형식, AGENTS.md 줄 수 상한, 오래된 문서 표시.
+// doc-lint (R8, 7.1~7.2절): 깨진 링크, 색인 누락, frontmatter 형식, AGENTS.md 줄 수 상한, 오래된 문서 표시,
+// 설계서 머리말과 변경 이력의 어긋남.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { HarnessConfig } from '../lib/config.ts';
@@ -70,6 +71,100 @@ function lastCommitTime(root: string, paths: string[]): number {
   if (!r.ok || (text !== '' && !/^\d+$/.test(text)))
     throw new DocLintReadError(`커밋 시각을 읽지 못했다(git log 실패: ${paths.join(', ')})`);
   return text ? Number(text) : 0;
+}
+
+/** 설계서의 경로. 문서 목록에 있을 때만 머리말과 변경 이력을 견준다 */
+const DESIGN_DOC = 'docs/harness/design.md';
+const VERSION = String.raw`\d+(?:\.\d+)*`;
+const DATE = String.raw`\d{4}-\d{2}-\d{2}`;
+/** `> 버전 v<버전> · … 최종 갱신: <날짜>` */
+const DESIGN_HEAD = new RegExp(`^> 버전 v(${VERSION}) · .*최종 갱신: (${DATE})\\s*$`);
+/** 변경 이력의 항목: 공백 둘, 붙임표, `v<버전> (<날짜>): ` */
+const DESIGN_ITEM = new RegExp(`^  - v(${VERSION}) \\((${DATE})\\): `);
+
+/** 버전을 마디마다 수로 견준다. 앞 마디가 모두 같으면 마디가 더 많은 쪽이 크다 */
+function compareVersions(a: string, b: string): number {
+  const x = a.split('.').map(BigInt);
+  const y = b.split('.').map(BigInt);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  }
+  return x.length - y.length;
+}
+
+/** 설계서 본문에서 머리말의 버전·최종 갱신과 변경 이력이 맞는지 본다. 문제가 없으면 빈 배열 */
+export function designVersionProblems(text: string): Problem[] {
+  const problem = (what: string): Problem => ({
+    rule: 'R8 설계서 버전',
+    what,
+    how: '머리말의 버전·최종 갱신을 변경 이력의 마지막 항목과 맞춰라. main을 병합하다 버전이 겹쳤으면 이 PR의 항목을 다음 번호로 올려라',
+    doc: DOC,
+  });
+  const lines = text.split('\n').map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
+
+  // 읽지 못하면 비교하지 않는다. 형식이 바뀌어 검사가 조용히 꺼지는 일을 막는다
+  const unreadable: Problem[] = [];
+  const headLine = lines.find((l) => l.startsWith('> 버전 v'));
+  const head = headLine === undefined ? null : DESIGN_HEAD.exec(headLine);
+  if (headLine === undefined) {
+    unreadable.push(problem('설계서에 머리말 줄(`> 버전 v…`)이 없다'));
+  } else if (!head) {
+    unreadable.push(
+      problem('설계서 머리말 줄의 형식이 틀리다(`> 버전 v<버전> · … 최종 갱신: <YYYY-MM-DD>`)'),
+    );
+  }
+
+  const items: { line: number; version: string; date: string }[] = [];
+  const start = lines.findIndex((l) => l.startsWith('- **변경 이력**'));
+  if (start < 0) {
+    unreadable.push(problem('설계서에 변경 이력 목록(`- **변경 이력**`)이 없다'));
+  } else {
+    let count = 0;
+    for (let i = start + 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (l.trim() === '') continue; // 빈 줄은 목록을 끝내지 않는다
+      if (!l.startsWith('  ')) break; // 다음 최상위 항목이나 본문
+      if (!l.startsWith('  - ')) continue; // 더 깊이 들여쓴 줄은 앞 항목에 딸린 줄이다
+      count++;
+      const m = DESIGN_ITEM.exec(l);
+      if (m) items.push({ line: i + 1, version: m[1], date: m[2] });
+      else {
+        unreadable.push(
+          problem(
+            `설계서 ${i + 1}번째 줄의 변경 이력 항목 형식이 틀리다(\`- v<버전> (<YYYY-MM-DD>): 내용\`)`,
+          ),
+        );
+      }
+    }
+    if (count === 0) unreadable.push(problem('설계서의 변경 이력에 항목이 없다'));
+  }
+  if (unreadable.length || !head) return unreadable;
+
+  const out: Problem[] = [];
+  const last = items[items.length - 1];
+  if (compareVersions(head[1], last.version) !== 0) {
+    out.push(
+      problem(
+        `설계서 머리말의 버전 v${head[1]}가 변경 이력의 마지막 항목 v${last.version}와 다르다`,
+      ),
+    );
+  }
+  if (head[2] !== last.date) {
+    out.push(
+      problem(
+        `설계서 머리말의 최종 갱신 ${head[2]}이 변경 이력의 마지막 항목 날짜 ${last.date}와 다르다`,
+      ),
+    );
+  }
+  for (let i = 1; i < items.length; i++) {
+    if (compareVersions(items[i].version, items[i - 1].version) > 0) continue;
+    out.push(
+      problem(
+        `설계서 ${items[i].line}번째 줄의 v${items[i].version}가 바로 앞 항목 v${items[i - 1].version}보다 크지 않다`,
+      ),
+    );
+  }
+  return out;
 }
 
 /**
@@ -201,6 +296,11 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
         doc: 'docs/harness/design.md 7.1절',
       });
     }
+  }
+
+  // 5) 설계서 머리말의 버전·최종 갱신과 변경 이력(설계서가 문서 목록에 있을 때만)
+  if (files.includes(DESIGN_DOC)) {
+    errors.push(...designVersionProblems(readFileSync(path.join(root, DESIGN_DOC), 'utf8')));
   }
   return { errors, warnings };
 }
