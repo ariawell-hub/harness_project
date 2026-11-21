@@ -2,7 +2,7 @@
 id: 20261121-db-arg-boundary
 issue: 172 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -81,6 +81,7 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
     - 낱말이 둘 이상인 금지 항목을 첫 낱말만 비교하게 함 → 5개 실패(읽은 횟수 한도와 시간 제한 테스트 포함).
     - 도구 이름을 앞부분만 비교하게 함(`drizzle-kitx`) → 1개 실패.
   - 한 번만 걷는다는 조건(금지사항 "도구 자리마다 다시 걷지 마라")을 깨는 변이는 따로 만들지 않았다. 읽은 횟수 테스트의 한도(규칙 수 × 인자 수 × 4)가 그 경우를 잡는다: 도구 자리가 빽빽한 입력에서 다시 걸으면 읽기가 인자 수의 제곱으로 는다.
+- 2026-11-21T14:23:07+09:00 step0 재작업: 구현 판정 1라운드(codex F8·F9): 인자 없는 Bash 호출이 틀린 설정을 통과하고, 리다이렉션을 하위 명령으로 오인한다
 
 ## 의사결정 로그
 
