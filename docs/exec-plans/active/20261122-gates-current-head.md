@@ -2,7 +2,7 @@
 id: 20261122-gates-current-head
 issue: 181 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -43,6 +43,7 @@ claimed_at: 2026-11-22T00:07:49+09:00
 - 2026-11-22 테스트 먼저: 새 테스트를 넣고 구현 전에 돌렸다. `risk-gate.test.ts`는 새 테스트 4건이 실패했고(나머지 10건 통과), `pr-state.test.ts`는 `gatesMissing`이 없어 파일 전체가 실패했다.
 - 2026-11-22 구현: `resolvePr`, `gatesMissing`, `pr-state` 명령의 안내 줄을 넣었다. 두 파일의 테스트 41건이 통과한다.
 - 2026-11-22 문서: 설계서 10.4절·버전 이력(v0.7.72), 절차서 5절, `architecture.md`, CHANGELOG.
+- 2026-11-22T00:55:52+09:00 step 재작업: 구현 판정 1회차(Codex 수정 요청). F1(P0): `pr-state`의 안내 줄이 PR 브랜치 이름을 인용 없이 셸 명령에 넣는다. F2(P1): 조회 응답의 head 저장소에 이름이 없으면(빈 객체) 포크로 보고 조용히 건너뛴다. 둘 다 맞는 지적이라 고친다.
 
 ## 의사결정 로그
 
