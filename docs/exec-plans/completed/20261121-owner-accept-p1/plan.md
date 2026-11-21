@@ -2,7 +2,7 @@
 id: 20261121-owner-accept-p1
 issue: 178 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active    # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -81,6 +81,12 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
   - AC 16줄과 `check` 통과. step0 완료 처리.
 - 2026-11-21T22:21:36+09:00 step0 재작업: 코드 판정 1라운드의 F7(승인 뒤 새 지적의 설명에 동결 조건이 빠졌다)을 문서 세 곳에서 고친다
 
+- 2026-11-21 코드 판정 1라운드(head `9609303`): `review/claude` 승인. `review/codex` 수정 요청(P1 1, P2 1). F1~F4는 `fixed`로 확인됐다.
+  - F7(P2, 미룸: `scripts/cross-review/ledger.md`의 "새 지적은 새 ID로 등록되고 다시 막는다"에 동결 조건이 빠졌다): 맞는 지적이라 고쳤다. 같은 문장이 설계서 10.2절 (4)와 절차서 8절에도 있어 세 곳을 같은 뜻으로 맞췄다.
+  - F6(P1: step0의 AC 한 줄이 `docs/exec-plans/active/20261121-owner-accept-p1/plan.md`를 읽는데, 완료 처리로 계획이 `completed/`로 옮겨져 PR head에서는 그 줄이 실패한다): 사실이다. 그 줄은 계획에 `test-effect` 예외 줄이 없는지를 본다. 반박한다(1회째). 근거: AC는 완료 처리 전에 돌리는 검증이다(작업 루프 4 자체 검증 → 5 완료 처리). 그때 계획은 `active/`에 있었고 AC 16줄이 통과했다. 완료 처리가 마지막 step의 계획을 `completed/`로 옮기는 것은 하네스의 동작이고, 옮겨진 `plan.md`에 같은 검사(`grep -c "^- test-effect 예외:"`)를 돌린 결과도 0이다(2026-11-21, 코드 판정 1라운드 뒤에 확인). AC 문구를 고치면 계획 승인(G1)이 무효가 돼 코드를 내리고 계획 검증부터 다시 받아야 한다. 반박이 받아들여지지 않으면 그렇게 고친다(경로를 `active/`와 `completed/` 어디에 있든 찾게).
+  - 배운 것: step의 AC에 자기 계획 파일의 `active/` 경로를 적으면 마지막 step에서는 완료 처리 뒤에 그 줄을 다시 돌릴 수 없다(발견 사항에 적었다).
+  - `origin/main`을 병합했다(#177, 계획 파일만 바뀐 변경. 충돌 없음).
+
 ## 의사결정 로그
 
 - 결정(제작자, 2026-11-21 대화): `/harness accept`를 P1까지 넓힌다. / 이유: 검증자(LLM)를 거치지 않아 결과가 확정적이고, 봇은 쓸 수 없으며, 변경이 작다. / 버린 대안: 제작자 계정의 PR 댓글을 검증자 입력에 넣기(자유 글이 검증자에게 가는 길이 생기고, 닫힐지는 여전히 검증자에 달려 있다).
@@ -94,6 +100,7 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 - 이 변경 뒤에는 열린 P1이 있는 모든 판정 실행이 PR 댓글의 편집 이력을 GraphQL로 읽는다(전에는 열린 P0이 있을 때만). 읽지 못하면 `review-ledger`가 `error`로 남는다. 닫힌 쪽이지만 GraphQL 장애에 걸리는 PR이 늘어난다. → 처리: 해당 없음(설계서 10.2절 (4)에 이미 적힌 닫힌 쪽 동작이다. 문제가 실제로 나오면 그때 다룬다)
 - `scripts/test/record.test.ts`의 가짜 서버처럼 `/graphql`을 모르는 호출 환경에서는 열린 P1이 있는 원장의 기록이 `error`가 된다(닫힌 쪽). 실제 판정 워크플로는 원장 토큰으로 GraphQL을 읽으므로 해당하지 않는다. 계획을 쓸 때 "열린 P1이 있는 모든 실행이 편집 이력을 읽는다"는 것은 적었지만, 있던 테스트 가운데 그 요청을 모르는 가짜 서버가 있는지는 확인하지 않았다. → 처리: #178(이 계획의 step0에 더해 고쳤다. 진행 로그)
 - 계획 검증 4라운드의 F5(P2, 미룸): `record.test.ts`에 줄을 더하기만 했는지 보는 AC(`grep -c '^-[^-]'`)가 빈 줄 삭제를 세지 않는다. → 처리: 해당 없음(이 PR에서는 `git diff --numstat`으로 삭제 0줄을 따로 확인했다. AC를 고치면 계획 승인이 무효가 돼 고치지 않았다)
+- step의 AC에 자기 계획 파일의 경로(`docs/exec-plans/active/<id>/plan.md`)를 적으면, 마지막 step에서는 완료 처리가 계획을 `completed/`로 옮긴 뒤 그 줄을 다시 돌릴 수 없다(이 계획의 F6). AC는 완료 처리 전에 돌리므로 그때는 통과한다. → 처리: 해당 없음(제작자에게 보고한다. 계획 템플릿이나 절차서에 "AC에 계획 폴더의 `active/` 경로를 적지 않는다"를 더할지는 제작자가 정한다)
 
 ## 열린 질문
 
