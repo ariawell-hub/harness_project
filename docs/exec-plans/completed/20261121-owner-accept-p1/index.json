@@ -1,0 +1,12 @@
+{
+  "plan": "20261121-owner-accept-p1",
+  "steps": [
+    {
+      "step": 0,
+      "name": "p1-accept",
+      "status": "completed",
+      "started_at": "2026-11-21T21:38:07+09:00",
+      "completed_at": "2026-11-21T23:21:10+09:00"
+    }
+  ]
+}
