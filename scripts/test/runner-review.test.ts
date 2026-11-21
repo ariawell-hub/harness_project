@@ -10,6 +10,7 @@ import {
   applyVerdict,
   emptyLedger,
   renderLedger,
+  type Entry,
   type Ledger,
   type Reviewer,
 } from '../ci/ledger.ts';
@@ -31,6 +32,8 @@ import {
   deadlocked,
   failedResponses,
   findingLine,
+  LONG_OPEN_REJUDGED,
+  longOpen,
   markCounted,
   openBlocking,
   parseReviewLog,
@@ -1490,4 +1493,87 @@ test('runner: review-round 실패가 3회면 프롬프트에 방법 전환 지�
   } finally {
     t.fx.cleanup();
   }
+});
+
+// ---------- 오래 열린 지적: 재판정 3회 뒤에도 열려 있다 (9.1절, Issue #165) ----------
+
+/** 그 검증자가 지적 하나를 열어 둔 채 판정을 n번 더 낸 원장 */
+function rejudgedOpen(l: Ledger, reviewer: Reviewer, id: string, n: number): Ledger {
+  let out = l;
+  for (let i = 0; i < n; i++)
+    out = judged(out, reviewer, `r${i}`, [], [{ id, status: 'open', note: '' }]);
+  return out;
+}
+
+test('longOpen: 열린 차단 지적의 재판정 수가 3 이상이면 오래 열린 지적이다. 원장만으로 센다', () => {
+  assert.equal(LONG_OPEN_REJUDGED, 3);
+  const first = judged(emptyLedger(BASE), 'codex', 'h0', [finding('P1', 'src/a.ts', 1, '하나')]);
+  assert.deepEqual(longOpen(rejudgedOpen(first, 'codex', 'F1', 2)), []);
+  assert.deepEqual(
+    longOpen(rejudgedOpen(first, 'codex', 'F1', 3)).map((x) => [x.entry.id, x.rejudged]),
+    [['F1', 3]],
+  );
+  assert.deepEqual(
+    longOpen(rejudgedOpen(first, 'codex', 'F1', 4)).map((x) => [x.entry.id, x.rejudged]),
+    [['F1', 4]],
+  );
+  // 2번째 판정에서 등록된 지적은 그 검증자의 판정이 5번일 때부터다
+  let late = judged(emptyLedger(BASE), 'codex', 'h0', []);
+  late = judged(late, 'codex', 'h1', [finding('P1', 'src/a.ts', 1, '늦게 나온 지적')]);
+  assert.deepEqual(longOpen(rejudgedOpen(late, 'codex', 'F1', 2)), []);
+  assert.deepEqual(
+    longOpen(rejudgedOpen(late, 'codex', 'F1', 3)).map((x) => [x.entry.id, x.rejudged]),
+    [['F1', 3]],
+  );
+  // 다른 검증자의 판정은 세지 않는다
+  let other = first;
+  for (let i = 0; i < 5; i++) other = judged(other, 'claude', `c${i}`, []);
+  assert.deepEqual(longOpen(other), []);
+});
+
+test('longOpen: 미룬 지적·닫힌 지적·받아들인 지적·P2·P3은 대상이 아니고, P0은 대상이다. ID 번호 순이다', () => {
+  const severity = (i: number): Severity =>
+    i === 1 ? 'P0' : i === 2 ? 'P2' : i === 3 ? 'P3' : 'P1';
+  const many = Array.from({ length: 10 }, (_, i) =>
+    finding(severity(i), 'src/a.ts', i + 1, `지적 ${i + 1}`),
+  );
+  let l = judged(emptyLedger(BASE), 'codex', 'h0', many);
+  for (let i = 0; i < 3; i++)
+    l = judged(
+      l,
+      'codex',
+      `h${i + 1}`,
+      [],
+      [
+        { id: 'F5', status: 'fixed', note: '' },
+        { id: 'F6', status: 'rejected', note: '' },
+      ],
+    );
+  // P2·P3은 등록될 때 미룸이 된다. 등급만으로 빠지는지 보려고 열림으로 바꿔 둔다
+  const status: Record<string, Entry['status']> = {
+    F3: 'open',
+    F4: 'open',
+    F7: 'deferred',
+    F8: 'accepted',
+  };
+  l = { ...l, findings: l.findings.map((e) => ({ ...e, status: status[e.id] ?? e.status })) };
+  assert.deepEqual(
+    l.findings.map((e) => `${e.id}:${e.severity}:${e.status}`),
+    [
+      'F1:P1:open',
+      'F2:P0:open',
+      'F3:P2:open',
+      'F4:P3:open',
+      'F5:P1:fixed',
+      'F6:P1:rejected',
+      'F7:P1:deferred',
+      'F8:P1:accepted',
+      'F9:P1:open',
+      'F10:P1:open',
+    ],
+  );
+  assert.deepEqual(
+    longOpen(l).map((x) => x.entry.id),
+    ['F1', 'F2', 'F9', 'F10'],
+  );
 });

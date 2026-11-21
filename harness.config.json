@@ -67,6 +67,7 @@
   "guard": {
     "dbPatterns": [],
     "dbClients": [],
+    "dbCommands": [],
     "mcp": {
       "denyWords": ["delete", "trash", "remove", "destroy", "purge", "erase", "wipe", "cancel"],
       "denyTools": ["mcp__*Gmail__send_message", "mcp__*Gmail__reply", "mcp__*Gmail__forward"],
