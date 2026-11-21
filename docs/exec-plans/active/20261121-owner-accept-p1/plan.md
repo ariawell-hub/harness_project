@@ -2,7 +2,7 @@
 id: 20261121-owner-accept-p1
 issue: 178 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -79,6 +79,7 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
   - 테스트 커밋 `2935b8b`: 다섯 테스트 파일 77개 가운데 17개가 실패한다(앞서의 15개와 `record.test.ts`의 2개: 있던 테스트에 더한 요청 수 단언, 읽기 실패 테스트).
   - 구현 커밋 `3d1fa67`: 일곱 테스트 파일 107개가 통과한다. 문서 커밋 `2a2d696`.
   - AC 16줄과 `check` 통과. step0 완료 처리.
+- 2026-11-21T22:21:36+09:00 step0 재작업: 코드 판정 1라운드의 F7(승인 뒤 새 지적의 설명에 동결 조건이 빠졌다)을 문서 세 곳에서 고친다
 
 ## 의사결정 로그
 
