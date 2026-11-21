@@ -221,3 +221,20 @@ test('design-version: doc-lint 명령과 check의 doc-lint 단계가 실패하�
   const check2 = cli(['check', '--only', 'doc-lint', '--no-cache'], root);
   assert.equal(check2.code, 0, check2.stdout + check2.stderr);
 });
+
+test('design-version: 머리말 줄 안의 유니코드 줄 구분 문자는 줄을 나누지 않는다', () => {
+  // 줄은 LF로만 나눈다. U+2028·U+2029는 머리말 가운데의 임의의 글자다
+  for (const ch of [' ', ' ']) {
+    const line = `> 버전 v0.7.3 · 상태: 초안${ch}검토 중 · 최종 갱신: 2026-11-21`;
+    assert.deepEqual(designVersionProblems(design(line, ITEMS)), [], JSON.stringify(ch));
+  }
+});
+
+test('design-version: 변경 이력의 문제가 아주 많아도 docLint가 예외 없이 모두 돌려준다', () => {
+  const N = 200_000;
+  const many = Array.from({ length: N }, () => item('0.7.3', '2026-11-21'));
+  const root = repo(design(head('0.7.3', '2026-11-21'), many));
+  const r = docLint(root, loadConfig(root));
+  assert.equal(r.errors.length, N - 1);
+  assert.ok(r.errors.every((e) => e.rule === RULE));
+});
