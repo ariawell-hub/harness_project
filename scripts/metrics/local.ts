@@ -311,15 +311,13 @@ export function readSelfTestReport(file: string): { passed: number; total: numbe
 
 /**
  * 보고서를 가장 먼저 읽는다: 틀린 보고서는 다른 자료를 읽기 전에 `SelfTestReportError`로 끝난다.
- * 문서 목록이나 커밋 시각을 읽지 못하면 "검토 필요" 문서 수를 0으로 내지 않고 예외다(`docLint`의 엄격 모드)
+ * 문서 목록이나 커밋 시각을 읽지 못하면 "검토 필요" 문서 수를 0으로 내지 않고 예외다(`docLint`가 던지는 `DocLintReadError`)
  */
 export function localMetrics(i: LocalInput): LocalMetrics {
   const selfTest = i.selfTestReport === null ? null : readSelfTestReport(i.selfTestReport);
   return {
     ...planMetrics(i.root, i.period),
-    reviewNeeded: docLint(i.root, i.cfg, { strict: true }).warnings.filter(
-      (w) => w.rule === 'R8 검토 필요',
-    ).length,
+    reviewNeeded: docLint(i.root, i.cfg).warnings.filter((w) => w.rule === 'R8 검토 필요').length,
     runner:
       i.runnerLog !== null && existsSync(i.runnerLog) ? runnerMetrics(i.runnerLog, i.period) : null,
     selfTest,

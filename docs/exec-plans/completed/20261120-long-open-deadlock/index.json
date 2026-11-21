@@ -1,0 +1,11 @@
+{
+  "plan": "20261120-long-open-deadlock",
+  "steps": [
+    {
+      "step": 0,
+      "name": "long-open",
+      "status": "completed",
+      "completed_at": "2026-11-20T23:12:57+09:00"
+    }
+  ]
+}

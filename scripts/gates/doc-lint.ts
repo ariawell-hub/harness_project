@@ -22,23 +22,20 @@ export interface DocLintResult {
   warnings: Problem[];
 }
 
+/** 문서 목록이나 커밋 시각을 `git`으로 읽지 못했다 */
+export class DocLintReadError extends Error {}
+
 export interface DocLintOptions {
-  /**
-   * 참이면 `git` 읽기(문서 목록, 커밋 시각)가 실패할 때 빈 결과로 넘기지 않고 예외를 던진다.
-   * 결과를 수로 기록하는 쪽(지표 집계)이 쓴다. 기본은 거짓이고 게이트의 동작은 그대로다
-   */
-  strict?: boolean;
+  /** 참이면 커밋 시각을 읽지 않는다(커밋이 없는 리포). "검토 필요" 경고는 나오지 않는다 */
+  noHistory?: boolean;
 }
 
-function listMarkdown(root: string, strict: boolean): string[] {
+function listMarkdown(root: string): string[] {
   const r = gitTry(
     ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'],
     root,
   );
-  if (!r.ok) {
-    if (strict) throw new Error('문서 목록을 읽지 못했다(git ls-files 실패)');
-    return [];
-  }
+  if (!r.ok) throw new DocLintReadError('문서 목록을 읽지 못했다(git ls-files 실패)');
   return r.stdout
     .split('\0')
     .filter(Boolean)
@@ -67,20 +64,24 @@ function isExternal(href: string): boolean {
 }
 
 /** 그 경로들의 마지막 커밋 시각(초). 조회는 성공했지만 커밋 이력이 없으면 0이다 */
-function lastCommitTime(root: string, paths: string[], strict: boolean): number {
+function lastCommitTime(root: string, paths: string[]): number {
   const r = gitTry(['log', '-1', '--format=%ct', '--', ...paths], root);
   const text = r.stdout.trim();
-  if (strict && (!r.ok || (text !== '' && !/^\d+$/.test(text))))
-    throw new Error(`커밋 시각을 읽지 못했다(git log 실패: ${paths.join(', ')})`);
-  return r.ok && text ? Number(text) : 0;
+  if (!r.ok || (text !== '' && !/^\d+$/.test(text)))
+    throw new DocLintReadError(`커밋 시각을 읽지 못했다(git log 실패: ${paths.join(', ')})`);
+  return text ? Number(text) : 0;
 }
 
+/**
+ * 문서 검사. `git` 읽기(문서 목록, 커밋 시각)가 실패하면 빈 결과로 넘기지 않고 `DocLintReadError`를 던진다.
+ * 게이트(`check`, `doc-lint` 명령)는 `docLintGate`를 쓴다
+ */
 export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}): DocLintResult {
-  const strict = o.strict === true;
+  const history = o.noHistory !== true;
   const errors: Problem[] = [];
   const warnings: Problem[] = [];
   const exclude = cfg.docLint.exclude ?? [];
-  const files = listMarkdown(root, strict).filter((f) => !matchesAny(f, exclude));
+  const files = listMarkdown(root).filter((f) => !matchesAny(f, exclude));
 
   // 1) 깨진 상대 링크
   const linked = new Map<string, Set<string>>(); // 대상 → 링크한 파일들
@@ -162,12 +163,13 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
         doc: DOC,
       });
     if (
+      history &&
       fm.review_cycle === 'on-change' &&
       Array.isArray(fm.related_code) &&
       fm.related_code.length
     ) {
-      const codeT = lastCommitTime(root, fm.related_code, strict);
-      const docT = lastCommitTime(root, [f], strict);
+      const codeT = lastCommitTime(root, fm.related_code);
+      const docT = lastCommitTime(root, [f]);
       if (codeT && docT && codeT > docT) {
         warnings.push({
           rule: 'R8 검토 필요',
@@ -201,6 +203,61 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
     }
   }
   return { errors, warnings };
+}
+
+/**
+ * HEAD가 브랜치를 가리키고 그 브랜치의 ref가 아예 없는가(`git init` 직후, `checkout --orphan` 직후).
+ * ref 파일이 있는데 읽을 수 없는 것(손상)은 여기에 들지 않는다. 판별 명령이 실패해도 거짓이다:
+ * 그 리포는 보통의 경로로 가서 `git ls-files`나 `git log`의 실패로 드러난다
+ */
+function hasNoCommits(root: string): boolean {
+  const head = gitTry(['symbolic-ref', '-q', 'HEAD'], root);
+  const ref = head.stdout.trim();
+  if (!head.ok || !ref.startsWith('refs/heads/')) return false;
+  if (gitTry(['show-ref', '--verify', '-q', ref], root).code !== 1) return false;
+  const file = gitTry(['rev-parse', '--git-path', ref], root);
+  return file.ok && !existsSync(path.resolve(root, file.stdout.trim()));
+}
+
+/**
+ * HEAD가 커밋을 가리키는지 확인한다. 커밋 시각이 필요한 문서가 없으면 문서 검사에서 git log가 불리지 않고,
+ * ref가 커밋이 아닌 객체를 가리키면 git log가 출력 없이 성공한다. 손상된 ref가 그대로 지나가지 않게 따로 본다.
+ * - show-ref --verify는 정확한 이름만 읽는다: rev-parse HEAD는 브랜치 ref가 손상되면 refs/tags/HEAD 같은 ref로 대신 풀린다
+ * - show-ref는 객체가 있는지만 본다: 커밋인지는 그 해시로 cat-file이 본다
+ */
+function assertHeadCommit(root: string): void {
+  const head = gitTry(['show-ref', '--verify', '--hash', 'HEAD'], root);
+  const sha = head.stdout.trim();
+  if (!head.ok || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha))
+    throw new DocLintReadError('HEAD를 읽지 못했다(git show-ref 실패)');
+  if (!gitTry(['cat-file', '-e', `${sha}^{commit}`], root).ok)
+    throw new DocLintReadError('HEAD가 커밋을 가리키지 않는다(git cat-file 실패)');
+}
+
+/**
+ * 게이트(`check`의 doc-lint 단계, `doc-lint` 명령)가 쓰는 문서 검사. `git` 읽기 실패를 통과로 넘기지 않고
+ * 오류 한 건으로 돌려준다. 커밋이 없는 리포는 커밋 시각 검사만 건너뛴다
+ */
+export function docLintGate(root: string, cfg: HarnessConfig): DocLintResult {
+  try {
+    const unborn = hasNoCommits(root);
+    const r = docLint(root, cfg, unborn ? { noHistory: true } : {});
+    if (!unborn) assertHeadCommit(root);
+    return r;
+  } catch (e) {
+    if (!(e instanceof DocLintReadError)) throw e;
+    return {
+      errors: [
+        {
+          rule: 'R8 문서 읽기 실패',
+          what: e.message,
+          how: '이 폴더에서 `git status`가 도는지 확인하고(색인·ref 손상, 리포가 아닌 폴더) 고친 뒤 다시 실행하라',
+          doc: DOC,
+        },
+      ],
+      warnings: [],
+    };
+  }
 }
 
 export function printDocLint(r: DocLintResult): void {

@@ -1,0 +1,16 @@
+{
+  "plan": "20261120-q10-db-decision",
+  "steps": [
+    {
+      "step": 0,
+      "name": "decision-record",
+      "status": "completed",
+      "completed_at": "2026-11-20T22:33:10+09:00"
+    },
+    {
+      "step": 1,
+      "name": "drizzle-guard",
+      "status": "pending"
+    }
+  ]
+}
