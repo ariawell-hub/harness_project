@@ -2,7 +2,7 @@
 id: 20261121-db-arg-boundary
 issue: 172 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -96,6 +96,7 @@ L1 훅의 DB 규칙(`scripts/hooks/rules.ts`의 `dbRules`)은 명령의 인자�
   - 같은 종류를 먼저 찾아 함께 고쳤다(지적이 꼴 하나씩 나오는 것을 끊으려는 것이다): heredoc 앞의 숫자(`3<<EOF`), `{이름}>` 꼴(전에는 묶음 괄호로 읽어 명령이 갈라졌다), 프로세스 치환(`<(…)`. 전에는 `<`를 리다이렉션으로 읽어 뒤의 인자를 놓쳤다. 이제 인자 하나로 두고 안의 명령은 따로 본다).
   - 찾는 방법을 바꿨다: 손으로 고른 사례 대신, 리다이렉션과 인자를 무작위로 섞은 명령을 실제 셸로 돌려 셸이 명령에 넘긴 인자와 `args`를 비교했다. 로컬에서 bash 3.2로 8,500건, zsh로 4,000건(bash 4부터 있는 `{이름}>`·`&>>` 포함)을 돌려 다른 것이 0건이다. 같은 대조를 2라운드에 올린 코드로 돌리면 1,500건 가운데 361건이 다르다(대조가 틀린 해석을 잡는다). 이 대조를 테스트로 넣었다(`db-commands.test.ts`, 씨앗을 고정한 500건, bash 3.2와 그 뒤 버전이 같은 뜻으로 읽는 꼴만, bash가 없으면 건너뛴다).
   - 테스트 먼저: 테스트 4개를 더하고 고치기 전에 돌려 4개 모두 실패하는 것을 봤다. 고친 뒤 테스트 4개 파일 85개 통과.
+- 2026-11-21T15:18:22+09:00 step0 재작업: 구현 판정 3라운드(codex F12): 변수 파일 디스크립터가 붙은 heredoc을 인자로 남긴다
 
 ## 의사결정 로그
 
