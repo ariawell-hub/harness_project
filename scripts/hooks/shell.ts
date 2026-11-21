@@ -9,7 +9,14 @@ export type Dialect = 'posix' | 'powershell' | 'cmd';
 const ESCAPE: Record<Dialect, string> = { posix: '\\', powershell: '`', cmd: '^' };
 
 export interface SimpleCommand {
+  /** 낱말을 그대로 담는다. 리다이렉션(`>`, `out.txt`, `2>&1`)도 낱말로 들어 있다(명령의 글을 보는 규칙이 쓴다) */
   argv: string[];
+  /**
+   * 셸이 명령에 넘기는 인자: argv에서 리다이렉션의 연산자와 대상을 뺀 것. 인자의 자리를 보는 규칙이 쓴다.
+   * 따옴표로 묶거나 이스케이프한 `>`·`<`는 인자이므로 남는다. 인자 자리의 `{`·`}`에서 명령이 나뉘면 첫 조각의 args에
+   * bash가 넘기는 나머지 인자를 붙인다(argv와 명령의 수는 그대로다). argv와 같으면 두지 않는다
+   */
+  args?: string[];
   /** 명령 앞에 붙은 VAR=값 할당과 env VAR=값 */
   assigns: Record<string, string>;
   /** env -u NAME, unset NAME */
@@ -31,9 +38,159 @@ const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 const POWERSHELLS = new Set(['powershell', 'pwsh']);
 const MAX_DEPTH = 6;
 
+/** 낱말에 든 리다이렉션(따옴표·이스케이프 밖의 `>`·`<`) */
+interface Redir {
+  /** 연산자 앞에 붙은 인자(`sub>out`의 `sub`). 없거나 파일 디스크립터 번호(`2>`)면 null */
+  arg: string | null;
+  /** 낱말이 연산자로 끝난다: 대상은 다음 낱말이다(`> out`) */
+  needsTarget: boolean;
+  /** 연산자 앞의 글 그대로(파일 디스크립터여도 담는다). 앞에 중괄호가 붙으면 디스크립터가 아니라 인자다(`{2>out`) */
+  pre: string;
+}
+
 interface Token {
   kind: 'word' | 'op';
   value: string;
+  redir?: Redir;
+  /** 연산자 `{`·`}` 바로 뒤에 공백 없이 낱말이 이어진다: bash에서는 그 낱말의 앞 글자다(`{a`, `}a`) */
+  glue?: boolean;
+}
+
+/** bash가 넘기는 인자 가운데 이 조각 뒤에 이어지는 것(인자 자리의 `{`·`}`에서 나뉜 나머지) */
+interface Tail {
+  words: string[];
+  redirs: (Redir | undefined)[];
+  /** 이어지는 인자가 끝나는 토큰의 자리 */
+  end: number;
+}
+
+/** 뒤에 오는 `{`가 묶음 괄호인 예약어(명령의 첫 낱말일 때) */
+const BEFORE_GROUP = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', 'time']);
+
+/**
+ * 토큰 k의 `{`·`}`가 인자 자리에 있을 때, 거기서부터 진짜 구분자 앞까지를 bash가 읽는 낱말로 모은다.
+ * 공백 없이 붙은 중괄호는 다음 낱말의 앞 글자다(`{a`, `}}`)
+ */
+function braceTail(tokens: Token[], k: number): Tail {
+  const words: string[] = [];
+  const redirs: (Redir | undefined)[] = [];
+  let pending = '';
+  let j = k;
+  for (; j < tokens.length; j++) {
+    const tk = tokens[j];
+    if (tk.kind === 'op') {
+      if (tk.value !== '{' && tk.value !== '}') break;
+      if (tk.glue) pending += tk.value;
+      else {
+        words.push(pending + tk.value);
+        redirs.push(undefined);
+        pending = '';
+      }
+      continue;
+    }
+    words.push(pending + tk.value);
+    redirs.push(
+      tk.redir && pending
+        ? {
+            arg: pending + tk.redir.pre,
+            needsTarget: tk.redir.needsTarget,
+            pre: pending + tk.redir.pre,
+          }
+        : tk.redir,
+    );
+    pending = '';
+  }
+  if (pending) {
+    words.push(pending);
+    redirs.push(undefined);
+  }
+  return { words, redirs, end: j };
+}
+
+/**
+ * 리다이렉션 연산자(`<`·`>`로 시작하는 것과 heredoc) 바로 앞에 붙은, 따옴표 밖의 글이 파일 디스크립터 번호인가.
+ * 일반 리다이렉션과 heredoc이 같은 판별을 쓴다. 숫자(`2>`)와 PowerShell의 `*>`(모든 스트림).
+ * bash의 디스크립터 변수(`{이름}>`)는 낱말을 읽을 때 낱말을 읽는 반복문이 따로 가린다
+ */
+function isFdPrefix(pre: string, dialect: Dialect): boolean {
+  return /^\d+$/.test(pre) || (dialect === 'powershell' && pre === '*');
+}
+
+/** 낱말을 끝내는 글자(따옴표 밖): 공백과 셸의 연산자 글자 */
+const isWordEnd = (ch: string): boolean => /\s/.test(ch) || ';&|()<>'.includes(ch);
+
+/**
+ * 자리 j에서 시작하는 "통째로 건너뛸 조각"의 다음 자리. 조각이 아니면 -1. 닫히지 않았으면 입력의 끝.
+ * 조각: 이스케이프한 글자, 따옴표로 묶은 글, `$(…)`, `${…}`, 백틱. 그 안의 공백과 연산자 글자는 낱말을 끝내지 않는다
+ */
+function skipPiece(src: string, j: number): number {
+  const ch = src[j];
+  if (ch === '\\') return Math.min(j + 2, src.length);
+  if (ch === "'" || ch === '`') {
+    const end = src.indexOf(ch, j + 1);
+    return end < 0 ? src.length : end + 1;
+  }
+  if (ch === '"') {
+    let k = j + 1;
+    while (k < src.length && src[k] !== '"') k += src[k] === '\\' ? 2 : 1;
+    return Math.min(k + 1, src.length);
+  }
+  if (ch === '$' && src[j + 1] === '(') return readParen(src, j + 2)[1];
+  if (ch === '$' && src[j + 1] === '{') {
+    let depth = 0;
+    for (let k = j + 1; k < src.length; k++) {
+      if (src[k] === '{') depth++;
+      else if (src[k] === '}' && --depth === 0) return k + 1;
+    }
+    return src.length;
+  }
+  return -1;
+}
+
+/** bash의 디스크립터 변수(`{이름}>`, `{이름[첨자]}>`)의 시작: `{이름`. 자리를 정해 두고 맞춘다(길이 제한이 없다) */
+const FD_VAR_HEAD = /\{[A-Za-z_][A-Za-z0-9_]*/y;
+
+/**
+ * 자리 i의 `{`로 시작하는 낱말이 따옴표 밖의 `}`로 끝나는가와, 그 낱말이 끝나는 자리.
+ * 그렇게 끝나는 낱말(`{}`, `{x}`, `{$x}`, `{a,{b,c}}`)은 인자다. 묶음 괄호(`{ 명령; }`)와 zsh의 `{명령 인자}`는
+ * `{` 뒤에 공백이 있거나 낱말이 `}`로 끝나지 않으므로 여기에 들지 않는다(전처럼 연산자로 읽는다)
+ */
+function braceWordAt(src: string, i: number): [closed: boolean, end: number] {
+  let j = i + 1;
+  let closed = false;
+  while (j < src.length && !isWordEnd(src[j])) {
+    const next = skipPiece(src, j);
+    if (next >= 0) {
+      j = next;
+      closed = false;
+      continue;
+    }
+    closed = src[j] === '}';
+    j++;
+  }
+  return [closed, j];
+}
+
+/** 낱말 목록에서 리다이렉션을 뺀다. 리다이렉션이 없으면 undefined */
+function shellArgs(words: string[], redirs: (Redir | undefined)[]): string[] | undefined {
+  if (!redirs.some((r) => r !== undefined)) return undefined;
+  const out: string[] = [];
+  let target = false;
+  for (let k = 0; k < words.length; k++) {
+    const r = redirs[k];
+    if (target) {
+      // 앞 연산자의 대상이다. 대상에 연산자가 붙어 있으면(`> a>`) 그 연산자의 대상이 또 이어진다
+      target = r?.needsTarget ?? false;
+      continue;
+    }
+    if (!r) {
+      out.push(words[k]);
+      continue;
+    }
+    if (r.arg !== null) out.push(r.arg);
+    target = r.needsTarget;
+  }
+  return out;
 }
 
 /** 단어·연산자 토큰화. 치환($(...)·백틱)의 내용은 subs로 따로 모은다 */
@@ -43,14 +200,127 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   const tokens: Token[] = [];
   let word = '';
   let inWord = false;
+  /** 이 낱말에서 따옴표 밖의 첫 리다이렉션 연산자가 시작한 자리(없으면 -1)와, 마지막 연산자 글자 바로 뒤의 자리 */
+  let redirAt = -1;
+  let redirEnd = -1;
+  /** 이 낱말에 따옴표·이스케이프·치환으로 들어온 글이 있는가(빈 따옴표 포함) */
+  let wordQuoted = false;
+  /** 첫 연산자 앞부분에 그런 글이 있었는가: 있으면 숫자여도 파일 디스크립터가 아니라 인자다(`'2'>out`) */
+  let preQuoted = false;
+  /** 첫 연산자가 `&`로 시작하는가(`&>`): 이 연산자는 디스크립터 번호를 받지 않아 앞의 글이 인자다(`2&>out`) */
+  let redirAmp = false;
+  /** 이 낱말의 앞부분이 bash의 디스크립터 변수(`{이름}`, `{이름[첨자]}`)다: 첨자에 따옴표가 있어도 인자가 아니다 */
+  let fdVar = false;
+  /** 이 자리 앞에서 시작하는 `{`는 중괄호 낱말이 아님을 이미 확인했다(같은 낱말을 `{`마다 다시 읽지 않는다) */
+  let braceFailEnd = -1;
+  /**
+   * `{이름[`으로 시작한 낱말을 디스크립터 변수로 읽어 보는 중이다. 첨자 안의 글(따옴표, 치환, 이스케이프)은 낱말의 다른 곳과
+   * 같은 코드가 읽는다. 짝이 맞는 `]` 뒤에 `}`와 `<`·`>`가 오면 디스크립터 변수이고, 그 전에 낱말이 끝나면 아니다.
+   * start: `{`의 자리, open: 첨자를 연 `[`의 자리, depth: `[`의 깊이, subs: 시작할 때 모아 둔 치환의 수,
+   * pairs: 첨자 안에서 열린 `${…}`·`$[…]`가 기다리는 닫는 글자(bash는 그 안을 공백이 있어도 낱말 하나로 읽는다),
+   * dead: 디스크립터 변수가 아님을 알았다(낱말이 끝나는 자리만 마저 찾는다)
+   */
+  let sub: {
+    start: number;
+    open: number;
+    depth: number;
+    subs: number;
+    pairs: string[];
+    dead: boolean;
+  } | null = null;
+  /**
+   * 이 자리 앞에서는 디스크립터 변수를 찾지 않는다. 읽다 그만둔 낱말은 bash에서도 그 끝까지 낱말 하나이므로(`${…}` 안의 공백 포함)
+   * 그 안에서 다시 시도하지 않는다. 그래서 시도한 구간이 겹치지 않고 전체 시간이 입력 길이에 비례한다
+   */
+  let noSubBefore = 0;
+  /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
+  const redirOp = (ch: string) => {
+    if (redirAt < 0) {
+      redirAt = word.length;
+      preQuoted = wordQuoted;
+      redirAmp = ch === '&';
+    }
+    word += ch;
+    redirEnd = word.length;
+    inWord = true;
+  };
   const push = () => {
-    if (inWord) tokens.push({ kind: 'word', value: word });
+    if (inWord) {
+      const t: Token = { kind: 'word', value: word };
+      if (redirAt >= 0) {
+        const pre = word.slice(0, redirAt);
+        // 연산자 바로 앞의, 따옴표 밖의 글이 파일 디스크립터면 인자가 아니다(`2>`, `{이름}>`)
+        const fd = fdVar || (!preQuoted && !redirAmp && isFdPrefix(pre, dialect));
+        // 따옴표로 묶은 앞부분은 빈 글이어도 인자다(`''>out`)
+        const arg = fd ? null : preQuoted || pre !== '' ? pre : null;
+        t.redir = { arg, needsTarget: redirEnd === word.length, pre };
+      }
+      tokens.push(t);
+    }
     word = '';
     inWord = false;
+    redirAt = -1;
+    redirEnd = -1;
+    wordQuoted = false;
+    preQuoted = false;
+    redirAmp = false;
+    fdVar = false;
   };
   const heredocs: string[] = [];
   let i = 0;
-  while (i < src.length) {
+  /** 디스크립터 변수가 아니었다: 읽은 것을 버리고 `{`의 자리로 돌아가 전처럼 읽는다(그사이 모은 치환도 버린다) */
+  const giveUpSub = (s: { start: number; subs: number }, end: number) => {
+    subs.length = s.subs;
+    noSubBefore = Math.max(end, s.start + 1);
+    i = s.start;
+    sub = null;
+    word = '';
+    inWord = false;
+    wordQuoted = false;
+  };
+  while (i < src.length || sub) {
+    if (sub) {
+      const ch = src[i];
+      if (ch === undefined) {
+        giveUpSub(sub, i);
+        continue;
+      }
+      if (ch === '$' && (src[i + 1] === '{' || src[i + 1] === '[')) {
+        // `${…}`·`$[…]`: 닫는 글자까지 낱말이 이어진다
+        sub.pairs.push(src[i + 1] === '{' ? '}' : ']');
+        word += src.slice(i, i + 2);
+        i += 2;
+        continue;
+      }
+      const closer = sub.pairs[sub.pairs.length - 1];
+      if (closer !== undefined) {
+        // 그 안의 공백과 연산자 글자는 낱말을 끝내지 않는다. 따옴표·이스케이프·치환·보통 글자는 아래의 낱말 읽기가 읽는다
+        if (ch === closer || (closer === ']' && ch === '[') || isWordEnd(ch)) {
+          if (ch === closer) sub.pairs.pop();
+          else if (ch === '[') sub.pairs.push(']');
+          word += ch;
+          i++;
+          continue;
+        }
+      } else if (isWordEnd(ch)) {
+        giveUpSub(sub, i);
+        continue;
+      } else if (!sub.dead) {
+        if (ch === '[') sub.depth++;
+        else if (ch === ']' && --sub.depth === 0) {
+          // 첨자는 비어 있으면 안 되고, 바로 뒤에 `}`와 리다이렉션 연산자가 와야 한다
+          const after = src[i + 2];
+          if (i > sub.open + 1 && src[i + 1] === '}' && (after === '<' || after === '>')) {
+            word += ']}';
+            fdVar = true;
+            sub = null;
+            i += 2;
+            continue;
+          }
+          sub.dead = true;
+        }
+      }
+    }
     const c = src[i];
     // heredoc 본문 건너뛰기: 줄바꿈을 만나면 대기 중인 구분자까지 소비
     if (c === '\n' && heredocs.length) {
@@ -75,6 +345,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       }
       word += src[i + 1];
       inWord = true;
+      wordQuoted = true;
       i += 2;
       continue;
     }
@@ -91,6 +362,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       const stop = end < 0 ? src.length : end;
       word += src.slice(i + 1, stop);
       inWord = true;
+      wordQuoted = true;
       i = stop + 1;
       continue;
     }
@@ -128,6 +400,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       }
       word += buf;
       inWord = true;
+      wordQuoted = true;
       i = j + 1;
       continue;
     }
@@ -136,6 +409,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       subs.push(inner);
       word += '$(…)';
       inWord = true;
+      wordQuoted = true;
       i = next;
       continue;
     }
@@ -145,16 +419,29 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       subs.push(src.slice(i + 1, stop));
       word += '`…`';
       inWord = true;
+      wordQuoted = true;
       i = stop + 1;
       continue;
     }
-    if (c === '#' && !inWord && dialect !== 'cmd') {
+    if (c === '#' && !inWord && dialect !== 'cmd' && !tokens[tokens.length - 1]?.glue) {
       // 주석: 줄 끝까지
       const end = src.indexOf('\n', i);
       i = end < 0 ? src.length : end;
       continue;
     }
+    // here-string(`<<< 낱말`)은 heredoc이 아니다: 연산자 하나로 읽는다(대상은 뒤의 낱말)
+    if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] === '<') {
+      redirOp('<');
+      redirOp('<');
+      redirOp('<');
+      i += 3;
+      continue;
+    }
     if (posix && c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
+      // heredoc 연산자 앞에 붙은, 따옴표 밖의 파일 디스크립터(`3<<EOF`, `{fd}<<EOF`)는 인자에서 뺀다.
+      // 일반 리다이렉션과 같은 판별이다
+      if (inWord && redirAt < 0 && (fdVar || (!wordQuoted && isFdPrefix(word, dialect))))
+        redirAt = 0;
       push();
       let j = i + 2;
       if (src[j] === '-') j++;
@@ -188,14 +475,80 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         i++;
         continue;
       }
-      if (c === '&' && (src[i - 1] === '>' || src[i + 1] === '>')) {
+      // 연산자 글자 바로 뒤(`>&`, `<&`: 디스크립터 복제·닫기)이거나 `&>`의 시작이면 리다이렉션 연산자의 글자다
+      if (c === '&' && ((redirAt >= 0 && redirEnd === word.length) || src[i + 1] === '>')) {
+        redirOp(c);
+        i++;
+        continue;
+      }
+      // 따옴표로 묶은 `>` 바로 뒤의 `&`는 전처럼 낱말의 글자로 둔다
+      if (c === '&' && src[i - 1] === '>') {
         word += c;
         inWord = true;
         i++;
         continue;
       }
+      if (posix && c === '{' && !inWord) {
+        // bash의 디스크립터 변수 + 리다이렉션(`{fd}>out`, `{fds[$i]}>out`): 낱말 전체가 리다이렉션의 일부다
+        // (셸이 디스크립터를 골라 그 변수에 넣는다). 이름 부분에 따옴표가 있으면 디스크립터 변수가 아니다
+        FD_VAR_HEAD.lastIndex = i;
+        if (i >= noSubBefore && FD_VAR_HEAD.test(src)) {
+          const j = FD_VAR_HEAD.lastIndex;
+          if (src[j] === '}' && (src[j + 1] === '<' || src[j + 1] === '>')) {
+            word += src.slice(i, j + 1);
+            inWord = true;
+            fdVar = true;
+            i = j + 1;
+            continue;
+          }
+          if (src[j] === '[') {
+            // 배열 원소: 첨자는 아래의 낱말 읽기가 그대로 읽는다(반복문 첫머리가 끝을 가린다)
+            sub = { start: i, open: j, depth: 1, subs: subs.length, pairs: [], dead: false };
+            word += src.slice(i, j + 1);
+            inWord = true;
+            i = j + 1;
+            continue;
+          }
+        }
+        // 공백 없이 `}`로 닫히는 낱말(`{}`, `{x}`, `{$x}`)은 묶음 괄호가 아니라 인자다
+        if (i >= braceFailEnd) {
+          const [closed, end] = braceWordAt(src, i);
+          if (closed) {
+            word += c;
+            inWord = true;
+            i++;
+            continue;
+          }
+          braceFailEnd = end;
+        }
+      }
+      // `>|`(noclobber를 무시하는 출력)는 파이프가 아니다
+      if (posix && c === '|' && redirAt >= 0 && redirEnd === word.length && word.endsWith('>')) {
+        redirOp(c);
+        i++;
+        continue;
+      }
       push();
-      tokens.push({ kind: 'op', value: c });
+      const op: Token = { kind: 'op', value: c };
+      // 공백 없이 낱말이 이어지는 중괄호(`{a`, `}a`, `{{a`)
+      const nx = src[i + 1];
+      if (posix && (c === '{' || c === '}') && nx !== undefined && !isWordEnd(nx)) op.glue = true;
+      tokens.push(op);
+      i++;
+      continue;
+    }
+    // 프로세스 치환 `<(…)`·`>(…)`은 리다이렉션이 아니라 인자 하나다(셸이 경로로 바꿔 넘긴다). 안의 명령은 따로 본다
+    if (posix && (c === '>' || c === '<') && src[i + 1] === '(') {
+      const [inner, next] = readParen(src, i + 2);
+      subs.push(inner);
+      word += `${c}(…)`;
+      inWord = true;
+      wordQuoted = true;
+      i = next;
+      continue;
+    }
+    if (c === '>' || c === '<') {
+      redirOp(c);
       i++;
       continue;
     }
@@ -278,7 +631,14 @@ function powershellScript(args: string[]): string | null {
   return null;
 }
 
-function normalize(words: string[], out: SimpleCommand[], depth: number, dialect: Dialect): void {
+function normalize(
+  words: string[],
+  out: SimpleCommand[],
+  depth: number,
+  dialect: Dialect,
+  redirs?: (Redir | undefined)[],
+  tail?: Tail,
+): void {
   const assigns: Record<string, string> = {};
   const unsets: string[] = [];
   let i = 0;
@@ -342,10 +702,19 @@ function normalize(words: string[], out: SimpleCommand[], depth: number, dialect
     if (Object.keys(assigns).length) out.push({ argv: [], assigns, unsets });
     return;
   }
+  const own = redirs ? redirs.slice(i) : argv.map(() => undefined);
+  let args = redirs ? shellArgs(argv, own) : undefined;
+  if (tail) {
+    // 인자 자리의 `{`·`}`에서 나뉜 나머지도 bash는 이 명령에 넘긴다
+    const words = [...argv, ...tail.words];
+    args = shellArgs(words, [...own, ...tail.redirs]) ?? words;
+  }
+  /** argv와, 셸이 넘기는 인자가 argv와 다를 때만 args */
+  const base = args ? { argv, args } : { argv };
   const head = commandName(argv[0]);
   if (head === 'unset') {
     out.push({
-      argv,
+      ...base,
       assigns,
       unsets: [...unsets, ...argv.slice(1).filter((a) => !a.startsWith('-'))],
     });
@@ -363,10 +732,10 @@ function normalize(words: string[], out: SimpleCommand[], depth: number, dialect
       const mm = ASSIGN_RE.exec(x);
       if (mm) a[mm[1]] = mm[2];
     }
-    out.push({ argv, assigns: a, unsets });
+    out.push({ ...base, assigns: a, unsets });
     return;
   }
-  out.push({ argv, assigns, unsets });
+  out.push({ ...base, assigns, unsets });
   if (depth >= MAX_DEPTH) return;
   // 재귀: bash -c "...", eval ..., powershell -Command ..., cmd /c ..., iex ...
   if (SHELLS.has(head)) {
@@ -391,17 +760,45 @@ function normalize(words: string[], out: SimpleCommand[], depth: number, dialect
   }
 }
 
+/** 이 낱말들 뒤의 `{`가 묶음 괄호인가: 예약어 하나뿐이거나(`then {`, `do {`), 함수·코프로세스 선언이다 */
+function beforeGroup(cur: string[]): boolean {
+  if (cur.length === 1 && BEFORE_GROUP.has(cur[0])) return true;
+  return cur[0] === 'function' || cur[0] === 'coproc';
+}
+
 function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Dialect): void {
   const subs: string[] = [];
   const tokens = tokenize(src, subs, dialect);
   let cur: string[] = [];
-  for (const t of tokens) {
+  let curRedirs: (Redir | undefined)[] = [];
+  /** 이 자리 앞의 토큰은 앞 조각의 args에 이미 담았다(조각마다 다시 모으지 않는다) */
+  let tailEnd = 0;
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
     if (t.kind === 'op') {
-      if (cur.length) normalize(cur, out, depth, dialect);
+      if (cur.length) {
+        // bash는 명령의 첫 낱말 자리가 아닌 곳의 `{`·`}`를 낱말로 넘긴다. 명령은 전처럼 여기서 나누고(argv는 그대로다),
+        // 첫 조각의 args에 bash가 넘기는 인자를 진짜 구분자 앞까지 담는다
+        let tail: Tail | undefined;
+        if (
+          dialect === 'posix' &&
+          (t.value === '{' || t.value === '}') &&
+          k >= tailEnd &&
+          !(t.value === '{' && beforeGroup(cur))
+        ) {
+          tail = braceTail(tokens, k);
+          tailEnd = tail.end;
+        }
+        normalize(cur, out, depth, dialect, curRedirs, tail);
+      }
       cur = [];
-    } else cur.push(t.value);
+      curRedirs = [];
+    } else {
+      cur.push(t.value);
+      curRedirs.push(t.redir);
+    }
   }
-  if (cur.length) normalize(cur, out, depth, dialect);
+  if (cur.length) normalize(cur, out, depth, dialect, curRedirs);
   if (depth < MAX_DEPTH) for (const s of subs) parseInto(s, out, depth + 1, dialect);
 }
 

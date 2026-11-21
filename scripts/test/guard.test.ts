@@ -78,6 +78,11 @@ const BLOCK: [string, string][] = [
   ['pnpm prisma db push', 'R13'],
   ['npx prisma migrate reset --force', 'R13'],
   ['pnpm drizzle-kit push', 'R13'],
+  ['pnpm drizzle-kit --config drizzle.config.ts push', 'R13'],
+  ['npx drizzle-kit@latest push', 'R13'],
+  ['pnpm dlx drizzle-kit@0.31.11 --config "team config.ts" push', 'R13'],
+  ['npx prisma --schema prisma/schema.prisma db push', 'R13'],
+  ['npx prisma@6 --schema "my schema.prisma" migrate reset', 'R13'],
   [`node -e "db.query('DROP TABLE users')"`, 'R13'],
   [`node -e "db.query('DELETE FROM users')"`, 'R13'],
   ['echo "UPDATE users SET admin = true" | sqlite3 dev.db', 'R13'],
@@ -102,6 +107,11 @@ const ALLOW = [
   'gh auth status',
   'node scripts/harness.ts check',
   'pnpm test',
+  'pnpm drizzle-kit generate --name push',
+  'pnpm drizzle-kit --config "team push config.ts" generate',
+  'npx prisma migrate status',
+  'npx prisma --schema prisma/schema.prisma migrate dev --name reset',
+  'cat prisma/schema.prisma',
   'cat .env.example',
   'ls -la .env',
   'rm -rf /tmp/harness-x',
@@ -869,4 +879,68 @@ test('guard 프로세스: MCP 규칙은 메인 체크아웃의 guard.mcp로 판�
   assert.equal(bad.code, 2);
   assert.match(bad.stderr, /guard\.mcp\.denyWords/);
   assert.equal(runGuard({ tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: main }).code, 0);
+});
+
+test('guard 프로세스: guard.dbCommands는 메인 체크아웃의 설정으로 판정하고, 틀린 설정이면 Bash 호출을 막는다', () => {
+  const dir = tmp();
+  const main = path.join(dir, 'repo');
+  gitInit(main);
+  const put = (root: string, dbCommands?: unknown) =>
+    write(
+      root,
+      'harness.config.json',
+      JSON.stringify({ guard: dbCommands === undefined ? {} : { dbCommands } }),
+    );
+  const bash = (cwd: string, command: string) =>
+    runGuard({ tool_name: 'Bash', tool_input: { command }, cwd });
+  put(main, [{ tool: 'knex', forbidden: ['migrate:latest'] }]);
+  commitAll(main);
+  const forbidden = 'npx knex --knexfile "my knexfile.js" migrate:latest';
+  const blocked = bash(main, forbidden);
+  assert.equal(blocked.code, 2);
+  assert.match(blocked.stderr, /R13/);
+  assert.equal(
+    bash(main, 'npx knex --knexfile "my migrate:latest file.js" migrate:status').code,
+    0,
+  );
+
+  // worktree의 설정이 빈 목록이거나 키가 없어도(병합 전) 메인 체크아웃의 설정으로 막는다
+  const wt = path.join(dir, 'wt');
+  sh('git', ['worktree', 'add', '-q', '-b', 'chore/20261121-relax-s0', wt], main);
+  put(wt, []);
+  assert.equal(bash(wt, forbidden).code, 2, 'worktree의 빈 목록이 메인의 차단을 풀지 못한다');
+  put(wt);
+  assert.equal(bash(wt, forbidden).code, 2, 'worktree에 키가 없어도 메인의 차단이 남는다');
+  // worktree의 설정에만 있는 항목은 적용되지 않는다(출처는 메인이다)
+  put(wt, [{ tool: 'sequelize', forbidden: ['db:migrate'] }]);
+  assert.equal(bash(wt, 'npx sequelize db:migrate').code, 0);
+  assert.equal(bash(wt, forbidden).code, 2);
+
+  // 메인의 설정이 틀리면 조용히 꺼지지 않고 Bash 호출을 막는다(fail-closed). 금지 호출이 아니어도 막힌다
+  put(main, [{ tool: '-knex', forbidden: ['migrate:latest'] }]);
+  // 인자가 없는 명령(할당뿐, 주석뿐)도 막힌다: 설정 검사는 명령의 내용과 무관하게 돈다
+  for (const cwd of [main, wt])
+    for (const command of ['ls', 'REVIEW_SAMPLE=1', '# 주석뿐이다', ':']) {
+      const bad = bash(cwd, command);
+      assert.equal(bad.code, 2, command);
+      assert.match(bad.stderr, /설정을 읽지 못해/);
+      assert.match(bad.stderr, /guard\.dbCommands\[0\]\.tool/);
+    }
+  // Bash가 아닌 도구는 이 설정을 읽지 않는다: 설정을 읽고 고칠 길이 남는다
+  const read = runGuard({
+    tool_name: 'Read',
+    tool_input: { file_path: path.join(main, 'harness.config.json') },
+    cwd: main,
+  });
+  assert.equal(read.code, 0);
+  const editCall = runGuard({
+    tool_name: 'Edit',
+    tool_input: {
+      file_path: path.join(wt, 'harness.config.json'),
+      old_string: 'a',
+      new_string: 'b',
+    },
+    cwd: wt,
+  });
+  assert.doesNotMatch(editCall.stderr, /설정을 읽지 못해/);
 });

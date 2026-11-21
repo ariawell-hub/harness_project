@@ -68,7 +68,12 @@ export interface HarnessConfig {
   commands: Record<StandardName, CommandDef | null>;
   docLint: { agentsMdMaxLines: number; exclude: string[] };
   bypass: { extraPatterns: string[]; excludeExtensions: string[] };
-  guard: { dbPatterns: string[]; dbClients: string[]; mcp: McpGuardConfig };
+  guard: {
+    dbPatterns: string[];
+    dbClients: string[];
+    dbCommands: DbCommandRule[];
+    mcp: McpGuardConfig;
+  };
   planReview: { required: boolean };
   riskPaths: { glob: string; risk: 'low' | 'normal' | 'high' }[];
   protectedPaths: string[];
@@ -227,6 +232,77 @@ export const DEFAULT_MCP_GUARD: McpGuardConfig = {
   denyHosts: ['github.com', '*.github.com', 'github.dev', '*.github.dev'],
 };
 
+/** 도구의 금지 하위 명령(R13). L1 훅이 인자 배열의 자리로 판정한다(scripts/hooks/db-commands.ts) */
+export interface DbCommandRule {
+  /** 도구 이름(예: `drizzle-kit`) */
+  tool: string;
+  /** 금지 하위 명령. 낱말이 둘 이상이면 공백으로 나눠 적는다(예: `db push`) */
+  forbidden: string[];
+}
+
+/** 도구 이름에 허용하는 글자. 이 밖의 글자가 든 이름은 인자의 경로 조각과 같아질 수 없거나(`/`, `@`, 공백) 플래그로 읽힌다(`-`로 시작) */
+const DB_TOOL_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+/** 도구 자리를 찾을 때 떼고 비교하는 실행 파일 확장자. 이것으로 끝나는 이름은 걸 수 없다 */
+const DB_TOOL_EXEC_EXT = /\.(exe|cmd|bat|com)$/;
+
+/**
+ * `guard.dbCommands`를 검증해 정규화한다. 키가 없으면 빈 목록이다(옛 설정 파일과 호환). L1 훅도 이 함수로 읽는다.
+ * 통과한 규칙은 모두 실제로 걸 수 있다: `[tool, ...금지 항목의 낱말들]`은 반드시 금지로 판정된다.
+ * 걸 수 없는 항목을 조용히 받아 주면 오타 하나로 규칙이 꺼진 것을 아무도 모른다.
+ */
+export function resolveDbCommands(raw: unknown): DbCommandRule[] {
+  if (raw === undefined) return [];
+  const problems: string[] = [];
+  const out: DbCommandRule[] = [];
+  if (!Array.isArray(raw)) problems.push('guard.dbCommands는 배열이어야 한다');
+  else
+    raw.forEach((item: unknown, i) => {
+      const at = `guard.dbCommands[${i}]`;
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+        problems.push(`${at}는 객체여야 한다({ "tool": …, "forbidden": […] })`);
+        return;
+      }
+      const before = problems.length;
+      for (const key of Object.keys(item))
+        if (key !== 'tool' && key !== 'forbidden') problems.push(`${at}.${key}는 모르는 키다`);
+      const { tool, forbidden } = item as { tool?: unknown; forbidden?: unknown };
+      let name = '';
+      if (typeof tool !== 'string') problems.push(`${at}.tool은 문자열이어야 한다`);
+      else {
+        name = tool.trim().toLowerCase();
+        if (!DB_TOOL_NAME.test(name))
+          problems.push(
+            `${at}.tool은 영문 소문자·숫자로 시작하고 영문·숫자·\`.\`·\`_\`·\`-\`만 담아야 한다(경로, 버전, 공백, \`-\`로 시작하는 이름은 걸리지 않는다)`,
+          );
+        else if (DB_TOOL_EXEC_EXT.test(name))
+          problems.push(
+            `${at}.tool은 실행 파일 확장자(.exe·.cmd·.bat·.com) 없이 적는다(확장자를 떼고 비교하므로 걸리지 않는다)`,
+          );
+      }
+      const subs: string[] = [];
+      if (!Array.isArray(forbidden)) problems.push(`${at}.forbidden은 문자열 배열이어야 한다`);
+      else if (forbidden.length === 0) problems.push(`${at}.forbidden이 비어 있다`);
+      else
+        forbidden.forEach((f: unknown, j) => {
+          if (typeof f !== 'string') {
+            problems.push(`${at}.forbidden[${j}]은 문자열이어야 한다`);
+            return;
+          }
+          const words = f.toLowerCase().split(/\s+/).filter(Boolean);
+          if (words.length === 0) problems.push(`${at}.forbidden[${j}]이 비어 있다`);
+          else if (words[0].startsWith('-'))
+            problems.push(
+              `${at}.forbidden[${j}]의 첫 낱말이 \`-\`로 시작한다(플래그로 읽혀 걸리지 않는다)`,
+            );
+          else subs.push(words.join(' '));
+        });
+      if (problems.length === before) out.push({ tool: name, forbidden: subs });
+    });
+  if (problems.length)
+    throw new ConfigError(`${CONFIG_FILE} 검증 실패:\n- ${problems.join('\n- ')}`);
+  return out;
+}
+
 /** `guard.mcp`를 검증해 기본값을 채운다. 키가 없으면 기본값이다(옛 설정 파일과 호환). L1 훅도 이 함수로 읽는다 */
 export function resolveMcpGuard(raw: unknown): McpGuardConfig {
   const out: McpGuardConfig = {
@@ -315,6 +391,7 @@ export function loadConfig(repoRoot: string): HarnessConfig {
   cfg.protectedPaths ??= [];
   cfg.planReview ??= { required: false };
   cfg.guard.mcp = resolveMcpGuard(cfg.guard.mcp);
+  cfg.guard.dbCommands = resolveDbCommands(cfg.guard.dbCommands);
   const ci: Partial<HarnessConfig['ci']> = cfg.ci ?? {};
   cfg.ci = {
     environments: ci.environments ?? [...DEFAULT_ENVIRONMENTS],

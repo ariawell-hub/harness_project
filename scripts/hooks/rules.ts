@@ -3,10 +3,11 @@
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
-import { DEFAULT_MCP_GUARD, type McpGuardConfig } from '../lib/config.ts';
+import { DEFAULT_MCP_GUARD, type DbCommandRule, type McpGuardConfig } from '../lib/config.ts';
 import type { RepoInfo } from '../lib/git.ts';
 import { PLANS_DIR, parseBranch } from '../lib/plan.ts';
 import { globToRegExp, type Problem } from '../lib/util.ts';
+import { matchDbCommand } from './db-commands.ts';
 import {
   baseName,
   commandName,
@@ -40,6 +41,8 @@ export interface GuardContext {
   hasPlan: (root: string, id: string) => boolean;
   dbPatterns: string[];
   dbClients: string[];
+  /** 설정의 `guard.dbCommands`. Bash 명령을 판정할 때만 부른다. 설정이 틀리면 던진다(훅이 그 호출을 막는다) */
+  dbCommands?: () => DbCommandRule[];
   home?: string;
   tmpDirs?: string[];
   /** 경로가 속한 리포(worktree). 없으면 쓰기 대상을 세션의 리포 기준으로만 판정한다 */
@@ -509,7 +512,17 @@ const DB_PATTERNS: RegExp[] = [
   /\bflushall\b|\bflushdb\b/i,
 ];
 
-function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
+/**
+ * 하위 명령을 인자 배열의 자리로 보는 금지 항목(설정 `guard.dbCommands`가 더한다).
+ * 위 정규식은 인자를 이은 글을 보므로 플래그가 앞에 오는 호출(`drizzle-kit --config x push`),
+ * 버전을 붙인 호출(`drizzle-kit@latest push`), 값에 공백이 든 호출을 놓친다. 정규식은 그대로 두고 이것을 더한다
+ */
+const DB_COMMANDS: DbCommandRule[] = [
+  { tool: 'drizzle-kit', forbidden: ['push'] },
+  { tool: 'prisma', forbidden: ['db push', 'migrate reset'] },
+];
+
+function dbRules(c: SimpleCommand, ctx: GuardContext, commands: DbCommandRule[]): Problem | null {
   const clients = new Set([...DB_CLIENTS, ...ctx.dbClients]);
   const hit = c.argv.find((x) => clients.has(commandName(x)));
   if (hit) {
@@ -528,6 +541,16 @@ function dbRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
       'R13 DB 위험 작업',
       `금지된 DB 작업을 실행하려 했다: ${text.slice(0, 160)}`,
       '데이터 삭제·스키마 파괴·스키마 diff 자동 적용은 에이전트가 실행하지 않는다. 마이그레이션 파일로 작성하면 위험도 높음 + 제작자 승인으로 처리된다',
+      `${D} R13, 14.3절`,
+    );
+  }
+  // 셸이 명령에 넘기는 인자로 본다: 리다이렉션(`tool > out.txt push`)은 인자가 아니다
+  const cmd = matchDbCommand(c.args ?? c.argv, commands);
+  if (cmd) {
+    return v(
+      'R13 DB 위험 작업',
+      `금지된 DB 작업을 실행하려 했다: ${cmd.tool}의 하위 명령 ${cmd.sub}`,
+      '데이터 삭제·스키마 파괴·스키마 diff 자동 적용은 에이전트가 실행하지 않는다. 마이그레이션 파일로 작성하면 위험도 높음 + 제작자 승인으로 처리된다. 플래그의 값이 금지 하위 명령과 같은 글이면 `--이름=값`으로 붙여 써라',
       `${D} R13, 14.3절`,
     );
   }
@@ -892,6 +915,9 @@ export function evaluateBash(
   ctx: GuardContext,
   dialect: Dialect = 'posix',
 ): Problem | null {
+  // 설정(guard.dbCommands)은 명령의 내용과 무관하게 Bash 호출마다 한 번 읽는다. 틀린 설정이면 여기서 던져
+  // 훅이 그 호출을 막는다: 인자가 없는 명령(할당뿐, 주석뿐)이나 앞의 규칙에 걸린 명령도 지나치지 않는다
+  const dbCommands = [...DB_COMMANDS, ...(ctx.dbCommands?.() ?? [])];
   const raw = rawRules(command);
   if (raw) return raw;
   let procedural: Problem | null = null;
@@ -901,7 +927,7 @@ export function evaluateBash(
       secretRules(c, ctx) ??
       (head === 'git' ? gitRules(c, cwd, ctx) : null) ??
       (head === 'gh' ? ghRules(c, cwd, ctx) : null) ??
-      (c.argv.length ? dbRules(c, ctx) : null) ??
+      (c.argv.length ? dbRules(c, ctx, dbCommands) : null) ??
       (c.argv.length ? rmRule(c, cwd, ctx) : null) ??
       (c.argv.length ? externalRules(c) : null);
     // 금지 규칙(R…)이 먼저다. 승인 요청 순서 같은 절차 안내는 뒤 명령의 금지 규칙과 검사 순서 규칙을 가리지 않는다
@@ -1147,6 +1173,8 @@ export function evaluateMcp(input: GuardInput, ctx: GuardContext): Problem | nul
 
 export function evaluate(input: GuardInput, ctx: GuardContext): Problem | null {
   if (input.kind === 'mcp') return evaluateMcp(input, ctx);
+  // 빈 명령도 Bash 호출이다: 설정(guard.dbCommands) 검사는 지나치지 않는다
+  if (input.kind === 'bash' && !input.command) ctx.dbCommands?.();
   if (input.kind === 'bash' && input.command) {
     for (const d of input.dialects ?? ['posix']) {
       const r = evaluateBash(input.command, input.cwd, ctx, d);
