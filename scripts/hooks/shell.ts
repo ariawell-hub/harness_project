@@ -276,7 +276,7 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
    * 따옴표를 벗긴 낱말을 `<`·`>`로 다시 나누지 않으려고 읽으면서 적는다(따옴표 안의 `>`는 파일 이름의 글자다)
    */
   let runs: number[] = [];
-  /** here-string(`<<<`) 연산자의 구간이 runs에서 시작하는 자리. 그 뒤의 글은 파일이 아니다 */
+  /** here-string(`<<<`) 연산자의 구간이 runs에서 시작하는 자리(커지는 차례, 겹치지 않는다). 그 뒤의 글은 파일이 아니다 */
   let hereRuns: number[] = [];
   /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
   const redirOp = (ch: string) => {
@@ -303,8 +303,13 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         const arg = fd ? null : preQuoted || pre !== '' ? pre : null;
         t.redir = { arg, needsTarget: redirEnd === word.length, pre };
         const targets: string[] = [];
+        // hereRuns는 커지는 차례로 적혀 있다: 구간과 함께 한 번에 지나간다(구간마다 목록을 다시 찾지 않는다)
+        let h = 0;
         for (let k = 0; k < runs.length; k += 2) {
-          if (hereRuns.includes(k)) continue;
+          if (hereRuns[h] === k) {
+            h++;
+            continue;
+          }
           const piece = word.slice(runs[k + 1], runs[k + 2] ?? word.length);
           if (piece) targets.push(piece);
         }
@@ -491,7 +496,8 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
       redirOp('<');
       redirOp('<');
       redirOp('<');
-      hereRuns.push(runs.length - 2);
+      // 앞의 연산자에 바로 이어진 here-string(`<<<<<<`)은 같은 구간이다: 한 번만 적는다
+      if (hereRuns[hereRuns.length - 1] !== runs.length - 2) hereRuns.push(runs.length - 2);
       i += 3;
       continue;
     }
@@ -866,7 +872,12 @@ function normalize(
   }
   // 낱말에 붙은 리다이렉션의 대상: 토큰화가 연산자의 경계로 낸 것(`<a>b`는 a와 b, `<'a>b'`는 `a>b` 하나)
   const targets: string[] = [];
-  if (hasRedirs) for (const r of own) if (r?.targets) targets.push(...r.targets);
+  if (hasRedirs)
+    for (const r of own) {
+      if (!r?.targets) continue;
+      // 하나씩 더한다: 배열을 인자로 펼치면 대상이 아주 많은 입력에서 함수 인자의 한도를 넘는다
+      for (const target of r.targets) targets.push(target);
+    }
   /** argv와, 셸이 넘기는 인자가 argv와 다를 때만 args. 붙은 대상이 있을 때만 targets */
   const base: Pick<SimpleCommand, 'argv' | 'args' | 'targets'> = args ? { argv, args } : { argv };
   if (targets.length) base.targets = targets;
@@ -939,10 +950,13 @@ function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Di
   /**
    * 조건식 `[[ … ]]` 안이다. zsh는 `if [[ … ]] 명령`의 명령을 실행하므로 조건식이 끝난 자리에서 명령을 나눈다.
    * 시작: 따옴표가 없고 리다이렉션이 붙지 않은 `[[`가 명령의 첫 낱말 자리에 있을 때만이다(인자 자리의 `[[`, `"[["`는 예약어가 아니다).
+   * 첫 낱말 자리: 앞의 낱말이 모두 따옴표·이스케이프 없는 예약어다. `"then" [[ a ]] x`의 `then`은 명령 이름이고 `[[`는 그 인자다.
    * 끝: 따옴표 없는 `]]`. 따옴표로 묶은 `"]]"`는 피연산자다. 조건식 안의 연산자(`&&`, `||`, 괄호, 줄바꿈)는 조건식을 끝내지 않는다.
    * bash에서는 `[[ … ]]` 뒤에 연산자가 와야 하므로 바른 bash 명령의 조각은 달라지지 않는다
    */
   let cond = false;
+  /** cur의 낱말이 모두 따옴표·이스케이프·리다이렉션 없는 예약어다(비어 있어도 참). 조건식이 설 수 있는 자리다 */
+  let bare = true;
   for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k];
     if (t.kind === 'op') {
@@ -963,23 +977,19 @@ function parseInto(src: string, out: SimpleCommand[], depth: number, dialect: Di
       }
       cur = [];
       curRedirs = [];
+      bare = true;
     } else {
-      if (
-        dialect === 'posix' &&
-        !cond &&
-        t.value === '[[' &&
-        !t.quoted &&
-        !t.redir &&
-        cur.every((w) => BEFORE_COND.has(w))
-      )
+      if (dialect === 'posix' && !cond && bare && t.value === '[[' && !t.quoted && !t.redir)
         cond = true;
       cur.push(t.value);
       curRedirs.push(t.redir);
+      bare = bare && !t.quoted && !t.redir && BEFORE_COND.has(t.value);
       // 조건식의 끝: `]]`, 또는 `]]`에 리다이렉션이 붙은 낱말(`]]>out`)
       if (cond && (t.redir ? t.redir.pre === ']]' : t.value === ']]' && !t.quoted)) {
         normalize(cur, out, depth, dialect, curRedirs);
         cur = [];
         curRedirs = [];
+        bare = true;
         // 리다이렉션이 붙은 낱말에 따옴표가 있으면 `]]`가 따옴표 안이었을 수 있다: 나누기만 하고 조건식은 끝내지 않는다
         if (!t.quoted) cond = false;
       }

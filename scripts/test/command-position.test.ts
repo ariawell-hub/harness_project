@@ -452,6 +452,12 @@ const NOT_COMMAND: Frame[] = [
   ['"[[" -n x ]] C', (c) => `"[[" -n x ]] ${c}`],
   ['echo then C', (c) => `echo then ${c}`],
   ["tool2 <'in>put' C", (c) => `tool2 <'in>put' ${c}`],
+  // 따옴표·이스케이프로 묶은 예약어는 예약어가 아니라 명령 이름이다: 그 뒤의 `[[`는 인자이고 조건식이 아니다
+  ['"then" [[ a ]] C', (c) => `"then" [[ a ]] ${c}`],
+  ["'if' [[ a ]] C", (c) => `'if' [[ a ]] ${c}`],
+  ['\\if [[ a ]] C', (c) => `\\if [[ a ]] ${c}`],
+  ['"!" [[ a ]] C', (c) => `"!" [[ a ]] ${c}`],
+  ['"time" [[ a ]] C', (c) => `"time" [[ a ]] ${c}`],
 ];
 
 test('분석기: 인자 자리의 [[·]]와 따옴표 안의 >에서 가짜 명령을 만들지 않는다', () => {
@@ -535,7 +541,8 @@ test('실제 zsh가 명령을 실행하는 꼴에서는 분석기도 그 명령�
 // ---------- 시간 ----------
 // 훅은 모든 Bash 호출에서 돈다. 폭주하면 이 프로세스 안에서는 끊을 수 없으므로 자식 프로세스에 시간 제한을 건다.
 
-test('긴 입력(낱말 20,000개)의 판정이 시간 안에 끝난다', () => {
+/** 입력마다 판정에 걸린 시간(ms). 자식 프로세스에서 판정하고 시간 제한을 건다. 판정이 예외를 던지면 실패한다 */
+function timeEvaluate(inputs: string[]): number[] {
   const mod = pathToFileURL(
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'rules.ts'),
   ).href;
@@ -551,17 +558,6 @@ test('긴 입력(낱말 20,000개)의 판정이 시간 안에 끝난다', () => 
     }
     process.stdout.write(JSON.stringify(times));
   `;
-  const n = 20_000;
-  const inputs = [
-    `if [[ ${']] '.repeat(n)}echo x`,
-    `${'then '.repeat(n)}echo x`,
-    `${'>/dev/null '.repeat(n)}echo x`,
-    `${'! noglob '.repeat(n / 2)}echo x`,
-    `${'[[ -n x ]] && '.repeat(n / 4)}echo x`,
-    `if [[ ${'a && '.repeat(n)}b ]] echo x`,
-    `echo ${'[[ '.repeat(n)}x`,
-    `cat ${'<a>b'.repeat(n)}`,
-  ];
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
     timeout: 60_000,
@@ -575,5 +571,47 @@ test('긴 입력(낱말 20,000개)의 판정이 시간 안에 끝난다', () => 
   assert.equal(r.status, 0, r.stderr);
   const times = JSON.parse(r.stdout) as number[];
   assert.equal(times.length, inputs.length);
-  for (const [i, ms] of times.entries()) assert.ok(ms < 5_000, `입력 ${i}: ${ms}ms`);
+  return times;
+}
+
+test('긴 입력(낱말 20,000개)의 판정이 시간 안에 끝난다', () => {
+  const n = 20_000;
+  const inputs = [
+    `if [[ ${']] '.repeat(n)}echo x`,
+    `${'then '.repeat(n)}echo x`,
+    `${'>/dev/null '.repeat(n)}echo x`,
+    `${'! noglob '.repeat(n / 2)}echo x`,
+    `${'[[ -n x ]] && '.repeat(n / 4)}echo x`,
+    `if [[ ${'a && '.repeat(n)}b ]] echo x`,
+    `echo ${'[[ '.repeat(n)}x`,
+    `cat ${'<a>b'.repeat(n)}`,
+  ];
+  for (const [i, ms] of timeEvaluate(inputs).entries()) assert.ok(ms < 5_000, `입력 ${i}: ${ms}ms`);
+});
+
+test('한 낱말에 리다이렉션이 아주 많은 입력도 예외 없이 시간 안에 판정한다', () => {
+  // 대상의 수가 함수 인자의 한도를 넘어도 분석기가 멈추지 않는다(대상을 하나씩 더한다).
+  // here-string이 많은 낱말도 입력의 길이에 비례해 읽는다(구간마다 목록을 다시 찾지 않는다)
+  const n = 300_000;
+  const inputs = [
+    `cat ${'<a'.repeat(n)}`,
+    `cat ${'<a>b'.repeat(n / 2)}`,
+    `cat ${'<<<a'.repeat(n)}`,
+    `cat ${'<<<a<b'.repeat(n / 2)}`,
+    `cat ${'<<<<<<a<b'.repeat(n / 2)}`,
+    `cat ${'<a '.repeat(n)}`,
+    `>x ${'<a'.repeat(n)} cat`,
+    `cat${'<a'.repeat(n)} x`,
+    `if [[ -n x ]]${'>a'.repeat(n)} echo x`,
+  ];
+  for (const [i, ms] of timeEvaluate(inputs).entries()) assert.ok(ms < 5_000, `입력 ${i}: ${ms}ms`);
+});
+
+test('분석기: here-string의 글은 대상이 아니고, 그 앞뒤의 리다이렉션의 대상은 그대로 낸다', () => {
+  const targets = (src: string) => parseShell(src).map((c) => c.targets ?? []);
+  assert.deepEqual(targets('cat <<<a'), [[]]);
+  assert.deepEqual(targets('cat <<<a<b'), [['b']]);
+  assert.deepEqual(targets('cat <a<<<b<c'), [['a', 'c']]);
+  assert.deepEqual(targets('cat <<<a<<<b<c>d'), [['c', 'd']]);
+  assert.deepEqual(targets('cat <a<<<b<<<c'), [['a']]);
 });
