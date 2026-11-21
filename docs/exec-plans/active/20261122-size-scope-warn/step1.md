@@ -4,7 +4,7 @@
 
 - `ARCHITECTURE.md`, `docs/harness/architecture.md`(`gates/*`, `ci/*` 행)
 - `docs/harness/design.md` 5절(R18 행), 8.2절(계획 파일 구성), 10.2절 (1), 10.3절의 필수 체크 표와 그 아래 목록, 14.6절 "범위 이탈 표시", 0절의 머리말과 변경 이력
-- step0이 만든·바꾼 파일: `scripts/gates/pr-size.ts`, `scripts/ci/results.ts`(`WARN_CONTEXTS`, `RECORDED_CONTEXTS`), `scripts/ci/gates.ts`(`runGates`의 경고 판정 부분, `isWarning`), `scripts/ci/results.ts`의 `fitWarnings`, `scripts/ci/gates.ts`의 `gatesOutput`, `scripts/lib/util.ts`(`WARN_PREFIX`, `capDetails`, `DETAILS_CUT`), `scripts/test/pr-size.test.ts`
+- step0이 만든·바꾼 파일: `scripts/gates/pr-size.ts`, `scripts/ci/results.ts`(`WARN_CONTEXTS`, `RECORDED_CONTEXTS`), `scripts/ci/gates.ts`(`runGates`의 경고 판정 부분, `isWarning`), `scripts/ci/results.ts`의 `fitWarnings`, `scripts/ci/gates.ts`의 `gatesOutput`, `scripts/lib/util.ts`(`WARN_PREFIX`, `capDetails`, `DETAILS_CUT`, `showPath`), `scripts/test/pr-size.test.ts`
 - `scripts/gates/risk-gate.ts`의 `changedFiles`, `scripts/lib/plan.ts`(`parseBranch`, `findPlan`, `planCandidates`, `parseDoc`, `stripHtmlComments`, 그리고 `sections`가 코드 블록을 가리는 방식), `scripts/lib/plan.ts`의 `STEP_BOUND_SECTIONS`, `scripts/ci/plan-hash.ts`(`hashFrom`, `normalize`, `PLAN_SECTIONS`)와 `scripts/test/plan-hash.test.ts`, `docs/harness/architecture.md`의 "레이어", `scripts/lib/util.ts`(`globToRegExp`, `matchesAny`가 파일 경로의 `\`를 `/`로 바꾸는 것)
 - `docs/harness/workflow.md` 2절·5절, `docs/exec-plans/TEMPLATE.md`, `docs/exec-plans/TEMPLATE-small.md`, `scripts/cross-review/checklist.md`(R18 항목)
 - `docs/exec-plans/tech-debt-tracker.md`의 TD-6 행, `scripts/metrics/render.ts`의 `UNMEASURED_TD`(읽기만)
@@ -68,15 +68,15 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
   - `읽기만`으로 시작하는 목록 항목(줄 머리의 공백, 목록 표식 `-`·`*`·`+` 하나, 공백 뒤가 `읽기만`)의 줄은 보지 않는다. 그 항목보다 깊이 들여쓴 뒤따르는 줄도 보지 않는다. 들여쓰기가 같거나 얕은 줄이 나오면 그 줄부터 다시 판단한다. 빈 줄은 이 판단을 바꾸지 않는다.
   - 항목 머리가 아닌 곳의 `읽기만`(예: `` `a.ts`(읽기만) ``)은 아무 뜻이 없다. 그 경로는 범위에 든다.
 - `inScope`: 범위 경로 하나라도 아래 둘 가운데 하나를 만족하면 참이다. 파일 경로는 `git`이 준 글자 그대로 견준다.
-  - `globToRegExp(경로).test(file)`이 참이다(glob. 글자 그대로의 경로도 여기에 든다). `matchesAny`는 쓰지 않는다(파일 경로의 `\`를 `/`로 바꾸므로, 리포 루트의 파일 이름 `src\a.ts`가 범위 경로 `src/a.ts`에 맞아 버린다).
+  - `globToRegExp(경로).test(file)`이 참이다(glob. 글자 그대로의 경로도 여기에 든다. step0이 고친 대로 `**`는 줄바꿈이 든 파일 이름에도 맞는다). `matchesAny`는 쓰지 않는다(파일 경로의 `\`를 `/`로 바꾸므로, 리포 루트의 파일 이름 `src\a.ts`가 범위 경로 `src/a.ts`에 맞아 버린다).
   - 경로에서 끝의 `/`를 뗀 것이 비어 있지 않고, `file`이 그것에 `/`를 붙인 글자로 시작한다(폴더 아래). `scripts/ci`는 `scripts/ci/a.ts`를 덮고 `scripts/ci-x/a.ts`는 덮지 않는다.
 - `judgeScope`: 순수 함수다. `state`는 늘 `success`다. `changed`는 경로 순서로 정렬해 쓴다.
   1. `changed`가 비어 있으면 `description`은 `통과 (계획 파일만 바뀌었다)`이고 `details`·`outside`는 비어 있다.
   2. `paths`가 비어 있으면 경고다: `description`은 `WARN_PREFIX`로 시작하고 범위를 `견줄 수 없다`는 말과 바뀐 파일 수를 담는다(경로는 넣지 않는다). `outside`는 `changed` 전부다. `details`는 경로를 백틱으로 감싸 적으라는 줄과 아래 고정 줄 둘이다.
   3. `inScope`가 거짓인 파일이 `outside`다. 비어 있으면 `통과 (바뀐 파일 <N>개가 모두 계획의 관련 파일 안)`이다(`<N>`은 `changed`의 수).
-  4. `outside`가 있으면 경고다. `description`은 `WARN_PREFIX`로 시작하고 `outside`의 수와 앞의 두 경로를 담는다(셋 이상이면 `외 <나머지 수>개`도 적는다). `description`에 넣는 경로 하나는 60자까지다(넘으면 59자로 자르고 `…`). `details`는 아래 순서의 줄들에 `capDetails`를 적용한 것이다.
+  4. `outside`가 있으면 경고다. `description`은 `WARN_PREFIX`로 시작하고 `outside`의 수와 앞의 두 경로를 담는다(셋 이상이면 `외 <나머지 수>개`도 적는다). `description`에 넣는 경로 하나는 `showPath`(step0의 `scripts/lib/util.ts`)로 한 줄의 보이는 표기로 바꾼 뒤 60자까지다(넘으면 59자로 자르고 `…`). `details`는 아래 순서의 줄들에 `capDetails`를 적용한 것이다.
      1. 고정 줄 둘: `고치는 법`으로 시작하는 줄(의도한 변경이면 PR 본문에 이유를 적는다, 검증자가 확인한다, 경고이며 병합을 막지 않는다)과 `근거`로 시작하는 줄(설계서 14.6절, R18).
-     2. `outside`를 한 줄에 하나씩. 30개까지만 적고 나머지는 수만 적는다.
+     2. `outside`를 한 줄에 하나씩, `- ` 뒤에 `showPath(경로)`를 적는다. 30개까지만 적고 나머지는 수만 적는다. 이유: 파일 이름은 PR이 정한다. `showPath`가 줄바꿈과 제어 문자를 보이는 표기로 바꾸므로 경로 하나가 한 줄에 머물고, 목록 표식이 앞에 있으므로 이름이 펜스 글자뿐인 파일(` ``` `, `~~~`)의 줄도 판정 job 요약의 코드 블록을 닫지 못한다. 견줄 때(`inScope`)와 `outside`에는 `git`이 준 글자를 그대로 쓴다.
 - `scopeCheck`:
   1. `parseBranch(branch)`가 없거나 `findPlan(root, id)`가 없으면 `description`은 `계획이 없어 범위를 보지 않는다`이고 `details`·`outside`는 비어 있다(`state`는 `success`).
   2. 바뀐 파일은 `changedFiles(root, base)`의 경로다(삭제 포함). 그 가운데 계획 자신의 파일은 뺀다: `planCandidates(id)`의 네 자리. 폴더 꼴(`active`·`completed`의 `<id>/`)은 그 폴더에 `/`를 붙인 글자로 시작하는 경로이고, 단일 파일 꼴(`<id>.md`)은 글자가 같은 경로다.
@@ -109,9 +109,10 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
 - **해시와의 결속**(`planHash`로 계획 폴더의 해시를 구한다): "관련 파일·문서"의 글만 서로 다른 계획 열 개 이상(위의 두 모양과 그 변형, 코드 블록 안의 HTML 주석 여는 표시, `읽기만` 항목, 물결표 펜스 안의 백틱 펜스, 섹션이 없는 계획, 뒤의 섹션만 다른 계획 포함)을 둘씩 견준다. `planScopePaths`의 결과가 다른 쌍은 모두 `planHash`가 다르다. 그런 쌍이 50개를 넘는다.
 - **`inScope`**: 글자 그대로의 경로, glob(`scripts/ci/**`, `docs/*.md`), 폴더(`scripts/ci/`와 `scripts/ci` 둘 다 `scripts/ci/a/b.ts`를 덮는다), 비슷한 접두어(`scripts/ci`는 `scripts/ci-x/a.ts`를 덮지 않는다), 범위 경로가 없으면 거짓. 역슬래시가 든 파일 이름 `src\a.ts`는 범위 경로 `src/a.ts`에도 `src/`에도 들지 않고, 범위 경로 `src\a.ts`에는 든다.
 - **긴 경로**(`judgeScope`에 직접 넘긴다. 파일 시스템을 거치지 않는다): 경로가 4,000자(한글)인 범위 밖 파일 40개에서 `description`이 200자 이하이고, `description`과 `details`를 JSON으로 만든 것의 UTF-8 크기가 16,000바이트보다 작다. `details`의 모든 줄이 200자 이하이고, 앞의 두 줄(고치는 법, 근거)이 남아 있으며, 끝 줄이 `DETAILS_CUT`이다. `outside`의 길이는 40이다.
+- **파일 이름의 줄바꿈·펜스 글자**(`judgeScope`에 직접 넘긴다): 범위 밖 파일의 이름이 ` ``` `, `~~~~`, 줄바꿈 뒤에 펜스 줄과 `# 제목` 줄이 오는 것, `\r\n`이 든 것, U+2028이 든 것, 역슬래시가 든 것일 때 `details`는 고정 줄 둘과 파일마다 한 줄이다. 파일 줄은 모두 `- `로 시작하고 제어 문자·U+2028·U+2029가 없다. `description`에도 없다. 그 결과로 만든 `summaryMarkdown`에서 `scope`의 코드 블록은 상세가 끝난 자리에서 닫히고, 첫 줄 뒤에 `#`나 `##` 제목 줄이 새로 생기지 않는다. `outside`는 원래 글자 그대로다. 줄바꿈이 든 파일 `src/a\nb.ts`는 범위 경로 `src/`와 `src/**`에 든다.
 - **`scopeCheck`**(임시 `git` 리포. 계획 폴더와 "관련 파일·문서"를 테스트 안에서 만든다):
   - 바뀐 파일이 모두 범위 안이면 `통과 (바뀐 파일 N개가 모두 계획의 관련 파일 안)`이고 `outside`와 `details`가 비어 있다.
-  - 범위 밖 파일이 셋 이상(그 가운데 하나는 base에 있던 파일을 지운 것, 하나는 `읽기만` 항목에만 있는 파일, 하나는 다른 섹션에만 적힌 파일)이면 `description`이 `경고: `로 시작하고 `outside`의 수와 경로 순서로 앞의 두 경로, `외 <나머지 수>개`가 들어 있다. `details`의 앞 두 줄은 고치는 법과 근거이고 그 뒤가 경로 순서의 `outside`다. `state`는 `success`다.
+  - 범위 밖 파일이 셋 이상(그 가운데 하나는 base에 있던 파일을 지운 것, 하나는 `읽기만` 항목에만 있는 파일, 하나는 다른 섹션에만 적힌 파일)이면 `description`이 `경고: `로 시작하고 `outside`의 수와 경로 순서로 앞의 두 경로, `외 <나머지 수>개`가 들어 있다. `details`의 앞 두 줄은 고치는 법과 근거이고 그 뒤가 경로 순서의 `outside`를 `- <경로>`로 적은 줄들이다. `state`는 `success`다.
   - 계획 자신의 파일(`plan.md`, `index.json`, `step0.md`)은 "관련 파일·문서"에 없어도 범위 안이다. base에서 `active/`에 있던 계획을 `completed/`로 옮긴 PR에서 `active/` 쪽의 삭제와 `completed/` 쪽의 추가도 범위 안이다. 이름이 비슷한 다른 경로(`<id>-x/plan.md`, `<id>.md.bak`)는 계획 자신의 파일이 아니다.
   - 계획 파일만 바뀐 PR은 `통과 (계획 파일만 바뀌었다)`이다. "관련 파일·문서"가 비어 있거나 없어도 같다.
   - "관련 파일·문서"에 경로가 없는데(섹션이 없는 경우, 주석만 있는 경우, 백틱 없이 적은 경우) 다른 파일이 바뀌면 경고이고 `outside`가 그 파일들이다.
@@ -120,8 +121,8 @@ export function scopeCheck(o: { root: string; base: string; branch: string }): S
   - 범위 밖 파일이 31개면 `details`에 30개만 적히고 나머지 1개는 수로 적힌다. `outside`의 길이는 31이다.
   - 해시에 묶이지 않는 자리(긴 펜스 안의 `## 예시` 줄 뒤, 바깥 블록이 닫힌 뒤)에 `` `late.ts` ``를 적은 계획과 적지 않은 계획: 두 리포의 `planHash`가 같고, `late.ts`를 바꾼 PR에서 둘 다 `outside`가 `late.ts`이며 경고다.
 - **`runGates`**: 결과의 context 순서가 `RECORDED_CONTEXTS`와 같고 끝의 둘이 `pr-size`, `scope`다. 범위 밖 파일이 있는 PR에서 `scope`가 `success`이고 `isWarning`이 참이며, 필수 판정 다섯의 `state`는 범위 밖 파일이 없는 같은 모양의 PR과 같다. 계획 파일 자리에 폴더가 있어 읽을 수 없으면 `scope`는 `error`이고 `pr-size`는 `success`다.
-- **요약에 남는 범위 경고**(`gatesOutput`에 만든 결과 값을 직접 넘긴다): `judgeScope`가 낸 범위 밖 파일 셋의 경고를 `scope`의 결과로 두고, 필수 판정의 상세를 채워 (가) `scope`의 상세만 빠지는 크기와 (나) 경고 판정이 통째로 빠지는 크기의 결과를 만든다. 두 경우 모두 `file`은 `RESULTS_MAX_BYTES` 이하이고, (가)의 `file`에는 모든 context가 있되 범위 밖 파일의 줄이 없으며 (나)의 `file`에는 `GATE_CONTEXTS`만 있다. 두 경우 모두 `summary`에는 `| scope | 경고 |` 행과 `### scope` 제목, 범위 밖 파일 셋이 한 줄씩 들어 있다.
-- **`gates` 명령**(프로세스로 실행한다. step0의 `scripts/test/pr-size.test.ts`에 있는 같은 이름의 사례와 같은 방법으로 크기 상한이 실제로 발동하는 입력을 만든다): 임시 리포에 계획 폴더("관련 파일·문서"에 `pad/`는 없다)와 `riskPaths` glob 열 개를 두고, `pad/` 아래의 `.md` 파일을 하나씩 늘려 `runGates`의 결과가 `RESULTS_MAX_BYTES`를 처음 넘는 때를 찾는다. 그 결과에서 `scope`가 경고이고 상세에 `pad/`로 시작하는 범위 밖 파일 줄이 30개인지 먼저 단언한다. 그 head에서 `gates --out … --summary …`를 실행한 뒤:
+- **요약에 남는 범위 경고**(`gatesOutput`에 만든 결과 값을 직접 넘긴다): `judgeScope`가 낸 범위 밖 파일 셋의 경고를 `scope`의 결과로 두고, 필수 판정의 상세를 채워 (가) `scope`의 상세만 빠지는 크기와 (나) 경고 판정이 통째로 빠지는 크기의 결과를 만든다. 두 경우 모두 `file`은 `RESULTS_MAX_BYTES` 이하이고, (가)의 `file`에는 모든 context가 있되 범위 밖 파일의 줄이 없으며 (나)의 `file`에는 `GATE_CONTEXTS`만 있다. 두 경우 모두 `summary`에는 `| scope | 경고 |` 행과 `### scope` 제목, 범위 밖 파일 셋이 `- <경로>` 줄로 하나씩 들어 있다.
+- **`gates` 명령**(프로세스로 실행한다. step0의 `scripts/test/pr-size.test.ts`에 있는 같은 이름의 사례와 같은 방법으로 크기 상한이 실제로 발동하는 입력을 만든다): 임시 리포에 계획 폴더("관련 파일·문서"에 `pad/`는 없다)와 `riskPaths` glob 열 개를 두고, `pad/` 아래의 `.md` 파일을 하나씩 늘려 `runGates`의 결과가 `RESULTS_MAX_BYTES`를 처음 넘는 때를 찾는다. 그 결과에서 `scope`가 경고이고 상세에 `- pad/`로 시작하는 범위 밖 파일 줄이 30개인지 먼저 단언한다. 그 head에서 `gates --out … --summary …`를 실행한 뒤:
   - `--out` 파일은 `RESULTS_MAX_BYTES` 이하이고, `scope`의 `details`가 `[WARN_DETAILS_DROPPED]`이며 `description`은 원래 결과와 같고, 필수 판정 다섯의 결과는 원래 결과와 같다.
   - `--summary` 파일에는 `| scope | 경고 |`로 시작하는 행과 `### scope` 줄, 범위 밖 파일 줄 30개가 한 줄씩 그대로 들어 있다.
 - **레이어**: `scripts/gates/scope.ts`의 글에 `../ci/`가 없다.
