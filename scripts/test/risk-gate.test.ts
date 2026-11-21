@@ -187,28 +187,89 @@ const prObj = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-test('resolvePr: pull_request_target은 이벤트에서, 포크는 건너뛴다', async () => {
-  const api = async () => assert.fail('API를 부르면 안 된다');
-  const r = await resolvePr({
-    eventName: 'pull_request_target',
-    event: { pull_request: prObj() },
-    repo: REPO,
-    api,
+const NEW_H = 'd'.repeat(40);
+const prTarget = (event: unknown, api: (p: string) => Promise<unknown>) =>
+  resolvePr({ eventName: 'pull_request_target', event, repo: REPO, api });
+
+test('resolvePr: pull_request_target은 이벤트의 PR 번호로 API를 조회해 실행 시점의 head를 낸다(Issue #181)', async () => {
+  const calls: string[] = [];
+  // 이벤트는 본문을 고친 때의 것이다: head가 이전 것이고 본문도 이전 것이다
+  const r = await prTarget({ pull_request: prObj({ body: '이전 본문' }) }, async (p) => {
+    calls.push(p);
+    return prObj({
+      body: '새 본문',
+      head: { sha: NEW_H, ref: 'feat/renamed', repo: { full_name: REPO } },
+      base: { sha: 'e'.repeat(40), ref: 'main' },
+    });
   });
+  assert.deepEqual(calls, [`repos/${REPO}/pulls/7`]);
   assert.deepEqual(r, {
     number: 7,
-    headSha: H,
-    headRef: BRANCH,
-    baseSha: 'b'.repeat(40),
-    body: '본문',
+    headSha: NEW_H,
+    headRef: 'feat/renamed',
+    baseSha: 'e'.repeat(40),
+    body: '새 본문',
   });
-  const fork = await resolvePr({
-    eventName: 'pull_request_target',
-    event: { pull_request: prObj({ head: { sha: H, ref: BRANCH, repo: { full_name: 'x/r' } } }) },
-    repo: REPO,
-    api,
-  });
-  assert.ok('skip' in fork);
+  // head가 그대로면 같은 값이 나온다. 닫힌 PR도 전처럼 판정한다(열림·닫힘을 따지지 않는다)
+  const same = await prTarget({ pull_request: prObj() }, async () => prObj({ state: 'closed' }));
+  assert.ok(!('skip' in same) && same.headSha === H && same.body === '본문');
+});
+
+test('resolvePr: pull_request_target의 이벤트가 포크 PR이거나 형식이 틀리면 API를 부르지 않고 건너뛴다', async () => {
+  const api = async () => assert.fail('API를 부르면 안 된다');
+  for (const pull_request of [
+    prObj({ head: { sha: H, ref: BRANCH, repo: { full_name: 'x/r' } } }),
+    prObj({ head: { sha: H, ref: BRANCH, repo: null } }),
+    prObj({ head: { sha: 'zzz', ref: BRANCH, repo: { full_name: REPO } } }),
+    prObj({ number: '7' }),
+    prObj({ number: 0 }),
+    prObj({ number: 1.5 }),
+    prObj({ number: -3 }),
+  ]) {
+    const r = await prTarget({ pull_request }, api);
+    assert.ok('skip' in r, JSON.stringify(pull_request));
+  }
+  assert.ok('skip' in (await prTarget({}, api)));
+  assert.ok('skip' in (await prTarget(null, api)));
+});
+
+test('resolvePr: pull_request_target의 조회 응답이 이벤트의 PR과 맞지 않으면 건너뛰지 않고 실패한다(상태가 조용히 빠지지 않는다)', async () => {
+  const ev = { pull_request: prObj() };
+  for (const res of [
+    null,
+    undefined,
+    'x',
+    [prObj()],
+    { message: 'Not Found' },
+    prObj({ number: 8 }),
+    prObj({ head: { sha: 'zzz', ref: BRANCH, repo: { full_name: REPO } } }),
+    prObj({ head: { sha: NEW_H, ref: 7, repo: { full_name: REPO } } }),
+    prObj({ base: { sha: 'zzz' } }),
+  ]) {
+    await assert.rejects(
+      prTarget(ev, async () => res),
+      /PR 조회 응답/,
+      JSON.stringify(res),
+    );
+  }
+  // API가 던지면 그 예외가 그대로 나온다
+  await assert.rejects(
+    prTarget(ev, async () => {
+      throw new Error('GitHub 조회 실패: HTTP 502 repos/o/r/pulls/7');
+    }),
+    /HTTP 502/,
+  );
+});
+
+test('resolvePr: pull_request_target의 조회 응답이 포크 PR이면 건너뛴다(포크 PR은 판정하지 않는다)', async () => {
+  const ev = { pull_request: prObj() };
+  for (const head of [
+    { sha: NEW_H, ref: BRANCH, repo: { full_name: 'x/r' } },
+    { sha: NEW_H, ref: BRANCH, repo: null },
+  ]) {
+    const r = await prTarget(ev, async () => prObj({ head }));
+    assert.ok('skip' in r, JSON.stringify(head));
+  }
 });
 
 test('resolvePr: workflow_run은 head SHA로 API를 조회해 열린 같은 리포 PR만 고른다', async () => {

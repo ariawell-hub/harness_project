@@ -1,6 +1,8 @@
 // gates 워크플로가 판정할 PR을 이벤트에서 정한다(10.4절).
-// pull_request_target은 이벤트의 PR을, workflow_run(리뷰 뒤 재판정)은 페이로드의 PR 정보를 믿지 않고
-// head SHA로 API를 다시 조회해 열려 있는 같은 리포 PR의 현재 head에만 판정한다.
+// 어느 이벤트든 페이로드의 head를 그대로 쓰지 않고 API로 다시 조회해 실행 시점의 head를 판정한다.
+// pull_request_target은 이벤트의 PR 번호로 그 PR을 조회한다: 본문 수정(edited)의 이벤트에는 수정한 때의 head가 담겨 있어,
+// 직후에 push가 오면 지난 head를 판정하고 새 head에는 상태가 남지 않았다(Issue #181).
+// workflow_run(리뷰 뒤 재판정)은 head SHA로 조회해 열려 있는 같은 리포 PR의 현재 head에만 판정한다.
 import { SHA_RE } from './results.ts';
 
 export interface PrInfo {
@@ -24,6 +26,8 @@ interface RawPr {
 function toInfo(p: RawPr, repo: string): PrInfo | null {
   if (
     typeof p?.number !== 'number' ||
+    !Number.isSafeInteger(p.number) ||
+    p.number <= 0 ||
     typeof p.head?.sha !== 'string' ||
     !SHA_RE.test(p.head.sha) ||
     typeof p.head.ref !== 'string' ||
@@ -51,8 +55,21 @@ export async function resolvePr(o: {
 }): Promise<Resolved> {
   const ev = (o.event ?? {}) as { pull_request?: RawPr; workflow_run?: { head_sha?: unknown } };
   if (o.eventName === 'pull_request_target') {
-    const info = ev.pull_request ? toInfo(ev.pull_request, o.repo) : null;
-    return info ?? { skip: '같은 리포 브랜치의 PR이 아니다(포크 PR은 판정하지 않는다)' };
+    const fork = { skip: '같은 리포 브랜치의 PR이 아니다(포크 PR은 판정하지 않는다)' };
+    // 포크 PR과 형식이 틀린 이벤트는 조회하지 않고 건너뛴다(워크플로의 job 조건과 같은 판단이다)
+    const fromEvent = ev.pull_request ? toInfo(ev.pull_request, o.repo) : null;
+    if (!fromEvent) return fork;
+    const cur = (await o.api(`repos/${o.repo}/pulls/${fromEvent.number}`)) as RawPr | null;
+    // 응답이 이벤트의 PR과 맞지 않으면 건너뛰지 않고 실패한다: 건너뛰면 상태가 빠진 채 실행이 성공으로 보인다
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur) || cur.number !== fromEvent.number)
+      throw new Error(`PR 조회 응답이 PR #${fromEvent.number}이 아니다`);
+    const info = toInfo(cur, o.repo);
+    if (info) return info;
+    // head 저장소가 이 리포가 아니면(지워졌으면 null) 포크 PR이다. 그 밖에는 응답의 형식이 틀린 것이다
+    const headRepo = cur.head && typeof cur.head === 'object' ? cur.head.repo : undefined;
+    if (headRepo === null || (typeof headRepo === 'object' && headRepo.full_name !== o.repo))
+      return fork;
+    throw new Error(`PR 조회 응답의 형식이 틀렸다(PR #${fromEvent.number})`);
   }
   if (o.eventName === 'workflow_run') {
     const sha = ev.workflow_run?.head_sha;
