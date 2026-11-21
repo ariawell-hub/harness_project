@@ -39,7 +39,7 @@
 - **README의 DB 절이 설정과 맞는다**: `profiles/web/README.md`의 `## DB` 절(다음 `## ` 제목 앞까지)을 읽어 본다.
   - "명령" 표에서 훅 칸이 "금지"인 행들에 백틱으로 적힌 이름의 집합이 웹 프로파일 `guard.dbCommands`의 `drizzle-kit` 항목의 `forbidden`과 같다(빠진 것도 남는 것도 없다).
   - 훅 칸이 "허용"인 행들의 이름 집합이 `generate`, `check`, `export`, `up`이고 금지 집합과 겹치지 않는다.
-  - 확인한 버전: `lab/q10-db/results/darwin-arm64.json`의 `versions`에 있는 세 패키지(`drizzle-orm`, `drizzle-kit`, `@electric-sql/pglite`)의 버전이 절에 그 패키지 이름과 함께 적혀 있다.
+  - 확인한 버전: `lab/q10-db/results/darwin-arm64.json`의 `packages`에 있는 세 패키지(`drizzle-orm`, `drizzle-kit`, `@electric-sql/pglite`)마다, 절 안의 한 줄에 그 패키지 이름과 그 버전이 함께 적혀 있다(테스트가 결과 파일을 읽어 대조한다. 버전을 테스트에 적어 두지 않는다).
 
 ### 2. 설정 `profiles/web/profile.json`
 
@@ -61,7 +61,24 @@
   - 훅이 보지 못하는 것: 패키지 스크립트(`pnpm db:migrate` 같은 이름) 안에 든 명령. 그런 스크립트를 더하는 변경은 리뷰에서 본다(절차 수준). 그 밖의 남는 틈은 설계서 13.1절의 "남는 틈"을 가리킨다(목록을 다시 적지 않는다).
   - 한계: ADR-0007의 "알려진 한계"를 가리킨다.
   - "명령"은 표로 적는다(칸: 하위 명령, 훅, 이유. 훅 칸은 "허용" 또는 "금지"). 테스트가 이 표를 설정과 대조한다.
-  - AC가 DB 절에서 글자 그대로 찾는 말(절 안에 있어야 한다): `ADR-0007`, `lab/q10-db`, `PGlite`, `worktree 안의 폴더`, `메모리 DB`, `함께 열지 않는다`, `TD-12`, `guard.dbCommands`, `메인 체크아웃`, `13.1절`, `패키지 스크립트`, `붙여 쓰면`, `알려진 한계`.
+  - DB 절에 **글자 그대로** 들어가야 하는 문장(AC가 절 안에서 같은 글로 찾는다. 앞뒤에 말을 더 붙여도 되지만 이 글은 바꾸지 않는다):
+
+    ```text
+    worktree 안의 폴더 하나가 DB 하나다
+    테스트는 메모리 DB
+    `dev`와 테스트는 같은 폴더를 함께 열지 않는다
+    기술 부채 표의 TD-12
+    훅은 설정 `guard.dbCommands`의 항목으로 인자의 자리를 본다(설계서 13.1절)
+    플래그가 하위 명령 앞에 오는 호출, 버전을 붙인 호출, 실행 파일을 직접 부르는 호출, 플래그의 값에 공백이 든 호출을 막는다
+    이 설정은 메인 체크아웃의 `harness.config.json`에서 읽는다
+    worktree에서 목록을 비워도 풀리지 않는다
+    플래그의 값이 금지 명령의 이름과 같으면 막힌다
+    `--이름=값`으로 붙여 쓰면 통과한다
+    패키지 스크립트 안에 든 명령은 훅이 보지 못한다
+    그런 스크립트를 더하는 변경은 리뷰에서 본다
+    ```
+
+    그 밖에 절 안에 있어야 하는 것: `ADR-0007`(결정 문서의 링크), `lab/q10-db`(실측의 링크), `PGlite`, ADR-0007의 `알려진 한계`를 가리키는 말.
 - `docs/harness/design.md` 14.3절의 "예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 줄: 줄의 자리와 있던 문장은 그대로 두고 같은 줄의 뒤에 웹 프로파일이 채운 것을 덧붙여, 그 줄을 **글자 그대로** 아래와 같게 한다. 금지 분류 표와 14.3절의 다른 줄은 한 글자도 바꾸지 않는다. 이 줄의 글은 계획이 정한 것이고 AC가 같은 글로 비교한다. 글을 바꿔야 하면 구현에서 바꾸지 않고 계획을 고쳐 다시 검증받는다.
 
   ```text
@@ -70,7 +87,7 @@
 
 - 0절 버전 이력과 문서 머리의 버전, `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄(검사를 약화하지 않는다는 것, 프로파일 버전). 번호는 push할 때 main의 다음 번호다.
 - `docs/harness/architecture.md`의 파일 표에 테스트 파일을 적는 칸이 있으면 더한다(없으면 고치지 않는다).
-- `docs/exec-plans/tech-debt-tracker.md`에 새 행 하나. 번호는 TD-62다(다른 세션과 맞춘 번호다. push할 때 main에 그 번호가 이미 있으면 main의 다음 번호). DB 규칙과 L1 훅의 명령 판정에 남은 틈을 적는다. 다른 행은 고치지 않는다: PR이 갈라진 지점의 파일과 비교해 더한 줄이 정확히 하나이고 지우거나 바꾼 줄이 없어야 한다(AC가 본다). 새 행에는 아래 네 가지가 모두 들어가고, AC가 찾는 말(`DB_PATTERNS`, `guard.dbCommands`, `dbClients`, `메인 체크아웃`, `리다이렉션`, `예약어`, `13.1절`)을 글자 그대로 쓴다.
+- `docs/exec-plans/tech-debt-tracker.md`에 새 행 하나. 번호는 TD-62다(다른 세션과 맞춘 번호다. push할 때 main에 그 번호가 이미 있으면 main의 다음 번호). DB 규칙과 L1 훅의 명령 판정에 남은 틈을 적는다. 다른 행은 고치지 않는다: PR이 갈라진 지점의 파일과 비교해 더한 줄이 정확히 하나이고 지우거나 바꾼 줄이 없어야 한다(AC가 본다). 새 행은 표 안에, 다른 TD 행 바로 아래에 같은 칸 수로 넣는다(번호 순서의 자리). 번호는 갈라진 지점의 표에 없는 것이어야 한다. 새 행에는 아래 네 가지가 모두 들어가고, AC가 찾는 말(`DB_PATTERNS`, `guard.dbCommands`, `dbClients`, `메인 체크아웃`, `리다이렉션`, `예약어`, `13.1절`)을 글자 그대로 쓴다.
   1. 하위 명령 판정(`guard.dbCommands`)이 보지 못하는 것: 금지 낱말 사이에 플래그가 끼는 호출(`prisma db --schema x push`). 코어의 다른 도구는 정규식(`scripts/hooks/rules.ts`의 `DB_PATTERNS`)으로만 막아 플래그가 앞에 오는 호출을 놓친다(`drizzle-kit`과 `prisma`는 Issue #172가 닫았다).
   2. `guard.dbPatterns`·`dbClients`는 작업 worktree의 설정에서 읽는다. worktree에서 목록을 비우면 프로파일이 더한 차단이 그 worktree에서 풀린다(`dbCommands`는 메인 체크아웃에서 읽는다).
   3. 명령 이름으로 고르는 있던 규칙(`git`·`gh`: R2·R14·R20)은 명령 이름 앞에 리다이렉션이 오는 호출과 예약어 뒤의 명령(`then`·`do` 뒤)에서 돌지 않는다. Issue #172의 작업 중에 확인했다(그 계획의 발견 사항).
@@ -89,29 +106,32 @@ test "$(grep -c '^## DB$' profiles/web/README.md)" = 1
 awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "ADR-0007"
 awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "lab/q10-db"
 awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "PGlite"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "worktree 안의 폴더"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "메모리 DB"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "함께 열지 않는다"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "TD-12"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "guard.dbCommands"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "메인 체크아웃"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "13.1절"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "패키지 스크립트"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "붙여 쓰면"
-awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -q "알려진 한계"
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF "알려진 한계"
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF 'worktree 안의 폴더 하나가 DB 하나다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '테스트는 메모리 DB'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '`dev`와 테스트는 같은 폴더를 함께 열지 않는다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '기술 부채 표의 TD-12'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '훅은 설정 `guard.dbCommands`의 항목으로 인자의 자리를 본다(설계서 13.1절)'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '플래그가 하위 명령 앞에 오는 호출, 버전을 붙인 호출, 실행 파일을 직접 부르는 호출, 플래그의 값에 공백이 든 호출을 막는다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '이 설정은 메인 체크아웃의 `harness.config.json`에서 읽는다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF 'worktree에서 목록을 비워도 풀리지 않는다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '플래그의 값이 금지 명령의 이름과 같으면 막힌다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '`--이름=값`으로 붙여 쓰면 통과한다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '패키지 스크립트 안에 든 명령은 훅이 보지 못한다'
+awk '/^## DB$/{s=1;next} /^## /{s=0} s' profiles/web/README.md | grep -qF '그런 스크립트를 더하는 변경은 리뷰에서 본다'
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep "프로파일이 채운다" | grep -q "drizzle-kit"
 test "$(sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -c "프로파일이 채운다")" = 1
 sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md | grep -q "^- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)\. "
 O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/harness/design.md" | sed -n '/^### 14.3/,/^### 14.4/p' | NEW='- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10). 웹 프로파일은 DB에 접속하는 `drizzle-kit`의 하위 명령과 마이그레이션 파일을 지우는 하위 명령을 막는다(플래그가 하위 명령 앞에 오는 형태 포함, ADR-0007). 목록은 `profiles/web/README.md`의 "DB" 절에 있다.' awk '$0 == "- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." {print ENVIRON["NEW"]; next} {print}' > "$O/expected.txt" && sed -n '/^### 14.3/,/^### 14.4/p' docs/harness/design.md > "$O/now.txt" && test -s "$O/expected.txt" && diff "$O/expected.txt" "$O/now.txt"
-O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/exec-plans/tech-debt-tracker.md" > "$O/base.md" && { diff "$O/base.md" docs/exec-plans/tech-debt-tracker.md > "$O/d.txt"; test "$(grep -c '^<' "$O/d.txt")" = 0; } && test "$(grep -c '^>' "$O/d.txt")" = 1 && grep '^> ' "$O/d.txt" | sed 's/^> //' | awk -F'|' '$2 ~ /^ *TD-[0-9]+ *$/' | grep "DB_PATTERNS" | grep "guard.dbCommands" | grep "dbClients" | grep "메인 체크아웃" | grep "리다이렉션" | grep "예약어" | grep -q "13.1절"
+O=$(mktemp -d) && git show "$(git merge-base HEAD origin/main):docs/exec-plans/tech-debt-tracker.md" > "$O/base.md" && { diff "$O/base.md" docs/exec-plans/tech-debt-tracker.md > "$O/d.txt"; test "$(grep -c '^<' "$O/d.txt")" = 0; } && test "$(grep -c '^>' "$O/d.txt")" = 1 && grep '^> ' "$O/d.txt" | sed 's/^> //' > "$O/new.txt" && N=$(awk -F'|' '$2 ~ /^ *TD-[0-9]+ *$/ {gsub(/ /, "", $2); print $2}' "$O/new.txt") && test -n "$N" && test "$(awk -F'|' -v id="$N" '{c = $2; gsub(/ /, "", c)} c == id' "$O/base.md" | wc -l | tr -d ' ')" = 0 && awk -F'|' -v id="$N" '{c = $2; gsub(/ /, "", c); if (c == id) {found += 1; ok = (prev ~ /^TD-[0-9]+$/ && NF == prevnf)} prev = c; prevnf = NF} END {exit !(found == 1 && ok)}' docs/exec-plans/tech-debt-tracker.md && grep "DB_PATTERNS" "$O/new.txt" | grep "guard.dbCommands" | grep "dbClients" | grep "메인 체크아웃" | grep "리다이렉션" | grep "예약어" | grep -q "13.1절"
 node scripts/harness.ts lint
 node scripts/harness.ts doc-lint
 node scripts/harness.ts fmt --check
 ```
 
 - `git merge-base`가 든 줄은 14.3절 전체가 기대한 글과 같은지 본다. 기대한 글은 PR이 갈라진 지점의 14.3절에서 "- 예시 명령은 스택마다 다르므로, 실제 차단 목록은 프로파일이 채운다(Q10)." 한 줄만 그 자리에서 **이 명령에 글자 그대로 적힌 줄**로 바꾼 것이다. 그 줄의 글을 지금 파일에서 가져오지 않는다. 그 기대한 글과 지금의 14.3절 전체를 `diff`로 비교한다. 그래서 고친 줄의 글이 한 글자라도 다르거나(뒤에 문장을 더 덧붙인 경우 포함), 다른 자리(표 안 포함)로 옮겨지거나, 다른 줄이 빠지거나 바뀌거나 빈 줄이 끼면 실패한다. `origin/main`이 필요하다(`git fetch origin`). 명령에 적힌 글에는 `drizzle-kit`의 하위 명령 이름을 넣지 않았다(금지 명령의 글자가 든 명령은 L1 훅이 막는다).
-- README를 보는 줄들은 `## DB` 절(그 제목 다음 줄부터 다음 `## ` 제목 앞까지)만 본다. 절 밖에 같은 말이 있어도 통과하지 않는다. `## DB` 제목은 하나여야 한다. 수용 기준 6의 내용마다 줄이 있다: 결정과 실측(`ADR-0007`, `lab/q10-db`, `PGlite`), 일회용 DB의 규약(`worktree 안의 폴더`, `메모리 DB`, `함께 열지 않는다`, `TD-12`), 훅이 보는 것(`guard.dbCommands`, `메인 체크아웃`, `13.1절`), 알려진 대가(`붙여 쓰면`), 훅이 보지 못하는 것(`패키지 스크립트`), 한계(`알려진 한계`). 허용·금지 명령의 목록과 버전은 테스트가 설정·결과 파일과 대조한다(명령 줄에서 보지 않는 이유: 금지 하위 명령의 이름이 든 명령은 L1 훅이 막을 수 있다).
-- 기술 부채 표를 보는 줄은 PR이 갈라진 지점의 표와 지금의 표를 `diff`로 비교한다. 지우거나 바꾼 줄(`<`)이 0이고 더한 줄(`>`)이 정확히 1이어야 한다. 그래서 있던 행을 고쳐 말을 넣거나 같은 내용을 두 행에 적으면 실패한다. 필수 내용은 그 더한 줄 하나에서만 찾는다: 첫 칸이 `TD-<번호>`이고, `DB_PATTERNS`(정규식뿐인 도구의 틈), `guard.dbCommands`와 `dbClients`와 `메인 체크아웃`(설정의 출처가 다르다), `리다이렉션`과 `예약어`(명령 이름으로 고르는 규칙의 틈), `13.1절`(남는 틈)이 모두 있어야 한다. `origin/main`이 필요하다(`git fetch origin`).
+- README를 보는 줄들은 `## DB` 절(그 제목 다음 줄부터 다음 `## ` 제목 앞까지)만 본다. 절 밖에 같은 말이 있어도 통과하지 않는다. `## DB` 제목은 하나여야 한다. 수용 기준 6의 내용마다 줄이 있고, 낱말이 아니라 "작업"에 고정한 문장을 같은 글로 찾는다(`grep -F`): 결정과 실측(`ADR-0007`, `lab/q10-db`, `PGlite`), 일회용 DB의 규약(폴더 하나가 DB 하나, 메모리 DB, 같은 폴더를 함께 열지 않는다, TD-12), 훅이 보는 것(설정과 판정 방식, 막는 호출의 꼴, 설정의 출처, worktree에서 풀 수 없음), 알려진 대가(막히는 경우와 통과하는 쓰기), 훅이 보지 못하는 것(패키지 스크립트 안의 명령을 보지 못한다는 것과 그 대신 하는 일), 한계(`알려진 한계`). 그래서 낱말만 있고 설명이 빠진 README는 통과하지 않는다. 허용·금지 명령의 목록과 버전은 테스트가 설정·결과 파일과 대조한다(명령 줄에서 보지 않는 이유: 금지 하위 명령의 이름이 든 명령은 L1 훅이 막을 수 있다).
+- 기술 부채 표를 보는 줄은 PR이 갈라진 지점의 표와 지금의 표를 `diff`로 비교한다. 지우거나 바꾼 줄(`<`)이 0이고 더한 줄(`>`)이 정확히 1이어야 한다. 그래서 있던 행을 고쳐 말을 넣거나 같은 내용을 두 행에 적으면 실패한다. 더한 줄은 표의 행이어야 한다: 첫 칸이 `TD-<번호>`이고, 그 번호가 갈라진 지점의 표에 없고(있던 번호로 행을 더하면 실패한다), 지금의 표에서 그 번호의 행이 하나뿐이며 바로 윗줄이 다른 TD 행이고 칸 수가 그 행과 같다(표 밖에 붙인 줄은 실패한다). 필수 내용은 그 더한 줄 하나에서만 찾는다: `DB_PATTERNS`(정규식뿐인 도구의 틈), `guard.dbCommands`와 `dbClients`와 `메인 체크아웃`(설정의 출처가 다르다), `리다이렉션`과 `예약어`(명령 이름으로 고르는 규칙의 틈), `13.1절`(남는 틈)이 모두 있어야 한다. `origin/main`이 필요하다(`git fetch origin`).
 - 설정의 꼴(`dbCommands` 항목의 금지 목록 여섯, `dbPatterns`에 `drizzle` 항목이 없음)과 실제 훅이 그 목록을 읽는지는 `scripts/test/profile-web-db.test.ts`가 본다.
 
 ## 금지사항
