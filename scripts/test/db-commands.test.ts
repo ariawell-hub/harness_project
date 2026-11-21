@@ -660,6 +660,14 @@ test('중괄호가 빽빽한 입력도 시간 안에 끝난다(낱말 시작마�
     `tool ${'{ a } '.repeat(20_000)}`,
     `tool ${'}{'.repeat(30_000)}`,
     `then ${'{ a } b '.repeat(20_000)}`,
+    `tool ${'{a[x '.repeat(30_000)}`,
+    `tool ${'{a["x '.repeat(30_000)}`,
+    `tool {a[${'['.repeat(60_000)}`,
+    `tool {a[${'${'.repeat(30_000)}`,
+    `tool ${'{a[${x '.repeat(20_000)}`,
+    `tool {a[${'${ {a[y}'.repeat(20_000)}`,
+    `tool ${'{a[${ '.repeat(20_000)}${'} '.repeat(20_000)}`,
+    `tool ${'{a[0]x{a[${ y}'.repeat(20_000)}`,
   ])
     parseShell(src);
   assert.ok(Date.now() - started < 10_000, `${Date.now() - started}ms`);
@@ -778,6 +786,90 @@ test('인자 자리의 중괄호가 끼어도 금지 하위 명령을 막는다'
     '{ drizzle-kit generate }',
   ])
     assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+});
+
+// ---------- 첨자 안의 따옴표 문맥 (구현 판정 F14) ----------
+// 첨자 안의 글은 낱말의 다른 곳과 같은 코드가 읽는다(따옴표·치환의 해석이 한 군데다)
+
+test('parseShell: 배열 첨자 안의 명령 치환은 따옴표 문맥대로 모은다', () => {
+  const inner = (cmd: string) => parseShell(cmd).map((c) => c.argv.join(' '));
+  // 큰따옴표 안의 작은따옴표는 글자다: 뒤의 치환은 실행된다
+  for (const cmd of [
+    `tool {fds["'$(echo a b)"]}>out.txt sub`,
+    `tool {fds["'$(echo a b)'"]}>out.txt sub`,
+    `tool {fds["x'y$(echo a b)"]}>out.txt sub`,
+    'tool {fds["\'`echo a b`"]}>out.txt sub',
+    `tool {fds["'$(echo a b)"]}<<EOF sub\nbody\nEOF`,
+    'tool {fds["$(echo a b)"]}>out.txt sub',
+    'tool {fds[$(echo a b)]}>out.txt sub',
+    'tool {fds[`echo a b`]}>out.txt sub',
+  ]) {
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd);
+    assert.ok(inner(cmd).includes('echo a b'), `치환 안의 명령을 봐야 한다: ${cmd}`);
+  }
+  // 진짜 작은따옴표 구간과 이스케이프한 `$`는 치환이 아니다
+  for (const cmd of [
+    `tool {fds['$(echo a b)']}>out.txt sub`,
+    `tool {fds['"$(echo a b)"']}>out.txt sub`,
+    'tool {fds["\\$(echo a b)"]}>out.txt sub',
+  ]) {
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd);
+    assert.ok(!inner(cmd).includes('echo a b'), `치환이 아니다: ${cmd}`);
+  }
+  // 치환 안에 따옴표와 괄호가 있어도 첨자의 끝을 찾는다
+  assert.deepEqual(argsOf('tool {fds["$(echo ")")"]}>out.txt sub')[0], ['tool', 'sub']);
+  // 디스크립터 변수로 읽다 그만둔 낱말의 치환은 한 번만 모은다
+  assert.equal(inner('tool {fds[$(echo a b)]x} sub').filter((x) => x === 'echo a b').length, 1);
+});
+
+test('배열 첨자의 따옴표 안에 든 명령 치환의 금지 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    `drizzle-kit {fds["'$(drizzle-kit migrate)"]}>out.txt generate`,
+    `echo {fds["'$(drizzle-kit migrate)"]}>out.txt`,
+    'echo {fds["\'`drizzle-kit migrate`"]}>out.txt',
+    `drizzle-kit {fds["'$(echo 0)"]}>out.txt migrate`,
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  for (const cmd of [
+    `echo {fds['$(drizzle-kit migrate)']}>out.txt`,
+    `drizzle-kit {fds["'$(echo 0)"]}>out.txt generate`,
+  ])
+    assert.equal(bash(cmd, c), null, `통과해야 한다: ${cmd}`);
+});
+
+test('parseShell의 args: 첨자 안의 `${…}`·`$[…]`는 공백이 있어도 낱말을 끝내지 않는다', () => {
+  for (const cmd of [
+    'tool {fds[${x:- 0}]}>out.txt sub',
+    'tool {fds[${x:-a b}]}>out.txt sub',
+    'tool {fds[${x:-"}"}]}>out.txt sub',
+    'tool {fds[${x:-${y:- 0}}]}>out.txt sub',
+    'tool {fds[${m[0]}]}>out.txt sub',
+    'tool {fds[${x:-;}]}>out.txt sub',
+    'tool {fds[$[ 1 + 1 ]]}>out.txt sub',
+    'tool {fds[$[ m[0] + 1 ]]}>out.txt sub',
+    'tool {fds[${x:- 0}]}<<EOF sub\nbody\nEOF',
+  ])
+    assert.deepEqual(argsOf(cmd)[0], ['tool', 'sub'], cmd);
+  // 그 안의 명령 치환도 모은다
+  assert.ok(
+    parseShell('tool {fds[${x:- $(echo a b)}]}>out.txt sub').some(
+      (c) => c.argv.join(' ') === 'echo a b',
+    ),
+  );
+  // 닫히지 않으면 디스크립터 변수가 아니다: 전처럼 읽고, 인자는 bash가 넘기는 대로 붙는다
+  assert.deepEqual(argsOf('tool {fds[${x:- 0 sub')[0], ['tool', '{fds[${x:-', '0', 'sub']);
+});
+
+test('첨자 안의 `${…}`에 공백이 있어도 금지 하위 명령을 막는다', () => {
+  const c = ctx(DRIZZLE);
+  for (const cmd of [
+    'drizzle-kit {fds[${x:- 0}]}>out.txt migrate',
+    'drizzle-kit {fds[$[ 1 + 1 ]]}>out.txt migrate',
+    'echo {fds[${x:- $(drizzle-kit migrate)}]}>out.txt',
+  ])
+    assert.ok(bash(cmd, c)?.rule.startsWith('R13'), `막혀야 한다: ${cmd}`);
+  assert.equal(bash('drizzle-kit {fds[${x:- 0}]}>out.txt generate', c), null);
 });
 
 // 손으로 고른 사례는 빠진 꼴을 모른다(구현 판정에서 꼴이 하나씩 드러났다). 리다이렉션과 인자를 무작위로 섞은 명령을

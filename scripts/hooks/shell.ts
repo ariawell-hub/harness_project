@@ -110,7 +110,7 @@ function braceTail(tokens: Token[], k: number): Tail {
 /**
  * 리다이렉션 연산자(`<`·`>`로 시작하는 것과 heredoc) 바로 앞에 붙은, 따옴표 밖의 글이 파일 디스크립터 번호인가.
  * 일반 리다이렉션과 heredoc이 같은 판별을 쓴다. 숫자(`2>`)와 PowerShell의 `*>`(모든 스트림).
- * bash의 디스크립터 변수(`{이름}>`)는 낱말을 읽을 때 `fdVarEnd`로 따로 가린다
+ * bash의 디스크립터 변수(`{이름}>`)는 낱말을 읽을 때 낱말을 읽는 반복문이 따로 가린다
  */
 function isFdPrefix(pre: string, dialect: Dialect): boolean {
   return /^\d+$/.test(pre) || (dialect === 'powershell' && pre === '*');
@@ -147,59 +147,8 @@ function skipPiece(src: string, j: number): number {
   return -1;
 }
 
-/**
- * 자리 i의 `{`가 bash의 디스크립터 변수(`{이름}`, `{이름[첨자]}`)이고 바로 뒤에 `<`·`>`가 오면 그 연산자의 자리를,
- * 아니면 -1을 돌려준다. bash는 이 낱말 전체를 리다이렉션의 일부로 읽는다(셸이 디스크립터를 골라 그 변수에 넣는다).
- * 첨자는 짝이 맞는 `]`까지이고 비어 있으면 안 된다. 첨자 안에는 숫자·변수·치환·따옴표로 묶은 글이 올 수 있다
- * (`{fds[$i]}>out`, `{fds["$i"]}>out`). 이름 부분에 따옴표가 있으면 디스크립터 변수가 아니다
- */
-function fdVarEnd(src: string, i: number): number {
-  let j = i + 1;
-  if (!/[A-Za-z_]/.test(src[j] ?? '')) return -1;
-  while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
-  if (src[j] === '[') {
-    const open = j;
-    let depth = 0;
-    for (;;) {
-      if (j >= src.length) return -1;
-      const ch = src[j];
-      if (isWordEnd(ch)) return -1;
-      const next = skipPiece(src, j);
-      if (next >= 0) {
-        j = next;
-        continue;
-      }
-      j++;
-      if (ch === '[') depth++;
-      else if (ch === ']' && --depth === 0) break;
-    }
-    if (j - open <= 2) return -1;
-  }
-  if (src[j] !== '}') return -1;
-  return src[j + 1] === '<' || src[j + 1] === '>' ? j + 1 : -1;
-}
-
-/** src의 [from, to) 안에 든 명령 치환(`$(…)`, 백틱)의 내용을 subs에 모은다(작은따옴표 안은 치환이 아니다) */
-function collectSubs(src: string, from: number, to: number, subs: string[]): void {
-  let k = from;
-  while (k < to) {
-    const ch = src[k];
-    if (ch === '\\') k += 2;
-    else if (ch === "'") {
-      const end = src.indexOf("'", k + 1);
-      k = end < 0 ? to : end + 1;
-    } else if (ch === '$' && src[k + 1] === '(') {
-      const [inner, next] = readParen(src, k + 2);
-      subs.push(inner);
-      k = next;
-    } else if (ch === '`') {
-      const end = src.indexOf('`', k + 1);
-      const stop = end < 0 ? to : end;
-      subs.push(src.slice(k + 1, stop));
-      k = stop + 1;
-    } else k++;
-  }
-}
+/** bash의 디스크립터 변수(`{이름}>`, `{이름[첨자]}>`)의 시작: `{이름`. 자리를 정해 두고 맞춘다(길이 제한이 없다) */
+const FD_VAR_HEAD = /\{[A-Za-z_][A-Za-z0-9_]*/y;
 
 /**
  * 자리 i의 `{`로 시작하는 낱말이 따옴표 밖의 `}`로 끝나는가와, 그 낱말이 끝나는 자리.
@@ -264,6 +213,26 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   let fdVar = false;
   /** 이 자리 앞에서 시작하는 `{`는 중괄호 낱말이 아님을 이미 확인했다(같은 낱말을 `{`마다 다시 읽지 않는다) */
   let braceFailEnd = -1;
+  /**
+   * `{이름[`으로 시작한 낱말을 디스크립터 변수로 읽어 보는 중이다. 첨자 안의 글(따옴표, 치환, 이스케이프)은 낱말의 다른 곳과
+   * 같은 코드가 읽는다. 짝이 맞는 `]` 뒤에 `}`와 `<`·`>`가 오면 디스크립터 변수이고, 그 전에 낱말이 끝나면 아니다.
+   * start: `{`의 자리, open: 첨자를 연 `[`의 자리, depth: `[`의 깊이, subs: 시작할 때 모아 둔 치환의 수,
+   * pairs: 첨자 안에서 열린 `${…}`·`$[…]`가 기다리는 닫는 글자(bash는 그 안을 공백이 있어도 낱말 하나로 읽는다),
+   * dead: 디스크립터 변수가 아님을 알았다(낱말이 끝나는 자리만 마저 찾는다)
+   */
+  let sub: {
+    start: number;
+    open: number;
+    depth: number;
+    subs: number;
+    pairs: string[];
+    dead: boolean;
+  } | null = null;
+  /**
+   * 이 자리 앞에서는 디스크립터 변수를 찾지 않는다. 읽다 그만둔 낱말은 bash에서도 그 끝까지 낱말 하나이므로(`${…}` 안의 공백 포함)
+   * 그 안에서 다시 시도하지 않는다. 그래서 시도한 구간이 겹치지 않고 전체 시간이 입력 길이에 비례한다
+   */
+  let noSubBefore = 0;
   /** 따옴표·이스케이프 밖의 리다이렉션 연산자 글자를 낱말에 더한다 */
   const redirOp = (ch: string) => {
     if (redirAt < 0) {
@@ -299,7 +268,59 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
   };
   const heredocs: string[] = [];
   let i = 0;
-  while (i < src.length) {
+  /** 디스크립터 변수가 아니었다: 읽은 것을 버리고 `{`의 자리로 돌아가 전처럼 읽는다(그사이 모은 치환도 버린다) */
+  const giveUpSub = (s: { start: number; subs: number }, end: number) => {
+    subs.length = s.subs;
+    noSubBefore = Math.max(end, s.start + 1);
+    i = s.start;
+    sub = null;
+    word = '';
+    inWord = false;
+    wordQuoted = false;
+  };
+  while (i < src.length || sub) {
+    if (sub) {
+      const ch = src[i];
+      if (ch === undefined) {
+        giveUpSub(sub, i);
+        continue;
+      }
+      if (ch === '$' && (src[i + 1] === '{' || src[i + 1] === '[')) {
+        // `${…}`·`$[…]`: 닫는 글자까지 낱말이 이어진다
+        sub.pairs.push(src[i + 1] === '{' ? '}' : ']');
+        word += src.slice(i, i + 2);
+        i += 2;
+        continue;
+      }
+      const closer = sub.pairs[sub.pairs.length - 1];
+      if (closer !== undefined) {
+        // 그 안의 공백과 연산자 글자는 낱말을 끝내지 않는다. 따옴표·이스케이프·치환·보통 글자는 아래의 낱말 읽기가 읽는다
+        if (ch === closer || (closer === ']' && ch === '[') || isWordEnd(ch)) {
+          if (ch === closer) sub.pairs.pop();
+          else if (ch === '[') sub.pairs.push(']');
+          word += ch;
+          i++;
+          continue;
+        }
+      } else if (isWordEnd(ch)) {
+        giveUpSub(sub, i);
+        continue;
+      } else if (!sub.dead) {
+        if (ch === '[') sub.depth++;
+        else if (ch === ']' && --sub.depth === 0) {
+          // 첨자는 비어 있으면 안 되고, 바로 뒤에 `}`와 리다이렉션 연산자가 와야 한다
+          const after = src[i + 2];
+          if (i > sub.open + 1 && src[i + 1] === '}' && (after === '<' || after === '>')) {
+            word += ']}';
+            fdVar = true;
+            sub = null;
+            i += 2;
+            continue;
+          }
+          sub.dead = true;
+        }
+      }
+    }
     const c = src[i];
     // heredoc 본문 건너뛰기: 줄바꿈을 만나면 대기 중인 구분자까지 소비
     if (c === '\n' && heredocs.length) {
@@ -468,16 +489,26 @@ function tokenize(src: string, subs: string[], dialect: Dialect): Token[] {
         continue;
       }
       if (posix && c === '{' && !inWord) {
-        // bash의 디스크립터 변수 + 리다이렉션(`{fd}>out`, `{fds[$i]}>out`): 낱말 전체가 리다이렉션의 일부다.
-        // 첨자 안의 명령 치환은 따로 본다
-        const fdEnd = fdVarEnd(src, i);
-        if (fdEnd > 0) {
-          collectSubs(src, i, fdEnd, subs);
-          word += src.slice(i, fdEnd);
-          inWord = true;
-          fdVar = true;
-          i = fdEnd;
-          continue;
+        // bash의 디스크립터 변수 + 리다이렉션(`{fd}>out`, `{fds[$i]}>out`): 낱말 전체가 리다이렉션의 일부다
+        // (셸이 디스크립터를 골라 그 변수에 넣는다). 이름 부분에 따옴표가 있으면 디스크립터 변수가 아니다
+        FD_VAR_HEAD.lastIndex = i;
+        if (i >= noSubBefore && FD_VAR_HEAD.test(src)) {
+          const j = FD_VAR_HEAD.lastIndex;
+          if (src[j] === '}' && (src[j + 1] === '<' || src[j + 1] === '>')) {
+            word += src.slice(i, j + 1);
+            inWord = true;
+            fdVar = true;
+            i = j + 1;
+            continue;
+          }
+          if (src[j] === '[') {
+            // 배열 원소: 첨자는 아래의 낱말 읽기가 그대로 읽는다(반복문 첫머리가 끝을 가린다)
+            sub = { start: i, open: j, depth: 1, subs: subs.length, pairs: [], dead: false };
+            word += src.slice(i, j + 1);
+            inWord = true;
+            i = j + 1;
+            continue;
+          }
         }
         // 공백 없이 `}`로 닫히는 낱말(`{}`, `{x}`, `{$x}`)은 묶음 괄호가 아니라 인자다
         if (i >= braceFailEnd) {
