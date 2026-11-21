@@ -422,9 +422,12 @@ test('record-review: 열린 P1과 미뤄진 P2를 함께 승인하면 P1만 닫�
     ],
   );
   assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 7027568658\)/);
-  assert.match(
+  // 고정된 문구 그대로 남는다
+  assert.ok(
+    r.out.includes(
+      'record-review: 제작자 승인 무시 F2(댓글 7027568658): 차단 지적(P0·P1)이 아니다',
+    ),
     r.out,
-    /record-review: 제작자 승인 무시 F2\(댓글 7027568658\): 차단 지적\(P0·P1\)이 아니다/,
   );
   assert.equal(ledgerStatus()?.state, 'success');
 });
