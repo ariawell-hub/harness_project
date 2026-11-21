@@ -177,6 +177,15 @@ test('신호: harness.config.json의 판정 관련 키 변경(TD-10), 깨진 JSO
     ),
     /testInertPaths/,
   );
+  // PR 크기 경고의 상한·제외 목록(R15)을 바꾸는 것도 신호다. 키가 없던 설정에 더하는 것도 같다
+  assert.match(
+    reasons(
+      run({
+        'harness.config.json': JSON.stringify({ ...c, prSize: { maxLines: 100000 } }, null, 2),
+      }),
+    ),
+    /판정 관련 설정 변경 — .*prSize/,
+  );
   // 테스트 실효성 검사(R5)를 끄거나 대상을 줄이는 변경도 신호다(TD-51)
   assert.match(
     reasons(run({ 'harness.config.json': JSON.stringify({ ...c, testEffect: null }, null, 2) })),

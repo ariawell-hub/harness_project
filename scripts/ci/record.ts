@@ -12,7 +12,7 @@ import {
 import {
   cleanDescription,
   REVIEW_CONTEXTS,
-  GATE_CONTEXTS,
+  RECORDED_CONTEXTS,
   SHA_RE,
   toStatuses,
   validateResults,
@@ -43,7 +43,7 @@ export async function recordStatuses(
 ): Promise<{ ok: boolean; reason: string | null }> {
   if (!REPO_RE.test(o.repo)) throw new Error(`repo 형식 오류(owner/name): ${o.repo.slice(0, 80)}`);
   if (!SHA_RE.test(o.headSha)) throw new Error('head SHA가 40자리 소문자 hex가 아니다');
-  const contexts = o.contexts ?? GATE_CONTEXTS;
+  const contexts = o.contexts ?? RECORDED_CONTEXTS;
   let value: GateResults | null = null;
   let reason: string | null = null;
   if (o.raw === null || o.raw.trim() === '') reason = '판정 결과 없음(판정 job 실패)';

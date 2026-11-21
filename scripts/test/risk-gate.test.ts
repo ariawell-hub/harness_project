@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { resolvePr } from '../ci/pr.ts';
 import { runGates } from '../ci/gates.ts';
-import { validateResults, GATE_CONTEXTS } from '../ci/results.ts';
+import { validateResults, RECORDED_CONTEXTS } from '../ci/results.ts';
 import {
   assessRisk,
   changedFiles,
@@ -168,9 +168,9 @@ test('runGates: risk-gate 결과와 risk를 담고 결과 검사를 통과한다
   const r = await runGates({ ...hi, branch: BRANCH, headSha: hi.head, reviews: [] });
   assert.equal(r.risk, 'high');
   assert.equal(r.results.find((x) => x.context === 'risk-gate')!.state, 'failure');
-  assert.equal(validateResults(r, { headSha: hi.head, contexts: GATE_CONTEXTS }).ok, true);
+  assert.equal(validateResults(r, { headSha: hi.head, contexts: RECORDED_CONTEXTS }).ok, true);
   assert.equal(
-    validateResults({ ...r, risk: 'none' }, { headSha: hi.head, contexts: GATE_CONTEXTS }).ok,
+    validateResults({ ...r, risk: 'none' }, { headSha: hi.head, contexts: RECORDED_CONTEXTS }).ok,
     false,
   );
 });
