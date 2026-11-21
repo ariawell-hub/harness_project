@@ -2,7 +2,7 @@
 id: 20261121-merge-leftovers
 issue: 175 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -154,6 +154,7 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 2026-11-21 23:13 step0이 병합됐다(PR #176, main `7eb751b`). step1을 새 브랜치(`feat/20261121-merge-leftovers-s1`)에서 시작했다.
 - 2026-11-21 23:13 step1 테스트를 먼저 올렸다(`c835f91`, 테스트 파일만). 구현 전 `node --test scripts/test/doc-lint-design-version.test.ts`는 실패한다(종료 코드 1: `../gates/doc-lint.ts`에 `designVersionProblems`가 없다, `SyntaxError: … does not provide an export named 'designVersionProblems'`).
 - 2026-11-21 23:15 구현을 올렸다. 같은 명령이 통과한다(9건). 이 리포의 설계서(v0.7.70, 변경 이력 항목 80개쯤)는 새 검사를 통과한다. 절차서 5절에 한 항목, `CHANGELOG`에 한 줄을 더하고 TD-33을 해결로 바꿨다.
+- 2026-11-21T23:35:44+09:00 step1 재작업: 구현 판정의 지적 둘(F1: 변경 이력 문제가 아주 많으면 결과를 펼쳐 더하다 RangeError로 끝난다, F2: 머리말 줄 안의 U+2028을 형식 오류로 본다)을 고친다
 
 ## 의사결정 로그
 
