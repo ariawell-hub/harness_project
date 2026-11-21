@@ -50,6 +50,7 @@ import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
+import { runActionsCost } from './commands/actions-cost.ts';
 import { runMetrics } from './commands/metrics.ts';
 import { formatOps, opsCheck } from './commands/ops-check.ts';
 import { describeFailure, runStandard } from './commands/standard.ts';
@@ -162,6 +163,10 @@ CI(gates 워크플로, 10.4절):
                                            지표(17.2절)를 집계해 출력한다. 기간은 UTC 날짜(YYYY-MM-DD, 양끝 포함, 기본 최근 7일).
                                            파일을 쓰지 않는다. 출력을 docs/QUALITY_SCORE.md의 집계 결과 구간에 붙여 넣는다
                                            --self-test-report <파일>: self-test --out이 쓴 보고서로 자체 테스트 통과율을 낸다
+  actions-cost [--since <날짜>] [--until <날짜>] [--save <파일>] | --from <파일>
+                                           Actions 실행 기록에서 비공개 리포였다면 청구됐을 분과 금액을 계산해 출력한다(읽기만).
+                                           기간은 UTC 날짜(YYYY-MM-DD, 양끝 포함, 기본 최근 7일). --save: 읽은 기록을 보존 기록(.jsonl)으로
+                                           남긴다(있는 파일은 덮어쓰지 않는다). --from: GitHub 대신 보존 기록으로 계산한다
 
 설정:
   init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
@@ -282,6 +287,8 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   since: { type: 'string' },
   until: { type: 'string' },
   'self-test-report': { type: 'string' },
+  save: { type: 'string' },
+  from: { type: 'string' },
   profile: { type: 'string' },
   bot: { type: 'string' },
 };
@@ -1253,6 +1260,13 @@ async function main(argv: string[]): Promise<number> {
         since: str('since'),
         until: str('until'),
         selfTestReport: str('self-test-report'),
+      });
+    case 'actions-cost':
+      return runActionsCost(cwd, {
+        since: str('since'),
+        until: str('until'),
+        save: str('save'),
+        from: str('from'),
       });
     case 'init':
       return init(repoInfo(cwd).root, str('profile') ?? '', {
