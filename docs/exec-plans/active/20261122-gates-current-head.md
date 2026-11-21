@@ -2,7 +2,7 @@
 id: 20261122-gates-current-head
 issue: 181 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -48,6 +48,7 @@ claimed_at: 2026-11-22T00:07:49+09:00
   - F1(P0): `pr-state`의 안내 줄이 PR 브랜치 이름(`pr.head`, GitHub에서 온 값)을 인용 없이 `gh run list … --branch` 명령에 넣는다. git은 셸의 특수 문자가 든 브랜치 이름을 받으므로, 안내를 복사해 실행하면 이름의 일부가 명령으로 읽힐 수 있다. 맞는 지적이다. 안내 줄을 함수(`gatesMissingLine`)로 빼고 브랜치 이름을 있는 `shellQuote`로 낱말 하나로 인용했다. 제어 문자가 든 이름은 넣지 않는다. 테스트 먼저: 특수 문자가 든 이름 여덟 개로 인용의 꼴을 보고, 실제 `sh`가 그 낱말을 이름 그대로 읽는지(다른 명령이 실행되지 않는지) 본다. 구현 전에는 함수가 없어 실패했다.
   - F2(P1, 재현됨): 조회 응답의 head 저장소가 이름 없는 객체(`{}`)면 포크로 보고 건너뛰었다. 형식이 틀린 응답은 실패로 드러나야 한다는 이 계획의 기준과 어긋난다. 맞는 지적이다. head 저장소가 `null`이거나 이름이 다른 리포로 **확인될 때만** 포크로 본다. 이름이 없거나 글이 아니거나 빈 글이면 예외다. 테스트 먼저: 그 응답 여섯 가지를 "건너뛰지 않고 실패한다" 테스트에 넣어 실패를 확인한 뒤 고쳤다.
   - 완료 처리 뒤라 `reopenStep`으로 step을 다시 열고 고쳤다.
+- 2026-11-22T01:13:44+09:00 step 재작업: 구현 판정 2회차(Claude 승인, Codex 수정 요청). F1·F2는 고쳐진 것으로 닫혔다. F3(P1, 재현됨): 조회 응답의 head 저장소 이름이 `owner/name` 꼴이 아닌 글(`invalid`)이어도 "다른 리포"로 보고 건너뛴다. 맞는 지적이다(F2와 같은 원칙: 포크로 확인될 때만 건너뛴다). 이름이 `owner/name` 꼴일 때만 다른 리포로 본다. 테스트를 먼저 넣어 실패를 확인하고 고친다.
 
 ## 의사결정 로그
 
