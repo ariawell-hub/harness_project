@@ -2,7 +2,7 @@
 id: 20261121-hook-command-position
 issue: 182 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -90,6 +90,7 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
   - 수정: 토큰에 따옴표 여부(`quoted`)와 리다이렉션 대상(`Redir.targets`)을 남긴다. `parseInto`가 조건식을 "첫 낱말 자리의 따옴표 없는 `[[`"부터 "따옴표 없는 첫 `]]`"까지 따라간다(안의 연산자는 끝이 아니다). 수정 뒤 14건 통과, 기존 훅 테스트 네 파일 통과(합 108건).
   - here-string(`cat <<<.env`)의 글은 파일이 아니므로 대상에서 뺐다. 먼저 만든 구현은 이것도 R10으로 막았다(main에서는 통과하던 호출이다). 테스트에 넣었다.
   - 실제 셸 대조의 `{fd}>` 틀: 디스크립터 변수는 bash 4.1에서 생겼다. 이 Mac의 bash 3.2는 `{fd}`를 인자로 넘기므로 bash 4.1 앞에서는 그 두 틀을 비교하지 않는다(CI의 bash는 비교한다). zsh는 `명령 {fd}>파일 인자` 꼴을 실행해 비교한다.
+- 2026-11-22T02:45:59+09:00 step0 재작업: 구현 판정(다시 올린 구현의 1회차): Claude 승인(지적 없음), Codex 수정 요청. F1(P1)이 남았다: 조건식의 시작을 볼 때 `[[`의 따옴표만 보고 앞 낱말의 따옴표는 보지 않아 `"then" [[ a ]] 명령`에서 명령을 나눈다(따옴표로 묶은 `then`은 명령 이름이고 `[[`는 그 인자다). F6(P0): 리다이렉션 대상을 `push(...배열)`로 펼쳐, 대상이 함수 인자의 한도를 넘으면 분석기가 예외로 멈춘다. F7(P1): 한 낱말의 here-string마다 목록을 처음부터 찾아 시간이 제곱으로 는다. 셋 다 맞는 지적이다. F1이 재판정 4회 뒤에도 열려 있어(`pr-state`의 "오래 열린 지적") 고치기 전에 제작자에게 물었고, "A. 한 번 더 고친다"를 받았다(2026-11-22 대화). 테스트를 먼저 넣어 실패를 확인하고 고친다.
 
 ## 의사결정 로그
 
