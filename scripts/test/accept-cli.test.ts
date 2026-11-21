@@ -356,3 +356,91 @@ test('record-review: 편집 이력을 읽지 못하면 원장을 쓰지 않고 r
     noSecret(state.received.join('\n'), `${mode} 서버가 받은 요청`);
   }
 });
+
+// --- P1 (계획 20261121-owner-accept-p1)
+
+/** F1을 P1로 바꾼 원장. `more`로 지적을 더한다 */
+function useLedger(over: Partial<Ledger['findings'][number]>, ...more: Ledger['findings']) {
+  const l = ledger();
+  l.findings[0] = { ...l.findings[0], ...over };
+  l.findings.push(...more);
+  state.ledgerBody = renderLedger(l);
+}
+const stored = () => parseLedger(state.ledgerBody)?.findings ?? [];
+
+test('record-review: 열린 P1의 제작자 승인을 원장에 저장하고 review-ledger가 통과한다', async () => {
+  reset();
+  useLedger({ severity: 'P1' });
+  const r = await recordReview(OWNER);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(state.gqlCalls, 1);
+  assert.deepEqual(
+    stored().map((e) => [e.id, e.severity, e.status, e.note]),
+    [['F1', 'P1', 'accepted', '제작자 승인(댓글 7027568658)']],
+  );
+  assert.match(state.ledgerBody, /F1 \| P1 \| codex \|[^\n]*\| accepted \|/);
+  assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 7027568658\)/);
+  assert.equal(ledgerStatus()?.state, 'success');
+  assert.match(ledgerStatus()?.description ?? '', /제작자 승인 1/);
+});
+
+test('record-review: P1에 봇 계정의 승인 줄 댓글만 있으면 open으로 남고 review-ledger가 실패한다', async () => {
+  reset([acceptNode({ author: { login: 'writer-bot' } })]);
+  useLedger({ severity: 'P1' });
+  const r = await recordReview(OWNER);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(stored()[0].status, 'open');
+  assert.doesNotMatch(r.out, /record-review: 제작자 승인 F1/);
+  assert.equal(ledgerStatus()?.state, 'failure');
+});
+
+test('record-review: 열린 P1과 미뤄진 P2를 함께 승인하면 P1만 닫히고 P2의 거부 이유가 로그에 남는다', async () => {
+  reset([acceptNode({ body: '/harness accept F1\n/harness accept F2' })]);
+  useLedger(
+    { severity: 'P1' },
+    {
+      id: 'F2',
+      severity: 'P2',
+      reviewer: 'claude',
+      file: 'src/b.ts',
+      line: 1,
+      title: '개선',
+      repro: '',
+      status: 'deferred',
+      note: '',
+      round: 1,
+      rejectedBy: [],
+    },
+  );
+  const r = await recordReview(OWNER);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(
+    stored().map((e) => [e.id, e.status]),
+    [
+      ['F1', 'accepted'],
+      ['F2', 'deferred'],
+    ],
+  );
+  assert.match(r.out, /record-review: 제작자 승인 F1\(댓글 7027568658\)/);
+  assert.match(
+    r.out,
+    /record-review: 제작자 승인 무시 F2\(댓글 7027568658\): 차단 지적\(P0·P1\)이 아니다/,
+  );
+  assert.equal(ledgerStatus()?.state, 'success');
+});
+
+test('record-review: fixed인 P1만 있는 원장에서는 승인 댓글이 있어도 댓글을 읽지 않고 기록 줄도 없다', async () => {
+  reset();
+  useLedger({ severity: 'P1', status: 'fixed', note: 'abc1234' });
+  const r = await recordReview(OWNER);
+  assert.equal(r.code, 0, r.out);
+  // (1) 편집 이력을 읽지 않았다
+  assert.equal(state.gqlCalls, 0);
+  // (2) 그 P1 행의 상태와 처리 칸은 그대로다(판정 라운드가 더해져 원장이 다시 저장되는 것은 정상이다)
+  assert.deepEqual(
+    stored().map((e) => [e.id, e.status, e.note]),
+    [['F1', 'fixed', 'abc1234']],
+  );
+  // (3) 승인·무시·철회 기록이 없다
+  assert.doesNotMatch(r.out, /record-review: 제작자 승인/);
+});
