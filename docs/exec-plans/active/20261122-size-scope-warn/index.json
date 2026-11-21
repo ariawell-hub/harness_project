@@ -1,0 +1,7 @@
+{
+  "plan": "20261122-size-scope-warn",
+  "steps": [
+    { "step": 0, "name": "pr-size", "status": "pending" },
+    { "step": 1, "name": "scope", "status": "pending" }
+  ]
+}
