@@ -4,7 +4,8 @@
     {
       "step": 0,
       "name": "command-name",
-      "status": "in_progress"
+      "status": "completed",
+      "completed_at": "2026-11-22T00:50:03+09:00"
     }
   ]
 }
