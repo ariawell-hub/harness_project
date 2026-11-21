@@ -2,7 +2,7 @@
 id: 20261121-owner-accept-p1
 issue: 178 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -90,6 +90,7 @@ claimed_at: 2026-11-21T20:54:15+09:00 # new-task가 채운다
 - 2026-11-21 코드 판정 2라운드(head `6179935`): `review/claude` 승인(F6을 틀린 지적으로 봤다: 완료된 계획의 AC가 `active/` 경로를 적는 것은 완료 전에 돌린 검증의 기록이고 이 리포의 관례다). `review/codex` 수정 요청(새 지적 없음. F6만 open). codex가 반박을 받지 않은 이유: "완료 뒤에도 코드 판정 대응에서 `runner/run.ts:1671`이 수용 검사를 다시 실행한다. 이때 `active/` 경로에는 `plan.md`가 없어 실패한다". `pr-state`에 오래 열린 지적 줄은 없다.
   - 그 이유를 코드에서 확인했다. 사실과 다르다. runner는 지적 대응 세션을 띄우기 전에 완료된 step을 먼저 되돌린다(`scripts/runner/run.ts`의 `reopen(`지적 대응: …`)` → `reopenStep`). `reopenStep`(`scripts/commands/task.ts`)은 계획이 `completed/`에 있으면 `active/`로 옮긴다(`movePlan(info.root, ref, 'active')`). 그래서 1671행의 판정(AC·`check`)이 돌 때 계획은 `active/`에 있고 그 AC 줄은 통과한다. 대화 세션에서도 같다: 코드 판정 1라운드 대응 때 `reopenStep`으로 되돌린 뒤 AC 16줄을 다시 돌렸고 모두 통과했다(이 진행 로그의 "step0 재작업" 줄과 그 뒤의 완료 커밋 `6179935`).
   - 반박 2회째를 냈다(근거: `scripts/commands/task.ts`). 이번에도 받아들여지지 않으면 교착이다. 더 반박하지 않고 제작자에게 묻는다(선택지: AC 문구를 고쳐 계획 검증부터 다시 받는다 / 그 밖).
+- 2026-11-21T23:08:20+09:00 step0 재작업: F6(교착, 제작자 결정: 지적대로 고친다)으로 step0의 AC 한 줄을 고쳐 계획 검증을 다시 받는다
 
 ## 의사결정 로그
 
