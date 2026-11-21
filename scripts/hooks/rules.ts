@@ -524,7 +524,8 @@ const DB_COMMANDS: DbCommandRule[] = [
 
 function dbRules(c: SimpleCommand, ctx: GuardContext, commands: DbCommandRule[]): Problem | null {
   const clients = new Set([...DB_CLIENTS, ...ctx.dbClients]);
-  const hit = c.argv.find((x) => clients.has(commandName(x)));
+  // 리다이렉션이 붙은 낱말(`psql>/dev/null`)은 셸이 넘기는 인자(args)에 이름만 남는다
+  const hit = [...c.argv, ...(c.args ?? [])].find((x) => clients.has(commandName(x)));
   if (hit) {
     return v(
       'R13 DB 위험 작업',
@@ -766,12 +767,23 @@ function rawRules(command: string): Problem | null {
   return null;
 }
 
-function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
+/**
+ * 이름과 인자의 자리로 고르는 규칙에 넘기는 꼴: argv 자리에 셸이 넘기는 인자(리다이렉션을 뺀 것)를 둔다.
+ * 인자 사이에 리다이렉션이 끼어도(`git >out push`) 하위 명령의 자리가 밀리지 않는다
+ */
+function positional(c: SimpleCommand): SimpleCommand {
+  return c.args ? { ...c, argv: c.args } : c;
+}
+
+/**
+ * c는 분석기가 낸 명령(대상 파일을 본다), p는 positional(c)(명령 이름과 하위 명령을 본다).
+ */
+function secretRules(c: SimpleCommand, p: SimpleCommand, ctx: GuardContext): Problem | null {
   const home = ctx.home ?? homedir();
   const tokenChange =
     Object.keys(c.assigns).map(tokenVar).find(Boolean) ??
     c.unsets.map(tokenVar).find(Boolean) ??
-    windowsTokenChange(c);
+    windowsTokenChange(p);
   if (tokenChange) {
     return v(
       'R20 제작자 권한',
@@ -781,11 +793,11 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
     );
   }
   if (!c.argv.length) return null;
-  const head = commandName(c.argv[0]);
-  if (head === 'security' && /^(find-|dump-|export|unlock-keychain)/.test(c.argv[1] ?? '')) {
+  const head = p.argv.length ? commandName(p.argv[0]) : '';
+  if (head === 'security' && /^(find-|dump-|export|unlock-keychain)/.test(p.argv[1] ?? '')) {
     return v(
       'R20 제작자 권한',
-      `macOS 키체인을 조회하려 했다(security ${c.argv[1]})`,
+      `macOS 키체인을 조회하려 했다(security ${p.argv[1]})`,
       '에이전트는 키체인에 접근하지 않는다',
       `${D} R20, E5`,
     );
@@ -793,12 +805,15 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
   if (CREDENTIAL_TOOLS.has(head) || head.startsWith('git-credential')) {
     return v(
       'R20 제작자 권한',
-      `OS 자격증명 저장소를 조회·변경하려 했다(${c.argv[0]})`,
+      `OS 자격증명 저장소를 조회·변경하려 했다(${p.argv[0]})`,
       '에이전트는 Windows 자격 증명 관리자·git 자격증명 도우미에 접근하지 않는다. 봇 토큰(GH_TOKEN)만 쓴다',
       `${D} R20, E5`,
     );
   }
-  const cred = c.argv.slice(1).find((x) => isCredentialFile(x, home));
+  // 파일 이름을 볼 낱말: 명령 이름 뒤의 낱말(띄어 쓴 리다이렉션의 대상 포함)과 낱말에 붙은 리다이렉션의 대상(`<.env`).
+  // 명령 이름이 없는 명령(`> 파일`)은 모든 낱말이 리다이렉션이다
+  const files = [...(p.argv.length ? c.argv.slice(1) : c.argv), ...(c.targets ?? [])];
+  const cred = files.find((x) => isCredentialFile(x, home));
   if (cred) {
     return v(
       'R20 제작자 권한',
@@ -808,7 +823,7 @@ function secretRules(c: SimpleCommand, ctx: GuardContext): Problem | null {
     );
   }
   if (!ENV_READ_EXEMPT.has(head)) {
-    const env = c.argv.slice(1).find((x) => !x.startsWith('-') && isEnvFile(x));
+    const env = files.find((x) => !x.startsWith('-') && isEnvFile(x));
     if (env) {
       return v(
         'R10 시크릿',
@@ -877,7 +892,9 @@ function sequenceRules(command: string): Problem | null {
   let pipefail = false;
   let checked = false; // 검사 명령이 앞에 있었다
   let broken = false; // 그 뒤 `&&`가 아닌 연산자로 이어진 적이 있다
-  for (const { cmd, next } of parseSequence(command, 'posix')) {
+  for (const { cmd: raw, next } of parseSequence(command, 'posix')) {
+    // 이름과 하위 명령의 자리는 리다이렉션을 뺀 인자로 본다(`git >out push`, `node harness.ts >log check`)
+    const cmd = positional(raw);
     const opts = setOptions(cmd);
     errexit ||= opts.errexit;
     pipefail ||= opts.pipefail;
@@ -922,14 +939,16 @@ export function evaluateBash(
   if (raw) return raw;
   let procedural: Problem | null = null;
   for (const c of parseShell(command, dialect)) {
-    const head = c.argv.length ? commandName(c.argv[0]) : '';
+    // 이름과 인자의 자리로 고르는 규칙은 p를, 낱말을 이은 글과 대상 파일을 보는 규칙은 c를 본다
+    const p = positional(c);
+    const head = p.argv.length ? commandName(p.argv[0]) : '';
     const r =
-      secretRules(c, ctx) ??
-      (head === 'git' ? gitRules(c, cwd, ctx) : null) ??
-      (head === 'gh' ? ghRules(c, cwd, ctx) : null) ??
+      secretRules(c, p, ctx) ??
+      (head === 'git' ? gitRules(p, cwd, ctx) : null) ??
+      (head === 'gh' ? ghRules(p, cwd, ctx) : null) ??
       (c.argv.length ? dbRules(c, ctx, dbCommands) : null) ??
-      (c.argv.length ? rmRule(c, cwd, ctx) : null) ??
-      (c.argv.length ? externalRules(c) : null);
+      (p.argv.length ? rmRule(p, cwd, ctx) : null) ??
+      (p.argv.length ? externalRules(p) : null);
     // 금지 규칙(R…)이 먼저다. 승인 요청 순서 같은 절차 안내는 뒤 명령의 금지 규칙과 검사 순서 규칙을 가리지 않는다
     if (r && /^R\d/.test(r.rule)) return r;
     procedural ??= r;
