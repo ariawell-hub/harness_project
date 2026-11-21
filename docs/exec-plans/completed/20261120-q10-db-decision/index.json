@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "drizzle-guard",
-      "status": "in_progress"
+      "status": "completed",
+      "completed_at": "2026-11-21T22:21:16+09:00"
     }
   ]
 }
