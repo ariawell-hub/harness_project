@@ -26,23 +26,22 @@ function failed(why: string): Problem[] {
 
 /** 작업 트리에 남은 병합 충돌 표식 줄을 찾는다. 파일마다 한 건, 경로 순 */
 export function conflictMarkers(root: string): Problem[] {
-  // -G·--no-color·--no-column: 사용자의 git 설정(grep.patternType, color.grep, grep.column)이
-  // 패턴 해석과 출력 형식을 바꾸지 못하게 한다
+  // -E·--no-color·--no-column: 사용자의 git 설정(grep.patternType, color.grep, grep.column)이
+  // 패턴 해석과 출력 형식을 바꾸지 못하게 한다.
+  // 패턴은 하나다. -e를 둘 주면 맞는 줄이 많은 파일에서 git grep이 아주 느려진다(20만 줄에 98초, 한 패턴이면 0.1초)
   const r = gitTry(
     [
       'grep',
       '-n',
       '-I',
       '-z',
-      '-G',
+      '-E',
       '--no-color',
       '--no-column',
       '--no-recurse-submodules',
       '--untracked',
       '-e',
-      `^${START}`,
-      '-e',
-      `^${END}`,
+      `^(${START}|${END})`,
       '--',
       '.',
     ],
