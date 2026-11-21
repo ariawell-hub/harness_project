@@ -15,19 +15,21 @@
 
 제목: 비공개 리포의 Actions 비용 — 예산과 절감 수단.
 
-- **배경**: 기준선(step1의 문서를 가리킨다), 예산, 비용이 어디서 나오는가(워크플로별 비율, push 한 번당, 올림으로 붙은 몫).
-- **후보표**: 수단마다 한 행. 열은 `수단`, `예상 절감`, `잃는 보장`, `바꿔야 하는 것`, `되돌리는 방법`, `확인 상태`.
+절의 제목은 아래 굵은 글씨를 그대로 쓴다(`## 배경`, `## 후보표`, `## 묶음`, `## 결정`, `## 되돌리는 조건`). 머리의 `- 상태:` 줄은 `제안` 또는 `채택`으로 시작한다.
+
+- **배경**: 기준선(step1의 문서를 가리킨다), 예산, 비용이 어디서 나오는가(워크플로별 비율, PR head 하나당, 올림으로 붙은 몫).
+- **후보표**: 수단마다 한 행. 이 절에는 표를 하나만 둔다. 열은 `수단`, `예상 절감`, `잃는 보장`, `바꿔야 하는 것`, `되돌리는 방법`, `확인 상태`.
   - `예상 절감`은 기준선의 수치에서 계산하고 계산식을 적는다. 계산할 수 없으면 "재 봐야 안다"고 적는다.
   - `잃는 보장`은 설계서 5절·13.2절의 어느 줄이 어떻게 바뀌는지 적는다. 바뀌지 않으면 "없음"이다.
   - `바꿔야 하는 것`은 워크플로(제작자 적용), 설계서의 절, 훅·스크립트를 나눠 적는다.
-  - `확인 상태`는 사실관계를 공식 문서로 확인했는지다(확인함 + 출처와 날짜 / 확인 못 함).
+  - `확인 상태`는 사실관계를 공식 문서로 확인했는지다. 칸은 `확인함`(출처와 날짜를 함께 적는다) 또는 `확인 못 함`으로 시작한다. 확인할 외부 사실이 없는 수단(훅, 스크립트만 바꾸는 것)은 `확인함(외부 사실 없음)`으로 적는다.
 - **후보**(적어도 아래를 다룬다. 조사하면서 더한다):
   - push·실행 횟수: push 전 통과 도장(L1·L2 훅), push 전 로컬 사전 리뷰, 기록만 담은 커밋 묶기, 요청한 head만 검증, 병합 뒤 main `check`의 조건부 생략, 문서·기록만 바꾼 커밋의 가벼운 `check`.
   - 단가·올림: 1분 미만 job을 1코어 러너로, arm64 러너, 격리가 필요 없는 job 합치기, 초 단위로 청구하는 외부 러너 서비스.
   - Actions 밖: 결정적 게이트를 Actions 밖에서 돌리기, 판정을 작성자와 분리된 검증 서비스로 돌리기, self-hosted 러너(전부 / 시크릿이 없는 job만).
   - `check` 자체: 영향받는 테스트만, 결과 캐시의 범위, 무거운 테스트의 주기 실행.
   - 요금제·계정: 포함 사용량이 계정 단위라는 점, 조직·요금제에 따른 차이(Q13).
-- **묶음**: 예산에 드는 조합을 둘 이상 제시한다(보장을 가장 덜 잃는 조합, 가장 싼 조합). 조합마다 예상 PR당 청구 분과 30일 환산을 적는다.
+- **묶음**: 예산에 드는 조합을 둘 이상 제시한다(보장을 가장 덜 잃는 조합, 가장 싼 조합). 조합마다 `### 묶음 <이름>` 제목을 두고 `- 예상 PR당 청구 분:` 줄과 `- 30일 환산:` 줄을 적는다. 예산에 드는 조합이 없으면 그렇게 적고 가장 가까운 조합 둘을 같은 형식으로 적는다.
 - **결정**: 제작자가 고른 수단과 순서를 적는다. 답을 받기 전이면 상태를 "제안"으로 두고 추천 조합과 이유를 적는다. 고른 수단은 수단마다 별도 Issue로 구현한다고 적는다(보안 설계·워크플로를 바꾸는 것은 위험도 높음).
 - **되돌리는 조건**: 다시 쟀을 때 효과가 없거나 보장이 예상보다 더 약해진 경우.
 
@@ -35,7 +37,7 @@
 
 - `docs/harness/design.md`: 10.4절의 self-hosted 러너 문단 옆과 18절의 열린 질문에 ADR을 가리키는 줄을 더한다. 버전 줄을 올린다.
 - `docs/harness/CHANGELOG.md`에 한 줄.
-- `docs/exec-plans/tech-debt-tracker.md`: 비용과 관련된 행(TD-40 등)에 ADR을 가리키는 말을 더한다. 관련 행만 고친다.
+- `docs/exec-plans/tech-debt-tracker.md`: 비용과 관련된 행(TD-40 등)에 ADR 파일로 가는 링크를 더한다. 관련 행만 고친다.
 
 ### 3. 제작자에게 묻기
 
@@ -45,11 +47,17 @@ ADR의 후보표와 묶음을 올린 뒤, 어느 묶음(또는 수단)을 어떤
 
 ```bash
 ls docs/decisions | grep -q "actions-cost"
-f=$(ls docs/decisions/ADR-*-actions-cost.md) && grep -q "잃는 보장" "$f" && grep -q "되돌리는 방법" "$f" && grep -q "확인 상태" "$f"
-grep -q "actions-cost" docs/decisions/index.md
-grep -q "actions-cost" docs/harness/design.md
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && grep -Eq "^- 상태: (제안|채택)" "$f"
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && for h in "## 배경" "## 후보표" "## 묶음" "## 결정" "## 되돌리는 조건"; do grep -q "^$h" "$f" || exit 1; done
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && awk '/^## 후보표/{s=1;next} /^## /{s=0} s && /^\|/' "$f" | head -n 1 | grep "수단" | grep "예상 절감" | grep "잃는 보장" | grep "바꿔야 하는 것" | grep "되돌리는 방법" | grep -q "확인 상태"
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && test "$(awk '/^## 후보표/{s=1;next} /^## /{s=0} s && /^\|/' "$f" | tail -n +3 | wc -l)" -ge 14
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && test "$(awk '/^## 후보표/{s=1;next} /^## /{s=0} s && /^\|/' "$f" | tail -n +3 | grep -Evc "\| *(확인함|확인 못 함)[^|]*\| *$")" -eq 0
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && test "$(grep -c "^### 묶음 " "$f")" -ge 2 && test "$(grep -c "^- 예상 PR당 청구 분:" "$f")" -ge 2 && test "$(grep -c "^- 30일 환산:" "$f")" -ge 2
+f=$(ls docs/decisions/ADR-*-actions-cost.md) && grep -q "$(basename "$f")" docs/exec-plans/tech-debt-tracker.md && grep -q "$(basename "$f")" docs/decisions/index.md && grep -q "$(basename "$f")" docs/harness/design.md
 node scripts/harness.ts check
 ```
+
+- "작업"의 후보 목록에 적은 수단은 16개다(횟수 6, 단가·올림 4, Actions 밖 3, `check` 자체 3). 하나로 묶어 적을 수 있는 것을 감안해 후보표의 행 수 하한을 14로 둔다. 마지막 열이 `확인 상태`이고 모든 행의 그 칸이 `확인함` 또는 `확인 못 함`으로 시작해야 한다.
 
 ## 금지사항
 
