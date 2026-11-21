@@ -250,6 +250,13 @@ test('resolvePr: pull_request_target의 조회 응답이 이벤트의 PR과 맞�
     prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 7 } } }),
     prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: '' } } }),
     prObj({ head: { sha: NEW_H, ref: BRANCH, repo: 'x/r' } }),
+    // 이름이 owner/name 꼴이 아니면 다른 리포로 확인된 것이 아니다(F3)
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 'invalid' } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 'a/b/c' } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 'x/' } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: '/r' } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 'x/r y' } } }),
+    prObj({ head: { sha: NEW_H, ref: BRANCH, repo: { full_name: 'x/r\n' } } }),
     prObj({ head: { sha: NEW_H, ref: BRANCH } }),
     prObj({ head: null }),
   ]) {

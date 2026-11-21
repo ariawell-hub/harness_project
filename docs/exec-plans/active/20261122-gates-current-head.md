@@ -2,7 +2,7 @@
 id: 20261122-gates-current-head
 issue: 181 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -70,4 +70,5 @@ claimed_at: 2026-11-22T00:07:49+09:00
 - 2026-11-22: `node --test scripts/test/risk-gate.test.ts scripts/test/pr-state.test.ts` 통과(41건). `node scripts/harness.ts check` 통과(test 전체 포함), `node scripts/harness.ts self-test` 통과(시나리오 10개).
 - 수용 기준 "이전 head를 담은 `pull_request_target` 이벤트로 돌려도 현재 head가 나온다"는 `risk-gate.test.ts`의 "resolvePr: pull_request_target은 이벤트의 PR 번호로 API를 조회해 실행 시점의 head를 낸다"가 본다.
 - 2026-11-22(판정 1회차의 수정 뒤): 같은 두 파일 통과(42건). `node scripts/harness.ts check`, `node scripts/harness.ts self-test` 통과.
+- 2026-11-22(판정 2회차의 수정 뒤): 같은 두 파일 통과(42건). `node scripts/harness.ts check`, `node scripts/harness.ts self-test` 통과.
 - 병합 뒤 확인(Issue의 수용 기준): 실제 PR에서 본문 수정 직후 push해 새 head에 게이트 상태가 기록되는지 보고 Issue #181에 남긴다. `gates`는 main의 스크립트로 돌므로 병합 전에는 확인할 수 없다.
