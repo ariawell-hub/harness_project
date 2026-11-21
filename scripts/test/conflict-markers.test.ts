@@ -177,6 +177,31 @@ test('conflict-markers: assume-unchanged로 표시한 파일도 작업 트리의
   assert.deepEqual(conflictMarkers(indexOnly), []);
 });
 
+test('conflict-markers: 하위 모듈 안의 파일은 보지 않는다', () => {
+  const child = path.join(tmp(), 'child');
+  gitInit(child);
+  write(child, 'c.txt', 'clean\n');
+  commitAll(child);
+  const root = repo();
+  write(root, 'p.txt', 'clean\n');
+  commitAll(root);
+  // 로컬 경로의 하위 모듈은 file 전송을 허용해야 붙는다
+  sh('git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', child, 'sub'], root);
+  commitAll(root);
+  assert.deepEqual(conflictMarkers(root), []);
+
+  // 하위 모듈의 추적 파일과 새 파일에만 표식이 있다: 상위 리포의 검사에는 걸리지 않는다
+  write(root, 'sub/c.txt', `${START} HEAD\nx\n`);
+  write(root, 'sub/new.txt', `${END} other\n`);
+  assert.deepEqual(conflictMarkers(root), []);
+
+  // 상위 리포의 파일에도 표식이 있으면 그 파일만 알린다
+  write(root, 'p.txt', `a\n${START} HEAD\n`);
+  const p = conflictMarkers(root);
+  assert.equal(p.length, 1);
+  assert.ok(p[0].what.startsWith('p.txt:2'), p[0].what);
+});
+
 test('conflict-markers: 커밋이 없는 리포의 새 파일도 본다', () => {
   const root = repo();
   write(root, 'new.txt', BLOCK);
