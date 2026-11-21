@@ -77,8 +77,8 @@ function lastCommitTime(root: string, paths: string[]): number {
 const DESIGN_DOC = 'docs/harness/design.md';
 const VERSION = String.raw`\d+(?:\.\d+)*`;
 const DATE = String.raw`\d{4}-\d{2}-\d{2}`;
-/** `> 버전 v<버전> · … 최종 갱신: <날짜>` */
-const DESIGN_HEAD = new RegExp(`^> 버전 v(${VERSION}) · .*최종 갱신: (${DATE})\\s*$`);
+/** `> 버전 v<버전> · … 최종 갱신: <날짜>`. 줄은 이미 LF로 나눴으므로 가운데의 `.`은 모든 글자다(`s`) */
+const DESIGN_HEAD = new RegExp(`^> 버전 v(${VERSION}) · .*최종 갱신: (${DATE})\\s*$`, 's');
 /** 변경 이력의 항목: 공백 둘, 붙임표, `v<버전> (<날짜>): ` */
 const DESIGN_ITEM = new RegExp(`^  - v(${VERSION}) \\((${DATE})\\): `);
 
@@ -300,7 +300,10 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
 
   // 5) 설계서 머리말의 버전·최종 갱신과 변경 이력(설계서가 문서 목록에 있을 때만)
   if (files.includes(DESIGN_DOC)) {
-    errors.push(...designVersionProblems(readFileSync(path.join(root, DESIGN_DOC), 'utf8')));
+    // 문제가 아주 많을 수 있어 인자로 펼치지 않는다
+    for (const p of designVersionProblems(readFileSync(path.join(root, DESIGN_DOC), 'utf8'))) {
+      errors.push(p);
+    }
   }
   return { errors, warnings };
 }

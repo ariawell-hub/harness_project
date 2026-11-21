@@ -2,7 +2,7 @@
 id: 20261121-merge-leftovers
 issue: 175 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -155,6 +155,8 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 2026-11-21 23:13 step1 테스트를 먼저 올렸다(`c835f91`, 테스트 파일만). 구현 전 `node --test scripts/test/doc-lint-design-version.test.ts`는 실패한다(종료 코드 1: `../gates/doc-lint.ts`에 `designVersionProblems`가 없다, `SyntaxError: … does not provide an export named 'designVersionProblems'`).
 - 2026-11-21 23:15 구현을 올렸다. 같은 명령이 통과한다(9건). 이 리포의 설계서(v0.7.70, 변경 이력 항목 80개쯤)는 새 검사를 통과한다. 절차서 5절에 한 항목, `CHANGELOG`에 한 줄을 더하고 TD-33을 해결로 바꿨다.
 - 2026-11-21T23:35:44+09:00 step1 재작업: 구현 판정의 지적 둘(F1: 변경 이력 문제가 아주 많으면 결과를 펼쳐 더하다 RangeError로 끝난다, F2: 머리말 줄 안의 U+2028을 형식 오류로 본다)을 고친다
+- 2026-11-21 23:35 PR #183의 첫 판정(head `e0e4e90`): claude 승인, codex 수정 요청 둘. F1(P0): `docLint`가 `designVersionProblems`의 결과를 `errors.push(...)`의 인자로 펼쳐, 문제가 아주 많으면(같은 버전의 항목 20만 개) `RangeError`로 끝난다. F2(P1): 머리말 정규식의 `.`이 U+2028·U+2029에 맞지 않아, LF로는 한 줄인 머리말을 형식 오류로 본다. 둘 다 로컬에서 재현했다. 테스트만 담은 커밋(`8b6cdd3`)에서 `node --test scripts/test/doc-lint-design-version.test.ts`는 실패한다(11건 가운데 2건: `RangeError`, `R8 설계서 버전` 한 건이 나온다).
+- 2026-11-21 23:36 고쳤다: 결과를 하나씩 더하고, 머리말 정규식에 `s` 플래그를 줬다. 같은 명령이 통과한다(11건). 문제 199,999건인 임시 리포에서 `doc-lint` 명령과 `check --only doc-lint --no-cache`가 끝까지 돌고 종료 코드 1로 끝나는 것도 손으로 확인했다. step1의 "작업"·"AC"·"금지사항"은 바뀌지 않는다.
 
 ## 의사결정 로그
 
@@ -174,6 +176,7 @@ claimed_at: 2026-11-21T17:23:51+09:00 # new-task가 채운다
 - 결정: UTF-8로 읽을 수 없는 파일 이름은 이 계획에서 다루지 않고 TD-63으로 남긴다(PR #176의 F11). / 이유: 실행 도우미가 모든 `git` 출력을 UTF-8 문자열로 주므로 이 게이트만 고칠 수 없다. 도우미에 바이트 경로를 더하면 다른 게이트 넷도 같은 판단이 필요하다. 이 경우에도 검사는 실패로 끝난다. / 버린 대안: 이 게이트만 `spawnSync`를 직접 불러 바이트로 받기(게이트마다 경로를 읽는 방식이 달라진다), `-z`를 빼고 `git`의 경로 인용(`core.quotePath`)을 풀어 읽기(인용 해석을 새로 써야 하고 step0의 "작업"이 또 바뀐다). 반박이 받아들여지지 않아 제작자에게 물었고, 제작자가 범위를 줄이는 쪽을 골랐다(2026-11-21, 대화). 수용 기준 1과 비범위에 적었다.
 - 결정(철회, 같은 날): `assume-unchanged`로 표시한 파일의 작업 트리 내용을 검사 범위에서 빼기로 했던 것을 거둔다(PR #176의 F14, F15). / 이유: 전제가 틀렸다. 게이트의 인자(`--untracked`)에서는 `git grep`이 그 파일도 작업 트리에서 읽는다. 처음부터 수용 기준 1대로 돌고 있었다. / 남긴 것: 그 동작을 수용 기준 1에 적고 step0에 테스트 사례를 넣었다.
 - 결정: 규모는 medium이고 step을 둘로 나눈다. / 이유: 두 검사는 파일과 목적이 다르다(R15: PR 하나에 목적 하나). 게이트의 동작이 바뀌므로 medium 이상이다(절차서 1절).
+- 2026-11-21 23:36 F1·F2는 반박하지 않고 고친다. 이유: 둘 다 재현되고, step1의 문장("`<임의의 글자>`", "항목마다 한 건")과 구현이 어긋난 것이다. 계획은 바꾸지 않는다.
 
 ## 발견 사항
 
@@ -198,9 +201,9 @@ step0 결과(2026-11-21 22:01, 하위 모듈 사례를 더한 작업 트리):
 - `grep -q "^| TD-30 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
 - `grep -q "^| TD-63 .*UTF-8.*runSync.*| 열림 " docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
 
-step1 결과(2026-11-21 23:15, 구현 커밋의 작업 트리):
+step1 결과(2026-11-21 23:36, F1·F2를 고친 작업 트리):
 
-- `node --test scripts/test/doc-lint-design-version.test.ts scripts/test/doc-lint-gate.test.ts scripts/test/gates.test.ts scripts/test/codeowners.test.ts scripts/test/metrics-command.test.ts scripts/test/metrics-local.test.ts`: 종료 코드 0. 101건 가운데 101건 통과, 실패 0, 건너뜀 0. 새 테스트는 9건이다.
+- `node --test scripts/test/doc-lint-design-version.test.ts scripts/test/doc-lint-gate.test.ts scripts/test/gates.test.ts scripts/test/codeowners.test.ts scripts/test/metrics-command.test.ts scripts/test/metrics-local.test.ts`: 종료 코드 0. 103건 가운데 103건 통과, 실패 0, 건너뜀 0. 새 테스트는 11건이다.
 - `node scripts/harness.ts doc-lint`: 종료 코드 0(`doc-lint: 통과(경고 6건)`. 경고는 있던 "검토 필요"이고 `R8 설계서 버전`은 없다).
 - 절차서의 문장을 글자 그대로 견주는 `grep -qxF` 명령: 종료 코드 0.
 - `grep -q "^| TD-33 .*| 해결(" docs/exec-plans/tech-debt-tracker.md`: 종료 코드 0.
