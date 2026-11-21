@@ -162,7 +162,7 @@ test('testEffect.support는 래퍼 폴더에 맞는다(이 변경이 더하거�
 
 test('웹 프로파일은 verify를 켜고(node scripts/verify/web.ts) dev가 있다', () => {
   const cfg = loadConfig(webRepo());
-  assert.equal(cfg.profileVersion, 'web@0.3.0');
+  assert.equal(cfg.profileVersion, 'web@0.4.0');
   assert.deepEqual(cfg.commands.verify, { run: 'node scripts/verify/web.ts', timeoutSec: 1800 });
   assert.notEqual(cfg.commands.dev, null);
 });

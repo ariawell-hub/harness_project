@@ -13,7 +13,7 @@
   - `vitest`는 대상 리포의 devDependency다. 테스트 위치나 실행 도구가 다르면 그 리포의 `harness.config.json`에서 `testEffect`를 고친다. 그 변경은 `harness-guard`가 신호로 올린다.
   - 실제 Vitest로 확인한 기록: [lab/pilot-prep](../../lab/pilot-prep/README.md).
 - **verify**: `node scripts/harness.ts verify`가 앱을 띄우고 Playwright 시나리오를 돌려 판정한다. 아래 "verify" 절.
-- **DB 금지 명령**: 코어 목록에 `guard.dbPatterns`를 더한다. DB·ORM 확정(Q10) 후 보강한다.
+- **DB 금지 명령**: 코어 목록에 `guard.dbPatterns`(정규식)와 `guard.dbCommands`(도구의 금지 하위 명령)를 더한다. Drizzle의 명령 가운데 DB에 접속하는 것과 마이그레이션 파일을 지우는 것은 `guard.dbCommands`의 항목으로 막는다. 아래 "DB" 절.
 
 ## verify
 
@@ -104,3 +104,41 @@ node scripts/harness.ts verify -- e2e/login.spec.ts  # 지정한 파일만(여�
 ### 확인한 버전
 
 주소 제한(프록시 우회 규칙의 뜻)과 서비스 워커 차단은 Playwright와 Chromium의 동작에 기댄다. Playwright 1.65.0(Chromium 158 headless shell)에서 사례별로 확인했다: [lab/pilot-prep](../../lab/pilot-prep/README.md). **Playwright 버전을 올릴 때 그 실물 확인을 다시 돌린다.** 우회 규칙의 뜻이 바뀌면 요청이 프록시를 지나지 않고 나갈 수 있다(그때도 fixture의 관찰로 `verify`는 실패한다).
+
+## DB
+
+파일럿 웹 프로젝트의 DB는 PostgreSQL, ORM·마이그레이션 도구는 Drizzle(`drizzle-orm`, `drizzle-kit`)이고, 일회용 DB(설계서 14.3절)는 내장 PostgreSQL(PGlite, `@electric-sql/pglite`)이다. 결정과 이유는 [ADR-0007](../../docs/decisions/ADR-0007-db-postgres-drizzle.md)에 있고 **잠정**이다(macOS에서만 쟀다. Windows 네이티브와 Linux의 결과가 통과해야 확정한다). 확인한 버전(`drizzle-orm` 0.45.4, `drizzle-kit` 0.31.11, `@electric-sql/pglite` 0.5.15)과 절차는 [lab/q10-db](../../lab/q10-db/README.md)에 있다.
+
+### 일회용 DB의 규약
+
+- worktree 안의 폴더 하나가 DB 하나다. PC에 PostgreSQL 서버나 컨테이너 런타임을 두지 않는다. DB 폴더는 리포에 커밋하지 않는다(`.gitignore`에 둔다).
+- 테스트는 메모리 DB(`memory://`)를 쓴다.
+- PGlite는 한 프로세스가 연결 하나로 쓴다. `dev`와 테스트는 같은 폴더를 함께 열지 않는다.
+- 일회용 DB를 표준 명령(`setup`·`test`·`dev`·`verify`)에 잇는 일은 대상 리포에서, DB를 쓰는 첫 작업에 한다(기술 부채 표의 TD-12).
+
+### 명령
+
+| `drizzle-kit`의 하위 명령                 | 훅   | 이유                                                                               |
+| ----------------------------------------- | ---- | ---------------------------------------------------------------------------------- |
+| `generate`, `check`, `export`, `up`       | 허용 | 파일만 다룬다. 마이그레이션은 `generate`가 만든 SQL 파일로 쓰고 리뷰받는다(14.3절) |
+| `push`                                    | 금지 | 스키마 diff를 계산해 DB에 바로 적용한다(14.3절의 금지 분류)                        |
+| `migrate`, `studio`, `introspect`, `pull` | 금지 | 설정이 가리키는 DB에 접속한다. 그 DB가 일회용인지 훅은 알 수 없다                  |
+| `drop`                                    | 금지 | 마이그레이션 파일을 지운다(14.3절의 이력 변경)                                     |
+
+- 금지 명령은 L1 훅이 막는다(R13). 목록은 `profiles/web/profile.json`의 `guard.dbCommands`에 있다(`scripts/test/profile-web-db.test.ts`가 이 표와 설정을 견준다).
+- 마이그레이션의 적용은 에이전트가 명령으로 하지 않는다. 표준 명령 안에서 앱의 마이그레이션 코드(`drizzle-orm`의 migrator)가 일회용 DB에 적용한다.
+- `drizzle-kit`은 되돌리는 마이그레이션을 만들지 않는다. 14.3절이 요구하는 "적용 → 롤백 → 재적용" 증거의 롤백 SQL은 손으로 쓴다.
+
+### 훅이 보는 것과 보지 못하는 것
+
+- 훅은 설정 `guard.dbCommands`의 항목으로 인자의 자리를 본다(설계서 13.1절). 명령의 인자에서 `drizzle-kit` 자리를 찾고, 그 뒤에서 플래그를 건너뛴 다음의 낱말이 금지 목록에 있으면 막는다. 인자를 이어 붙인 글이 아니라 인자 하나하나를 본다.
+- 플래그가 하위 명령 앞에 오는 호출, 버전을 붙인 호출, 실행 파일을 직접 부르는 호출, 플래그의 값에 공백이 든 호출을 막는다(`drizzle-kit --config <파일> <하위 명령>`, `drizzle-kit@<버전> <하위 명령>`, `node node_modules/drizzle-kit/bin.cjs <하위 명령>`, `drizzle-kit --config "<공백이 든 경로>" <하위 명령>`).
+- 하위 명령 자리가 아닌 곳의 이름은 보지 않는다. 허용된 하위 명령 뒤의 인자(`drizzle-kit generate --name add-migrate-log`)와 플래그 값 안의 낱말(`drizzle-kit --config "team migrate config.ts" generate`)은 통과한다.
+- 이 설정은 메인 체크아웃의 `harness.config.json`에서 읽는다. worktree에서 목록을 비워도 풀리지 않는다. 목록을 바꾸는 변경은 병합되어 메인 체크아웃에 들어온 뒤에 적용된다.
+- 알려진 대가(더 막는 쪽): 플래그의 값이 금지 명령의 이름과 같으면 막힌다. 훅은 플래그 바로 뒤의 낱말이 값인지 하위 명령인지 알 수 없어 양쪽으로 따진다. `drizzle-kit --name migrate generate`가 막히고, 값을 받지 않는 플래그가 하위 명령 앞에 오는 `drizzle-kit --verbose generate --name migrate`도 막힌다. `--이름=값`으로 붙여 쓰면 통과한다(`--name=migrate`). 다른 명령의 인자에 `drizzle-kit`과 금지 명령의 이름이 차례로 있어도 막힌다(`echo drizzle-kit migrate`). 설계서 13.1절의 "알려진 대가"를 본다.
+- 패키지 스크립트 안에 든 명령은 훅이 보지 못한다(`pnpm db:migrate` 같은 이름으로 감싼 경우). 그런 스크립트를 더하는 변경은 리뷰에서 본다(절차 수준).
+- 그 밖에 남는 틈은 설계서 13.1절의 "남는 틈"에 있다. 훅은 빠른 피드백이고, 보장은 권한과 L3이 한다(설계서 14.3절의 강제 장치 표).
+
+### 한계
+
+ADR-0007의 "알려진 한계"를 본다: 개발·테스트(PGlite)와 운영(서버형 PostgreSQL)은 드라이버가 다르고, `drizzle-kit`은 `esbuild`에 기대며(설치 스크립트 허용 목록에 더하지 않는다), 설치 정책(게시 후 14일) 때문에 최신 버전을 바로 쓰지 못한다.

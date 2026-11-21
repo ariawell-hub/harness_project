@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "웹 프로파일(초안). pnpm + Prettier + ESLint + Vitest + 프로덕션 빌드. 제품의 실제 스크립트는 app:* 이름으로 둔다(하네스 별칭과 재귀를 피하려고)",
   "config": {
     "commands": {
@@ -34,6 +34,12 @@
         "\\bsupabase\\s+db\\s+reset\\b"
       ],
       "dbClients": ["supabase-db"],
+      "dbCommands": [
+        {
+          "tool": "drizzle-kit",
+          "forbidden": ["migrate", "studio", "introspect", "pull", "drop", "push"]
+        }
+      ],
       "mcp": {
         "denyWords": ["delete", "trash", "remove", "destroy", "purge", "erase", "wipe", "cancel"],
         "denyTools": ["mcp__*Gmail__send_message", "mcp__*Gmail__reply", "mcp__*Gmail__forward"],
