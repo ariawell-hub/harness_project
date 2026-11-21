@@ -396,7 +396,7 @@ test('검사 순서 규칙(R4): 뒤 명령(push·완료 처리·승인 요청·P
   for (const [plain, redirected] of FOLLOW_UPS) {
     // 기준: 리다이렉션이 없는 꼴
     assert.equal(rule(after(plain)), 'R4', after(plain));
-    const want = plain === 'gh pr ready 7' ? ready : null;
+    const want: string | null = plain === 'gh pr ready 7' ? ready : null;
     assert.equal(rule(chained(plain)), want, chained(plain));
     for (const f of redirected) {
       if (rule(after(f)) !== 'R4') diffs.push(`${after(f)}: ${rule(after(f)) ?? '통과'}`);
