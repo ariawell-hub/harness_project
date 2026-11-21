@@ -86,7 +86,7 @@ export function matchDbCommand(
   - 12.4절의 `r13-db` 행에 `guard.dbCommands`를 더한다.
   - 머리의 버전 줄(`> 버전 v…`)을 올리고 변경 기록에 `- v<번호> (<날짜>): …` 줄을 더한다(번호는 올릴 때 main의 다음 번호). 그 줄에 `guard.dbCommands`를 적는다.
   - **14.3절은 고치지 않는다.**
-- `docs/harness/architecture.md`: 모듈 표에서 첫 칸이 정확히 `` `hooks/*` ``인 행(하나뿐이다)에 `db-commands.ts`와 `guard.dbCommands`를 적는다. 다른 행에 적는 것으로는 채워지지 않는다(AC가 첫 칸으로 행을 고른다). 12.4절의 `r13-db` 행도 같은 방식으로 고른다(첫 칸이 정확히 `` `r13-db` ``인 행 하나).
+- `docs/harness/architecture.md`: 모듈 표에서 첫 칸이 정확히 `` `hooks/*` ``인 행(하나뿐이다)에 `db-commands.ts`와 `guard.dbCommands`를 적는다. 다른 행에 적는 것으로는 채워지지 않는다(AC가 첫 칸으로 행을 고른다). 두 행 모두 절 안에서 고른다: `hooks/*` 행은 `architecture.md`의 "레이어" 절 안에서, `r13-db` 행은 설계서 12.4절(`### 12.4 `부터 다음 `##`·`###` 제목 전까지) 안에서 첫 칸이 정확히 그 이름인 행이 하나여야 한다. 행을 다른 절로 옮겨 적는 것으로는 채워지지 않는다.
 - `docs/harness/CHANGELOG.md`의 `## 다음 버전 (미배포)` 절에 `guard.dbCommands`를 적은 한 줄을 더한다.
 - 설계서의 버전은 갈라진 지점(merge-base)의 버전보다 커야 한다(패치 자리를 올린다). 변경 기록에는 새 버전 번호로 시작하는 줄(`- v<새 번호> (<날짜>): …`)이 있고 그 줄에 `guard.dbCommands`가 있다.
 
@@ -98,13 +98,13 @@ b=$(git merge-base HEAD origin/main) && test "$(git diff "$b" -- scripts/test/gu
 b=$(git merge-base HEAD origin/main) && t=$(mktemp -d) && git show "$b:docs/harness/design.md" | awk '/^### 14\.3 /{s=1} /^### 14\.4 /{s=0} s' > "$t/a" && awk '/^### 14\.3 /{s=1} /^### 14\.4 /{s=0} s' docs/harness/design.md > "$t/b" && test -s "$t/a" && diff "$t/a" "$t/b"
 b=$(git merge-base HEAD origin/main) && test -z "$(git diff --name-only "$b" -- profiles/web scripts/test/profile-web.test.ts docs/exec-plans/tech-debt-tracker.md .github)"
 awk '/^### 13\.1 /{s=1;next} /^### 13\.2 /{s=0} s' docs/harness/design.md | grep -q "guard.dbCommands"
-test "$(awk -F'|' '$2 ~ /^ *`r13-db` *$/' docs/harness/design.md | wc -l)" -eq 1 && awk -F'|' '$2 ~ /^ *`r13-db` *$/' docs/harness/design.md | grep -qF "guard.dbCommands"
+test "$(awk '/^### 12\.4 /{s=1;next} /^###? /{s=0} s' docs/harness/design.md | awk -F'|' '$2 ~ /^ *`r13-db` *$/' | wc -l)" -eq 1 && awk '/^### 12\.4 /{s=1;next} /^###? /{s=0} s' docs/harness/design.md | awk -F'|' '$2 ~ /^ *`r13-db` *$/' | grep -qF "guard.dbCommands"
 b=$(git merge-base HEAD origin/main) && old=$(git show "$b:docs/harness/design.md" | sed -n 's/^> 버전 v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\) .*/\1/p' | head -n 1) && new=$(sed -n 's/^> 버전 v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\) .*/\1/p' docs/harness/design.md | head -n 1) && test -n "$old" && test -n "$new" && test "$old" != "$new" && test "$(printf '%s\n%s\n' "$old" "$new" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$new"
 new=$(sed -n 's/^> 버전 v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\) .*/\1/p' docs/harness/design.md | head -n 1) && test -n "$new" && grep -E "^ *- v[0-9]+\.[0-9]+\.[0-9]+ \(20[0-9]{2}-[0-9]{2}-[0-9]{2}\):" docs/harness/design.md | grep -F -- "- v$new (" | grep -q "guard.dbCommands"
 b=$(git merge-base HEAD origin/main) && test "$(git show "$b:docs/harness/design.md" | grep -c "guard.dbCommands")" -eq 0
 awk '/^## 다음 버전/{s=1;next} /^## /{s=0} s' docs/harness/CHANGELOG.md | grep -q "guard.dbCommands"
 b=$(git merge-base HEAD origin/main) && git diff "$b" -- docs/harness/CHANGELOG.md | grep "^+" | grep -q "guard.dbCommands"
-test "$(awk -F'|' '$2 ~ /^ *`hooks\/\*` *$/' docs/harness/architecture.md | wc -l)" -eq 1 && awk -F'|' '$2 ~ /^ *`hooks\/\*` *$/' docs/harness/architecture.md | grep -F "db-commands.ts" | grep -qF "guard.dbCommands"
+test "$(awk '/^## 레이어/{s=1;next} /^## /{s=0} s' docs/harness/architecture.md | awk -F'|' '$2 ~ /^ *`hooks\/\*` *$/' | wc -l)" -eq 1 && awk '/^## 레이어/{s=1;next} /^## /{s=0} s' docs/harness/architecture.md | awk -F'|' '$2 ~ /^ *`hooks\/\*` *$/' | grep -F "db-commands.ts" | grep -qF "guard.dbCommands"
 node scripts/harness.ts self-test
 node scripts/harness.ts check
 ```
