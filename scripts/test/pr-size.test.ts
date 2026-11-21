@@ -187,6 +187,10 @@ test('설정 prSize: 키가 없으면 기본값이고, 준 항목만 기본값�
     { maxLines: -1 },
     { maxLines: 1.5 },
     { maxLines: '400' },
+    // 적어 놓은 null은 생략이 아니다
+    { maxLines: null },
+    { exclude: null },
+    { maxLines: null, exclude: [] },
     { exclude: ['/abs'] },
     { exclude: ['../x'] },
     { exclude: [1] },
@@ -424,6 +428,72 @@ test('prSizeOf: 경로는 글자 그대로 견준다(역슬래시가 든 파일 
   assert.equal(r.lines, 7);
   // 진짜 폴더 경로는 제외된다
   assert.equal(prSizeOf([sized('docs/a.ts', 3), sized('src/test/a.ts', 4)], CFG as never).lines, 0);
+});
+
+test('prSizeOf: 줄바꿈이 든 경로도 제외 glob과 lockfile glob에 맞는다', () => {
+  const cfg = { prSize: resolvePrSize(undefined), deps: { lockfiles: ['**/lock.yaml'] } };
+  const excluded = [
+    'docs/a\nb.txt',
+    'docs/x\n/y.txt',
+    'src/a\nb.test.ts',
+    'pkg\n/test/a.ts',
+    'src\n/generated/a.ts',
+    'a\nb.md',
+    'pkg\n/lock.yaml',
+    'docs/a\r\nb.txt',
+  ];
+  for (const f of excluded) {
+    const r = prSizeOf([sized(f, 401)], cfg as never);
+    assert.equal(r.lines, 0, JSON.stringify(f));
+    assert.equal(r.over, false, JSON.stringify(f));
+  }
+  // 줄바꿈이 있어도 제외 목록에 맞지 않는 경로는 센다. 역슬래시는 여전히 글자 그대로다
+  for (const f of ['src/a\nb.ts', 'docs\\a\nb.ts', 'src/a\n/docs/x']) {
+    const r = prSizeOf([sized(f, 401)], cfg as never);
+    assert.equal(r.lines, 401, JSON.stringify(f));
+    assert.equal(r.over, true, JSON.stringify(f));
+  }
+});
+
+test('prSizeOf: 파일 이름의 줄바꿈·제어 문자는 상세에서 보이는 표기로 바뀌어 경로 하나가 한 줄에 머문다', () => {
+  const names = [
+    'src/a\n```\n# 제목.ts',
+    'src/b\r\n~~~\r\n## x.ts',
+    'src/c\u0001\td\u2028e\u2029f\u0085g.ts',
+    'src\\h.ts',
+  ];
+  const r = prSizeOf(
+    names.map((n, i) => sized(n, 10 - i)),
+    CFG as never,
+  );
+  assert.equal(r.over, true);
+  assert.equal(r.lines, 34);
+  // 첫 줄, 고치는 법, 근거, 파일 넷: 줄이 늘지 않는다
+  assert.equal(r.details.length, 7);
+  for (const l of r.details) assert.ok(!/[\p{Cc}\u2028\u2029]/u.test(l), JSON.stringify(l));
+  assert.deepEqual(
+    r.details.slice(3).map((l) => l.trim().replace(/^\d+\s+/, '')),
+    [
+      'src/a\\n```\\n# 제목.ts',
+      'src/b\\r\\n~~~\\r\\n## x.ts',
+      'src/c\\u{1}\\td\\u{2028}e\\u{2029}f\\u{85}g.ts',
+      'src\\\\h.ts',
+    ],
+  );
+  // 요약의 코드 블록이 일찍 닫히지 않는다: pr-size 상세 블록 안에 펜스만 있는 줄이나 제목 줄이 없다
+  const md = summaryMarkdown({
+    version: 1,
+    headSha: HEAD_SHA,
+    results: [
+      { context: 'pr-size', state: r.state, description: r.description, details: r.details },
+    ],
+  }).split('\n');
+  const open = md.indexOf('```text');
+  assert.ok(open > 0);
+  assert.equal(md.indexOf('```', open + 1), open + 1 + r.details.length);
+  assert.ok(!md.some((l) => /^\s*(~~~|#\s)/.test(l) && l !== md[0]), md.join('\n'));
+  // 견줄 때는 git이 준 글자 그대로다: 줄바꿈이 든 `.ts` 파일은 센다
+  assert.equal(prSizeOf([sized('src/a\n.ts', 6)], CFG as never).over, true);
 });
 
 test('gatesOutput: 결과 파일은 크기를 맞춘 결과이고, 요약은 원래 결과라 뺀 경고와 상세가 남는다', () => {
