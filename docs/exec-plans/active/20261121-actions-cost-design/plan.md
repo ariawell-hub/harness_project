@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -264,6 +264,8 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - 실패하는 테스트를 먼저 썼다(커밋 `36a9eb6`: 61개 가운데 1개 실패 → `7aadbe0`: 61개 통과). 검증자의 재현 입력(실제 ADR의 링크 글을 폭 없는 글자만 든 코드로 바꾼 것)이 "링크가 없다"로 실패하는 것을 확인했다.
   - 이 PR의 네 번째 수정 요청이다. 다음 판정도 수정 요청이면 더 고치지 않고 멈춰 제작자에게 묻는다(절차서 8절, 5회).
   - AC 12줄과 `check` 통과.
+
+- 2026-11-22T14:00:26+09:00 step2 재작업: 코드 판정 5라운드 F7 대응(제작자: 한 번 더 고친다)
 
 ## 의사결정 로그
 
