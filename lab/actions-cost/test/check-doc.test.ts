@@ -658,3 +658,94 @@ test('check-doc 명령: 인자가 틀리거나 문서를 읽지 못하면 1이�
   // 절대 경로를 오류 글에 옮기지 않는다
   assert.ok(!missing.stderr.includes(dir));
 });
+
+// ---- 코드 판정 1라운드(F2~F4)와 같은 종류의 구멍: 화면에 보이는 문서가 틀렸는데 통과하면 안 된다 ----
+
+test('checkDoc: 기록 표의 구분 줄은 머리 줄과 칸 수가 같아야 한다', () => {
+  const doc = goodDoc();
+  fails(check(swap(doc, TABLE_RULE, '| --- |')), /기록.*구분 줄/);
+  fails(check(swap(doc, TABLE_RULE, `${TABLE_RULE} --- |`)), /기록.*구분 줄/);
+});
+
+test('checkDoc: 판단 절차의 내용은 그 항목에 속한 줄만 센다(다음 목록 항목이나 문단은 세지 않는다)', () => {
+  const doc = goodDoc();
+  const line = doc.split('\n').find((l) => l.startsWith(HEADS[4]));
+  assert.ok(line);
+  const item = `${HEADS[4]}\n- 이 줄은 머리가 다른 별개의 목록 항목이고 스무 자를 넘는다.`;
+  fails(check(swap(doc, line, item)), /판단 절차.*판단 시점 3.*20자/);
+  const para = `${HEADS[4]}\n\n이 줄은 목록 밖의 문단이고 공백을 빼고도 스무 자를 넘는다.\n`;
+  fails(check(swap(doc, line, para)), /판단 절차.*판단 시점 3.*20자/);
+  // 마지막 항목도 절의 끝까지 읽지 않는다
+  const last = doc.split('\n').find((l) => l.startsWith(HEADS[7]));
+  assert.ok(last);
+  const tail = `${HEADS[7]}\n\n제작자가 정한다는 것을 목록 밖의 문단에만 적었다. 스무 자를 넘는다.`;
+  fails(check(swap(doc, last, tail)), /판단 절차.*예산을 넘는 결정/);
+});
+
+test('checkDoc: 잰 명령과 다시 계산하는 명령은 코드로 적은 명령 전체가 같아야 한다', () => {
+  const doc = goodDoc();
+  const from = `\`${FROM_COMMAND}\``;
+  const save = `\`${SAVE_COMMAND}\``;
+  fails(check(swap(doc, from, `\`${FROM_COMMAND}.bak\``)), /기준선.*다시 계산하는 명령/);
+  fails(check(swap(doc, save, `\`${SAVE_COMMAND}.bak\``)), /기준선.*잰 명령/);
+  fails(
+    check(swap(doc, from, `\`${FROM_COMMAND} --since 2026-11-18\``)),
+    /기준선.*다시 계산하는 명령/,
+  );
+  // 코드 구간(백틱)이나 코드 블록 밖의 글은 명령으로 치지 않는다
+  fails(check(swap(doc, from, FROM_COMMAND)), /기준선.*다시 계산하는 명령/);
+  // 코드 블록의 한 줄로 적어도 된다
+  const block = swap(
+    doc,
+    `- 다시 계산하는 명령: ${from}\n`,
+    `- 다시 계산하는 명령:\n\n\`\`\`bash\n${FROM_COMMAND}\n\`\`\`\n`,
+  );
+  assert.deepEqual(check(block), []);
+});
+
+const fence = (s: string) => `\`\`\`text\n${s}\n\`\`\``;
+const comment = (s: string) => `<!--\n${s}\n-->`;
+
+test('checkDoc: 코드 블록이나 주석 안의 줄은 절·예산 줄·항목·표로 치지 않는다', () => {
+  const doc = goodDoc();
+  const budget = '- PR 하나당 예산: 30분($0.18, 2코어 Linux 기준)';
+  fails(check(swap(doc, budget, fence(budget))), /예산.*PR 하나당 예산/);
+  fails(check(swap(doc, budget, comment(budget))), /예산.*PR 하나당 예산/);
+  fails(check(swap(doc, budget, `<!-- ${budget} -->`)), /예산.*PR 하나당 예산/);
+  const item = doc.split('\n').find((l) => l.startsWith(HEADS[5]));
+  assert.ok(item);
+  fails(check(swap(doc, item, comment(item))), /판단 절차.*효과가 없을 때/);
+  fails(check(swap(doc, item, fence(item))), /판단 절차.*효과가 없을 때/);
+  const table = `${TABLE_HEAD}\n${TABLE_RULE}\n${recordRow(BASE, BASELINE_FILE, '기준선', '예산 안')}`;
+  fails(check(swap(doc, table, fence(table))), /기록.*표/);
+  fails(check(swap(doc, table, comment(table))), /기록.*표/);
+  fails(check(swap(doc, '## 예산\n', `${fence('## 예산')}\n`)), /## 예산/);
+  const date = '- 잰 날짜: 2026-11-22';
+  fails(check(swap(doc, date, comment(date))), /기준선.*잰 날짜/);
+});
+
+test('checkDoc: 주석 안의 글은 본문·낱말·명령으로 치지 않는다', () => {
+  const doc = goodDoc();
+  const why = sectionOf(doc, '왜 재는가');
+  const body = why.split('\n').slice(2).join('\n');
+  fails(check(swap(doc, why, `## 왜 재는가\n\n<!--\n${body}-->\n\n`)), /왜 재는가/);
+  const from = `\`${FROM_COMMAND}\``;
+  fails(check(swap(doc, from, `<!-- ${from} -->`)), /기준선.*다시 계산하는 명령/);
+});
+
+test('checkDoc: 코드 블록 안의 글은 본문의 낱말로 친다(명령 예시를 코드 블록에 적는다)', () => {
+  const doc = swap(
+    goodDoc(),
+    '`node scripts/harness.ts actions-cost --since <날짜> --until <날짜>`로 잰다.',
+    '아래 명령으로 잰다.\n\n```bash\nnode scripts/harness.ts actions-cost --since <날짜> --until <날짜>\n```\n',
+  );
+  assert.deepEqual(check(doc), []);
+});
+
+test('checkDoc: 표식이 코드 블록 안에 있으면 표식 구간으로 치지 않는다', () => {
+  const doc = goodDoc();
+  const begin = doc.indexOf('<!-- actions-cost:begin -->');
+  const end = doc.indexOf('<!-- actions-cost:end -->') + '<!-- actions-cost:end -->'.length;
+  const wrapped = `${doc.slice(0, begin)}${fence(doc.slice(begin, end))}${doc.slice(end)}`;
+  fails(check(wrapped), /기준선.*표식 구간/);
+});
