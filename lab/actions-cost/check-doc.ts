@@ -645,6 +645,19 @@ export function checkDoc(i: DocInputs): string[] {
     const r = found.get(p.title);
     if (r) checkProse(p.title, p.words, part(v.text, r), problems);
   }
+  // 표는 표식 구간(계산한 출력)과 "기록" 절의 표뿐이다. 다른 자리의 표는 값을 견주지 않은 채 화면에 보인다.
+  // 표식 구간과 코드 블록의 줄은 struct에서 비어 있다. 절마다 처음 한 줄만 낸다
+  const kept = found.get('기록');
+  const told = new Set<string>();
+  v.struct.forEach((l, k) => {
+    if (!l.includes('|') || (kept && k >= kept.from && k < kept.to)) return;
+    const title = [...found].find(([, r]) => k >= r.from && k < r.to)?.[0] ?? '절 밖';
+    if (told.has(title)) return;
+    told.add(title);
+    problems.push(
+      `표: ${k + 1}째 줄(${title})에 \`|\`가 있다. 표는 표식 구간과 "기록" 절에만 둔다(다른 자리의 표는 값을 견주지 않는다)`,
+    );
+  });
   const budget = found.get('예산');
   if (budget) checkBudget(part(v.struct, budget), problems);
   const baseline = found.get('기준선');

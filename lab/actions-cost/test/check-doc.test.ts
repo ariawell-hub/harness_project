@@ -924,7 +924,8 @@ test('checkDoc 형식: 링크의 주소에 |를 쓰지 않는다(표의 칸은 �
   const doc = goodDoc();
   // F9: 주소를 뺀 뒤에 칸을 세면 아홉 칸이지만 화면에서는 열 칸으로 갈려 값이 어긋난다
   fails(check(swap(doc, '예산 안. 설명 한 줄', '예산 안. [설명](x|y) 한 줄')), /형식.*링크/);
-  formatOnly(check(swap(doc, WORD, `[무료 분](x|y) ${WORD}`)), /형식.*링크/);
+  // 본문의 |는 "표는 두 곳에만"도 함께 어긋난다
+  fails(check(swap(doc, WORD, `[무료 분](x|y) ${WORD}`)), /형식.*링크/);
 });
 
 test('checkDoc: 기록 절에서 |는 표의 줄에만 쓴다(|로 시작하지 않는 줄도 화면에서 표가 된다)', () => {
