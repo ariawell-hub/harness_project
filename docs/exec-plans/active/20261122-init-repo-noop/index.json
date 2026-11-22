@@ -1,0 +1,10 @@
+{
+  "plan": "20261122-init-repo-noop",
+  "steps": [
+    {
+      "step": 0,
+      "name": "init-target",
+      "status": "pending"
+    }
+  ]
+}
