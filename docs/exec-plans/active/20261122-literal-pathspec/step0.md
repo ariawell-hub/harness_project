@@ -27,6 +27,8 @@
 
 ### 4. 테스트(먼저 쓴다)
 
+새 테스트와 그 도우미는 두 테스트 파일의 끝에 붙인다. 있던 내용은 import 줄까지 한 글자도 바꾸지 않는다(새 테스트는 그 파일에 이미 있는 import와 도우미만 쓴다). 그래서 병합 기준 커밋(merge-base)의 파일 내용이 고친 파일의 앞부분에 그대로 남고, AC가 그것을 바이트로 견준다(있던 테스트의 단언을 지우거나 고치면 실패한다).
+
 `*`와 `:`은 Windows의 파일 이름에 쓸 수 없다. 그 글자가 든 이름을 만드는 테스트는 Windows에서 건너뛴다(`process.platform === 'win32'`). `[`가 든 이름의 테스트는 건너뛰지 않는다.
 
 `scripts/test/harness-guard.test.ts`에 더한다(있던 테스트는 고치지 않는다).
@@ -39,7 +41,10 @@
 `scripts/test/test-effect.test.ts`에 더한다(있던 테스트는 고치지 않는다). 셋 다 커밋된 변경만 보는 실행(`check(root, base, true)`)이다. 테스트 파일을 실행하는 명령은 `[process.execPath]`로 바꿔 쓴다(`repo({ command: [process.execPath] })`). 이유: `node --test <파일>`은 인자를 glob으로 읽어 이름에 glob 글자가 든 파일을 실행하지 못한다("발견 사항" 둘째 항목). 이 step이 보는 것은 git에 넘기는 이름이다.
 
 - 이전 판 찾기: `t/x[ab].test.mjs`를 첫 판으로 커밋하고, 둘째 판으로 고쳐 커밋한다. 그 뒤 `t/xa.test.mjs`를 고치는 커밋을 한도(30)보다 많이 쌓는다. 그 끝이 base다. PR이 `t/x[ab].test.mjs`를 첫 판으로 되돌린다(base에서도 통과하는 내용이다). 결과가 `restored`다. 지금은 `restored`가 아니다(한도 안의 커밋이 모두 `t/xa.test.mjs`를 바꾼 것이라 그 파일의 첫 판을 보지 못한다).
-- base 체크아웃: base에 `t/xa.test.mjs`가 있다. PR이 `t/xa.test.mjs`를 고쳐 값을 하나 더 내보내고(export), 계획 파일의 예외 줄로 그 파일을 판정에서 뺀다(`exempt`). PR이 새 파일 `t/x[ab].test.mjs`를 더하는데, 이 파일은 `./xa.test.mjs`에서 그 값을 가져와 단언한다. `t/x[ab].test.mjs`의 결과가 `effective`다(base 체크아웃의 `t/xa.test.mjs`는 base 판이라 그 값이 없어 실패한다). 지금은 `ineffective`다(glob에 맞는 `t/xa.test.mjs`도 head 판으로 덮어써 base에서 통과한다).
+- base 체크아웃: 설정에 실패 이유를 가리는 정규식(`assertPattern`)을 둔다. base에 `t/xa.test.mjs`가 있다. PR이 `t/xa.test.mjs`를 고쳐 값을 하나 더 내보내고(export), 계획 파일의 예외 줄로 그 파일을 판정에서 뺀다(`exempt`). PR이 새 파일 `t/x[ab].test.mjs`를 더한다. 이 파일은 `./xa.test.mjs`를 네임스페이스로 가져와(`import * as`) 그 값을 고유한 메시지의 단언으로 견주고, 단언 뒤에 고유한 표식을 출력한다.
+  - 먼저 head에서 그 파일을 직접 실행해 통과하고 표식이 출력되는 것을 단언한다(그 이름의 파일이 실행되고 단언까지 가는 테스트라는 확인이다. 테스트 실행기 안에서 띄우므로 `NODE_TEST_CONTEXT`를 비워 넘긴다).
+  - 판정 결과: `t/x[ab].test.mjs`가 `effective`이고 실패 이유가 단언 실패(`reason: 'assertion'`)다. base 체크아웃의 `t/xa.test.mjs`는 base 판이라 그 값이 없어 그 단언에서 실패한다. `effective`만 보지 않는 이유: 그 파일이 base 체크아웃에 놓이지 않았거나 가져오기에서 죽어도 `effective`가 되지만 그때의 이유는 단언 실패가 아니다(`other`). 네임스페이스로 가져오는 이유도 같다(없는 이름을 직접 가져오면 단언 전에 죽는다).
+  - 지금은 `ineffective`다(glob에 맞는 `t/xa.test.mjs`도 head 판으로 덮어써 base에서 통과한다).
 - `:`으로 시작하는 이름(Windows에서는 건너뛴다): 설정의 `files`에 리포 최상위의 테스트 파일도 넣는다(`['*.test.mjs', 't/*.test.mjs']`). PR이 최상위에 `:!x.test.mjs`(base에서도 통과하는 테스트)를 더한다. 예외 없이 끝나고 결과가 `ineffective`다. 지금은 `git ls-tree`가 실패해 `testEffect`가 예외로 끝난다.
 
 테스트만 담은 커밋을 구현 커밋보다 먼저 만들고, 구현 전의 실패를 진행 로그에 적는다.
@@ -56,6 +61,10 @@
 ```bash
 node --test scripts/test/harness-guard.test.ts scripts/test/test-effect.test.ts
 git rev-parse --verify --quiet origin/main^{commit}
+test "$(head -c "$(git cat-file -s "$(git merge-base origin/main HEAD):scripts/test/harness-guard.test.ts")" scripts/test/harness-guard.test.ts | git hash-object --stdin)" = "$(git rev-parse "$(git merge-base origin/main HEAD):scripts/test/harness-guard.test.ts")"
+test "$(head -c "$(git cat-file -s "$(git merge-base origin/main HEAD):scripts/test/test-effect.test.ts")" scripts/test/test-effect.test.ts | git hash-object --stdin)" = "$(git rev-parse "$(git merge-base origin/main HEAD):scripts/test/test-effect.test.ts")"
+test "$(git cat-file -s "$(git merge-base origin/main HEAD):scripts/test/harness-guard.test.ts")" -lt "$(wc -c < scripts/test/harness-guard.test.ts)"
+test "$(git cat-file -s "$(git merge-base origin/main HEAD):scripts/test/test-effect.test.ts")" -lt "$(wc -c < scripts/test/test-effect.test.ts)"
 grep -qE "^export const LITERAL_PATHSPECS = '--literal-pathspecs';$" scripts/lib/git.ts
 [ $(grep -o 'LITERAL_PATHSPECS' scripts/gates/harness-guard.ts | wc -l) -ge 2 ]
 [ $(grep -o 'LITERAL_PATHSPECS' scripts/gates/test-effect.ts | wc -l) -ge 4 ]
