@@ -71,6 +71,13 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - 2026-11-22 main(`5e8cc64`)의 코드를 읽었다. 판정 워크플로의 plan job이 PR 전체 변경을 보고 `mode`(`plan` | `code`)를 정하고(`scripts/ci/plan-hash.ts`의 `planMode`), 저장된 원장을 읽어 판정 job에 넘긴다(`review-plan` 명령, `readRoundLedger`). 판정 job은 받은 원장으로 판정 입력 파일을 만든다(`writeRoundInput`). 기록 job은 `record-review --mode`로 `mode`를 받고 `recordLedger`가 원장을 읽어 판정을 반영한 뒤 `review-ledger` 상태를 쓴다(`review-ledger`를 쓰는 곳은 여기뿐이다. 판정이 없어도 쓴다). 상태 값은 `scripts/ci/ledger.ts`의 `ENTRY_STATUSES`에 있고 형식 검사가 이 목록으로 거른다. `deferred`·`accepted`인 지적은 판정으로 바뀌지 않는다(같은 꼴을 `parked`에 쓴다). runner의 지적 대응과 `pr-state`의 "오래 열린 지적"은 `open`인 지적만 본다.
 - 2026-11-22 계획 검증 1회차(head `b467754`): Claude 승인(지적 없음), Codex 수정 요청(P1 넷). F1(계획 전용 2라운드부터는 바뀌지 않은 코드 파일을 위치로 적은 새 P1이 동결돼 `deferred`로 등록되므로, "계획 전용 판정의 새 P1은 `open`으로 등록된다"는 테스트 문장과 맞지 않는다) → 맞다. 동결은 지금의 규칙(10.2절 (5))이고 이 계획은 바꾸지 않는다는 것을 작업·비범위·금지사항에 적고, 테스트를 1라운드(동결되지 않는 경우)와 2라운드(지금처럼 `deferred`)로 나눠 적었다. F2(저장된 원장에 `parked`뿐이면 제작자 승인 조회를 건너뛰어, 되돌아온 지적의 유효한 승인이 첫 코드 기록에서 반영되지 않는다) → 맞다. `parkFor`를 승인 조회 앞에서 먼저 적용한다(뒤에서 한 번 더). F3(runner의 `settledResponses`가 `open`이 아닌 지적을 모두 닫힌 것으로 세어, `parked`가 된 지적의 대응을 성공으로 적는다) → 맞다. `scripts/runner/review.ts`를 범위에 넣어 `parked`를 뺀다. F4(step의 AC에 전체 `check`가 없다) → 넣었다.
 - 2026-11-22 계획 검증 2회차(head `e01b840`): Claude 승인(지적 없음), Codex 수정 요청. F1~F4는 닫혔고 F5가 새로 나왔다(1회차 뒤에 고친 AC의 금지 경로 검사가 runner 파일 셋만 봐서 다른 runner 파일의 변경을 놓치고, `git`이 실패하면 결과가 비어 통과한다). 맞는 지적이라 AC를 고쳤다: 기준 커밋과 diff의 성공을 `&&`로 확인하고, `scripts/runner/` 아래에서 바뀌는 파일이 `review.ts` 하나인지, 그 파일의 hunk가 모두 `settledResponses` 안인지 본다.
+- 2026-11-22 계획 검증 3회차(head `ee0c9f3`): 두 검증자가 승인했다(G1). Claude가 P2 하나(F6, 미룸)를 냈다: 열한째 AC의 hunk 머리글 검사는 `settledResponses` 뒤, 다음 함수 앞의 줄 변경을 놓칠 수 있다. 미룬 지적이라 계획은 고치지 않았고, 구현에서 바꾼 줄이 그 함수의 본문 안뿐인 것을 diff로 직접 확인했다(아래).
+- 2026-11-23 읽어서 확인한 것: 두 판정 워크플로(`judge-claude.yml`, `judge-codex.yml`)가 `record-review`에 `--mode "$MODE"`를 이미 넘긴다(워크플로는 고치지 않았다). runner의 `openBlocking`·`longOpen`·`deadlocked`는 `open`만 보고, `divergence`는 `open`과 `fixed`·`rejected`·`accepted`만 센다. 그래서 그 넷은 고치지 않았고 `parked`를 내지 않는 테스트가 지금의 코드로 통과한다.
+- 2026-11-23 테스트 먼저: `ledger`·`ledger-accept`·`ledger-store`·`accept-load`·`pr-state`·`runner-review`의 테스트를 더하고 구현 전에 돌렸다. `ledger.test.ts`와 `ledger-accept.test.ts`는 `parkFor`가 없어 불러오기에서 실패했다(파일마다 tests 1, fail 1). `ledger-store.test.ts` 6건(기록 job 5, 판정 입력 1), `accept-load.test.ts` 1건, `pr-state.test.ts` 2건, `runner-review.test.ts` 1건(`settledResponses`)이 실패했다. runner의 넷(`openBlocking`·`longOpen`·`deadlocked`·`divergence`)은 계획대로 지금의 코드로 통과했다.
+- 2026-11-23 `recordLedger`의 `planOnly`와 `readRoundLedger`의 `planOnly`를 필수 인자로 두어(빠뜨리면 타입 검사가 막는다), 그 두 함수를 부르는 있던 테스트의 호출에 `planOnly: false`(코드가 섞인 head)를 채웠다. 단언은 고치지 않았다.
+- 2026-11-23 구현: `scripts/ci/ledger.ts`(`parked`, `planRound`, `parkFor`, `applyVerdict`, `ledgerStatus`, 형식 검사), `ledger-store.ts`(`recordLedger`: 승인 조회 전과 뒤에 `parkFor`), `accept-load.ts`(`readRoundLedger`: 같은 순서, 반박은 그 뒤의 원장으로 거른다), `review-round.ts`(원장 파일의 한 줄), `scripts/harness.ts`(`record-review`는 `--mode`가 `plan`인지, `review-plan`은 계산한 `mode`), `scripts/commands/pr-state.ts`(구현 대기 지적 줄), `scripts/runner/review.ts`(`settledResponses`의 본문 안만). 여섯 테스트 파일이 모두 통과한다(139건).
+- 2026-11-23 문서: 프롬프트(`prompt.md`)와 설계서 10.2절·절차서 2절에 정한 글을 그대로 넣고, 원장 형식(`ledger.md`)에 `parked` 행, `planRound` 필드, "구현 대기" 절, 판정 반영 규칙을 더했다. 설계서는 v0.7.81로 적었다: main은 v0.7.79이고 먼저 승인을 요청할 PR #214가 v0.7.80을 쓴다(병합 순서가 바뀌면 main을 병합할 때 번호를 맞춘다). 머리말의 최종 갱신 날짜를 새 이력 항목의 날짜(2026-11-23)에 맞췄다(`doc-lint`의 설계서 버전 검사). CHANGELOG 한 줄.
+- 2026-11-23 `origin/main`(`c24444c`)을 구현 커밋 뒤에 병합했다(충돌 없음).
 
 ## 의사결정 로그
 
@@ -87,7 +94,8 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 
 ## 발견 사항
 
-- 봇이 되돌릴 수 없는 변경(제작자가 올린 워크플로 파일)이 든 PR은 계획만 남길 수 없어, 그 PR의 step이 금지한 파일을 고쳐야 하는 지적이 나오면 이 계획이 고치는 길로도 풀리지 않는다(PR #188의 F14. 제작자가 별도 PR #216으로 먼저 고치기로 정했다).
+- 봇이 되돌릴 수 없는 변경(제작자가 올린 워크플로 파일)이 든 PR은 계획만 남길 수 없어, 그 PR의 step이 금지한 파일을 고쳐야 하는 지적이 나오면 이 계획이 고치는 길로도 풀리지 않는다(PR #188의 F14. 제작자가 별도 PR #216으로 먼저 고치기로 정했다). → 처리: #215
+- 열한째 AC(바뀐 줄이 `settledResponses` 안에만 있다)의 hunk 머리글 검사는 그 함수 뒤, 다음 함수 앞의 줄 변경을 놓칠 수 있다(계획 검증 3회차의 F6, P2, 미룸). 이 구현의 `review.ts` 변경은 그 함수 본문 안의 다섯 줄뿐인 것을 diff로 직접 확인했다. AC를 더 단단히 하려면 함수의 줄 범위를 구해 견주는 검사가 필요하다(이 step의 범위 밖). → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -99,7 +107,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - 수용 기준 1~6: 원장·기록·판정 입력·`pr-state`·runner 대응 집계의 테스트.
 - 수용 기준 7: AC의 문서 비교 줄과 판정 입력 테스트.
 - 수용 기준 8: AC의 워크플로 비교 줄.
-- 결과는 step을 진행하며 적는다.
+- 결과(2026-11-23): step0의 AC 16줄과 `node scripts/harness.ts check` 통과. 여섯 테스트 파일(`ledger` 25, `ledger-accept` 13, `ledger-store` 18, `accept-load` 24, `pr-state` 30, `runner-review` 29)과 `runner-plan-review`·`record`·`ci` 테스트 통과.
 
 ## 다음 할 일
 
