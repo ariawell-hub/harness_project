@@ -9,17 +9,18 @@ import path from 'node:path';
 import { changedFiles } from '../gates/risk-gate.ts';
 import { gitTry, showFile } from '../lib/git.ts';
 import {
+  PLAN_BOUND_SECTIONS,
   STEP_BOUND_SECTIONS,
+  boundPlanSection,
   findPlan,
   findPlanAt,
+  normalizeBound,
   parseBranch,
   parseDoc,
   planCandidates,
   section,
 } from '../lib/plan.ts';
 
-/** 제목이 이 말로 시작하는 섹션(lib/plan.ts의 section과 같은 규칙) */
-const PLAN_SECTIONS = ['목표와 수용 기준', '범위', '관련 파일'] as const;
 const STEP_FILE_RE = /^step(0|[1-9]\d*)\.md$/;
 
 interface PlanSource {
@@ -29,23 +30,13 @@ interface PlanSource {
   list: (dir: string) => string[];
 }
 
-/** 줄 끝 공백과 섹션 앞뒤 빈 줄을 뗀다. 줄 안의 글자는 그대로 둔다 */
-function normalize(content: string | null): string {
-  return (content ?? '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.replace(/\s+$/, ''))
-    .join('\n')
-    .replace(/^\n+|\n+$/g, '');
-}
-
 function hashFrom(src: PlanSource, planDir: string): string | null {
   const plan = src.read(`${planDir}/plan.md`);
   if (plan === null) return null;
   const body = parseDoc(plan).body;
-  const parts: [string, string][] = PLAN_SECTIONS.map((s) => [
+  const parts: [string, string][] = PLAN_BOUND_SECTIONS.map((s) => [
     `plan:${s}`,
-    normalize(section(body, s)),
+    boundPlanSection(body, s),
   ]);
   const steps = src
     .list(planDir)
@@ -55,7 +46,8 @@ function hashFrom(src: PlanSource, planDir: string): string | null {
     .sort((a, b) => a - b);
   for (const n of steps) {
     const text = parseDoc(src.read(`${planDir}/step${n}.md`) ?? '').body;
-    for (const s of STEP_BOUND_SECTIONS) parts.push([`step${n}:${s}`, normalize(section(text, s))]);
+    for (const s of STEP_BOUND_SECTIONS)
+      parts.push([`step${n}:${s}`, normalizeBound(section(text, s))]);
   }
   // 이름과 본문의 경계가 섞이지 않게 목록을 JSON으로 만든다
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');

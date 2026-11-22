@@ -326,6 +326,9 @@ test('runGates: 확인된 revert PR은 계획 없이 plan-gate success, 작성�
   assert.equal(by('pr-size').state, 'success');
   assert.equal(by('pr-size').description, 'revert PR: 보지 않는다');
   assert.deepEqual(by('pr-size').details, []);
+  assert.equal(by('scope').state, 'success');
+  assert.equal(by('scope').description, 'revert PR: 보지 않는다');
+  assert.deepEqual(by('scope').details, []);
   assert.equal(r.results[0].context, 'revert-check');
   assert.equal(by('revert-check').state, 'success', by('revert-check').details.join('\n'));
   assert.equal(asked(), 1);
