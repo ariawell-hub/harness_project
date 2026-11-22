@@ -2,7 +2,7 @@
 id: 20261122-hook-wrapper-options
 issue: 193 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active    # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -93,6 +93,7 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
 - 2026-11-22 구현했다: `scripts/hooks/wrappers.ts`(옵션 표, `skipWrapperOptions`, `splitEnvString`), `scripts/hooks/shell.ts`(`normalize`가 주 해석과 후보를 낸다, `env`의 옵션과 `-S`, `parseSequence`의 `alts`, `parseWork`, `SimpleCommand.incomplete`), `scripts/hooks/rules.ts`(검사 순서 규칙이 후보를 함께 본다, 읽지 못한 명령의 차단 하나). 새 테스트 19건이 통과했고, 기존 훅 테스트(`shell`·`guard`·`db-commands`·`command-position`·`profile-web-db`) 110건은 고치지 않고 통과했다.
 - 2026-11-22 실제 실행 대조(이 Mac): 대조한 틀 53개, 건너뛴 틀 60개, 경계 사례 14개(모두 실행됐다). 이 Mac에 있는 래퍼는 `nice`·`env`·`nohup`·`time`·`timeout`·`stdbuf`·`caffeinate`·`arch`·`xargs`와 셸 내장 `command`·`exec`이고, 없는 것은 `gnice`·`genv`·`gtimeout`·`gstdbuf`·`gxargs`·`unbuffer`다. 건너뛴 틀은 돌리지 않기로 한 래퍼(`sudo`·`doas`·`ionice`·`chrt`·`taskset`·`setsid`)의 틀, 없는 래퍼의 틀, 이 Mac의 구현이 그 옵션을 몰라 `tool`을 실행하지 않은 틀이다. 이 Mac의 `env`는 `-S`를 안다. Linux(GNU)의 대조는 CI의 `check`에서 돈다.
 - 2026-11-22 main을 병합했다(PR #190 병합 뒤. 충돌 없음). 문서를 고쳤다: 설계서 13.1절과 버전 이력(v0.7.75), CHANGELOG, architecture, TD-62 (3).
+- 2026-11-22T11:49:35+09:00 step0 재작업: 구현을 올린 head(`eb9d88b`)의 CI `check`가 실패했다(검증자 판정은 돌지 않았다). 실패한 것은 새 테스트의 실제 실행 대조 하나다: CI의 Linux에서 `env -S -i -S -i -S -i -S 'tool a'`(네 번 나누는 꼴)로 `tool`이 실행되지 않았다. 이 Mac에서는 실행된다. GNU coreutils 9.4의 `env.c`를 읽으면 실행돼야 하는 꼴이라, CI 러너의 `env`가 무엇이고 어떤 오류를 냈는지부터 본다: 테스트가 실행되지 않은 사례를 모아 종료 코드·오류 문구·`env --version`과 함께 실패 메시지에 낸다. 단언은 그대로다(실행되지 않으면 실패).
 
 ## 의사결정 로그
 
