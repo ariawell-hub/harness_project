@@ -2,7 +2,7 @@
 id: 20261122-runner-question-post
 issue: 211 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -70,6 +70,13 @@ runner는 세션이 계획의 "열린 질문"에 남긴 질문을 Issue 댓글�
 - 2026-11-22 계획 검증 3회차(head `09a733b`): Claude 승인(지적 없음), Codex 수정 요청. F1~F5는 닫혔다. F6이 남았고 F7이 새로 나왔다. 둘 다 맞는 지적이라 계획을 고쳤다. F6(이미 올라간 댓글을 찾았는데 라벨을 붙이지 못해 올린 것으로 적지 못한 채, 먼저 붙어 있던 라벨 때문에 제작자의 답이 받아들여지면 같은 질문이 다시 올라간다) → 댓글이 올라간 것을 확인하면 라벨을 붙이기 전에 곧바로 `reported`에 적는다. 라벨은 따로 다시 붙인다. F7(기준 댓글이 최근 100개 밖으로 밀리면 이미 올린 질문을 찾지 못한다) → 기준 댓글이 목록에 없으면 GitHub이 준 작성 시각으로 가른다(기준의 시각보다 늦은 댓글이 기준 뒤다).
 - 2026-11-22 계획 검증 4회차(head `594e766`): Claude 승인(지적 없음), Codex 수정 요청. F6은 닫혔다. F7이 남았고 F8이 새로 나왔다. 둘 다 맞는 지적이라 계획을 고쳤다. F7(기준 댓글이 목록에 없을 때 작성 시각으로 가르면 같은 초의 질문 댓글을 놓친다. 목록에 없어도 기준 뒤를 가릴 안정된 기준이 필요하다) → 기준을 **댓글 번호**로 바꿨다(번호가 기준보다 큰 댓글이 기준 뒤다). 기준 댓글이 목록에 있든 없든, 같은 초든 같은 답이 나온다. 댓글 번호를 읽으려고 `scripts/lib/github.ts`의 `Comment`에 `id`를 더한다(범위에 넣었다). F8(설계서에 넣을 문장이 "댓글과 라벨을 모두 확인한 뒤에만 적는다"로 읽혀 3회차 뒤에 바꾼 기록 순서와 어긋난다) → 문장과 AC의 비교 문자열을 함께 고쳤다.
 - 2026-11-22 계획 검증 5회차(head `a94f553`): Claude 승인(지적 없음), Codex 수정 요청. F7·F8은 닫혔고 F9가 새로 나왔다(마지막 댓글의 번호를 읽지 못해 빈 값이 기준으로 저장되면 `0`으로 견줘져, 앞선 질문의 같은 본문 댓글이 이번 전달로 보인다). 맞는 지적이라 계획을 고쳤다: `0`은 Issue에 댓글이 하나도 없을 때만 쓴다. 마지막 댓글의 번호를 읽지 못하면 기준을 잡지 않고 그 주기의 전달과 답변 인정을 미룬다. 숫자가 아닌 기준은 없는 것으로 읽는다.
+- 2026-11-22 계획 검증 6회차(head `f4df27b`): Claude 승인, Codex 승인(F9 닫힘). 계획이 승인됐다(G1). 구현을 시작했다.
+- 2026-11-22 테스트 먼저: `scripts/test/next.test.ts`와 `scripts/test/runner.test.ts`에 테스트를 더하고 구현 전에 돌렸다. 두 파일 모두 실패했다(새 함수가 없어 불러오기에서 멈춘다: `commentsAfter`, `questionNotice`. 파일마다 tests 1, fail 1). 구현 뒤 `next.test.ts` 54개, `runner.test.ts` 36개가 통과한다.
+- 2026-11-22 테스트를 쓰며 알게 된 것: `new-task`가 선점할 때 봇 계정으로 Issue에 댓글을 하나 단다. 그래서 (1) 가짜의 실패 장치는 선점 뒤에 걸고 댓글 호출 수도 선점 뒤부터 센다(테스트의 `claimed`), (2) 질문을 올리기로 한 때의 기준은 `0`이 아니라 그 선점 댓글의 번호다(`0`인 경우는 `questionBase`의 단위 테스트가 본다), (3) 봇 댓글의 수는 질문 댓글과 안내 댓글만 센다.
+- 2026-11-22 테스트의 꼴(step에 적은 것과 다른 두 곳): "질문보다 먼저 있던 제작자 댓글은 답이 아니다"는 라벨을 처음부터 붙여 둘 수 없다(라벨이 붙고 마지막 댓글이 제작자의 것이면 질문을 남기기 전에 답으로 받는다). 질문을 올리지 못한 첫 주기 뒤에 라벨을 붙이고, 그 뒤 세 주기(`down` 셋) 동안 세션이 다시 뜨지 않는 것을 본다. "라벨이 먼저 붙어 있었다"(F6)는 라벨이 붙은 Issue를 runner가 새로 맡지 않으므로 선점 뒤, 질문을 남기기 전에 붙인다.
+- 2026-11-22 `Comment`에 `id`가 들어가 그것을 직접 만드는 테스트 둘(`next.test.ts`의 `said`, `task.test.ts`의 `comment`)에 `id`를 채웠다(단언은 그대로다). 가짜 GitHub의 장치와 `commentId`(번호 변환)의 단위 테스트를 `next.test.ts`에 더했다.
+- 2026-11-22 이벤트 이름(`questions-unposted`, `questions-posted`, `questions-hold`, `questions-reset`, `wait-questions`): 문서와 지표 코드에 이벤트 이름의 목록이 없어(`scripts/runner/run.ts`만 쓴다) 더하지 않았다.
+- 2026-11-22 설계서 v0.7.79(4.5절의 열린 질문 항목에 문장 하나, 버전 이력), CHANGELOG 한 줄.
 
 ## 의사결정 로그
 
@@ -86,10 +93,13 @@ runner는 세션이 계획의 "열린 질문"에 남긴 질문을 Issue 댓글�
 - 결정: 다시 보기는 할 일을 고르기 전에 하고, 처음이든 다시든 올리기 직전에 댓글을 읽는다. 댓글을 읽은 뒤 올리기까지의 사이(API 호출 하나)에 달린 제작자 댓글은 질문 댓글에 가려질 수 있다. / 이유: GitHub의 댓글 게시에는 "마지막 댓글이 이것일 때만"이라는 조건을 걸 수 없어 이 틈은 없앨 수 없다. 이 경우에도 질문은 전달됐으므로 제작자가 질문을 보고 답한다. 지금의 runner가 올리는 다른 알림(중단 알림 등)에도 같은 틈이 있다. 답으로 보는 것이 "마지막 댓글"이라는 기준(`next.ts`)은 이 step에서 바꾸지 않는다.
 - 결정: 길이는 문자열의 길이(UTF-16 단위)로 잰다. / 이유: GitHub이 세는 글자 수보다 같거나 크다(상한 아래의 본문을 안내 댓글로 돌리는 쪽으로만 틀린다). `scripts/ci/ledger-store.ts`의 원장 본문 검사와 같은 방식이다.
 - 결정: 올리지 못한 질문이 남은 채로 할 일이 없으면 `human`으로 멈추지 않고 환경 장애 대기로 돈다. 다른 PR이 CI를 기다리고 있어도 같다(CI 대기 분기보다 먼저 본다. 계획 검증 1회차 F3). 다른 할 일이 있으면 그 일을 하고(주기마다 다시 올려 본다) 기다린 시간은 지금의 환경 장애 대기처럼 0으로 돌아간다. / 이유: `human`으로 멈추면 runner가 끝나고, 제작자는 질문을 받지 못했으므로 아무도 움직이지 않는다. 환경 장애 대기는 상한이 있고, 상한을 넘어 멈출 때의 알림(`usage-limit`)이 이미 있다. 질문 하나를 올리지 못한다고 다른 계획의 일까지 멈추지는 않는다.
+- test-effect 예외: `scripts/test/task.test.ts` @ `357293495c56e56e2dbe441b63f9afc209c13b1a` — 사유: `Comment`에 필수 필드 `id`가 생겨 그것을 직접 만드는 테스트 도우미에 값 하나를 채웠다(타입 검사를 통과시키는 변경이고 단언은 그대로다). 이 변경의 동작은 `next.test.ts`와 `runner.test.ts`가 본다.
 
 ## 발견 사항
 
-없음(구현하며 적는다).
+- runner가 상태를 먼저 적고 GitHub에 알리는 다른 자리 둘에 이 Issue와 같은 꼴이 있다(고치지 않았다. 비범위). `blockPlan`(반복 실패 중단, 교착 보고, Issue를 믿을 수 없을 때)은 계획을 `blocked`로 커밋·push한 뒤 라벨과 중단 보고를 올리고, `reportConflict`(충돌 해결 한도)는 `conflict.json`에 대기를 적은 뒤 올린다. 둘 다 알림이 실패하면 경고만 남긴다: 계획은 멈춘 채 남고 runner는 사람의 답을 기다린다고 멈추는데, 제작자는 보고를 받지 못했다. 둘 다 라벨을 댓글보다 먼저 붙인다(댓글만 실패하면 라벨이 남아, 그 전의 제작자 댓글이 마지막 댓글이면 답으로 받는다). 제작자에게 보고해 Issue로 등록할지 묻는다 → 처리: 해당 없음
+- 승인 요청(`doRequestApproval`)과 CI 대기 알림(`doReportStall`)은 알림이 성공한 뒤에 표시를 적고, 실패하면 환경 장애로 다시 한다. 같은 문제가 없다 → 처리: 해당 없음
+- `new-task`는 선점할 때 Issue에 봇 댓글을 달고, 실패하면 무시한다(선점은 브랜치 push로 지킨다). 같은 문제가 없다 → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -100,7 +110,7 @@ runner는 세션이 계획의 "열린 질문"에 남긴 질문을 Issue 댓글�
 - step의 AC 명령과 `node scripts/harness.ts check`, `node scripts/harness.ts self-test`.
 - 수용 기준 1~6: `node --test scripts/test/runner.test.ts`, `node --test scripts/test/next.test.ts`.
 - 수용 기준 7: AC의 문서 비교 줄과 `doc-lint`.
-- 결과는 step을 진행하며 적는다.
+- 결과(2026-11-22): step0의 AC 12줄 통과(`runner.test.ts` 36개, `next.test.ts` 54개, runner의 다른 테스트 묶음, 설계서 문장과 줄 수, CHANGELOG, 바뀐 파일 목록, `self-test`, `lint`, `doc-lint`, `fmt --check`). `node scripts/harness.ts check` 통과.
 
 ## 다음 할 일
 
