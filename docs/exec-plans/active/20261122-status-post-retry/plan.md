@@ -1,0 +1,110 @@
+---
+id: 20261122-status-post-retry
+issue: 220 # GitHub Issue 번호
+type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
+status: active # draft | active | blocked | completed | abandoned
+size: medium # small | medium | large (4.3절)
+risk: high # low | normal | high (10.1절)
+author: claude-code # claude-code | codex | <사람>
+owner: session # 선점한 runner 작업자 또는 사람
+claimed_at: 2026-11-22T22:46:11+09:00 # new-task가 채운다
+---
+
+# 기록 job의 커밋 상태 쓰기가 GitHub API의 일시 오류(5xx)에 다시 시도한다 (TD-48)
+
+## 목표와 수용 기준
+
+기록 job은 검증 App 토큰으로 PR head에 커밋 상태를 쓴다(`scripts/ci/record.ts`의 `githubStatusPoster`). `gates` 워크플로의 record job(`record-status` 명령)과 두 판정 워크플로의 record job(`record-review` 명령)이 이 함수를 쓴다. 지금은 요청 하나가 실패하면 바로 예외다.
+
+- GitHub API가 일시 오류(HTTP 5xx)를 한 번 내면 job이 거기서 끝난다. 그 뒤의 상태는 기록되지 않고, 필수 체크가 비어 PR이 병합되지 않는다. 틀린 통과는 생기지 않는다(fail-closed).
+- 풀려면 누군가 실패한 job을 다시 실행해야 한다. PR #125(2026-11-18)에서 `plan-gate` 기록이 HTTP 500으로 실패해 `revert-check`만 기록됐고, 대화 세션이 `gh run rerun <실행> --failed`로 풀었다.
+- runner는 판정 워크플로를 다시 실행하지 않는다(`scripts/runner/run.ts`의 CI 대기 알림 문구가 그렇게 적는다). 같은 head의 CI 대기가 `limits.ciStallHours`(기본 24시간)를 넘으면 `needs-human`으로 알린다. 무인 실행에서는 일시 오류 한 번이 PR을 하루 멈춘다.
+
+커밋 상태 쓰기가 일시 오류에 정해진 횟수만큼 다시 보내게 한다. 그래도 실패하면 지금처럼 예외로 끝난다.
+
+수용 기준:
+
+1. 커밋 상태 쓰기가 HTTP 5xx를 받거나 응답을 받지 못하면(연결 끊김, 시간 제한) 기다렸다가 같은 내용을 다시 보낸다. 다음 요청이 성공하면 예외 없이 끝나고, 그 뒤의 상태도 차례대로 기록된다.
+2. 요청은 상태 하나에 4번까지다(첫 요청 포함). 기다리는 시간은 2초, 6초, 15초다. 4번 모두 실패하면 지금처럼 예외로 끝난다(fail-closed 그대로). 오류 문구에 마지막 응답과 시도 수가 있다.
+3. HTTP 4xx는 다시 보내지 않고 바로 실패한다. 오류 문구는 지금과 같다.
+4. 다시 시도가 더하는 시간(대기 + 둘째부터의 요청)은 poster 하나에 60초를 넘지 않는다. 다음 다시 시도(대기 + 요청 하나의 시간 제한 30초)가 이 상한을 넘길 수 있으면 보내지 않고 실패한다. 상한은 그 poster가 쓰는 상태 전체에 걸린다.
+5. 다시 시도를 알리는 로그 줄에는 context, 상태 코드(또는 오류의 종류), 기다리는 시간, 몇 번째 요청인지만 있다. 토큰과 응답 본문은 없다. 이 줄이 판정 로그에 끼어도 runner가 지적을 읽는 것(`parseReviewLog`)은 그대로다.
+6. 기록되는 상태의 내용(context, state, description, target_url)과 요청의 형식은 그대로다. 실패가 없으면 요청은 상태 하나에 한 번이고 로그 줄도 없다. 있던 테스트는 고치지 않고 통과한다.
+7. 설계서(10.4절과 변경 이력)와 CHANGELOG에 적고, 기술 부채 표의 TD-48은 해결로 닫는다. "발견 사항"은 기술 부채 표의 새 행으로 남긴다.
+
+## 범위 / 비범위
+
+범위:
+
+- `scripts/ci/record.ts`: `githubStatusPoster`의 다시 시도와 그 값(`STATUS_RETRY`).
+- 테스트: 새 파일 `scripts/test/status-poster.test.ts`.
+- 문서(설계서, CHANGELOG), 기술 부채 표.
+
+비범위:
+
+- 다른 GitHub API 호출의 다시 시도: PR·원장 읽기(`scripts/ci/pr.ts`의 `githubGet`, `githubGraphql`), 원장 댓글 읽기·쓰기(`scripts/ci/ledger-store.ts`의 `githubLedgerApi`). "의사결정 로그"와 "발견 사항"에 적는다.
+- 호출하는 쪽(`scripts/harness.ts`). 옵션을 더 넘기지 않아도 기본값으로 다시 시도한다.
+- HTTP 4xx의 사용량 제한(429, 일부 403)에 다시 시도하는 것. GitHub이 알려 주는 대기 시간(`retry-after`)이 분 단위일 수 있어 record job의 시간 제한(5분) 안에서 다룰 수 없다.
+- 워크플로 파일(`.github/workflows/`). job의 시간 제한은 그대로다.
+- runner가 멈춘 판정 워크플로를 다시 실행하게 하는 것. runner가 Actions 실행을 다루게 하는 것은 따로 정할 일이다.
+
+## 관련 파일·문서
+
+- `scripts/ci/record.ts`
+- `scripts/test/status-poster.test.ts`
+- `docs/harness/design.md`
+- `docs/harness/CHANGELOG.md`
+- `docs/exec-plans/tech-debt-tracker.md`
+- 읽기만: `scripts/harness.ts`(`record-status`, `record-review`), `scripts/ci/results.ts`, `scripts/ci/ledger-store.ts`, `scripts/ci/pr.ts`, `scripts/runner/review.ts`(`parseReviewLog`), `scripts/runner/run.ts`(CI 대기 알림), `scripts/lib/util.ts`(`log`), `scripts/test/record.test.ts`, `scripts/test/helpers.ts`, `.github/workflows/gates.yml`·`judge-claude.yml`·`judge-codex.yml`(record job의 시간 제한)
+
+## step 목록
+
+- step0 status-retry: 커밋 상태 쓰기가 일시 오류에 다시 보낸다. 테스트, 문서, 기술 부채 표.
+
+## 진행 로그
+
+- 2026-11-22 22:52 계획 작성. 코드를 읽고 초안 구현과 초안 테스트로 계획의 문장을 먼저 확인했다. 새 테스트 파일의 테스트 11건 가운데 10건이 지금의 코드에서 실패하고(HTTP 5xx나 끊긴 연결에서 바로 예외다. `STATUS_RETRY`가 없다) 초안 구현에서 11건 모두 통과했다. 지금도 통과하는 1건은 HTTP 4xx가 바로 실패한다는 것으로, 지금 동작을 지키는 테스트다. `record.test.ts`·`ci.test.ts`·`ledger-store.test.ts`·`binding.test.ts`의 80건도 초안 구현에서 통과했다. 초안은 커밋하지 않고 되돌렸다.
+
+## 의사결정 로그
+
+- 결정: 다시 시도는 `githubStatusPoster` 안에 둔다. 호출하는 세 자리(`record-status`, `record-review`의 `review/*`와 `review-ledger`)는 고치지 않는다.
+  - 이유: 세 자리 모두 이 함수가 만든 함수로 상태를 쓴다. 한 곳을 고치면 모두 같은 동작이 된다. `scripts/harness.ts`는 다른 세션의 계획(`20261122-plan-review-parked`)이 고칠 파일이라 겹치지 않게 한다.
+- 결정: 다시 보내는 오류는 HTTP 5xx와 "응답 없음"(연결 실패·끊김, 요청의 시간 제한)이다. HTTP 4xx는 다시 보내지 않는다.
+  - 이유: 4xx는 다시 보내도 같은 답이 온다(권한 없음, 형식 오류, 없는 커밋). 응답 없음은 GitHub 쪽 장애에서 5xx와 함께 나온다.
+  - 응답을 받지 못한 요청은 GitHub이 이미 처리했을 수 있다. 다시 보내면 같은 상태가 두 번 기록된다. 해가 없다: GitHub은 context마다 가장 최근 상태를 쓰고, 두 기록의 내용이 같다. 한 실행 안에서 poster는 context 하나를 한 번만 쓰므로, 늦게 도착한 앞의 요청이 다른 내용을 덮는 일도 없다. GitHub의 한도(커밋·context마다 상태 1,000개)에 견줘 더해지는 수는 상태 하나에 많아야 3개다.
+  - 버린 대안: 429와 사용량 제한의 403도 다시 보낸다. GitHub이 알려 주는 대기 시간이 분 단위일 수 있어 시간 상한(아래) 안에서 기다릴 수 없다. 지금까지 본 실패도 5xx다(PR #125).
+- 결정: 값은 요청 4번, 대기 2초·6초·15초, 요청 하나의 시간 제한 30초(지금 값 그대로), 다시 시도가 더하는 시간의 상한 60초(poster 하나).
+  - 이유: 빠르게 돌아오는 5xx면 첫 요청부터 23초에 걸쳐 4번 보낸다. PR #125 때는 `gh run rerun`도 같은 때 500이었다(수 초가 아니라 그보다 긴 장애로 보인다). 대기를 뒤로 갈수록 늘려 짧은 장애를 넘긴다.
+  - 상한이 필요한 이유: record job의 시간 제한은 5분이다(`gates.yml`, `judge-claude.yml`, `judge-codex.yml`). 요청마다 시간 제한(30초)까지 걸리는 장애에서 상태마다 4번씩 보내면 job이 시간 제한으로 죽는다. 그래도 fail-closed지만, 다시 시도 때문에 다른 단계의 시간을 먹지 않게 한다.
+  - 상한의 규칙: poster가 다시 시도에 쓴 시간(대기를 시작한 때부터 그 요청이 끝날 때까지)을 더해 둔다. 다음 다시 시도를 시작하기 전에 `쓴 시간 + 대기 + 30초 ≤ 60초`인지 본다. 아니면 보내지 않고 실패한다. 그래서 요청이 시간 제한을 지키는 한 쓴 시간은 60초를 넘지 않는다. 첫 요청에 걸린 시간은 세지 않는다(다시 시도가 없어도 드는 시간이다).
+  - `record-review`는 poster 둘을 만든다(`review/*`용, `review-ledger`용). 둘의 상한을 더해도 120초로 5분의 절반이 안 된다.
+  - 시계는 단조 시계(`performance.now()`)를 쓴다. 벽시계가 바뀌어도 쓴 시간이 틀리지 않는다.
+  - 버린 대안: 상한 없이 횟수만 둔다(위의 이유). 상한을 프로세스 전체에 하나로 둔다(모듈 전역 상태가 생기고 테스트가 서로 영향을 준다. poster 둘의 합이 이미 충분히 작다).
+- 결정: 다시 시도를 알리는 줄은 `record: 커밋 상태 기록 다시 시도(<context>): <HTTP 상태 코드 | 응답 없음(<오류 이름>)>, <N>초 뒤 <몇 번째>/4번째`다. 기본으로 표준 출력에 낸다(`scripts/lib/util.ts`의 `log`. 기록 명령의 다른 줄과 같은 곳이다).
+  - 이유: 실행 로그에서 일시 오류가 있었다는 것과 몇 번 만에 풀렸는지를 본다.
+  - 응답 본문과 오류의 글은 넣지 않는다. 오류는 이름(`TypeError`, `TimeoutError` 같은 영문자만)으로 적는다. context는 호출하는 쪽이 정한 고정된 이름이다(`RECORDED_CONTEXTS`, `REVIEW_CONTEXTS`, `review-ledger`).
+  - 줄은 `record: `로 시작해 러너의 워크플로 명령 줄(`::…`)이 되지 않는다.
+  - runner가 판정 로그를 읽는 것(`parseReviewLog`)은 판정 줄(`record-review: 판정 …`) 바로 뒤의 세 줄 묶음만 읽는다. 상태 쓰기는 지적 묶음을 찍은 뒤라 새 줄은 묶음 뒤에 온다. 테스트로 확인한다.
+  - 마지막 실패의 오류 문구는 지금 형식을 지킨다(`커밋 상태 기록 실패(<context>): HTTP <코드> <응답 본문 앞 300자>`). 두 번 이상 보냈으면 끝에 ` (<N>회 시도)`를 붙인다. 응답 없음으로 끝나면 `커밋 상태 기록 실패(<context>): 응답 없음(<오류 이름>)`이다(전에는 `fetch`의 예외가 그대로 나갔다).
+- 결정: 대기와 시계는 주입할 수 있게 한다(`sleep`, `now`). 요청 함수(`fetch`)는 주입하지 않는다.
+  - 이유: 테스트는 가짜 GitHub API 서버(127.0.0.1)로 실제 요청을 보낸다. 요청 함수를 주입하는 테스트는 이 변경 전의 코드에서 주입을 무시하고 실제 GitHub으로 요청을 보낸다(판정 `test-effect`가 새 테스트를 base에서 돌린다). 주소를 늘 가짜 서버로 주면 그럴 일이 없다.
+- 조사: 같은 유형의 다른 호출(남긴다. 이유는 아래와 "발견 사항").
+  - `githubLedgerApi`(원장 댓글 읽기·쓰기, `scripts/ci/ledger-store.ts`): 실패하면 `review-ledger`가 `error`로 기록되고 job은 실패하지 않는다. 댓글을 새로 만드는 요청(POST)은 다시 보내면 원장 댓글이 둘이 될 수 있어, 다시 보내기 전에 있는지 읽어야 한다. 이 파일은 다른 세션의 계획(`20261122-plan-review-parked`)이 고칠 파일이다.
+  - `githubGet`·`githubGraphql`(PR·댓글·편집 이력 읽기, `scripts/ci/pr.ts`): 읽기라 다시 보내도 안전하다. 쓰는 자리가 여럿이고(`review-plan`, `ci-pr`, 제작자 승인 읽기 등) 자리마다 실패의 뜻이 다르다(판정 없이 실패, `error` 기록). 함께 고치면 이 step이 판정 job의 여러 명령으로 넓어진다.
+
+## 발견 사항
+
+- 기록·판정 job의 다른 GitHub API 호출도 일시 오류에 다시 시도하지 않는다: 원장 댓글 읽기·쓰기(`githubLedgerApi`)와 PR·편집 이력 읽기(`githubGet`, `githubGraphql`). 실패하면 `review-ledger`가 `error`로 기록되거나 job이 판정 없이 실패하고, 실행을 다시 돌려야 풀린다. 읽기는 다시 보내도 안전하다. 원장 댓글을 새로 만드는 요청은 다시 보내기 전에 댓글이 이미 있는지 봐야 한다. runner가 멈춘 판정 워크플로를 스스로 다시 실행하지 않는 것(24시간 뒤 `needs-human`)도 그대로다.
+
+## 열린 질문
+
+없음.
+
+## 검증 방법과 결과
+
+- step0의 Acceptance Criteria.
+- `node scripts/harness.ts check`.
+
+## 다음 할 일
+
+- 계획만 담은 커밋을 push해 초안 PR을 열고 계획 검증(G1)을 받는다. 승인 뒤 step0을 구현한다(테스트 먼저).

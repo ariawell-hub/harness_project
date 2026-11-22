@@ -1,0 +1,10 @@
+{
+  "plan": "20261122-status-post-retry",
+  "steps": [
+    {
+      "step": 0,
+      "name": "status-retry",
+      "status": "pending"
+    }
+  ]
+}
