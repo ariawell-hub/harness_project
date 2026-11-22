@@ -45,4 +45,4 @@ claimed_at: 2026-11-23T06:36:16+09:00
 
 ## 발견 사항
 
-- `lab/q10-db/README.md`와 `lab/pilot-prep/README.md`가 같은 문장("`scripts/test/`의 테스트는 `lab/`을 읽지 않는다")을 적었다. pilot-prep 폴더는 테스트가 읽지 않아(`verify-playwright.test.ts`의 주석에 이름만 나온다) 그쪽 문장은 맞다.
+- `lab/q10-db/README.md`와 `lab/pilot-prep/README.md`가 같은 문장("`scripts/test/`의 테스트는 `lab/`을 읽지 않는다")을 적었다. pilot-prep 폴더는 테스트가 읽지 않아(`verify-playwright.test.ts`의 주석에 이름만 나온다) 그쪽 문장은 맞다. q10-db의 문장은 PR #188이 지금의 사실대로 고치고, 이 PR이 #188 뒤에 보호 경로 쪽을 맞춘다. → 처리: #225
