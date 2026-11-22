@@ -1,6 +1,7 @@
 // 판단 절차 문서(docs/harness/actions-cost.md)가 비어 있거나 값이 보존 기록과 다르면 실패하게 하는 검사
 // (계획 20261121-actions-cost-design step1). 낱말을 찾는 대신 문서의 구조와 값을 읽는다.
-// 화면에 보이는 문서를 본다: 주석 안의 글은 없는 것으로 치고, 코드 블록 안의 줄은 절·항목·표로 치지 않는다.
+// Markdown을 해석하지 않는다. 검사가 읽는 좁은 형식만 받고, 벗어난 줄은 "형식"으로 거부한다(`viewsOf`):
+// 해석이 화면과 어긋나는 자리마다 가려진 글이 통과하거나 바른 문서가 거부되기 때문이다.
 // GitHub을 읽지 않는다: 값은 보존 기록(lab/actions-cost/*.jsonl)으로만 계산한다. 지난 기간의 실행 기록도
 // 다시 실행하면 바뀌므로, 읽으면 바르게 적은 기준선이 뒤에 실패한다.
 // 글의 옳고 그름(설명이 맞는가, 절차가 쓸 만한가)은 보지 않는다. 그것은 PR 검증이 본다.
@@ -112,106 +113,176 @@ const dense = (lines: string[]) => lines.join('').replace(/\s/g, '').length;
 const blank = (line: string) => /^\s*$/.test(line);
 
 /**
- * 문서의 줄을 보는 세 가지 눈. 줄 번호는 셋이 같다.
+ * 문서의 줄을 보는 눈. 줄 번호는 모두 같다.
  * - `raw`: 파일의 글 그대로. 표식 구간을 계산한 출력과 견줄 때 쓴다.
- * - `text`: 화면에 보이는 글. 주석(`<!-- … -->`) 안의 글을 뺐다. 코드 블록 안의 글은 보이므로 남긴다.
- * - `struct`: 문서의 뼈대를 찾는 눈. `text`에서 코드 블록의 줄까지 비웠다. 제목, 목록 항목, 표, 표식을 여기서 찾는다.
- * `fenced`는 코드 블록 안의 줄(여닫는 줄 제외)이다. 표식 줄은 주석이지만 `text`·`struct`에 남긴다
+ * - `text`: 글. 링크의 주소를 뺐다. 코드 블록 안의 줄은 그대로다.
+ * - `struct`: 문서의 뼈대를 찾는 눈. `text`에서 코드 블록의 줄을 비웠다. 제목, 목록 항목, 표, 표식을 여기서 찾는다.
+ * - `fenced`: 코드 블록 안의 줄인가(여닫는 줄 제외).
+ * - `codes`: 그 줄의 코드 구간(백틱)에 든 글.
+ * 머리말(frontmatter)과 표식 구간 안의 줄은 `text`·`struct`에서 비운다. 표식 줄은 남긴다
  */
 interface Views {
   raw: string[];
   text: string[];
   struct: string[];
   fenced: boolean[];
+  codes: string[][];
+}
+
+interface Part {
+  code: boolean;
+  s: string;
 }
 
 /**
- * 한 줄에서 주석(`<!-- … -->`)을 뺀다. 코드 구간(백틱) 안의 글은 그대로 둔다: 백틱 안의 `<!--`는 화면에 보이는 글이다.
- * 코드 구간은 같은 수의 백틱으로 여닫힌 것만 친다(줄을 넘는 코드 구간은 보지 않는다).
- * `inComment`는 앞 줄에서 열린 주석이 이어지는가이고, 돌려주는 값은 이 줄 끝에서의 상태다
+ * 한 줄을 코드 구간(백틱)과 그 밖의 글로 가른다. 코드 구간은 길이가 같은 백틱 묶음 한 쌍의 사이다.
+ * 짝이 없는 묶음이 있으면 null이다(줄을 넘는 코드 구간은 받지 않는다)
  */
-function withoutComments(line: string, inComment: boolean): { shown: string; inComment: boolean } {
-  let shown = '';
+function partsOf(line: string): Part[] | null {
+  const parts: Part[] = [];
+  let plain = '';
   let i = 0;
   while (i < line.length) {
-    if (inComment) {
-      const close = line.indexOf('-->', i);
-      if (close < 0) return { shown, inComment: true };
-      inComment = false;
-      i = close + 3;
-    } else if (line[i] === '`') {
-      let n = 1;
-      while (line[i + n] === '`') n++;
-      // 같은 길이의 백틱 묶음이 뒤에 있으면 그 사이가 코드 구간이다
-      let close = -1;
-      for (let j = i + n; j < line.length;) {
-        if (line[j] !== '`') {
-          j++;
-          continue;
-        }
-        let k = 1;
-        while (line[j + k] === '`') k++;
-        if (k === n) {
-          close = j;
-          break;
-        }
-        j += k;
-      }
-      const end = close < 0 ? i + n : close + n;
-      shown += line.slice(i, end);
-      i = end;
-    } else if (line.startsWith('<!--', i)) {
-      inComment = true;
-      i += 4;
-    } else {
-      shown += line[i];
+    if (line[i] !== '`') {
+      plain += line[i];
       i++;
+      continue;
     }
+    let n = 1;
+    while (line[i + n] === '`') n++;
+    let close = -1;
+    for (let j = i + n; j < line.length;) {
+      if (line[j] !== '`') {
+        j++;
+        continue;
+      }
+      let k = 1;
+      while (line[j + k] === '`') k++;
+      if (k === n) {
+        close = j;
+        break;
+      }
+      j += k;
+    }
+    if (close < 0) return null;
+    parts.push({ code: false, s: plain }, { code: true, s: line.slice(i + n, close) });
+    plain = '';
+    i = close + n;
   }
-  return { shown, inComment };
+  parts.push({ code: false, s: plain });
+  return parts;
 }
 
-function viewsOf(doc: string): Views {
+/** 링크의 주소: 괄호 안에 공백·괄호·따옴표·백틱 없이 적은 것. 제목을 단 링크는 맞지 않는다 */
+const LINK_TARGET = String.raw`\]\([^()\s"'<>\`]*\)`;
+
+/**
+ * 코드 구간 밖의 글 한 줄이 형식을 벗어난 점. 없으면 null.
+ * 코드 구간이 화면과 다르게 읽히는 길(이스케이프한 백틱, 표의 칸, 링크의 제목, 참조 정의)을 모두 막아야
+ * "백틱 안의 `<`는 글이다"가 참이 된다
+ */
+function lineFormat(line: string, parts: Part[] | null): string | null {
+  if (!/^ {0,3}\S/.test(line))
+    return '줄 머리를 네 칸 이상이나 탭으로 들여 쓰지 않는다(들여 쓴 코드 블록을 쓰지 않는다)';
+  if (/^ {0,3}(=+|-+)\s*$/.test(line)) return '밑줄 제목과 가로줄(===, ---)을 쓰지 않는다';
+  if (/^ {0,3}\[[^\]]*\]:/.test(line)) return '참조 정의([이름]: 주소)를 쓰지 않는다';
+  if (line.includes('\\')) return '역슬래시를 쓰지 않는다(이스케이프한 글자를 가려 읽지 않는다)';
+  if (parts === null)
+    return '백틱의 짝이 한 줄 안에서 맞지 않는다(코드 구간은 한 줄 안에서 여닫는다)';
+  const plain = parts.filter((p) => !p.code);
+  if (plain.some((p) => p.s.includes('<')))
+    return '코드(백틱, 코드 블록) 밖에 `<`를 쓰지 않는다(HTML 태그와 주석을 쓰지 않는다. 표식은 줄 전체가 표식인 두 줄만 둔다)';
+  if (line.includes('|') && line.includes('<'))
+    return '`|`가 있는 줄에는 백틱 안에도 `<`를 쓰지 않는다(표의 칸은 백틱 안의 `|`에서도 갈린다)';
+  if (plain.some((p) => p.s.includes('!['))) return '그림(![…](…))을 쓰지 않는다';
+  for (const p of plain)
+    for (let at = p.s.indexOf(']('); at >= 0; at = p.s.indexOf('](', at + 1))
+      if (!new RegExp(`^${LINK_TARGET}`).test(p.s.slice(at)))
+        return '링크의 주소는 한 줄 안에 공백·괄호·따옴표 없이 적는다(제목을 달지 않는다)';
+  return null;
+}
+
+/**
+ * 문서를 줄 단위로 읽는다. 형식을 벗어난 줄은 `problems`에 넣고 글로 남긴다(뒤의 줄을 가리지 않는다).
+ * 받는 형식: 머리말, 줄 머리의 ``````로 여닫는 코드 블록, 줄 전체가 표식인 표식 구간, 그리고 `lineFormat`을 지킨 줄
+ */
+function viewsOf(doc: string, problems: string[]): Views {
   const raw = doc.split(/\r?\n/);
-  const text: string[] = [];
-  const struct: string[] = [];
-  const fenced: boolean[] = [];
-  /** 열린 코드 블록의 여는 표시(`\`\`\`` 또는 `~~~`). 같은 글자가 그 길이 이상 나와야 닫힌다 */
-  let fence: string | null = null;
-  let inComment = false;
-  for (const line of raw) {
-    if (fence !== null) {
-      const closes = new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line);
-      text.push(closes ? '' : line);
-      struct.push('');
-      fenced.push(!closes);
-      if (closes) fence = null;
-      continue;
-    }
-    fenced.push(false);
-    // 코드 블록은 목록 항목 아래에 들여 써도 코드 블록이다. 주석 안에서는 열리지 않는다
-    const open = inComment ? null : /^\s*(`{3,}|~{3,})/.exec(line);
-    if (open) {
-      fence = open[1];
-      text.push('');
-      struct.push('');
-      continue;
-    }
-    if (!inComment && (line.trim() === BEGIN || line.trim() === END)) {
-      text.push(line);
-      struct.push(line);
-      continue;
-    }
-    const w = withoutComments(line, inComment);
-    inComment = w.inComment;
-    text.push(w.shown);
-    struct.push(w.shown);
+  const text = raw.map(() => '');
+  const struct = raw.map(() => '');
+  const fenced = raw.map(() => false);
+  const codes: string[][] = raw.map(() => []);
+  const bad = (i: number, why: string) => problems.push(`형식(${i + 1}째 줄): ${why}`);
+  /** 줄을 글로 남긴다 */
+  const keep = (i: number, s: string) => {
+    text[i] = s;
+    struct[i] = s;
+  };
+  let i = 0;
+  if (raw[0] === '---') {
+    const end = raw.indexOf('---', 1);
+    if (end > 0) i = end + 1;
   }
-  return { raw, text, struct, fenced };
+  while (i < raw.length) {
+    const line = raw[i];
+    if (blank(line)) {
+      i++;
+      continue;
+    }
+    // 표식 구간: 안의 줄은 계산한 출력과 raw로 견줄 뿐 글로 읽지 않는다
+    if (line === BEGIN || line === END) {
+      keep(i, line);
+      const end = line === BEGIN ? raw.indexOf(END, i + 1) : -1;
+      if (end > 0) {
+        keep(end, END);
+        i = end + 1;
+      } else i++;
+      continue;
+    }
+    if (/^\s*(`{3,}|~{3,})/.test(line)) {
+      const end = /^```[A-Za-z0-9_-]*$/.test(line) ? raw.indexOf('```', i + 1) : -1;
+      if (!/^```[A-Za-z0-9_-]*$/.test(line)) {
+        bad(
+          i,
+          '코드 블록은 줄 머리의 ```(뒤에 언어 이름만)로 열고 줄 머리의 ```로 닫는다(들여 쓴 것, ~~~, 백틱 네 개 이상은 쓰지 않는다)',
+        );
+        keep(i, line);
+        i++;
+      } else if (end < 0) {
+        bad(i, '코드 블록이 닫히지 않았다(줄 머리의 ```로 닫는다)');
+        i++;
+      } else {
+        for (let k = i + 1; k < end; k++) {
+          fenced[k] = true;
+          text[k] = raw[k];
+          if (/^\s*`{3,}/.test(raw[k]))
+            bad(
+              k,
+              '코드 블록 안에 ```로 시작하는 줄을 쓰지 않는다(화면에서 블록이 거기서 닫힐 수 있다)',
+            );
+        }
+        i = end + 1;
+      }
+      continue;
+    }
+    const parts = partsOf(line);
+    const why = lineFormat(line, parts);
+    if (why !== null) bad(i, why);
+    if (parts === null) keep(i, line);
+    else {
+      codes[i] = parts.filter((p) => p.code).map((p) => p.s.trim());
+      // 코드 구간은 백틱 한 쌍으로 다시 적고, 그 밖의 글에서는 링크의 주소를 뺀다
+      keep(
+        i,
+        parts
+          .map((p) => (p.code ? `\`${p.s}\`` : p.s.replace(new RegExp(LINK_TARGET, 'g'), ']')))
+          .join(''),
+      );
+    }
+    i++;
+  }
+  return { raw, text, struct, fenced, codes };
 }
-
-/** 네 칸 넘게 들여 쓰지 않은, 글이 있는 줄. 네 칸 들여 쓴 줄은 코드로 보이므로 표·표식·날짜 줄로 치지 않는다 */
-const shallow = (line: string) => /^ {0,3}\S/.test(line);
 
 /** 절의 본문이 놓인 줄의 범위(제목 다음 줄부터 다음 `## ` 전까지) */
 interface Range {
@@ -334,9 +405,7 @@ function realDay(day: string): boolean {
  * 본문에 풀어 쓴 글은 명령으로 치지 않는다(복사해 실행할 글이 무엇인지 가릴 수 없다)
  */
 function codeTexts(v: Views, lines: number[]): string[] {
-  return lines.flatMap((i) =>
-    v.fenced[i] ? [v.raw[i].trim()] : [...v.text[i].matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()),
-  );
+  return lines.flatMap((i) => (v.fenced[i] ? [v.raw[i].trim()] : v.codes[i]));
 }
 
 function checkBaseline(
@@ -346,10 +415,9 @@ function checkBaseline(
   problems: string[],
 ): void {
   // 표식 구간은 문서 전체에 하나이고 이 절 안에 있다. 표식은 struct에서 찾는다(코드 블록 안의 것은 표식이 아니다)
-  const count = (mark: string) => v.struct.filter((l) => shallow(l) && l.trim() === mark).length;
+  const count = (mark: string) => v.struct.filter((l) => l === mark).length;
   const within = (mark: string) => {
-    for (let i = r.from; i < r.to; i++)
-      if (shallow(v.struct[i]) && v.struct[i].trim() === mark) return i;
+    for (let i = r.from; i < r.to; i++) if (v.struct[i] === mark) return i;
     return -1;
   };
   const begin = within(BEGIN);
@@ -384,7 +452,7 @@ function checkBaseline(
       );
   }
 
-  const dated = outside.map((i) => v.struct[i]).filter((l) => shallow(l) && l.includes('잰 날짜:'));
+  const dated = outside.map((i) => v.struct[i]).filter((l) => l.includes('잰 날짜:'));
   if (!dated.length) problems.push('기준선: "잰 날짜: <YYYY-MM-DD>" 줄이 표식 구간 밖에 없다');
   for (const l of dated) {
     const m = /잰 날짜:\s*(\d{4}-\d{2}-\d{2})(?!\d)/.exec(l);
@@ -420,12 +488,12 @@ function checkProcedure(body: string[], problems: string[]): void {
       );
       continue;
     }
-    // 내용은 머리 뒤의 글과 그 항목에 속한 줄이다: 목록 표시("- ")의 글 자리(두 칸) 넘게 들여 쓴 줄.
+    // 내용은 머리 뒤의 글과 그 항목에 속한 줄이다: 목록 표시("- ")의 글 자리(두 칸)만큼 들여 쓴 줄.
     // 덜 들여 쓴 줄(다음 목록 항목, 문단)을 만나면 끝난다: 화면에서 그 항목의 내용이 아니다
     const content = [body[hits[0].i].slice(item.head.length)];
     for (let j = hits[0].i + 1; j < body.length; j++) {
       if (blank(body[j])) continue;
-      if (!/^( {2,}|\t)/.test(body[j])) break;
+      if (!/^ {2}/.test(body[j])) break;
       content.push(body[j]);
     }
     const n = dense(content);
@@ -537,7 +605,7 @@ function checkRecord(
 /** 어긋난 점의 목록. 없으면 빈 배열 */
 export function checkDoc(i: DocInputs): string[] {
   const problems: string[] = [];
-  const v = viewsOf(i.doc);
+  const v = viewsOf(i.doc, problems);
   const found = sections(v.struct, problems);
   const load = loader(i);
   const part = (lines: string[], r: Range) => lines.slice(r.from, r.to);
