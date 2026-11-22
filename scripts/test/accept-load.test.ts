@@ -161,7 +161,12 @@ type World = ReturnType<typeof world>;
 async function record(
   w: World,
   sec: number,
-  o: { verdict?: Verdict | null; reviewer?: 'claude' | 'codex'; owner?: string } = {},
+  o: {
+    verdict?: Verdict | null;
+    reviewer?: 'claude' | 'codex';
+    owner?: string;
+    planOnly?: boolean;
+  } = {},
 ) {
   w.now = at(sec);
   return recordLedger({
@@ -170,7 +175,7 @@ async function record(
     headSha: H1,
     promptBase: BASE,
     changedSinceLastRound: ['src/b.ts'],
-    planOnly: false,
+    planOnly: o.planOnly ?? false,
     repo: 'o/r',
     number: 7,
     recorderBot: BOT,
@@ -903,4 +908,56 @@ test('readRoundLedger: 구현 대기를 기록 job과 같은 순서로 반영해
     gql: [],
   });
   assert.equal((await read(e, true)).ledger?.findings[0].status, 'parked');
+});
+
+test('ledgerFromComments: 게시 시각이 없는 구현 대기 지적에도 원장 댓글의 저장 시각을 채운다 (Issue #212, 판정 지적 F8)', () => {
+  const l = ledgerOf(
+    entry({ severity: 'P1', status: 'parked' }),
+    entry({ id: 'F2', title: 'b', status: 'parked', openedAt: at(1) }),
+    entry({ id: 'F3', title: 'c', status: 'fixed' }),
+  );
+  const comment = { id: 500, user: { login: BOT }, body: renderLedger(l), updated_at: at(9) };
+  assert.deepEqual(
+    ledgerFromComments([comment], BOT).ledger?.findings.map((e) => [e.id, e.status, e.openedAt]),
+    [
+      ['F1', 'parked', at(9)],
+      ['F2', 'parked', at(1)],
+      ['F3', 'fixed', undefined],
+    ],
+  );
+});
+
+test('F8: 판정이 다시 열어 게시 시각 없이 구현 대기로 저장된 지적도, 게시 뒤의 제작자 승인을 코드가 돌아온 첫 기록에서 받는다 (Issue #212)', async () => {
+  for (const [sec, want] of [
+    [4, 'open'],
+    [5, 'open'],
+    [6, 'accepted'],
+  ] as const) {
+    // 앞선 구현 판정에서 고쳐진 코드 지적과, 그 번호를 승인한 제작자 댓글(sec초)
+    const w = world({
+      ledger: ledgerOf(
+        entry({ severity: 'P1', status: 'fixed', note: 'abc1234', openedAt: at(1) }),
+      ),
+      ledgerAt: at(1),
+      gql: [accept('F1', sec)],
+    });
+    // 실행 1(계획만 담은 head, at(5)에 저장): 지적을 낸 검증자가 다시 연다. 같은 기록에서 구현 대기가 되고
+    // 다시 열렸으므로 게시 시각은 지워진다
+    await record(w, 5, {
+      reviewer: 'codex',
+      verdict: verdict([], [{ id: 'F1', status: 'open', note: '고친 코드가 없다' }]),
+      planOnly: true,
+    });
+    assert.deepEqual(
+      w.stored().findings.map((e) => [e.status, e.openedAt]),
+      [['parked', undefined]],
+    );
+    assert.equal(w.status()?.state, 'success');
+    // 실행 2(코드가 돌아온 head, 판정 없음): 구현 대기로 게시된 시각(at(5))이 채워지고 그보다 엄격히 뒤의 승인만 받는다
+    await record(w, 20);
+    const e = w.stored().findings[0];
+    assert.equal(e.status, want, `댓글 ${sec}초`);
+    assert.equal(e.openedAt, at(5));
+    assert.equal(w.status()?.state, want === 'accepted' ? 'success' : 'failure');
+  }
 });

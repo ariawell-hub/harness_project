@@ -55,7 +55,7 @@ export interface Entry {
   /** P0을 rejected로 보자고 한 검증자. 둘 다 있어야 rejected다(B11) */
   rejectedBy: Reviewer[];
   /**
-   * 이 지적이 open인 채로 원장 댓글에 게시된 것이 확인된 시각(GitHub이 준 ISO 8601 시각). 제작자 승인 댓글이
+   * 이 지적이 open(또는 parked)인 채로 원장 댓글에 게시된 것이 확인된 시각(GitHub이 준 ISO 8601 시각). 제작자 승인 댓글이
    * 이보다 뒤여야 인정된다. 이 파일의 함수는 채우지 않는다(원장을 읽는 쪽이 채운다). 다시 열리면 지운다
    */
   openedAt?: string;

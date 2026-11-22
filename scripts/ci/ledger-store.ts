@@ -63,8 +63,10 @@ const validTime = (v: unknown): v is string =>
   typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v));
 
 /**
- * 게시 시각 채우기: open인데 openedAt이 없는 지적에 원장 댓글의 마지막 저장 시각(GitHub이 정한 updated_at)을 적는다.
- * 원장 댓글에 들어 있는 열린 지적은 그 시각이나 그 전에 게시됐으므로, 이 값은 실제 게시 시각보다 앞설 수 없다.
+ * 게시 시각 채우기: open이나 parked인데 openedAt이 없는 지적에 원장 댓글의 마지막 저장 시각(GitHub이 정한 updated_at)을
+ * 적는다. 원장 댓글에 들어 있는 지적은 그 시각이나 그 전에 게시됐으므로, 이 값은 실제 게시 시각보다 앞설 수 없다.
+ * parked도 채운다(Issue #212): 판정이 다시 연 지적은 openedAt 없이 같은 기록에서 parked로 저장된다. 채우지 않으면
+ * 코드가 돌아와 open으로 되돌아온 첫 기록에서 게시 시각이 없어, 그 번호가 게시된 뒤에 단 제작자 승인을 받지 못한다.
  * 한 번 채워진 값은 바꾸지 않는다(원장을 저장하는 경로가 채워진 원장을 저장하므로 뒤의 수정으로 늦춰지지 않는다).
  * 러너의 시계는 쓰지 않는다: 그 시각과 실제 게시 사이에 단 승인 댓글이 아직 보이지 않는 지적을 닫게 된다
  */
@@ -72,7 +74,7 @@ function stampOpened(l: Ledger, updatedAt: unknown): { ledger: Ledger; stamped: 
   if (!validTime(updatedAt)) return { ledger: l, stamped: 0 };
   let stamped = 0;
   const findings = l.findings.map((e) => {
-    if (e.status !== 'open' || e.openedAt !== undefined) return e;
+    if ((e.status !== 'open' && e.status !== 'parked') || e.openedAt !== undefined) return e;
     stamped++;
     return { ...e, openedAt: updatedAt };
   });
