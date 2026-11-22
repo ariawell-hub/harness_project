@@ -60,10 +60,27 @@ export function scopePaths(sectionText: string): string[] {
     if (skipIndent !== null && indent > skipIndent) continue;
     skipIndent = /^\s*[-*+]\s+읽기만/.test(line) ? indent : null;
     if (skipIndent !== null) continue;
-    for (const m of line.matchAll(/`([^`]+)`/g)) {
-      const t = m[1].trim();
+    for (const span of singleTickSpans(line)) {
+      const t = span.trim();
       if (t !== '' && !/\s/.test(t) && !out.includes(t)) out.push(t);
     }
+  }
+  return out;
+}
+
+/**
+ * 한 줄에서 백틱 하나로 감싼 코드 스팬의 안쪽 글자들. 백틱은 이어진 묶음 단위로 읽는다(CommonMark):
+ * 여는 묶음과 길이가 같은 다음 묶음에서 닫히고, 닫히지 않은 묶음은 글자다. 길이가 둘 이상인 스팬(예시,
+ * 백틱을 글자로 보이는 표기)과 그 안의 글자는 경로가 아니다
+ */
+function singleTickSpans(line: string): string[] {
+  const runs = [...line.matchAll(/`+/g)].map((m) => ({ at: m.index, len: m[0].length }));
+  const out: string[] = [];
+  for (let i = 0; i < runs.length; i++) {
+    const j = runs.findIndex((r, k) => k > i && r.len === runs[i].len);
+    if (j < 0) continue;
+    if (runs[i].len === 1) out.push(line.slice(runs[i].at + 1, runs[j].at));
+    i = j;
   }
   return out;
 }
