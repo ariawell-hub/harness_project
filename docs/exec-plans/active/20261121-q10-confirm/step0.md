@@ -20,7 +20,7 @@
 
 - 단계(기본): ① 새 임시 폴더를 만들어(`fs.mkdtempSync`, 지우지 않는다) `node lab/q10-db/trial.ts <폴더>` ② `node scripts/harness.ts fmt` ③ `node lab/q10-db/check-results.ts <platform>-<arch>`(이 머신의 `process.platform`·`process.arch`) ④ `node --test lab/q10-db/test/check-results.test.ts`.
 - `--skip-fmt`: ②를 뺀다.
-- 받는 인자는 `--skip-fmt` 하나뿐이다. 그 밖의 인자는(`--out` 포함) 사용법을 내고 종료 코드 2로 끝난다(아무 단계도 돌리지 않는다).
+- 받는 인자는 `--skip-fmt` 하나뿐이다. 그 밖의 인자는(`--out` 포함) 사용법을 표준 오류에 내고 종료 코드 2로 끝난다(아무 단계도 돌리지 않는다). 사용법의 글은 `사용법: node lab/q10-db/run.ts [--skip-fmt]`로 시작한다.
 - 한 단계가 0이 아닌 종료 코드로 끝나거나 실행하지 못하면 뒤 단계를 돌리지 않고, 실패한 단계의 이름을 표준 오류에 내고 종료 코드 1로 끝난다. 모든 단계가 통과하면 0이다.
 - 자식 프로세스는 `process.execPath`로 띄운다(셸을 거치지 않는다. OS와 무관하다). 출력은 그대로 흘려보낸다.
 - 구조: 단계 목록을 만드는 순수 함수(`planSteps(opts)` — 이름과 인자 배열의 목록), 목록을 차례로 돌리는 함수(`runSteps(steps, exec)` — `exec`를 주입한다), 실제로 자식 프로세스를 띄우는 함수(`spawnStep`)를 내보낸다. 파일을 직접 실행했을 때만 실제로 돈다.
@@ -31,7 +31,7 @@
 지금 `trial.ts`는 `--out <파일>`을 받아 결과를 그 경로에 검사 없이 쓴다(`--out package.json`이면 실측이 끝난 뒤 작업 트리의 `package.json`을 결과로 덮어쓴다. 계획 검증 1회차의 F1). 이 옵션을 안전하게 만드는 대신 없앤다(제작자 결정, 2026-11-22. 의사결정 로그). 확정 조건에 필요한 기능이 아니고 CI의 실측도 쓰지 않는다.
 
 - `trial.ts`가 받는 인자는 `<빈 폴더>` 하나뿐이다. 인자가 하나가 아니거나 `--`로 시작하면 사용법을 내고 0이 아닌 종료 코드로 끝난다(넘겨받은 폴더에 무엇을 만들거나 패키지를 설치하기 전에). 결과는 언제나 `lab/q10-db/results/<platform>-<arch>.json`에 쓴다(지금의 기본 동작 그대로). 머리 주석과 사용법 문구, 끝의 출력 문구에서 `--out`을 지운다.
-- 인자 검사를 함수로 뗀다: `lab/q10-db/trial-args.ts`(새 파일)의 `parseTrialArgs(argv)`. 받을 수 있으면 `{ dir }`를, 아니면 `{ error }`(사용법의 글)를 낸다. 파일 시스템을 보지 않고 아무것도 실행하지 않는 순수 함수다. `trial.ts`의 `main`은 첫 문장에서 이 함수를 부르고, `error`면 그 글을 내고 끝난다(`fail`). `trial.ts`는 불러오기만 해도 실측이 돌기 때문에(파일 끝에서 `main`을 부른다) 테스트가 `trial.ts`를 불러오거나 실행하지 않고 이 함수만 시험한다.
+- 인자 검사를 함수로 뗀다: `lab/q10-db/trial-args.ts`(새 파일)의 `parseTrialArgs(argv)`. 받을 수 있으면 `{ dir }`를, 아니면 `{ error }`(사용법의 글)를 낸다. 파일 시스템을 보지 않고 아무것도 실행하지 않는 순수 함수다. `trial.ts`의 `main`은 첫 문장에서 이 함수를 부르고, `error`면 그 글을 표준 오류에 내고 종료 코드 1로 끝난다(`fail`). 사용법의 글은 `사용법: node lab/q10-db/trial.ts <빈 폴더>`다. `trial.ts`는 불러오기만 해도 실측이 돌기 때문에(파일 끝에서 `main`을 부른다) 테스트가 `trial.ts`를 불러오거나 실행하지 않고 이 함수만 시험한다.
 - 그 밖의 `trial.ts`(확인 항목, 결과의 내용, 실험 폴더가 리포 밖인지 보는 검사)는 바꾸지 않는다.
 - `check-results.ts`의 `--file <파일>`은 그대로 둔다. 파일을 읽어 검사만 하고 아무것도 쓰지 않는다. 받은 실행 산출물을 리포에 넣기 전에 검사하는 데 쓴다(2의 README).
 - 테스트(`run.test.ts`에 더한다. 네트워크를 쓰지 않고 `trial.ts`를 실행하지 않는다): `parseTrialArgs`가 `['<폴더>']`에는 `{ dir }`를 내고, `[]`, `['--x']`, `['<폴더>', '--out', 'x.json']`, `['<폴더>', '더']`에는 사용법이 든 `error`를 낸다. 연결을 글로 본다(`trial.ts`를 읽는다): `trial.ts`가 `./trial-args.ts`의 `parseTrialArgs`를 가져오고, `main` 안에서 그 호출이 폴더를 보거나 만들거나 자식 프로세스를 띄우는 어떤 호출(`existsSync`, `statSync`, `readdirSync`, `mkdirSync`, `writeFileSync`, `spawnSync`)보다 앞에 있으며, `trial.ts`에 `--out`이라는 글이 없다. 구현 전의 실패 확인은 이 테스트로 한다: `trial-args.ts`가 없어 불러오기에서 실패한다(옛 `trial.ts`를 실행하지 않으므로 패키지 설치가 시작되지 않는다).
@@ -84,8 +84,8 @@ node --test scripts/test/q10-trial-workflow.test.ts
 node --test scripts/test/ci.test.ts
 C=$(mktemp -d) && git clone -q --no-hardlinks . "$C/repo" && (cd "$C/repo" && node lab/q10-db/run.ts --skip-fmt) && test -z "$(git status --porcelain -- lab/q10-db/results)"
 node lab/q10-db/run.ts --bogus; test $? = 2
-O=$(mktemp -d) && { node lab/q10-db/run.ts --out "$O/x.json"; test $? = 2; } && test -z "$(ls -A "$O")"
-D=$(mktemp -d) && O=$(mktemp -d) && { node lab/q10-db/trial.ts "$D" --out "$O/x.json"; test $? != 0; } && test -z "$(ls -A "$D")" && test -z "$(ls -A "$O")"
+O=$(mktemp -d) && E=$(mktemp -d) && { node lab/q10-db/run.ts --out "$O/x.json" 2> "$E/err"; test $? = 2; } && grep -q -F '사용법: node lab/q10-db/run.ts [--skip-fmt]' "$E/err" && test -z "$(ls -A "$O")"
+D=$(mktemp -d) && O=$(mktemp -d) && E=$(mktemp -d) && { node lab/q10-db/trial.ts "$D" --out "$O/x.json" 2> "$E/err"; test $? = 1; } && grep -q -F '사용법: node lab/q10-db/trial.ts <빈 폴더>' "$E/err" && test -z "$(ls -A "$D")" && test -z "$(ls -A "$O")"
 ! grep -q -e '--out' lab/q10-db/trial.ts lab/q10-db/run.ts lab/q10-db/README.md
 git apply --reverse --check lab/q10-db/q10-trial-workflow.patch
 test "$(git diff --name-only "$(git merge-base HEAD origin/main)" HEAD -- .github | tr '\n' ' ')" = ".github/workflows/q10-trial.yml "
@@ -97,7 +97,7 @@ node scripts/harness.ts fmt --check
 ```
 
 - 다섯째 줄은 절차를 이 머신에서 실제로 돌린다(네트워크로 패키지를 설치한다). 이 작업 트리가 아니라 새 임시 폴더의 복제본에서 돌린다: 복제본은 커밋된 HEAD이므로 구현을 커밋한 뒤에 돌린다. 결과는 복제본의 `lab/q10-db/results/`에 쓰이고, 이 작업 트리의 결과 폴더가 바뀌지 않았는지 본다. 복제본에는 하네스의 의존성이 없어 `--skip-fmt`로 돌린다(CI 러너와 같은 명령이다). 복제본은 지우지 않는다.
-- 여섯째~아홉째 줄: 모르는 인자와 `--out`은 `run.ts`가 2로 끝낸다(아무 단계도 돌지 않는다). `trial.ts`도 `--out`을 받지 않고 넘긴 폴더에 아무것도 만들지 않는다. `--out`에는 리포 밖의 새 임시 폴더 아래의 이름을 주고, 그 폴더가 빈 채인지 본다. `trial.ts`, `run.ts`, README에 `--out`이 남아 있지 않다. 이 줄들은 구현 뒤에 돌린다(AC). 구현 전의 실패 확인은 첫 줄의 테스트로 하고, 그 테스트는 `trial.ts`를 실행하지 않는다.
+- 여섯째~아홉째 줄: 모르는 인자와 `--out`은 `run.ts`가 2로 끝낸다(아무 단계도 돌지 않는다). `trial.ts`도 `--out`을 받지 않고 넘긴 폴더에 아무것도 만들지 않는다. `--out`에는 리포 밖의 새 임시 폴더 아래의 이름을 주고, 그 폴더가 빈 채인지 본다. 두 명령 모두 표준 오류를 파일로 받아 **사용법의 글이 나왔는지** 본다(예외로 죽은 것을 거부로 세지 않는다). `trial.ts`, `run.ts`, README에 `--out`이 남아 있지 않다. 이 줄들은 구현 뒤에 돌린다(AC). 구현 전의 실패 확인은 첫 줄의 테스트로 하고, 그 테스트는 `trial.ts`를 실행하지 않는다.
 - 열째~열두째 줄: 워크플로 파일이 패치와 같고(새 파일을 만드는 패치는 내용이 글자 그대로 같아야 거꾸로 적용된다), 이 PR이 `.github/` 아래에서 바꾼 파일이 그 하나뿐이며, 패치가 파일 하나만 다룬다. `origin/main`이 필요하다(`git fetch origin`).
 - 구조의 세부는 셋째 줄의 테스트가 본다.
 - Linux와 Windows에서 절차가 도는지는 이 step이 병합된 뒤 step1에서 워크플로로 본다.
