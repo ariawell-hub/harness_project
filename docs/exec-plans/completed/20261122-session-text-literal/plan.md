@@ -2,7 +2,7 @@
 id: 20261122-session-text-literal
 issue: 198 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -82,6 +82,8 @@ claimed_at: 2026-11-22T10:40:57+09:00 # new-task가 채운다
 - 2026-11-22 11:10 구현 뒤의 확인: 멘션(`@octocat`)·`#1`·`:tada:`·굵게·백틱 넷의 줄·`~~~`·닫히지 않은 HTML 주석이 든 질문으로 만든 질문 댓글과, 같은 글자가 든 근거·요지로 만든 교착 보고의 반박 줄을 GitHub Markdown API(`mode=gfm`, 리포 context)로 그렸다. 질문 댓글: 멘션 링크는 runner가 쓴 제작자 멘션 하나뿐이고, 질문의 글은 `<pre>` 하나 안에 글자 그대로 있었다(Issue 링크·이모지·굵게 없음). 반박 줄: 근거와 요지가 `<code>` 둘에 글자 그대로 있었고 멘션·Issue 링크·이모지가 없었다.
 - 2026-11-22 11:11 구현과 완료 처리를 한 번에 올린다. 판정 횟수를 줄이려는 것이고, 구현 판정에서 지적이 나오면 step을 되돌려 고친다.
 - 2026-11-22T17:23:14+09:00 step0 재작업: 판정 지적 F7(codex P1): 백틱 묶음이 아주 많은 글에서 longestTicks가 RangeError를 낸다
+- 2026-11-22 17:27 구현을 올린 뒤(11:20) 판정이 걸리지 않았다. push 몇 초 전에 #190이 병합돼 변경 이력 파일이 충돌했고, 충돌한 PR에서는 `check`가 돌지 않아 그 뒤에 시작하는 판정도 돌지 않았다. 대기 명령이 판정 결과만 기다려 이를 알아채지 못했다. main을 두 번 병합했다(#190·#196·#201, 이어서 #205). main이 설계서 v0.7.75를 먼저 써서 이 작업의 항목을 v0.7.76으로 옮겼다. TD 번호(65, 66)는 그대로다. PR 본문에 체크된 "보호 경로 변경" 줄이 없어 `harness-guard`가 실패한 것도 고쳤다. 이제 push 뒤에는 그 head의 `check` 실행이 생겼는지부터 본다.
+- 2026-11-22 17:27 구현 판정 1회차(head `df1768a`): claude 승인(지적 없음), codex 수정 요청(F7, P1). 오래 열린 지적 표시는 없었다. 맞는 지적이라 step을 되돌려 고쳤다. `longestTicks`가 백틱 묶음마다 인자 하나를 만들어 `Math.max`에 펼쳐, 묶음이 20만 개인 글에서 `RangeError`가 났다(로컬에서 재현). 그 예외는 `askQuestions`가 계획을 멈추고 질문을 올린 것으로 적은 뒤에 나서, 댓글 없이 질문이 올린 것으로 남는다. 테스트 먼저: `literal.test.ts`와 `runner.test.ts`에 더한 두 테스트가 구현 전에 `RangeError`로 실패했다. 고친 것: 묶음을 하나씩 보며 최댓값을 구하고, 댓글의 글을 계획을 멈추기 전에 만든다.
 
 ## 의사결정 로그
 
