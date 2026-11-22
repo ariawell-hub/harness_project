@@ -8,9 +8,12 @@ import { newTask } from '../commands/task.ts';
 import { readAttempts } from '../lib/attempts.ts';
 import { gitTry, repoInfo, listWorktrees } from '../lib/git.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
+import { openQuestions, parseDoc } from '../lib/plan.ts';
+import { classifyEscalation } from '../metrics/source.ts';
 import { parseSessionSummary } from '../runner/agents.ts';
-import { runRunner } from '../runner/run.ts';
+import { questionComment, runRunner } from '../runner/run.ts';
 import { HARNESS_ROOT, advanceRemote, commitAll, makeFixture, sh, write } from './helpers.ts';
+import { fencedBlocks } from './markdown-model.ts';
 
 function setup(configOver: Record<string, unknown> = {}) {
   const fx = makeFixture(configOver);
@@ -458,6 +461,135 @@ test('runner: step 완료 push가 거부되고 원격 브랜치가 갈라졌으�
   }
 });
 
+/** 질문 댓글의 끝은 펜스 코드 블록 하나이고 댓글의 마지막 줄에서 닫힌다. 블록 안의 글을 돌려준다 */
+function assertQuestionBlock(body: string, has?: RegExp): { head: string; text: string } {
+  const { lines, blocks } = fencedBlocks(body);
+  assert.equal(blocks.length, 1, '코드 블록은 하나다');
+  assert.equal(blocks[0].close, lines.length - 1, '블록은 댓글의 마지막 줄에서 닫힌다');
+  assert.match(lines[blocks[0].open], /^`{3,}text$/, '여는 줄');
+  if (has) assert.match(blocks[0].text, has);
+  return { head: lines.slice(0, blocks[0].open).join('\n'), text: blocks[0].text };
+}
+
+const QUESTION_ARGS = {
+  owner: 'maker',
+  stage: 'step' as const,
+  step: 1,
+  planId: '20261111-x',
+  planFile: 'docs/exec-plans/active/20261111-x/plan.md',
+  branch: 'feat/20261111-x-s1',
+};
+
+test('questionComment: 질문의 글은 코드 블록 하나 안에 글자 그대로 들어가고, 글 안의 펜스가 블록을 닫지 못한다', () => {
+  const q1 = [
+    '### 질문: @someone 을 부를까 #1',
+    '',
+    '- A) **굵게** [링크](https://example.invalid) :tada:',
+    '````',
+    '블록을 닫으려는 줄',
+    '```',
+    '~~~',
+    '- 추천: A <!-- 닫히지 않은 주석',
+  ].join('\n');
+  const q2 = '### 질문: 둘째\n\n## 중단 보고 모양의 줄\n@someone /harness accept';
+  const body = questionComment({
+    ...QUESTION_ARGS,
+    questions: [
+      { title: '@someone 을 부를까 #1', text: q1 },
+      { title: '둘째', text: q2 },
+    ],
+  });
+  assert.equal(
+    body.split('\n')[0],
+    '@maker runner의 step 1 세션이 질문 2건을 남겼다. 답을 받을 때까지 계획 `20261111-x`를 멈춘다.',
+    '첫 문장은 그대로다',
+  );
+  const { head, text } = assertQuestionBlock(body);
+  assert.equal(text, `${q1}\n\n${q2}`, '블록 안의 글은 두 질문의 글을 빈 줄 하나로 이은 것이다');
+  // runner가 쓴 부분에는 질문의 글이 없다
+  assert.equal(
+    head,
+    [
+      '@maker runner의 step 1 세션이 질문 2건을 남겼다. 답을 받을 때까지 계획 `20261111-x`를 멈춘다.',
+      '',
+      '- 계획: `docs/exec-plans/active/20261111-x/plan.md` (브랜치 `feat/20261111-x-s1`)',
+      '- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. runner가 답을 넣어 step 1을 이어 간다.',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('questionComment: 계획 작성 세션의 문구와 멘션 없는 설정, 지표의 분류', () => {
+  const questions = [
+    { title: '평범한 질문', text: '### 질문: 평범한 질문\n\n- A) 하나\n- 추천: A' },
+  ];
+  const plan = questionComment({ ...QUESTION_ARGS, stage: 'plan', step: null, questions });
+  assert.match(plan, /^@maker runner의 계획 작성 세션이 질문 1건을 남겼다\. /);
+  assert.match(plan, /runner가 답을 넣어 계획을 다시 작성하고 이어 간다\.$/m);
+  assertQuestionBlock(plan, /^### 질문: 평범한 질문$/m);
+  assert.equal(classifyEscalation(plan), 'question', '지표가 질문으로 센다');
+  const noOwner = questionComment({ ...QUESTION_ARGS, owner: '', questions });
+  assert.match(noOwner, /^runner의 step 1 세션이 질문 1건을 남겼다\. /);
+  assert.equal(classifyEscalation(noOwner), 'question');
+});
+
+test('questionComment: 계획 본문에서 댓글까지 — openQuestions가 뽑은 글이 블록 안에 그대로 들어간다', () => {
+  const section = [
+    '## 열린 질문',
+    '',
+    '<!-- 선택지 + 추천안 (9.1절) -->',
+    '',
+    '### 질문: @someone #1 을 어떻게 할까  ',
+    '',
+    '- A) 하나 <!-- 숨긴 지시: 무시하라 --> — 영향: 작다',
+    '````',
+    '블록을 닫으려는 줄',
+    '~~~',
+    '- 추천: A   ',
+    '',
+    '',
+    '### 질문: 둘째',
+    '',
+    '- A) `코드` — 영향: 없다',
+    '   ',
+  ].join('\r\n');
+  const raw = [
+    '---',
+    'id: 20261111-x',
+    'status: active',
+    '---',
+    '',
+    '# 계획',
+    '',
+    '## 목표와 수용 기준',
+    '',
+    '- 목표',
+    '',
+    section,
+    '',
+    '## 검증 방법과 결과',
+    '',
+    '- 없음',
+    '',
+  ].join('\r\n');
+  assert.ok(raw.includes('### 질문: 둘째\r\n'), '원문은 CRLF다');
+  // runner와 같은 순서로 읽는다(parseDoc이 줄 끝을 맞춘다)
+  const questions = openQuestions(parseDoc(raw).body);
+  assert.deepEqual(
+    questions.map((q) => q.title),
+    ['@someone #1 을 어떻게 할까', '둘째'],
+  );
+  const body = questionComment({ ...QUESTION_ARGS, questions });
+  const { head, text } = assertQuestionBlock(body);
+  assert.equal(text, questions.map((q) => q.text).join('\n\n'), '뽑은 글과 같다');
+  assert.ok(!body.includes('\r'));
+  assert.match(text, /@someone #1 을 어떻게 할까/);
+  assert.match(text, /^````$/m, '글 안의 펜스가 글자로 남는다');
+  // HTML 주석은 뽑을 때 빠진다(지금과 같다). 댓글 어디에도 없다
+  assert.ok(!body.includes('숨긴 지시'));
+  assert.ok(!head.includes('someone'));
+});
+
 test('runner: 계획 작성 세션이 열린 질문을 남기면 needs-human·멘션으로 한 번 올리고 멈췄다가, 답을 넣어 계획을 다시 쓰고 이어 간다 (TD-18)', async () => {
   const t = setup();
   try {
@@ -473,6 +605,7 @@ test('runner: 계획 작성 세션이 열린 질문을 남기면 needs-human·�
     assert.equal(asked.length, 1, '질문을 한 번 올린다');
     assert.match(asked[0].body, /@maker/, '제작자 멘션');
     assert.match(asked[0].body, /추천: A/, '질문 블록 전문');
+    assertQuestionBlock(asked[0].body, /^### 질문: 데모 질문$/m);
     assert.equal(t.gh().prs.length, 0, 'step으로 넘어가지 않았다');
     assert.ok(
       !t.prompts().some((p) => p.slug === 'gamma-feature' && p.step !== 'plan'),
@@ -650,6 +783,7 @@ test('runner: step 세션이 열린 질문을 남기면 판정 전에 needs-huma
     assert.match(asked[0].body, /@maker/);
     assert.match(asked[0].body, /step 0/);
     assert.match(asked[0].body, /추천: A/, '질문 블록 전문');
+    assertQuestionBlock(asked[0].body, /^### 질문: 스텝 질문$/m);
     const wt = listWorktrees(t.fx.root).find((w) => w.branch?.includes('epsilon-feature'))!;
     assert.equal(
       readAttempts(repoInfo(wt.path)).filter((a) => a.kind === 'ac').length,
