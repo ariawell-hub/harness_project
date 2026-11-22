@@ -177,31 +177,55 @@ export function init(root: string, profile: string, opts: InitOptions): number {
   const dry = opts.dryRun === true;
   const name = `${p.name}@${p.version}`;
   const changed = changedKeys(before, cfg);
-  // 템플릿마다 할 일을 미리 정한다(미리보기와 쓰기 전 검사에 쓴다). 파일을 쓰지 않고, 프로파일의 순서대로
-  // 차례로 처리했을 때의 결과를 따라간다: after는 이번 실행이 쓸 파일의 정체 → 쓴 뒤의 내용이다.
-  // 뒤의 템플릿은 앞의 것이 쓴 파일을 이미 있는 것으로 보고, 그 내용으로 자리 표시 여부와 복사할 글을 정한다.
-  // 파일은 경로의 글자가 아니라 정체로 가린다(같은 파일을 가리키는 다른 경로가 있다)
+  // 템플릿마다 할 일을 미리 정한다(미리보기와 쓰기 전 검사에 쓴다). 파일을 쓰지 않고, 아래의 실제 적용이
+  // 프로파일의 순서대로 하는 일(있는지 본다 → 자리 표시 파일인지 읽는다 → 상위 폴더를 만든다 → 복사한다)을
+  // 그대로 따라간다. written은 이번 실행이 쓸 파일의 정체 → 쓴 뒤의 내용, madeDirs는 만들 폴더의 정체다.
+  // 뒤의 템플릿은 앞의 것이 쓴 파일과 만든 폴더를 이미 있는 것으로 본다.
+  // 파일은 경로의 글자가 아니라 정체로 가린다(같은 파일을 가리키는 다른 경로가 있다).
+  // 실제 적용이 도중에 실패할 경우(앞의 파일을 쓴 뒤 예외)는 여기서 가려 쓰기 전에 멈춘다
   const cfgText = JSON.stringify(cfg, null, 2) + '\n';
-  const after = new Map<string, Buffer>();
-  if (changed.length) after.set(fileKey(cfgPath), Buffer.from(cfgText));
-  const contentOf = (f: string) => after.get(fileKey(f)) ?? readFileSync(f);
-  const present = (f: string) => after.has(fileKey(f)) || existsSync(f);
+  const written = new Map<string, Buffer>();
+  const madeDirs = new Set<string>();
+  if (changed.length) written.set(fileKey(cfgPath), Buffer.from(cfgText));
+  const kindOf = (f: string): 'none' | 'file' | 'dir' => {
+    const k = fileKey(f);
+    if (written.has(k)) return 'file';
+    if (madeDirs.has(k)) return 'dir';
+    try {
+      return statSync(f).isDirectory() ? 'dir' : 'file';
+    } catch {
+      return 'none';
+    }
+  };
+  const contentOf = (f: string) => written.get(fileKey(f)) ?? readFileSync(f);
   const jobs: { to: string; copy: boolean; overwrite: string | null }[] = [];
-  const missing: string[] = [];
   for (const t of p.templates ?? []) {
     const src = path.join(root, 'profiles', profile, t.from);
     const dst = path.join(root, t.to);
-    const copy =
-      !present(dst) || (t.replacePlaceholder === true && contentOf(dst).includes(PLACEHOLDER));
-    if (copy && !present(src)) {
-      missing.push(src);
-      continue;
+    const at = kindOf(dst);
+    const replace = t.replacePlaceholder === true;
+    if (at === 'dir' && replace)
+      return stop('템플릿이 놓일 자리가 폴더다(자리 표시 파일인지 읽을 수 없다)', [dst]);
+    const copy = at === 'none' || (replace && contentOf(dst).includes(PLACEHOLDER));
+    if (copy) {
+      if (/[\\/]$/.test(t.to))
+        return stop('템플릿이 놓일 자리가 폴더 경로다(구분자로 끝난다)', [dst]);
+      const from = kindOf(src);
+      if (from === 'none') return stop('템플릿 원본이 없다', [src]);
+      if (from === 'dir') return stop('템플릿 원본이 파일이 아니다(폴더)', [src]);
+      // 없는 상위 폴더는 복사하며 만들어진다. 상위 경로에 파일이 있으면 폴더를 만들 수 없다
+      for (let d = path.dirname(dst); path.dirname(d) !== d; d = path.dirname(d)) {
+        const up = kindOf(d);
+        if (up === 'file')
+          return stop('템플릿이 놓일 자리의 상위 경로가 파일이다(폴더를 만들 수 없다)', [d]);
+        if (up === 'dir') break;
+        madeDirs.add(fileKey(d));
+      }
+      written.set(fileKey(dst), contentOf(src));
     }
     // 디스크에 있던 파일을 덮어쓰는 것만 하드 링크 검사의 대상이다(이번 실행이 만든 파일은 새 파일이다)
     jobs.push({ to: t.to, copy, overwrite: copy && existsSync(dst) ? dst : null });
-    if (copy) after.set(fileKey(dst), contentOf(src));
   }
-  if (missing.length) return stop('템플릿 원본이 없다', missing);
   // 덮어쓸 파일이 하드 링크로 다른 이름과 이어져 있으면 쓰지 않는다. 그 자리에 쓰면 다른 이름으로
   // 보이는 파일(다른 리포의 설정일 수 있다)도 함께 바뀐다. 어디와 이어졌는지는 알 수 없어 모두 거절한다
   const linked = [
