@@ -576,16 +576,27 @@ test('checkAdr 후보표: 확인 상태의 날짜는 출처 주소 밖에서만 
     // 날짜 뒤에 주소가 이어지는 꼴
     '확인함(https://example.com/a, 2026-11-22.example.com/b)',
     '확인함(https://example.com/a, 2026-11-22?x)',
+    // 판정 2회차 F2: 주소의 질의 안에서 쉼표로 둘러싸인 날짜. 쉼표는 주소 안에도 올 수 있어 구분자가 아니다.
+    // 확인일은 공백으로 띄어 적은 낱말이어야 한다(낱말이 날짜이거나 날짜 뒤에 쉼표 하나)
+    '확인함(https://example.com/a?dates=2026-11-01,2026-11-22,2026-12-01&format=csv)',
+    '확인함(https://example.com/a?d=x,2026-11-22)',
+    '확인함(https://example.com/a,2026-11-22)',
+    '확인함(https://example.com/a, x,2026-11-22)',
+    '확인함(https://example.com/a, 2026-11-22,x)',
+    '확인함(https://example.com/a, 2026-11-22,,)',
+    '확인함(https://example.com/a, 2026-11-22에 확인)',
+    '확인함(https://example.com/a, 확인2026-11-22)',
   ])
     fails(check(v), NO_DAY);
   // 주소 밖에 확인일이 있으면 통과한다. 주소 안의 날짜는 실재하지 않아도 된다
   for (const v of [
     '확인함(https://example.com/blog/2026-11-01/pricing, 2026-11-22)',
     '확인함(https://example.com/blog/2026-02-30/pricing, 2026-11-22)',
-    '확인함(https://example.com/a,2026-11-22)',
     '확인함(2026-11-22, https://example.com/a)',
-    '확인함(https://example.com/a, 2026-11-22에 확인)',
     '확인함(https://example.com/a, 확인 2026-11-22)',
+    '확인함(https://example.com/a, 2026-11-22 확인)',
+    '확인함(https://example.com/a?dates=2026-11-01,2026-12-01, 2026-11-22)',
+    '확인함(https://example.com/a, 2026-11-21, 2026-11-22)',
   ])
     assert.deepEqual(check(v), [], v);
   // 주소 밖의 날짜가 실재하지 않으면 실패한다(그대로)
