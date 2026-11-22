@@ -104,16 +104,23 @@ retry?: Partial<StatusRetry>;
 
 ### 3. 문서와 기술 부채 표
 
-- `docs/harness/design.md` 10.4절: 기계 판정을 `gates` 워크플로가 기록한다는 항목 아래에 항목 하나(한 줄)를 더한다. 그 줄에 아래가 모두 있어야 한다(AC가 그 줄에서 본다).
-  - 값의 이름 `STATUS_RETRY`와 Issue 번호.
-  - 다시 보내는 오류: `HTTP 5xx`와 `응답 없음`(연결 끊김, 요청의 시간 제한).
-  - 횟수와 대기: 요청은 상태 하나에 `4번까지`, 대기는 `2초, 6초, 15초`.
-  - 시간 상한: 다시 시도가 더하는 시간은 poster 하나에 `60초`. 상한까지 `남은 시간이 5초`보다 적으면 보내지 않고(대기 전에도, 대기 뒤에도 본다), 다시 보내는 요청의 `시간 제한은 30초와 남은 시간 가운데 작은 값`이다.
-  - 제외: `HTTP 4xx`는 다시 보내지 않는다.
-  - 마지막 실패: 모두 실패하면 전처럼 job이 실패한다(`fail-closed`).
-  - 로그 줄의 형식: `record: 커밋 상태 기록 다시 시도(<context>): …`. 토큰과 응답 본문은 넣지 않는다.
-- `docs/harness/design.md`의 버전과 변경 이력 한 줄: `10.4절`, `Issue #220`, `TD-48` 해결을 적는다.
-- `docs/harness/CHANGELOG.md`: 한 항목(한 줄). `Issue #220`, `STATUS_RETRY`와, 위 10.4절 항목의 내용(다시 보내는 오류, 횟수와 대기, 시간 상한, 제외, 마지막 실패, 로그 줄의 형식)을 같은 글귀로 적는다(AC가 두 곳에서 같은 글귀를 본다).
+- `docs/harness/design.md` 10.4절: 기계 판정을 `gates` 워크플로가 기록한다는 항목 아래에 항목 하나(한 줄)를 더한다. 그 줄에 아래 글귀 14개가 글자 그대로 모두 있어야 한다. AC가 그 줄에서 14개를 모두 본다(하나라도 빠지면 실패한다). 이 목록이 문서에 적어야 하는 내용의 전부다.
+  1. `STATUS_RETRY` — 값의 이름
+  2. `Issue #220` — Issue 번호
+  3. `HTTP 5xx` — 다시 보내는 오류 하나
+  4. `응답 없음(연결 끊김, 요청의 시간 제한)` — 다시 보내는 오류 둘과 그 뜻
+  5. `4번까지` — 요청 수의 상한(상태 하나에)
+  6. `2초, 6초, 15초` — 대기 시간
+  7. `poster 하나에 60초` — 다시 시도가 더하는 시간의 상한
+  8. `남은 시간이 5초보다 적으면 보내지 않는다` — 상한까지 남겨야 하는 시간
+  9. `대기 전과 대기 뒤에 본다` — 남은 시간을 보는 때
+  10. `시간 제한은 30초와 남은 시간 가운데 작은 값` — 다시 보내는 요청의 시간 제한
+  11. `HTTP 4xx는 다시 보내지 않는다` — 제외
+  12. `모두 실패하면 전처럼 job이 실패한다(fail-closed)` — 마지막 실패의 동작
+  13. `` `record: 커밋 상태 기록 다시 시도(<context>):  `` — 로그 줄의 형식(앞머리)
+  14. `토큰과 응답 본문은 넣지 않는다` — 로그 줄에 넣지 않는 것
+- `docs/harness/design.md`의 버전과 변경 이력 한 줄: `10.4절`, `Issue #220`, `TD-48` 해결을 적는다(AC가 그 줄에서 셋을 본다).
+- `docs/harness/CHANGELOG.md`: 한 항목(한 줄). 위 글귀 14개를 글자 그대로 모두 적는다(AC가 `Issue #220`이 있는 줄에서 14개를 모두 본다).
 - `docs/exec-plans/tech-debt-tracker.md`: TD-48을 `해결(#220: …)`로 닫는다. "발견 사항"을 새 행 하나로 더한다(상태 `열림`). 새 행의 번호는 push 직전의 `origin/main` 기준 다음 번호다.
 - 이 계획의 "발견 사항"에 `→ 처리: TD-<새 번호>`를 적는다.
 
@@ -126,9 +133,9 @@ test "$(git diff --name-only origin/main...HEAD -- scripts .github harness.confi
 test "$(git diff --diff-filter=A --name-only origin/main...HEAD -- scripts)" = "scripts/test/status-poster.test.ts"
 grep -qE '^export const STATUS_RETRY: StatusRetry = \{$' scripts/ci/record.ts
 test "$(grep -c '^test(' scripts/test/status-poster.test.ts)" = 14
-awk '/^### 10\.4 /{f=1;next} /^### |^## /{f=0} f' docs/harness/design.md | grep -F 'STATUS_RETRY' | grep -F 'Issue #220' | grep -F 'HTTP 5xx' | grep -F '응답 없음' | grep -F '4번까지' | grep -F '2초, 6초, 15초' | grep -F '60초' | grep -F '남은 시간이 5초' | grep -F '시간 제한은 30초와 남은 시간 가운데 작은 값' | grep -F 'HTTP 4xx' | grep -F 'fail-closed' | grep -qF '`record: 커밋 상태 기록 다시 시도(<context>): '
+awk '/^### 10\.4 /{f=1;next} /^### |^## /{f=0} f' docs/harness/design.md | grep -F 'STATUS_RETRY' | grep -F 'Issue #220' | grep -F 'HTTP 5xx' | grep -F '응답 없음(연결 끊김, 요청의 시간 제한)' | grep -F '4번까지' | grep -F '2초, 6초, 15초' | grep -F 'poster 하나에 60초' | grep -F '남은 시간이 5초보다 적으면 보내지 않는다' | grep -F '대기 전과 대기 뒤에 본다' | grep -F '시간 제한은 30초와 남은 시간 가운데 작은 값' | grep -F 'HTTP 4xx는 다시 보내지 않는다' | grep -F '모두 실패하면 전처럼 job이 실패한다(fail-closed)' | grep -F '`record: 커밋 상태 기록 다시 시도(<context>): ' | grep -qF '토큰과 응답 본문은 넣지 않는다'
 grep -E '^  - v0\.7\.[0-9]+ \(2026-11-[0-9]+\): .*Issue #220' docs/harness/design.md | grep -F '10.4절' | grep -qF 'TD-48'
-grep -F 'Issue #220' docs/harness/CHANGELOG.md | grep -F 'STATUS_RETRY' | grep -F 'HTTP 5xx' | grep -F '응답 없음' | grep -F '4번까지' | grep -F '2초, 6초, 15초' | grep -F '60초' | grep -F '남은 시간이 5초' | grep -F '시간 제한은 30초와 남은 시간 가운데 작은 값' | grep -F 'HTTP 4xx' | grep -F 'fail-closed' | grep -qF '`record: 커밋 상태 기록 다시 시도(<context>): '
+cat docs/harness/CHANGELOG.md | grep -F 'STATUS_RETRY' | grep -F 'Issue #220' | grep -F 'HTTP 5xx' | grep -F '응답 없음(연결 끊김, 요청의 시간 제한)' | grep -F '4번까지' | grep -F '2초, 6초, 15초' | grep -F 'poster 하나에 60초' | grep -F '남은 시간이 5초보다 적으면 보내지 않는다' | grep -F '대기 전과 대기 뒤에 본다' | grep -F '시간 제한은 30초와 남은 시간 가운데 작은 값' | grep -F 'HTTP 4xx는 다시 보내지 않는다' | grep -F '모두 실패하면 전처럼 job이 실패한다(fail-closed)' | grep -F '`record: 커밋 상태 기록 다시 시도(<context>): ' | grep -qF '토큰과 응답 본문은 넣지 않는다'
 grep -qE '^\| TD-48 .*\| 해결\(#220' docs/exec-plans/tech-debt-tracker.md
 grep -qE '^\| TD-[0-9]+ +\| .*githubLedgerApi.*\| 열림 *\|$' docs/exec-plans/tech-debt-tracker.md
 test "$(grep -c '→ 처리: TD-' docs/exec-plans/*/20261122-status-post-retry/plan.md)" = 1
