@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -237,6 +237,8 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - 같은 누락이 다른 묶음에 있는지 기준선의 job별 집계(18종, 합 4028분)와 견줬다. "호스팅 유지"의 1코어 몫에는 `review-trigger` 27분이 들어 있고, "무손실"과 "자체 러너"는 전체에서 계산해 빠진 job이 없다.
   - 제작자가 대화에서 예산과 기준선의 뜻, 묶음별 금액, "호스팅 유지"와 "검증 밖으로"의 차이를 물어 답했고, 묶음 "호스팅 유지"를 골랐다(의사결정 로그). push 전이라 ADR의 상태를 `채택`으로 고쳐 같은 라운드에 올린다: "결정"의 세 줄, "다시 볼 때 먼저 볼 것", 색인·설계서·`CHANGELOG`의 상태 글.
   - AC 12줄과 `check` 통과.
+
+- 2026-11-22T12:59:39+09:00 step2 재작업: 코드 판정 2라운드 F3·F4 대응
 
 ## 의사결정 로그
 
