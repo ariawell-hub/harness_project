@@ -254,8 +254,8 @@ test('runGates: pr-size를 필수 판정 뒤에 내고, 경고여도 다른 판�
   );
 
   // 요약의 결과 칸: 경고면 `경고`, 아니면 `통과`
-  assert.match(summaryMarkdown(b), /^\| pr-size \| 경고 \| 경고: /m);
-  assert.match(summaryMarkdown(a), /^\| pr-size \| 통과 \| 통과 \(/m);
+  assert.match(summaryMarkdown(b), /^\| pr-size \| 경고 \| ` 경고: /m);
+  assert.match(summaryMarkdown(a), /^\| pr-size \| 통과 \| ` 통과 \(/m);
 });
 
 test('runGates: pr-size는 넘겨받은 설정만 쓴다(PR 트리의 설정 파일로 상한을 올릴 수 없다)', async () => {
