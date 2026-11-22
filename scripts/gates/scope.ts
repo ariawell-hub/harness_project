@@ -14,28 +14,65 @@ const FILE_LIMIT = 30;
 /** description에 적는 경로 하나의 글자 수 상한 */
 const PATH_IN_DESCRIPTION = 60;
 
+type Fence = { ch: string; len: number };
+
+/** 코드 블록을 여는 줄이면 그 펜스(글자와 길이). 백틱이나 물결 셋 이상이다 */
+function opensFence(line: string): Fence | null {
+  const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+  // 백틱 펜스의 정보 문자열에는 백틱이 올 수 없다(그런 줄은 인라인 코드다)
+  if (!m || (m[1][0] === '`' && m[2].includes('`'))) return null;
+  return { ch: m[1][0], len: m[1].length };
+}
+
+/** 열린 펜스를 닫는 줄인가. 같은 글자가 그 길이 이상이고 다른 글자가 없어야 한다 */
+function closesFence(line: string, open: Fence): boolean {
+  const m = /^\s*(`+|~+)\s*$/.exec(line);
+  return m !== null && m[1][0] === open.ch && m[1].length >= open.len;
+}
+
 /**
  * 코드 블록과 HTML 주석 밖의 글을 줄 단위로 낸다. 둘은 먼저 열린 쪽으로 가린다: 주석 안의 펜스 줄은 블록을 열지 않고,
  * 코드 블록 안의 `<!--`는 주석을 열지 않는다(Issue #202).
  * - 코드 블록: 여는 펜스(백틱이나 물결 셋 이상)의 글자와 길이를 기억하고, 같은 글자가 그 길이 이상이고 다른 글자가 없는
  *   줄에서만 닫는다. 닫히지 않은 블록은 끝까지다. 펜스 줄 자신도 코드 블록 안으로 친다.
  * - 주석: 닫는 표식(`-->`)이 뒤에 없는 `<!--`는 주석이 아니다. 주석이 닫힌 줄의 나머지 글은 주석이 열린 줄에 이어 붙인다.
- * - 주석은 `## ` 줄을 넘지 못한다: 닫는 표식보다 `## ` 줄이 먼저 나오면 그 `<!--`는 닫히지 않은 것이다. 계획 해시의
- *   섹션 추출은 주석을 모르고 `## ` 줄에서 절을 나눈다. 다음 절의 닫는 표식이 절의 경계를 지우지 못한다.
+ * - 주석은 절의 경계를 넘지 못한다: 여는 표식과 닫는 표식 사이에 `## ` 줄이 있으면 그 `<!--`는 닫히지 않은 것이다.
+ *   계획 해시의 섹션 추출은 주석을 모르고 `## ` 줄에서 절을 나눈다. 다음 절의 닫는 표식이 절의 경계를 지우지 못한다.
+ *   그 사이의 코드 블록 안에 있는 `## ` 줄은 경계가 아니다(해시의 섹션 추출도 제목으로 보지 않는다).
  * - 코드 블록 밖의 `## ` 줄이 나오면 거기서 그친다.
  */
 function proseLines(text: string): string[] {
   const all = text.split('\n');
   const n = all.length;
-  /** i번째 줄부터 처음 나오는 `-->`가 든 줄과 `## ` 줄의 번호(없으면 n). 여는 표식마다 뒤를 다시 찾지 않는다 */
+  /** i번째 줄부터 처음 나오는 `-->`가 든 줄의 번호(없으면 n) */
   const nextClose = new Array<number>(n + 1).fill(n);
-  const nextHeading = new Array<number>(n + 1).fill(n);
-  for (let i = n - 1; i >= 0; i--) {
-    nextClose[i] = all[i].includes('-->') ? i : nextClose[i + 1];
-    nextHeading[i] = /^##\s/.test(all[i]) ? i : nextHeading[i + 1];
-  }
+  for (let i = n - 1; i >= 0; i--) nextClose[i] = all[i].includes('-->') ? i : nextClose[i + 1];
+  /** 닫는 표식보다 먼저 나온 절의 경계(`## ` 줄). 이 줄 앞의 `<!--`는 모두 닫히지 않은 것이다(-1이면 아직 없다) */
+  let boundary = -1;
+  /**
+   * i번째 줄에서 열린 `<!--`가 뒤의 줄에서 닫히는가. 닫는 표식이 든 첫 줄까지 가는 동안 코드 블록 밖의 `## ` 줄을
+   * 만나면 닫히지 않은 것이다. 그 뒤로는 그 줄에서 읽기가 끝나므로(사이에 닫는 표식이 없어 다른 주석도 열리지 않는다)
+   * 그 앞의 여는 표식은 다시 보지 않는다. 닫히면 그 줄까지 건너뛰므로 읽는 양은 글의 길이에 비례한다
+   */
+  const closesLater = (i: number): boolean => {
+    const c = nextClose[i + 1];
+    if (c >= n || i < boundary) return false;
+    let f: Fence | null = null;
+    for (let j = i + 1; j <= c; j++) {
+      if (f) {
+        if (closesFence(all[j], f)) f = null;
+        continue;
+      }
+      if (j < c) f = opensFence(all[j]);
+      if (!f && /^##\s/.test(all[j])) {
+        boundary = j;
+        return false;
+      }
+    }
+    return true;
+  };
   const out: string[] = [];
-  let open: { ch: string; len: number } | null = null;
+  let open: Fence | null = null;
   let inComment = false;
   /** i번째 줄의 글 s에서 주석을 지워 낸다. 이 줄에서 닫히지 않는 주석이 열리면 주석 안으로 들어간다 */
   const emit = (i: number, s: string, continued: boolean): void => {
@@ -53,8 +90,8 @@ function proseLines(text: string): string[] {
         rest = rest.slice(z + 3);
         continue;
       }
-      // 이 줄에서 닫히지 않는다: 뒤의 줄에 닫는 표식이 있고 그보다 먼저(같은 줄 포함) `## ` 줄이 없을 때만 주석이다
-      if (nextClose[i + 1] < nextHeading[i + 1]) {
+      // 이 줄에서 닫히지 않는다: 절의 경계보다 먼저 뒤의 줄에서 닫힐 때만 주석이다
+      if (closesLater(i)) {
         kept += rest.slice(0, a);
         inComment = true;
       } else kept += rest;
@@ -73,16 +110,11 @@ function proseLines(text: string): string[] {
       continue;
     }
     if (open) {
-      const m = /^\s*(`+|~+)\s*$/.exec(line);
-      if (m && m[1][0] === open.ch && m[1].length >= open.len) open = null;
+      if (closesFence(line, open)) open = null;
       continue;
     }
-    const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
-    // 백틱 펜스의 정보 문자열에는 백틱이 올 수 없다(그런 줄은 인라인 코드다)
-    if (m && !(m[1][0] === '`' && m[2].includes('`'))) {
-      open = { ch: m[1][0], len: m[1].length };
-      continue;
-    }
+    open = opensFence(line);
+    if (open) continue;
     if (/^##\s/.test(line)) break;
     emit(i, line, false);
   }
