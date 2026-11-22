@@ -24,6 +24,7 @@
 - `words`·`wordValues`: 글자 그대로 견주는 옵션 낱말(`arch`의 `-arm64`)과 그 가운데 값을 받는 것(`-arch 값`).
 - `positionals`: 옵션 뒤, 명령 앞에 오는 자리 인자의 수(`timeout`의 시간은 1).
 - `numeric`: `-<숫자>` 꼴의 옵션을 받는다(`nice -10`).
+- `assigns`: 옵션 사이에 `이름=값` 낱말을 받는다(`sudo`만 참이다. 아래 표에는 칸을 두지 않았다. 2의 "`sudo`의 할당").
 
 표의 내용(이름은 `commandName`으로 견준다. 경로·대소문자·`.exe`를 무시한다):
 
@@ -85,6 +86,10 @@
 - 주 해석을 먼저 `out`에 넣고 후보를 그 뒤에 넣는다. `parseSequence`(검사 순서용 분석)는 그 자리의 주 해석을 지금처럼 `cmd`로 내고, 후보가 있으면 `alts`(새 선택 칸. 명령의 배열)로 함께 낸다. 후보가 없으면 `alts`를 두지 않는다.
 - 계수기 `parseWork`(내보내는 객체 `{ words: number }`): `normalize`가 낱말 목록을 받을 때마다 그 길이를 `words`에 더한다(후보를 만들 때와 `-S`로 다시 읽을 때도 `normalize`를 거치므로 센다). 판정에는 쓰지 않는다. 읽은 양이 입력 길이에 비례하는지를 테스트가 이 값으로 본다(4).
 - 리다이렉션이 섞인 조각(`nice >/dev/null -n 5 git …`)에서도 같다: 옵션 읽기는 리다이렉션을 뺀 낱말로 한다(지금의 구조 그대로).
+- **`sudo`의 할당**: `sudo`는 옵션 사이에 `이름=값` 낱말을 받아 실행할 명령의 환경에 넣고, 그 뒤에서 옵션 읽기를 이어 간다(`sudo A=1 -u 사용자 명령`은 `명령`을 그 사용자로 실행한다). sudo의 소스(`src/parse_args.c`)를 2026-11-22에 읽었다: `/`나 `=`로 시작하지 않고 `=`가 든 낱말이 그런 낱말이고, 이름이 셸의 식별자일 필요가 없으며(`A-B=1`), 바로 앞 낱말이 `--`이면 할당이 아니라 명령이다. 지금은 셸의 식별자 꼴만 할당으로 읽고 그 뒤의 옵션을 읽지 않아 `sudo A=1 -u 사용자 명령`과 `sudo A-B=1 명령`의 명령에 규칙이 돌지 않는다(main에서도 같다).
+  - 훅도 sudo처럼 읽는다: 표의 `assigns`가 참인 래퍼의 옵션 읽기가 끝난 자리(`next`)의 낱말이 `-`·`/`·`=`로 시작하지 않고 `=`가 들었고 바로 앞 낱말이 `--`가 아니면, 첫 `=`의 앞을 이름으로 뒤를 값으로 `assigns`에 담고 그다음 낱말부터 그 래퍼의 옵션을 다시 읽는다(`skipWrapperOptions`를 다시 부른다. 표에 없는 옵션을 만나면 처음과 같게 후보를 낸다). 그런 낱말이 다시 오면 되풀이한다(낱말을 하나 이상 지나가므로 읽는 양은 입력에 비례한다).
+  - `--` 바로 뒤의 낱말은 sudo에게 명령이다. 그 낱말이 셸의 식별자 꼴 할당이면(`sudo -- A=1 명령`) 지금처럼 할당으로 읽어 뒤의 명령을 본다(sudo는 `A=1`이라는 명령을 찾다가 실패한다. 막는 쪽이고 지금도 그렇다). 식별자 꼴이 아니면(`sudo -- A-B=1 명령`) 그 낱말이 명령 이름이다.
+  - `doas`는 할당을 받지 않는다(OpenBSD의 `doas.c`를 읽었다: 옵션 뒤의 첫 낱말이 명령이다). 표의 `assigns`를 두지 않는다. 다른 래퍼도 지금 그대로다.
 
 ### 3. `env`
 
@@ -97,7 +102,16 @@
   - 셸의 연산자는 문자열 안에서 연산자가 아니다: `env -S "git status; echo x"`는 `git`에 `status;`, `echo`, `x`를 넘기는 명령 하나다(`env`가 그렇게 실행한다). 셸 명령 줄로 다시 읽지 않는다(`parseInto`를 쓰지 않는다).
   - 문자열에서 나온 낱말에 다시 `-S`가 있으면 같은 방식으로 나눈다. 한 조각에서 네 번까지다. 다섯 번째 `-S`를 만나면 더 읽지 않고, 그 조각이 낸 명령에 **끝까지 읽지 못했다**는 표시를 단다(`SimpleCommand`의 새 선택 칸 `incomplete: true`. 그 조각이 낸 명령이 없으면 빈 명령에 달아 낸다). 그 호출은 규칙이 막는다(3-1). 후보로 넘기지 않는다: 다섯 번째 문자열 안에 명령과 인자가 함께 있으면(`-S "tool a"`) 낱말 경계에서 시작하는 후보로는 그 명령을 찾지 못한다(계획 검증 2회차의 F6). 한도를 두는 이유: `-S-S-S…x`처럼 겹치면 나눌 때마다 남은 글을 다시 읽어 비용이 제곱으로 는다.
   - 리다이렉션이 붙은 낱말(`env -S "…">out`)에서는 리다이렉션을 그대로 두고 낱말의 글만 나눈다.
-- `-u`·`--unset`과 할당은 지금 그대로다.
+- `-u`·`--unset`은 지금 그대로다.
+- 할당: `env`의 할당은 `=`가 든 낱말이다. 이름이 셸의 식별자가 아니어도 된다(`BUILD-MODE=local`, `a.b=1`). GNU의 `env.c`(9.4)는 `strchr`로, uutils의 `env.rs`는 `split_once`로 `=`가 있는지만 본다(2026-11-22에 소스를 읽었다). 이 Mac의 `env`도 그렇게 실행한다. 첫 `=`의 앞을 이름으로 뒤를 값으로 `assigns`에 담고 다음 낱말로 간다. 지금은 셸의 식별자 꼴만 할당으로 읽어 `env BUILD-MODE=local 명령`의 `BUILD-MODE=local`을 명령 이름으로 본다(main에서도 같다. 구현 판정 7회차의 F10).
+  - 옵션 읽기가 끝나기 전에는 `-`로 시작하지 않는 낱말에 적용한다. `-S`가 나눈 낱말에도 같다(`env -S 'BUILD-MODE=local 명령'`).
+  - 이름이 빈 낱말(`=x`)은 `assigns`에 담지 않고 건너뛴다(GNU와 uutils는 넘어가 명령을 실행하고 macOS는 오류로 끝난다. 막는 쪽이다).
+- `--`: 옵션 읽기를 끝낸다(구현 판정 7회차의 F9). 그 뒤의 낱말은 `-`로 시작해도 옵션으로 읽지 않는다.
+  - `=`가 든 낱말은 할당이다(`-`로 시작해도 같다: `env -- -x=1 명령`의 `-x=1`. 이 Mac의 `env`가 그렇게 실행하고 GNU의 소스도 같다).
+  - `-` 혼자인 낱말은 건너뛴다(GNU는 `-i`로 읽고 macOS는 명령 이름으로 읽는다. 막는 쪽이다).
+  - 그 밖의 첫 낱말이 명령 이름이다. `env -- -S 'tool a'`는 `-S`라는 이름의 명령에 `tool a`를 인자 하나로 넘기는 호출이다. 문자열을 나누지 않고 후보도 내지 않는다(세 구현 모두 `--`에서 옵션을 끝낸다: GNU와 macOS는 `getopt`, uutils는 `-S`를 찾는 앞 단계가 `--`에서 멈춘다).
+- `--` 없이 할당 뒤에 온 `-`로 시작하는 낱말은 지금처럼 옵션으로 읽는다. GNU와 macOS는 첫 할당에서 옵션 읽기를 끝내 `env A=1 -i 명령`의 `-i`를 명령 이름으로 찾다가 실패한다. 훅은 뒤의 명령까지 읽으므로 막는 쪽이다(구현마다 다를 수 있는 자리라 넓게 읽는다).
+- 긴 옵션의 줄인 꼴: GNU의 `getopt_long`은 긴 옵션 이름을 다른 이름과 겹치지 않는 앞부분으로 줄여 쓸 수 있게 한다(glibc와 coreutils의 설명서. `env --split '…'`, `env --s='…'`). 이름이 `split-string`의 앞부분이면(한 글자 이상) `--split-string`으로 읽는다(`env`의 긴 옵션 가운데 `s`로 시작하는 것은 이것뿐이다). 다른 긴 옵션의 줄인 꼴(`--unse 이름`, `--chd 폴더`)은 표에 없는 옵션으로 읽어 후보를 낸다(값을 받는 옵션이어도 후보가 그 뒤의 명령을 본다). macOS의 `env`는 긴 옵션을 모른다(오류로 끝난다. 막는 쪽이다). GNU의 `env`로는 돌려 보지 못했다.
 - 위에 없는 `-`로 시작하는 낱말: 지금처럼 하나를 건너뛰고, 2의 "모르는 옵션"과 같이 후보를 낸다.
 
 ### 3-1. 규칙 `scripts/hooks/rules.ts`: 검사 순서 규칙과 읽지 못한 명령
@@ -131,8 +145,11 @@
   - 겹친 래퍼: `sudo -u someone nice -n 5 C`, `nice -n 5 sudo -u someone C`, `timeout -s KILL 5 env -C /tmp C`, `nohup nice -n 5 C`.
   - 다른 틀과 섞인 꼴: `if true; then nice -n 5 C; fi`, `>/dev/null nice -n 5 C`, `nice >/dev/null -n 5 C`, `nice -n >/dev/null 5 C`, `nice -n 5 >/dev/null C`, `A=1 nice -n 5 C`, `bash -c "nice -n 5 C"`, `true && sudo -u someone C`, `NICE -n 5 C`(이름의 대소문자), `/usr/bin/nice -n 5 C`(경로).
   - 모르는 옵션(후보로 막힌다): `nice --unknown 5 C`, `sudo --unknown someone C`, `sudo -Z someone C`, `timeout --unknown x 5 C`, `stdbuf -Z x C`, `env --unknown x C`, `xargs -i {} C`(값을 붙여 써야 하는 옵션을 띄어 쓴 꼴), `nice --unknown a b c d C`(후보 넷째 자리).
+  - 할당과 옵션의 끝(구현 판정 7회차의 F9·F10과 같은 갈래): `env BUILD-MODE=local C`, `env a.b=1 C`, `env -i A-B=1 C`, `env -S "BUILD-MODE=local C"`, `env -- BUILD-MODE=local C`, `env -- -x=1 C`, `env =x C`, `env --split "C"`, `env --s="C"`, `env --split-s "이름" 나머지`, `sudo A-B=1 C`, `sudo A=1 -u someone C`, `sudo -u someone A-B=1 C`, `sudo A=1 B-C=2 -g staff -u someone C`, `sudo -u someone A=1 -- C`.
 - **유지하는 꼴**(지금도 막힌다. 그대로여야 한다): `nice C`, `sudo C`, `sudo -n C`, `nohup C`, `time -p C`, `command -p C`, `exec -c C`, `nice -n5 C`, `nice --adjustment=5 C`, `nice -10 C`, `ionice -c2 C`, `timeout 5 C`, `timeout --signal=KILL 5 C`, `timeout --preserve-status 5 C`, `env -u HOME C`, `env -i C`, `env --chdir=/tmp C`, `env A=1 C`, `xargs -n 1 C`, `xargs -I {} C`, `xargs --max-procs=2 C`, `xargs -0 -n 1 C`, `sudo --user=someone C`, `sudo -usomeone C`, `command -- C`, `exec -- C`, `nohup -- C`, `builtin command C`.
+- **유지하는 꼴(할당과 옵션의 끝)**: `env -- C`, `env -i -- A=1 C`, `env A=1 -i C`, `env - C`, `sudo A=1 C`, `sudo -- A=1 C`.
 - **허용**(막히지 않아야 한다): `nice -n 5 node scripts/harness.ts test`, `timeout -s KILL 5 git status`, `timeout -k 1 5 node --test x.test.ts`, `sudo -u someone ls`, `nice -n 5 echo git reset --hard`, `sudo -u someone echo "git reset --hard"`, `timeout 5 grep -r "git push --force" .`, `xargs -n 1 echo`, `nice -n 5 git log --oneline`, `env -C /tmp git status`, `env -S "node -v"`, `stdbuf -o L cat file.txt`, `caffeinate -i node scripts/harness.ts test`, `arch -arm64 node -v`, `chrt -f 10 node -v`, `taskset -c 0 node -v`, `nice --unknown 5 node -v`(모르는 옵션이 있어도 뒤에 금지 호출이 없으면 통과한다), `sudo --unknown someone git status`.
+- **허용(할당과 옵션의 끝)**: `env BUILD-MODE=local git status`, `env -- git status`, `env --split "node -v"`, `sudo A=1 -u someone ls`, `env -- -S "git reset --hard"`(`-S`라는 이름의 명령의 인자일 뿐이다. main에서도 통과한다).
 - **막는 쪽으로 기우는 대가를 고정한다**(막힌다. 의사결정 로그의 대가): `nice --unknown 5 echo git reset --hard`는 R14로 막힌다. 같은 호출에서 모르는 옵션을 빼면(`nice -n 5 echo git reset --hard`) 통과한다.
 - **분석기의 낱말**(`parseShell`. 명령의 `args ?? argv`를 본다):
   - `nice -n 5 git status`, `sudo -u someone -g staff git status`, `timeout -s KILL -k 1 5 git status`, `xargs --max-args 1 git status`, `stdbuf -o L git status`, `arch -arch arm64 git status`, `chrt -f 10 git status`: 각각 명령 하나, `['git', 'status']`.
@@ -145,7 +162,8 @@
   - 다섯 번째에서는 읽지 못한 명령으로 막는다: `env -S -i -S -i -S -i -S -i -S "git status"`, `env -S-S-S-S-S"git status"`, `env -S -i -S -i -S -i -S -i -S "tool a"`는 낸 명령에 `incomplete`가 있고 R4로 막힌다(문자열 안의 명령이 허용된 것이어도). 금지 호출 열둘을 다섯 번째 문자열에 넣은 꼴(`env -S -i -S -i -S -i -S -i -S "C"`)도 모두 막힌다.
   - `incomplete`는 그 밖의 명령에는 없다(닫는 꼴·유지하는 꼴·허용의 어느 호출에도 없다).
   - 래퍼뿐인 조각(`nice -n 5`, `sudo -u someone`, `timeout -s KILL 5`, `nice -n`)은 전처럼 명령을 내지 않는다.
-- **`skipWrapperOptions`**(표를 읽는 함수만 따로): 위 "읽는 함수"의 항목마다 한 사례씩(`--`, 값이 붙은 긴 옵션, 값을 띄어 쓴 긴 옵션, 모르는 긴 옵션, 숫자 옵션, 묶은 짧은 옵션의 가운데·끝의 값 글자, 모르는 글자, `-` 하나, 자리 인자, 값이 없는 끝). 표에 든 래퍼 이름마다 `flags`와 `values`에 같은 글자가 없고 `longFlags`와 `longValues`에 같은 이름이 없다.
+  - 할당과 옵션의 끝: `env BUILD-MODE=local git status`와 `env -S 'BUILD-MODE=local git status'`는 `['git', 'status']`이고 `assigns`에 `'BUILD-MODE': 'local'`. `env =x git status`는 `['git', 'status']`이고 `assigns`가 비어 있다. `env -- -S 'tool a'`는 명령 하나 `['-S', 'tool a']`다(후보가 없다). `env -- -x=1 tool a`는 `['tool', 'a']`이고 `assigns`에 `'-x': '1'`. `env -i -- A=1 tool a`와 `env -- - tool a`는 `['tool', 'a']`. `env --split 'git status'`와 `env --s='git status'`는 `['git', 'status']`. `sudo A=1 -u someone git status`는 `['git', 'status']`이고 `assigns`에 `A: '1'`. `sudo -u someone A-B=1 git status`는 `['git', 'status']`이고 `assigns`에 `'A-B': '1'`. `sudo /x=1 git status`는 `['/x=1', 'git', 'status']`(`/`로 시작하면 명령이다). `sudo -u someone -- A-B=1 git status`는 `['A-B=1', 'git', 'status']`(`--` 바로 뒤는 명령이다). `doas A-B=1 git status`는 `['A-B=1', 'git', 'status']`(`doas`는 할당을 받지 않는다).
+- **`skipWrapperOptions`**(표를 읽는 함수만 따로): 위 "읽는 함수"의 항목마다 한 사례씩(`--`, 값이 붙은 긴 옵션, 값을 띄어 쓴 긴 옵션, 모르는 긴 옵션, 숫자 옵션, 묶은 짧은 옵션의 가운데·끝의 값 글자, 모르는 글자, `-` 하나, 자리 인자, 값이 없는 끝). 표에 든 래퍼 이름마다 `flags`와 `values`에 같은 글자가 없고 `longFlags`와 `longValues`에 같은 이름이 없다. `assigns`가 참인 래퍼는 `sudo`뿐이다.
 - **`splitEnvString`**: 규칙마다 한 사례씩. 공백·탭·줄바꿈에서 나눔, 작은따옴표, 큰따옴표, 빈 따옴표, 붙여 쓴 따옴표(`a"b c"d`는 `ab cd`), 제어 문자 이스케이프 다섯(`\f`·`\n`·`\r`·`\t`·`\v`. 따옴표 밖과 큰따옴표 안에서 각각), 글자 이스케이프 다섯(`\#`·`\$`·`\"`·`\'`·`\\`), 따옴표 밖과 큰따옴표 안의 `\_`, `\c`(그때까지의 낱말이 남는다), 정해지지 않은 이스케이프(`\q`는 `q`), 작은따옴표 안의 `\'`·`\\`와 그 밖의 백슬래시(남는다), 낱말 첫 글자의 `#`, 낱말 가운데의 `#`, 닫히지 않은 따옴표, `${이름}`, 빈 문자열, 문자열 끝의 백슬래시 하나(글자로 남는다).
 - **검사 순서 규칙**(R4): 다음 쌍의 판정이 서로 같다(앞의 것은 옵션 없는 래퍼, 뒤의 것은 값을 받는 옵션이 있는 래퍼).
   - `node scripts/harness.ts check; nice git push origin x`와 `node scripts/harness.ts check; nice -n 5 git push origin x`, `…; sudo -u someone git push origin x`, `…; timeout -s KILL 5 git push origin x`: 모두 R4.
@@ -163,7 +181,10 @@
   - `-S`를 아는 머신에서는 `-S` 사례를 건너뛰지 않는다: `tool`이 실행되지 않으면 실패다. macOS의 `env`, GNU coreutils 8.30 이상, uutils coreutils(CI의 Linux)는 `-S`를 알고 옵션 오류를 내지 않으므로, 그 머신에서는 확인이나 사례의 실행이 실패하면 건너뛰지 않고 테스트가 실패한다.
   - 닫는 꼴·유지하는 꼴의 틀에 `C`로 `tool a b`를 넣어 돌린다. `tool`이 인자 `a b`로(`xargs`는 `a b`로 시작하는 인자로) 실행된 틀에서는 분석기(`parseShell`)가 낸 명령 가운데 `[tool, 'a', 'b']`가 있는지 본다. 이 틀들에는 모르는 옵션이 없어 후보가 없으므로, 낸 명령은 모두 어느 조각의 주 해석이다. 실행되지 않은 틀(래퍼가 그 옵션을 모른다 등)은 비교하지 않는다.
   - 인자의 경계: `env -S 'tool' 'a b'`, `env -S "tool a" '' b`, `env -S 'tool "a b"' c`, `env -S 'tool a; b'`, `env -S 'tool a # b' c`, `env -S '-i tool a'`, `nice -n 5 tool 'a b' ''`, 이스케이프가 든 `env -S 'tool "a\tb"'`, `env -S 'tool a\tb'`, `env -S "tool 'a\tb'"`, `env -S 'tool "a\nb" c\_d "e\_f"'`, `env -S 'tool \#a "b\"c" \$d'`, `env -S 'tool a\cb c'`, 네 번 나누는 `env -S -uA -S -uB -S -uC -S 'tool a'`(같은 플래그를 되풀이하지 않는다. `-S`의 문자열은 차례로 `-uA`, `-uB`, `-uC`, `tool a`다)를 돌려, `tool`이 실제로 받은 인자 배열과 `parseShell`의 첫 명령(`args ?? argv`)이 통째로 같은지 본다. `-S`를 아는 머신에서는 사례마다 `tool`이 실행돼야 한다(실행되지 않으면 실패다. `-i`가 든 사례도 `tool`의 절대 경로와 스크립트 안의 결과 파일 경로 덕분에 실행된다). `tool`은 인자를 NUL로 구분해 적으므로 탭·줄바꿈이 든 인자도 그대로 견준다. 다섯 번 나누는 `env -S -uA -S -uB -S -uC -S -uD -S 'tool a'`는 `-S`를 아는 머신에서 `tool`이 인자 `a`로 실행됐음을 단언하고(`[tool, 'a']`), 훅이 그 호출을 R4로 막는지 본다(읽지 못한 명령이 통과하지 않는다는 것을 실제 실행과 함께 본다).
-- **입력 길이에 비례하는가**: 입력의 꼴 여섯에 대해 본다. (가) `nice` 뒤에 모르는 옵션 n개와 낱말 n개 (나) `sudo -u a`를 n번 겹친 것 (다) `nice --unknown 5`를 n번 겹친 것(모르는 옵션이 붙은 래퍼를 겹친 입력) (라) `env` 뒤에 `-S -i`를 n번 쓴 것 (마) `timeout -s KILL 5`를 n번 겹친 것 (바) `-S`를 n번 붙여 쓴 낱말 하나(`env -S-S-S…x`).
+  - 할당(위 사례와 같이 통째로 견주고, `-S`가 든 사례는 `-S`를 아는 머신에서 실행되지 않으면 실패다): `env BUILD-MODE=local tool a`, `env -S 'BUILD-MODE=local tool a'`.
+  - 구현마다 다를 수 있는 꼴: `env -- tool a`, `env -i -- A-B=1 tool a`, `env -- -x=1 tool a`, `env =x tool a`는 `tool`이 실행된 머신에서만 받은 인자 배열과 `parseShell`의 첫 명령을 통째로 견준다. 실행되지 않으면 견주지 않고 그 사례와 종료 코드를 `t.diagnostic`으로 낸다(이 Mac에서는 앞의 셋이 실행되고 `=x`는 오류로 끝난다).
+  - 실행되지 않는 꼴: `env -- -S 'tool a'`에서 `tool`이 실행됐는지와 `parseShell`이 낸 명령 가운데 이름이 `tool`인 것이 있는지가 같아야 한다. 이 Mac에서는 둘 다 아니다(`-S`라는 이름의 명령을 찾다가 끝난다). `--` 뒤의 `-S`를 나눠 실행하는 구현이 있다면 테스트가 실패해 알린다.
+- **입력 길이에 비례하는가**: 입력의 꼴 일곱에 대해 본다. (가) `nice` 뒤에 모르는 옵션 n개와 낱말 n개 (나) `sudo -u a`를 n번 겹친 것 (다) `nice --unknown 5`를 n번 겹친 것(모르는 옵션이 붙은 래퍼를 겹친 입력) (라) `env` 뒤에 `-S -i`를 n번 쓴 것 (마) `timeout -s KILL 5`를 n번 겹친 것 (바) `-S`를 n번 붙여 쓴 낱말 하나(`env -S-S-S…x`) (사) `sudo` 뒤에 `A=1 -u a`를 n번 쓴 것(할당 뒤에 옵션 읽기를 이어 가는 입력).
   - 읽은 낱말 수(실행 환경과 무관한 기준): n이 2,000·20,000·80,000일 때, `parseShell` 한 번과 `parseSequence` 한 번이 각각 `parseWork.words`에 더한 값이 입력의 낱말 수의 50배를 넘지 않는다. 배수는 n과 무관한 상수다(주 해석 하나와 후보 8개, 각각 `-S`로 많아야 4번 더 읽는다: 45배 이하). 다시 읽는 횟수가 입력 길이에 따라 늘면(겹친 래퍼마다 후보를 낸다, 후보에서 다시 후보를 낸다) 이 단언이 실패한다.
   - 시간: n이 20,000일 때 판정(`evaluate`)이 5초 안에 끝난다. n을 80,000으로 늘린 판정 시간은 20,000일 때의 8배와 1초 가운데 큰 값을 넘지 않는다(크기마다 세 번 재어 가장 짧은 값으로 견준다. 선형이면 4배, 제곱이면 16배다. 1초 아래에서는 재는 오차가 비율을 흔들므로 견주지 않는다). 별도 프로세스로 돌려 시간 제한을 건다(`command-position.test.ts`의 방식).
 
