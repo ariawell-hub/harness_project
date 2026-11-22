@@ -45,6 +45,8 @@ const TABLE_HEAD = [
   '되돌리는 방법',
   '확인 상태',
 ];
+/** ADR(docs/decisions)에서 본 기준선 문서(docs/harness/actions-cost.md)의 주소 */
+const BASELINE_LINK = /^\.\.\/harness\/actions-cost\.md(#[^#]*)?$/;
 const ID_RE = /^[A-Z]\d+$/;
 /** 자리만 채운 글(강조 표시·공백·마침표를 떼고 견준다) */
 const FILLERS = new Set(['', '-', '—', '?', 'tbd', '미정', '없음']);
@@ -173,15 +175,21 @@ function checkBackground(
   const body = struct.slice(r.from, r.to);
   const n = dense(body);
   if (n < 100) problems.push(`배경: 본문이 공백을 빼고 100자보다 짧다(${n}자)`);
-  // 링크의 주소는 struct에서 빠져 있다. 코드 구간 밖의 링크를 raw에서 찾는다
-  const targets: string[] = [];
+  // 링크의 주소는 struct에서 빠져 있다. 코드 구간 밖의 링크를 raw에서 찾는다.
+  // 주소는 ADR 폴더(docs/decisions)에서 본 기준선 문서 그대로여야 한다(뒤에 #절 이름만 받는다).
+  // 파일 이름만 같은 다른 주소나 같은 문서를 다르게 적은 주소, 글이 없는 링크는 세지 않는다
+  let linked = false;
   for (let i = r.from; i < r.to; i++) {
     if (fenced[i] || struct[i] === '') continue;
     for (const p of partsOf(raw[i]) ?? [])
-      if (!p.code) for (const m of p.s.matchAll(/\]\(([^()\s"'<>|`]*)\)/g)) targets.push(m[1]);
+      if (!p.code)
+        for (const m of p.s.matchAll(/\[([^[\]]*)\]\(([^()\s"'<>|`]*)\)/g))
+          if (/[^\s*_]/.test(m[1]) && BASELINE_LINK.test(m[2])) linked = true;
   }
-  if (!targets.some((t) => /(^|\/)actions-cost\.md(#.*)?$/.test(t)))
-    problems.push('배경: 기준선 문서(actions-cost.md)로 가는 링크가 없다');
+  if (!linked)
+    problems.push(
+      '배경: 기준선 문서로 가는 링크가 없다(주소는 ../harness/actions-cost.md 그대로 적는다)',
+    );
   if (!new RegExp(`(?<![\\d.,])${BUDGET.minutesPerPr}분`).test(body.join('\n')))
     problems.push(`배경: 예산("${BUDGET.minutesPerPr}분")이 없다`);
 }
