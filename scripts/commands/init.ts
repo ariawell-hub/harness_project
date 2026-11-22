@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -96,6 +97,29 @@ export function resolvesInside(realRoot: string, p: string): boolean {
   return full === realRoot || full.startsWith(realRoot + path.sep);
 }
 
+/**
+ * 경로가 가리키는 파일의 정체. 있는 파일은 장치와 아이노드 번호라, 이름이 달라도 같은 파일이면 같다
+ * (심볼릭 링크, 하드 링크, 대소문자를 가리지 않는 파일 시스템). 아직 없는 파일은 있는 가장 가까운
+ * 상위 폴더의 정체에 나머지 경로를 붙인다
+ */
+export function fileKey(p: string): string {
+  let cur = path.resolve(p);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      const st = statSync(cur, { bigint: true });
+      return [`${st.dev}:${st.ino}`, ...rest].join('/');
+    } catch {
+      const up = path.dirname(cur);
+      if (up === cur) return [cur, ...rest].join('/');
+      rest.unshift(path.basename(cur));
+      cur = up;
+    }
+  }
+}
+
+const PLACEHOLDER = 'harness:placeholder';
+
 export interface InitOptions {
   owner?: string;
   bot?: string;
@@ -153,30 +177,36 @@ export function init(root: string, profile: string, opts: InitOptions): number {
   const dry = opts.dryRun === true;
   const name = `${p.name}@${p.version}`;
   const changed = changedKeys(before, cfg);
-  // 템플릿마다 할 일을 프로파일의 순서대로 먼저 정한다: 이미 있으면 건너뛰고, 자리 표시 파일이면 바꾼다.
-  // 앞의 템플릿이 같은 자리에 복사될 것이면 그 결과(그 원본의 글)가 이미 있는 것으로 본다.
-  // 미리보기와 실제 적용이 이 목록 하나를 쓴다
-  const planned = new Map<string, string>();
-  const jobs: { to: string; src: string; dst: string; copy: boolean; overwrite: boolean }[] = [];
+  // 템플릿마다 할 일을 미리 정한다(미리보기와 쓰기 전 검사에 쓴다). 파일을 쓰지 않고, 프로파일의 순서대로
+  // 차례로 처리했을 때의 결과를 따라간다: after는 이번 실행이 쓸 파일의 정체 → 쓴 뒤의 내용이다.
+  // 뒤의 템플릿은 앞의 것이 쓴 파일을 이미 있는 것으로 보고, 그 내용으로 자리 표시 여부와 복사할 글을 정한다.
+  // 파일은 경로의 글자가 아니라 정체로 가린다(같은 파일을 가리키는 다른 경로가 있다)
+  const cfgText = JSON.stringify(cfg, null, 2) + '\n';
+  const after = new Map<string, Buffer>();
+  if (changed.length) after.set(fileKey(cfgPath), Buffer.from(cfgText));
+  const contentOf = (f: string) => after.get(fileKey(f)) ?? readFileSync(f);
+  const present = (f: string) => after.has(fileKey(f)) || existsSync(f);
+  const jobs: { to: string; copy: boolean; overwrite: string | null }[] = [];
+  const missing: string[] = [];
   for (const t of p.templates ?? []) {
     const src = path.join(root, 'profiles', profile, t.from);
     const dst = path.join(root, t.to);
-    const earlier = planned.get(dst);
-    const onDisk = existsSync(dst);
-    const exists = earlier !== undefined || onDisk;
-    const placeholder =
-      exists &&
-      t.replacePlaceholder === true &&
-      readFileSync(earlier ?? dst, 'utf8').includes('harness:placeholder');
-    const copy = !exists || placeholder;
-    if (copy) planned.set(dst, src);
-    jobs.push({ to: t.to, src, dst, copy, overwrite: copy && onDisk });
+    const copy =
+      !present(dst) || (t.replacePlaceholder === true && contentOf(dst).includes(PLACEHOLDER));
+    if (copy && !present(src)) {
+      missing.push(src);
+      continue;
+    }
+    // 디스크에 있던 파일을 덮어쓰는 것만 하드 링크 검사의 대상이다(이번 실행이 만든 파일은 새 파일이다)
+    jobs.push({ to: t.to, copy, overwrite: copy && existsSync(dst) ? dst : null });
+    if (copy) after.set(fileKey(dst), contentOf(src));
   }
+  if (missing.length) return stop('템플릿 원본이 없다', missing);
   // 덮어쓸 파일이 하드 링크로 다른 이름과 이어져 있으면 쓰지 않는다. 그 자리에 쓰면 다른 이름으로
   // 보이는 파일(다른 리포의 설정일 수 있다)도 함께 바뀐다. 어디와 이어졌는지는 알 수 없어 모두 거절한다
   const linked = [
     ...(changed.length ? [cfgPath] : []),
-    ...jobs.filter((j) => j.overwrite).map((j) => j.dst),
+    ...jobs.flatMap((j) => (j.overwrite ? [j.overwrite] : [])),
   ].filter((f) => lstatSync(realpathSync(f)).nlink > 1);
   if (linked.length) return stop('다른 이름과 이어진 파일(하드 링크)에는 쓰지 않는다', linked);
   if (dry) {
@@ -189,25 +219,35 @@ export function init(root: string, profile: string, opts: InitOptions): number {
   } else if (!changed.length) {
     log(`프로파일 ${name}은 이미 적용돼 있다: ${CONFIG_FILE}을 다시 쓰지 않았다.`);
   } else {
-    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+    writeFileSync(cfgPath, cfgText);
     log(`프로파일 ${name}을 ${CONFIG_FILE}에 적용했다. 바뀐 항목: ${changed.join(', ')}`);
     log(
       `- 파일 전체를 다시 써 서식이 달라졌을 수 있다. 의존성을 설치한 뒤 node scripts/harness.ts fmt로 맞춘다.`,
     );
   }
 
-  for (const j of jobs) {
-    if (!j.copy) {
-      log(`- 건너뜀(이미 있음): ${j.to}`);
-      continue;
+  if (dry) {
+    for (const j of jobs)
+      log(j.copy ? `- 템플릿 복사 예정: ${j.to}` : `- 건너뜀(이미 있음): ${j.to}`);
+  } else {
+    // 실제 적용은 전처럼 차례로, 그 순간의 파일을 보고 정한다. 위에서 미리 정한 것과 같은 결정이 나온다.
+    // 미리 정할 때 가리지 못하는 것은 아직 없는 두 이름이 같은 파일이 되는 경우뿐이다(대소문자를 가리지 않는
+    // 파일 시스템의 Guide.md와 guide.md). 그때도 여기서는 앞의 것이 만든 파일을 보고 건너뛴다.
+    // 그 파일은 이번 실행이 만든 새 파일이라 하드 링크 검사의 대상이 아니다
+    for (const t of p.templates ?? []) {
+      const src = path.join(root, 'profiles', profile, t.from);
+      const dst = path.join(root, t.to);
+      if (existsSync(dst)) {
+        const placeholder = t.replacePlaceholder && readFileSync(dst, 'utf8').includes(PLACEHOLDER);
+        if (!placeholder) {
+          log(`- 건너뜀(이미 있음): ${t.to}`);
+          continue;
+        }
+      }
+      mkdirSync(path.dirname(dst), { recursive: true });
+      copyFileSync(src, dst);
+      log(`- 템플릿 복사: ${t.to}`);
     }
-    if (dry) {
-      log(`- 템플릿 복사 예정: ${j.to}`);
-      continue;
-    }
-    mkdirSync(path.dirname(j.dst), { recursive: true });
-    copyFileSync(j.src, j.dst);
-    log(`- 템플릿 복사: ${j.to}`);
   }
 
   const checks = (cfg.ci as { requiredChecks?: RequiredCheck[] } | undefined)?.requiredChecks ?? [];
