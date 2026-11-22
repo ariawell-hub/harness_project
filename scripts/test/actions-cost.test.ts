@@ -16,6 +16,7 @@ import {
   renderCost,
   runnerRate,
   toSaved,
+  type CostRow,
   type JobRecord,
   type KnownNames,
   type SavedJob,
@@ -152,6 +153,139 @@ test('단가: 모르는 러너와 self-hosted는 금액에 들지 않고 분이 
   assert.equal(r.unknownMinutes, 3);
   assert.equal(r.selfHostedMinutes, 4);
   assert.equal(r.ranJobs, 3);
+});
+
+test('단가: arm64 2코어와 1코어 러너의 단가를 안다', () => {
+  assert.deepEqual(runnerRate(['ubuntu-24.04-arm']), { kind: 'priced', usdPerMinute: 0.005 });
+  assert.deepEqual(runnerRate(['ubuntu-slim']), { kind: 'priced', usdPerMinute: 0.002 });
+  // 확인한 라벨 하나뿐일 때만이다. 쓰기로 하지 않은 arm64 라벨은 단가표에 없다
+  assert.equal(runnerRate(['ubuntu-24.04-arm', 'gpu']).kind, 'unknown');
+  assert.equal(runnerRate(['ubuntu-slim', 'gpu']).kind, 'unknown');
+  assert.equal(runnerRate(['ubuntu-22.04-arm']).kind, 'unknown');
+  // 지금까지 알던 라벨은 그대로다
+  for (const l of ['ubuntu-latest', 'ubuntu-24.04', 'ubuntu-22.04'])
+    assert.deepEqual(runnerRate([l]), { kind: 'priced', usdPerMinute: 0.006 }, l);
+});
+
+/** 러너가 섞인 입력: x64 5분, arm64 4분, 1코어 5분, 모르는 러너 5분, self-hosted 6분. 모두 PR 7에 이어진다 */
+function runnerMix(): JobRecord[] {
+  return [
+    job({ seconds: 300 }),
+    job({ seconds: 240, labels: ['ubuntu-24.04-arm'] }),
+    job({ seconds: 300, labels: ['ubuntu-slim'] }),
+    job({ seconds: 300, labels: ['macos-latest'] }),
+    job({ seconds: 360, labels: ['self-hosted'] }),
+  ];
+}
+/** 줄의 금액을 밀리달러 정수로 되돌려 더한다(달러로 나눈 값끼리 더하면 부동소수점 오차가 난다) */
+const milliOf = (list: CostRow[]) => list.reduce((n, x) => n + Math.round(x.usd * 1000), 0);
+const sumOf = (list: CostRow[], key: 'jobs' | 'minutes') => list.reduce((n, x) => n + x[key], 0);
+
+test('단가: 러너가 섞이면 job마다 그 러너의 단가를 곱해 더한다', () => {
+  const r = cost(runnerMix());
+  assert.equal(r.days, 2);
+  assert.equal(r.ranJobs, 5);
+  assert.equal(r.minutes, 14);
+  // 5분 × 6 + 4분 × 5 + 5분 × 2 = 60밀리달러
+  assert.equal(r.usdMilli, 60);
+  assert.equal(r.usd, 0.06);
+  assert.equal(r.unknownMinutes, 5);
+  assert.equal(r.selfHostedMinutes, 6);
+  assert.equal(r.prs, 1);
+  assert.equal(r.perPrUsd, 0.06);
+  // 60밀리달러 ÷ 2일 × 30일
+  assert.equal(r.monthlyUsd, 0.9);
+});
+
+test('러너별: 러너마다 돈 job, 청구 분, 금액을 낸다', () => {
+  const r = cost(runnerMix());
+  // 청구 분 내림차순, 같으면 이름 오름차순. 단가를 모르는 러너와 self-hosted는 청구 분과 금액이 0이다
+  assert.deepEqual(r.byRunner, [
+    { name: 'ubuntu-latest', jobs: 1, minutes: 5, usd: 0.03 },
+    { name: 'ubuntu-slim', jobs: 1, minutes: 5, usd: 0.01 },
+    { name: 'ubuntu-24.04-arm', jobs: 1, minutes: 4, usd: 0.02 },
+    { name: OTHER, jobs: 1, minutes: 0, usd: 0 },
+    { name: 'self-hosted', jobs: 1, minutes: 0, usd: 0 },
+  ]);
+  assert.equal(sumOf(r.byRunner, 'jobs'), r.ranJobs);
+  assert.equal(sumOf(r.byRunner, 'minutes'), r.minutes);
+  assert.equal(milliOf(r.byRunner), r.usdMilli);
+  // 돌지 않은 job은 들지 않는다
+  const idle = cost([...runnerMix(), job({ conclusion: 'skipped', labels: ['ubuntu-slim'] })]);
+  assert.deepEqual(idle.byRunner, r.byRunner);
+  // 라벨이 여럿이면 단가를 모르는 러너다. self-hosted가 들어 있으면 self-hosted다
+  const many = cost([
+    job({ seconds: 61, labels: ['ubuntu-slim', 'gpu'] }),
+    job({ seconds: 61, labels: ['ubuntu-22.04-arm'] }),
+    job({ seconds: 61, labels: ['self-hosted', 'ubuntu-slim'] }),
+    job({ seconds: 61, labels: [] }),
+  ]);
+  assert.deepEqual(many.byRunner, [
+    { name: OTHER, jobs: 3, minutes: 0, usd: 0 },
+    { name: 'self-hosted', jobs: 1, minutes: 0, usd: 0 },
+  ]);
+  assert.equal(many.unknownMinutes, 6);
+  assert.equal(many.selfHostedMinutes, 2);
+  // 한 러너만 쓴 기간은 한 줄이고 전체와 같다
+  const one = cost([job({ seconds: 61 }), job({ seconds: 30 })]);
+  assert.deepEqual(one.byRunner, [{ name: 'ubuntu-latest', jobs: 2, minutes: 3, usd: 0.018 }]);
+  assert.deepEqual(cost([]).byRunner, []);
+});
+
+test('러너별: 줄의 금액은 밀리달러 정수로 더해야 전체와 같다', () => {
+  // arm64 20분 $0.10 + 1코어 100분 $0.20. 달러 숫자를 그대로 더하면 0.30000000000000004다
+  const r = cost([
+    job({ seconds: 1200, labels: ['ubuntu-24.04-arm'] }),
+    job({ seconds: 6000, labels: ['ubuntu-slim'] }),
+  ]);
+  assert.equal(r.usdMilli, 300);
+  assert.deepEqual(r.byRunner, [
+    { name: 'ubuntu-slim', jobs: 1, minutes: 100, usd: 0.2 },
+    { name: 'ubuntu-24.04-arm', jobs: 1, minutes: 20, usd: 0.1 },
+  ]);
+  assert.equal(milliOf(r.byRunner), 300);
+  assert.equal(sumOf(r.byRunner, 'minutes'), r.minutes);
+});
+
+/** 렌더에서 `**title**`로 시작하는 줄 다음부터 다음 `**`로 시작하는 줄 앞까지의 줄 */
+function sectionOf(text: string, title: string): string[] {
+  const lines = text.split('\n');
+  const from = lines.findIndex((l) => l.startsWith(`**${title}**`));
+  assert.ok(from >= 0, `"${title}" 구간이 없다`);
+  const rest = lines.slice(from + 1);
+  const to = rest.findIndex((l) => l.startsWith('**'));
+  return to < 0 ? rest : rest.slice(0, to);
+}
+const cellsOf = (line: string) =>
+  line
+    .slice(1, -1)
+    .split('|')
+    .map((c) => c.trim());
+
+test('렌더: 러너별 구간에 러너마다 한 행이 있고 워크플로별 표보다 앞이다', () => {
+  const text = render(runnerMix());
+  const tableLines = sectionOf(text, '러너별').filter((l) => l.startsWith('|'));
+  assert.deepEqual(cellsOf(tableLines[0]), ['러너', '돈 job', '청구 분', '금액', '비율']);
+  // 머리 줄과 구분 줄을 뺀 자료 행이 다섯이다: 러너, 돈 job, 청구 분, 표시 금액
+  assert.deepEqual(
+    tableLines.slice(2).map((l) => cellsOf(l).slice(0, 4)),
+    [
+      ['ubuntu-latest', '1', '5', '$0.03'],
+      ['ubuntu-slim', '1', '5', '$0.01'],
+      ['ubuntu-24.04-arm', '1', '4', '$0.02'],
+      [OTHER, '1', '0', '$0.00'],
+      ['self-hosted', '1', '0', '$0.00'],
+    ],
+  );
+  const lines = text.split('\n');
+  const at = (title: string) => lines.findIndex((l) => l.startsWith(`**${title}**`));
+  assert.ok(at('러너별') >= 0 && at('러너별') < at('워크플로별'));
+  // 다른 구간에는 러너의 행이 없다
+  assert.equal(lines.filter((l) => l.startsWith('| ubuntu-slim')).length, 1);
+  // 단가 안내 문장 한 줄에 세 단가가 모두 있다
+  const notes = lines.filter((l) => l.includes('$0.006'));
+  assert.equal(notes.length, 1);
+  assert.ok(notes[0].includes('$0.005') && notes[0].includes('$0.002'), notes[0]);
 });
 
 test('올림으로 붙은 분, 1분 미만 job, 30일 환산', () => {
@@ -506,8 +640,12 @@ test('보존 기록: 바꾼 라벨의 단가 분류가 바꾸기 전과 같다',
   for (const labels of [
     ['ubuntu-latest'],
     ['ubuntu-22.04'],
+    ['ubuntu-24.04-arm'],
+    ['ubuntu-slim'],
+    ['ubuntu-22.04-arm'],
     ['macos-latest'],
     ['ubuntu-latest', 'gpu'],
+    ['ubuntu-slim', 'gpu'],
     ['self-hosted', 'linux', 'x64'],
     [],
   ]) {
@@ -515,9 +653,56 @@ test('보존 기록: 바꾼 라벨의 단가 분류가 바꾸기 전과 같다',
     assert.deepEqual(runnerRate(s.labels), runnerRate(labels), labels.join(','));
     for (const l of s.labels)
       assert.ok(
-        ['ubuntu-latest', 'ubuntu-24.04', 'ubuntu-22.04', 'self-hosted', OTHER].includes(l),
+        [
+          'ubuntu-latest',
+          'ubuntu-24.04',
+          'ubuntu-22.04',
+          'ubuntu-24.04-arm',
+          'ubuntu-slim',
+          'self-hosted',
+          OTHER,
+        ].includes(l),
       );
   }
+});
+
+test('보존 기록: arm64·1코어 라벨이 그대로 남고 다시 계산한 값이 같다', () => {
+  const jobs = [...runnerMix(), job({ seconds: 61, labels: ['ubuntu-22.04-arm'] })];
+  const saved = toSaved(jobs, KNOWN);
+  assert.deepEqual(
+    saved.map((s) => s.labels),
+    [
+      ['ubuntu-latest'],
+      ['ubuntu-24.04-arm'],
+      ['ubuntu-slim'],
+      [OTHER],
+      ['self-hosted'],
+      // 단가표에 없는 라벨은 남지 않는다
+      [OTHER],
+    ],
+  );
+  const text = formatSaved(saved, PERIOD);
+  assert.ok(text.includes('["ubuntu-24.04-arm"]') && text.includes('["ubuntu-slim"]'));
+  assert.ok(!text.includes('ubuntu-22.04-arm') && !text.includes('macos-latest'));
+  // 파일을 거친 계산이 GitHub에서 읽은 입력의 계산과 같다
+  const back = fromSaved(parseSaved(text).jobs);
+  assert.deepEqual(cost(back), cost(jobs));
+  assert.equal(render(back), render(jobs));
+  assert.equal(cost(back).usdMilli, 60);
+  assert.equal(cost(back).unknownMinutes, 7);
+  // 파일의 줄에 직접 적은 라벨: 단가표의 라벨은 받고 밖의 라벨은 거부한다
+  const HEAD =
+    '{"version":1,"since":"2026-11-17","until":"2026-11-18","count":1,"columns":["run","attempt","workflow","job","day","seconds","labels","pr","head","offPr"]}';
+  const row = (label: string) =>
+    `${HEAD}\n[1,1,"check","check","2026-11-17",61,["${label}"],5,1,false]\n`;
+  for (const label of ['ubuntu-24.04-arm', 'ubuntu-slim']) {
+    const [s] = parseSaved(row(label)).jobs;
+    assert.deepEqual(s.labels, [label]);
+  }
+  assert.throws(
+    () => parseSaved(row('ubuntu-22.04-arm')),
+    (e: unknown) => e instanceof SourceError && /라벨/.test(e.message),
+  );
 });
 
 test('보존 기록: 형식은 머리 줄과 job마다 한 줄이고 입력 순서와 무관하다', () => {
