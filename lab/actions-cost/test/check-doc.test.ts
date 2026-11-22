@@ -842,7 +842,7 @@ test('checkDoc 형식: 줄 머리를 네 칸 이상이나 탭으로 들여 쓰�
   const date = '- 잰 날짜: 2026-11-22';
   formatOnly(check(swap(doc, date, `${date}\n\n    들여 쓴 코드`)), /형식.*들여/);
   fails(check(swap(doc, date, `    ${date}`)), /형식.*들여/);
-  fails(check(swap(doc, date, `\t${date}`)), /형식.*들여/);
+  fails(check(swap(doc, date, `\t${date}`)), /형식.*공백/);
   const row = recordRow(BASE, BASELINE_FILE, '기준선', '예산 안');
   fails(check(swap(doc, row, `    ${row}`)), /형식.*들여/);
 });
@@ -891,6 +891,71 @@ test('checkDoc: 기록 표의 앞뒤에는 빈 줄을 둔다(붙여 쓴 줄은 �
 });
 
 test('checkDoc: 파일 머리의 BOM은 떼고 읽는다. 줄 머리의 다른 공백 글자는 형식 오류다', () => {
-  assert.deepEqual(check(`﻿${goodDoc()}`), []);
-  formatOnly(check(swap(goodDoc(), WORD, `${WORD}\n\n　전각 공백으로 들여 쓴 줄`)), /형식.*들여/);
+  assert.deepEqual(check(`\uFEFF${goodDoc()}`), []);
+  formatOnly(
+    check(swap(goodDoc(), WORD, `${WORD}\n\n\u3000전각 공백으로 들여 쓴 줄`)),
+    /형식.*공백/,
+  );
+});
+
+// ---- 코드 판정 4라운드(F8, F9)와 같은 종류: 화면에는 보이는데 검사가 건너뛰는 줄 ----
+
+const LOOSE_ROW =
+  '2026-11-21~2026-11-22 | 캐시 | 1 | 1.0 | $0.001 | 1.0 | $1.00 | 없음 | 예산 안. 좋다';
+
+test('checkDoc 형식: 공백은 보통 공백만 쓴다(다른 공백 글자만 있는 줄은 빈 줄이 아니다)', () => {
+  const doc = goodDoc();
+  const row = recordRow(BASE, BASELINE_FILE, '기준선', '예산 안');
+  // F8: 줄바꿈 없는 공백만 있는 줄은 화면에서 표를 끝내지 않는다. 그 뒤의 행이 같은 표에 보인다
+  fails(check(swap(doc, row, `${row}\n\u00A0\n${LOOSE_ROW}`)), /형식.*공백/);
+  formatOnly(check(swap(doc, row, `${row}\n\u00A0`)), /형식.*공백/);
+  formatOnly(check(swap(doc, row, `${row}\n\u3000\u2003`)), /형식.*공백/);
+  // 줄 안의 공백 글자, 낱개 CR(화면에서는 줄이 갈린다)
+  formatOnly(check(swap(doc, WORD, `포함\u00A0사용량은 ${WORD}`)), /형식.*공백/);
+  formatOnly(check(swap(doc, WORD, `${WORD}\r`)), /형식.*공백/);
+  formatOnly(check(swap(doc, WORD, `포함\t사용량은 ${WORD}`)), /형식.*공백/);
+  // 공백과 탭만 있는 줄은 빈 줄이다
+  assert.deepEqual(check(swap(doc, row, `${row}\n  \t\n표 아래의 설명이다.`)), []);
+});
+
+test('checkDoc 형식: 링크의 주소에 |를 쓰지 않는다(표의 칸은 링크보다 먼저 갈린다)', () => {
+  const doc = goodDoc();
+  // F9: 주소를 뺀 뒤에 칸을 세면 아홉 칸이지만 화면에서는 열 칸으로 갈려 값이 어긋난다
+  fails(check(swap(doc, '예산 안. 설명 한 줄', '예산 안. [설명](x|y) 한 줄')), /형식.*링크/);
+  formatOnly(check(swap(doc, WORD, `[무료 분](x|y) ${WORD}`)), /형식.*링크/);
+});
+
+test('checkDoc: 기록 절에서 |는 표의 줄에만 쓴다(|로 시작하지 않는 줄도 화면에서 표가 된다)', () => {
+  const doc = goodDoc();
+  const row = recordRow(BASE, BASELINE_FILE, '기준선', '예산 안');
+  // 빈 줄로 띄운 둘째 표: 값을 견주지 않은 표가 화면에 보인다
+  const second = '기간 | 청구 분\n--- | ---\n2026-11-21~2026-11-22 | 1';
+  fails(check(swap(doc, row, `${row}\n\n${second}`)), /기록.*표 밖/);
+  fails(check(swap(doc, row, `${row}\n\n${LOOSE_ROW}`)), /기록.*표 밖/);
+});
+
+test('checkDoc: 예산 줄과 판단 절차의 항목은 한 곳에만 적는다(모양만 다른 둘째 줄이 화면에 보이면 안 된다)', () => {
+  const doc = goodDoc();
+  const budget = '- PR 하나당 예산: 30분($0.18, 2코어 Linux 기준)';
+  fails(
+    check(swap(doc, budget, `${budget}\n - PR 하나당 예산: 300분($1.80)`)),
+    /예산.*PR 하나당 예산.*더 있다/,
+  );
+  fails(
+    check(swap(doc, budget, `${budget}\n\n* PR 하나당 예산: 300분($1.80)`)),
+    /예산.*PR 하나당 예산.*더 있다/,
+  );
+  fails(check(swap(doc, budget, `${budget}\n  - 상태: 잠정`)), /예산.*상태.*더 있다/);
+  const item = doc.split('\n').find((l) => l.startsWith(HEADS[5]));
+  assert.ok(item);
+  fails(
+    check(
+      swap(
+        doc,
+        item,
+        `${item}\n - 효과가 없을 때: 그대로 둔다. 스무 자를 넘게 적은 다른 항목이다.`,
+      ),
+    ),
+    /판단 절차.*효과가 없을 때.*더 있다/,
+  );
 });
