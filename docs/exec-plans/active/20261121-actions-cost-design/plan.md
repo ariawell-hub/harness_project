@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -274,6 +274,8 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - 글에 글자나 숫자가 없는 기준선 링크는 "링크가 없다"만이 아니라 `배경 형식(N째 줄): 기준선 링크의 글에 글자나 숫자가 없다`로 이름을 붙여 거부한다(문장 부호·기호뿐인 글, 문자 참조뿐인 글 포함).
   - 실패하는 테스트를 먼저 썼다(커밋 `12a886f`: 63개 가운데 2개 실패 → `095d864`: 63개 통과). 지금까지의 재현 입력 다섯 가지(F1 틀린 주소, F3 글 안의 코드, F5 가로줄, F6 폭 없는 글자만 든 코드, F7 한자만 든 코드)를 실제 ADR의 배경 링크에 다시 돌려 기대대로임을 확인했다.
   - AC 12줄과 `check` 통과.
+
+- 2026-11-22T14:36:47+09:00 step2 재작업: 코드 판정 6라운드 F8 대응(제작자: 지적대로 한 번 더 고친다)
 
 ## 의사결정 로그
 
