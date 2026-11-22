@@ -40,7 +40,8 @@ import {
   type OpenQuestion,
   type PlanRef,
 } from '../lib/plan.ts';
-import { cell, type Entry, type Ledger } from '../ci/ledger.ts';
+import type { Entry, Ledger } from '../ci/ledger.ts';
+import { literalBlock } from '../lib/literal.ts';
 import { log, nowIso, warn } from '../lib/util.ts';
 import { runCheck } from '../commands/check.ts';
 import {
@@ -103,6 +104,7 @@ import {
   parseReviewLog,
   readReviewState,
   rebuttalComment,
+  rebuttalReportLine,
   revertCommits,
   reviewerJudgedResponse,
   reviewerKey,
@@ -321,6 +323,35 @@ function writeQuestionState(info: RepoInfo, s: QuestionState): void {
   writeFileSync(questionFile(info), JSON.stringify(s, null, 2) + '\n');
 }
 
+/**
+ * 질문 댓글의 본문(9.1절). runner가 쓰는 부분(제작자 멘션, 첫 문장, 두 항목) 뒤에 질문 블록들의 글을 코드 블록 하나로 붙인다.
+ * 질문의 글은 세션이 쓴 것이다. 코드 블록 안이라 멘션·`#번호`·Markdown으로 읽히지 않고, 글 안의 코드 펜스가
+ * 블록을 닫지 못한다(14.6절). 글은 바꾸지 않는다(제작자가 읽고 답할 원문이다)
+ */
+export function questionComment(o: {
+  /** 제작자 계정. 비면 멘션하지 않는다 */
+  owner: string;
+  stage: 'plan' | 'step';
+  step: number | null;
+  planId: string;
+  planFile: string;
+  branch: string;
+  questions: readonly OpenQuestion[];
+}): string {
+  const mention = o.owner ? `@${o.owner} ` : '';
+  const who = o.stage === 'step' ? `step ${o.step ?? 0} 세션` : '계획 작성 세션';
+  const resume =
+    o.stage === 'step'
+      ? `runner가 답을 넣어 step ${o.step ?? 0}을 이어 간다`
+      : 'runner가 답을 넣어 계획을 다시 작성하고 이어 간다';
+  return `${mention}runner의 ${who}이 질문 ${o.questions.length}건을 남겼다. 답을 받을 때까지 계획 \`${o.planId}\`를 멈춘다.
+
+- 계획: \`${o.planFile}\` (브랜치 \`${o.branch}\`)
+- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. ${resume}.
+
+${literalBlock(o.questions.map((q) => q.text).join('\n\n'))}`;
+}
+
 /** 계획을 멈추고(blocked, push) Issue에 needs-human + 제작자 멘션으로 질문을 올린다(9.1절) */
 async function askQuestions(
   ctx: Ctx,
@@ -331,6 +362,16 @@ async function askQuestions(
   stage: 'plan' | 'step' = 'plan',
 ): Promise<void> {
   const info = repoInfo(l.worktree);
+  // 댓글의 글을 먼저 만든다. 여기서 실패하면 계획을 멈추거나 질문을 올린 것으로 적지 않는다
+  const body = questionComment({
+    owner: ctx.cfg.github.owner,
+    stage,
+    step: l.step,
+    planId: l.id,
+    planFile: ref.file,
+    branch: l.branch,
+    questions: fresh,
+  });
   setPlanStatus(
     l.worktree,
     'blocked',
@@ -343,18 +384,6 @@ async function askQuestions(
     waiting: true,
     stage,
   });
-  const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
-  const who = stage === 'step' ? `step ${l.step ?? 0} 세션` : '계획 작성 세션';
-  const resume =
-    stage === 'step'
-      ? `runner가 답을 넣어 step ${l.step ?? 0}을 이어 간다`
-      : 'runner가 답을 넣어 계획을 다시 작성하고 이어 간다';
-  const body = `${mention}runner의 ${who}이 질문 ${fresh.length}건을 남겼다. 답을 받을 때까지 계획 \`${l.id}\`를 멈춘다.
-
-- 계획: \`${ref.file}\` (브랜치 \`${l.branch}\`)
-- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. ${resume}.
-
-${fresh.map((q) => q.text).join('\n\n')}`;
   try {
     ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
     ctx.gh.comment(l.issue, body);
@@ -1485,14 +1514,11 @@ async function doReview(
   // ---- 교착(9.1절): 같은 지적에 반박 2회, 둘째 반박을 그 검증자가 판정한 뒤에도 열려 있다 ----
   const stuck = deadlocked(state, ledger);
   if (stuck.length) {
-    // 반박의 근거·요지는 세션 출력이다. 댓글에서 멘션·마크다운으로 해석되지 않게 원장 표와 같은 방법으로 바꾼다
+    // 반박의 근거·요지는 세션 출력이다. 댓글에서 멘션·마크다운으로 해석되지 않게 코드 스팬에 넣는다
     const detail = stuck
       .map((id) => {
         const rebuttals = deadlockRebuttals(state, id)
-          .map(
-            (r, n) =>
-              `\n    - 반박 ${n + 1}: 근거 ${cell(r.evidence ?? '') || '—'} · 요지 ${cell(r.summary ?? '') || '—'}`,
-          )
+          .map((r, n) => `\n    - ${rebuttalReportLine(n + 1, r)}`)
           .join('');
         return `\n  - ${findingLine(byId.get(id)!)}${rebuttals}`;
       })

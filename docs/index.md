@@ -30,9 +30,11 @@ review_cycle: on-change
 - [하네스 설계서](harness/design.md) — 요구사항과 설계("왜")
 - [하네스 코드 구조](harness/architecture.md) — 레이어·모듈·상태 위치
 - [하네스 변경 이력](harness/CHANGELOG.md)
+- [Actions 비용: 판단 절차와 기준선](harness/actions-cost.md) — 비공개 리포에서의 Actions 비용을 재는 방법, 제작자가 정한 예산, 기준선(2026-11-17~20), 판단 절차와 기록 표
 - [운영 전환 시험 결과](../lab/ops-transition/README.md) — 테스트 리포(체크리스트 5)와 하네스 리포(체크리스트 6, `results/target-repo.json`)에서 확인한 사례별 기록(`results/`)과 검사 명령
 - [파일럿 착수 준비 실물 확인](../lab/pilot-prep/README.md) — 웹 프로파일의 `test-effect` 설정을 실제 Vitest로, `verify`를 실제 Playwright로 돌린 사례별 결과(`results/`)와 검사 명령
 - [Q10(DB·ORM) 실물 확인](../lab/q10-db/README.md) — PC에 DB 서버 없이 Drizzle과 내장 PostgreSQL(PGlite)로 마이그레이션 생성·적용과 폴더별 격리가 되는지 잰 머신별 결과(`results/`)와 검사 명령
+- [Actions 비용의 보존 기록과 문서 검사](../lab/actions-cost/README.md) — `actions-cost --save`가 남긴 기간별 입력(`.jsonl`)과, 판단 절차 문서의 값을 그 입력과 견주는 검사 명령
 
 ## 데이터 (지시가 아님)
 
