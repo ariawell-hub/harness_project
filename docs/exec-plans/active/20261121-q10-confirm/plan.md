@@ -95,6 +95,9 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-22 계획 검증 10회차: Claude·Codex 모두 승인(지적 없음. F4는 P2로 미뤄 둔 채다). 계획 해시 `49fa50ae8ba1`.
 - 2026-11-22 step0 구현(절차의 (나)): 테스트를 먼저 썼다(`lab/q10-db/test/run.test.ts`). 구현 전에 돌려 실패를 확인했다: `run.ts`가 없어 불러오기에서 실패한다(`ERR_MODULE_NOT_FOUND`. `trial.ts`를 실행하지 않는다). 그 뒤 `run.ts`(`--skip-fmt`만 받는다), `trial-args.ts`(`parseTrialArgs`)를 쓰고 `trial.ts`에서 `--out`을 지웠다. README, 패치(`q10-trial-workflow.patch`. 액션의 SHA와 Node 버전은 지금의 `check.yml`과 같다), CHANGELOG 한 줄. `node --test lab/q10-db/test/run.test.ts lab/q10-db/test/check-results.test.ts` 85건 통과. 구조 테스트(`scripts/test/q10-trial-workflow.test.ts`)는 제작자의 워크플로 커밋 뒤에 올린다. 완료 처리도 그때 한다.
 - 2026-11-22 구현 판정 1회차(head `3ae8632`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F13: README의 파일 표가 포맷 검사에서 실패한다고 했다(검증자는 명령을 실행하지 않았다). 확인했다: 이 작업 트리에서 `node scripts/harness.ts fmt --check`와 `prettier --check lab/q10-db/README.md`가 통과하고, 그 head의 CI `check`(포맷 검사 포함)도 통과했다. 포매터는 표의 칸을 표시 너비로 맞춘다(한글은 두 칸이라 글자 수로는 어긋나 보인다). 파일을 바꾸지 않았다. F13 반박(1회).
+- 2026-11-22 구현 판정 2회차: F13의 반박이 받아들여졌고 두 검증자가 승인했다(열린 지적 없음). Issue #180에 제작자 작업(워크플로 파일 커밋)을 요청했다(기준 커밋 `270d8d7`). 요청 뒤로 이 브랜치에 커밋을 올리지 않고 기다렸다.
+- 2026-11-22 제작자의 워크플로 커밋을 받았다(`cf280e3`, 작성자 제작자 계정, GitHub 웹에서 만든 서명된 커밋. 바뀐 파일은 `.github/workflows/q10-trial.yml` 하나, 42줄). 트리 비교(SECURITY.md의 비교 명령): 기준 커밋 `270d8d7`의 트리에 `lab/q10-db/q10-trial-workflow.patch`를 적용한 트리와 받은 head의 트리가 통째로 같다(둘 다 `163ed6b09826`).
+- 2026-11-22 `origin/main`(`5fdf195`)을 병합했다(기다리는 동안 main이 나아가 CHANGELOG의 같은 자리가 충돌했다: main의 줄 먼저, 이 PR의 줄 뒤). 구조 테스트 `scripts/test/q10-trial-workflow.test.ts`를 더했다(5건 통과. 계획대로 워크플로 커밋 뒤에 올린다. 테스트는 워크플로 파일을 읽으므로 그 파일이 없는 head에서는 실패한다).
 
 ## 의사결정 로그
 
@@ -127,7 +130,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 수용 기준 2: `node --test scripts/test/q10-trial-workflow.test.ts`, 받은 브랜치의 트리가 기준 커밋에 패치를 적용한 트리와 같은지(SECURITY.md의 비교 명령, 진행 로그에 적는다).
 - 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`, 출처 확인 `node lab/q10-db/verify-artifacts.ts`(step1 AC. 출력을 진행 로그와 PR 본문에 옮긴다).
 - 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
-- 결과는 step을 진행하며 적는다.
+- 결과(2026-11-22, step0): AC의 명령 16줄이 모두 통과했다(다섯째 줄은 새 임시 폴더의 복제본에서 절차를 실제로 돌렸다). `node scripts/harness.ts check` 통과. 트리 비교는 진행 로그에 있다.
+- step1의 결과는 step1을 진행하며 적는다.
 
 ## 다음 할 일
 
