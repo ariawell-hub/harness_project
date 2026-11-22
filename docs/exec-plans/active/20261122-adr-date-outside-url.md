@@ -2,7 +2,7 @@
 id: 20261122-adr-date-outside-url
 issue: 210 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -35,6 +35,7 @@ claimed_at: 2026-11-22T20:45:40+09:00
 
 - 2026-11-22 접수: PR #200의 판정에서 Codex가 낸 지적(F2)을 그 PR의 범위 밖으로 반박했고(받아들여졌다. 검증자는 날짜 판정의 동작을 확인했다고 기록했다), 제작자가 대화에서 Issue로 등록하라고 정해(2026-11-22) 봇이 Issue #210을 등록했다. `new-task`로 시작했다.
 - 2026-11-22 테스트를 먼저 더했다(`check-adr.test.ts`에 하나). 고치기 전: 65건 가운데 그 하나가 실패했다(주소 안에 날짜만 든 칸이 통과했다: "어긋난 점이 없다"). `check-adr.ts`의 "확인 상태" 검사를 고친 뒤 65건 통과. 지금의 ADR-0008은 고친 검사를 통과한다(`node lab/actions-cost/check-adr.ts`: 통과. 주소 안에 날짜가 든 칸 하나에는 확인일이 따로 적혀 있다). README의 설명을 고쳤다.
+- 2026-11-22T20:52:25+09:00 step 재작업: 구현 판정 1회차(head `2fdaaa9`): Codex 수정 요청(F1, P1, 재현됨. Claude는 위험도 기준으로 돌지 않았다). `이름://` 없이 적은 주소의 경로에서 `=` 뒤에 온 날짜를 확인일로 센다. 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 
 ## 의사결정 로그
 
