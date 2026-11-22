@@ -12,6 +12,14 @@ export class GitError extends Error {
   }
 }
 
+/**
+ * git의 전역 옵션(하위 명령 앞에 둔다): 그 호출의 경로 인자를 pathspec이 아니라 글자 그대로 읽는다.
+ * `git … -- <경로>`의 경로는 pathspec이라 `*`·`?`·`[`는 glob이고 `:`으로 시작하면 특수 표기다(`:!x`는 제외).
+ * 남이 정한 파일 이름(PR이 바꾼 파일)을 경로 인자로 넘기는 호출에 쓴다:
+ * `git([LITERAL_PATHSPECS, 'diff', …, '--', 파일], root)`
+ */
+export const LITERAL_PATHSPECS = '--literal-pathspecs';
+
 export function gitTry(args: string[], cwd: string, env?: NodeJS.ProcessEnv) {
   const r = runSync('git', args, { cwd, env: env ? { ...process.env, ...env } : undefined });
   return { ok: r.code === 0, stdout: r.stdout, stderr: r.stderr, code: r.code };

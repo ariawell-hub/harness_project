@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { HarnessConfig, TestEffectConfig } from '../lib/config.ts';
 import { run } from '../lib/exec.ts';
-import { git, gitTry } from '../lib/git.ts';
+import { git, gitTry, LITERAL_PATHSPECS } from '../lib/git.ts';
 import { matchesAny, type Problem } from '../lib/util.ts';
 
 export type TestEffectOutcome = 'effective' | 'ineffective' | 'restored' | 'exempt' | 'invalid';
@@ -70,6 +70,7 @@ export function parseExemptions(text: string): { file: string; blob: string; rea
   return out;
 }
 
+// 테스트 파일·보조 파일의 이름은 PR이 정한다. git의 경로 인자로 넘길 때는 글자 그대로 읽게 한다(LITERAL_PATHSPECS)
 const list = (out: string) => out.split('\0').filter(Boolean);
 
 /** base 대비 추가·수정되었거나 파일 종류가 바뀐 파일. 이름 변경은 삭제 + 추가로 본다 */
@@ -83,7 +84,9 @@ function changed(root: string, base: string, committedOnly: boolean): string[] {
 /** head 판의 blob. 일반 파일이 아니면 null */
 function headBlob(root: string, file: string, committedOnly: boolean): string | null {
   if (committedOnly) {
-    const m = /^(\d{6}) blob ([0-9a-f]{40})\t/.exec(git(['ls-tree', 'HEAD', '--', file], root));
+    const m = /^(\d{6}) blob ([0-9a-f]{40})\t/.exec(
+      git([LITERAL_PATHSPECS, 'ls-tree', 'HEAD', '--', file], root),
+    );
     return m && (m[1] === '100644' || m[1] === '100755') ? m[2] : null;
   }
   const st = lstatSync(path.join(root, file), { throwIfNoEntry: false });
@@ -93,7 +96,10 @@ function headBlob(root: string, file: string, committedOnly: boolean): string | 
 /** 그 경로의 base 판과 이전 판(base에서 그 경로를 바꾼 최근 커밋들의 판)의 blob */
 function pastBlobs(root: string, base: string, file: string): Set<string> {
   const out = new Set<string>();
-  const commits = git(['rev-list', '-n', String(HISTORY), base, '--', file], root);
+  const commits = git(
+    [LITERAL_PATHSPECS, 'rev-list', '-n', String(HISTORY), base, '--', file],
+    root,
+  );
   for (const c of commits.split('\n').filter(Boolean)) {
     const r = gitTry(['rev-parse', '-q', '--verify', `${c}:${file}`], root);
     if (r.ok) out.add(r.stdout.trim());
@@ -187,7 +193,10 @@ async function runOnBase(o: {
     const overlay = [...tests, ...o.support];
     if (overlay.length === 0) return out;
     if (o.committedOnly) {
-      git(['checkout', '-q', git(['rev-parse', 'HEAD'], root), '--', ...overlay], wt);
+      git(
+        [LITERAL_PATHSPECS, 'checkout', '-q', git(['rev-parse', 'HEAD'], root), '--', ...overlay],
+        wt,
+      );
     } else {
       for (const f of overlay) copyFileSync(path.join(root, f), path.join(wt, f));
     }

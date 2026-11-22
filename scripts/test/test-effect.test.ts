@@ -535,3 +535,65 @@ test('실패 이유: 단언 실패로 끝난 테스트 파일이 여러 개여�
   // 설정은 정규식의 원문만 받는다. 플래그(g·y)를 줄 방법이 없어 lastIndex를 쓰지 않는다
   assert.equal(new RegExp(PATTERN).flags, '');
 });
+
+// ---------- 파일 이름을 글자 그대로 읽는다 (TD-28, Issue #218) ----------
+// 실행 명령은 `node <파일>`로 바꿔 쓴다. `node --test <파일>`은 인자를 glob으로 읽어 이름에 glob 글자가 든 파일을
+// 실행하지 못한다(기술 부채 표). 여기서 보는 것은 git에 넘기는 이름이다
+
+const PLAIN_NODE = { command: [process.execPath] };
+
+test('이름에 glob 글자가 든 테스트 파일: 이전 판을 찾을 때 그 파일을 바꾼 커밋만 센다', async () => {
+  const { root } = repo(PLAIN_NODE);
+  const file = 't/x[ab].test.mjs';
+  write(root, file, PASSING);
+  commitAll(root, '첫 판');
+  write(root, file, `${PASSING}// 둘째 판\n`);
+  commitAll(root, '둘째 판');
+  // glob으로 맞는 다른 파일(t/xa.test.mjs)을 바꾼 커밋이 이전 판의 한도(30)보다 많다
+  let base = '';
+  for (let i = 0; i < 31; i++) {
+    write(root, 't/xa.test.mjs', `${PASSING}// ${i}\n`);
+    base = commitAll(root, `xa ${i}`);
+  }
+  write(root, file, PASSING);
+  commitAll(root, '첫 판으로 되돌림');
+  const r = await check(root, base, true);
+  assert.deepEqual(outcomes(r), { [file]: 'restored' });
+  assert.deepEqual(r.problems, []);
+});
+
+test('이름에 glob 글자가 든 테스트 파일: base 체크아웃에는 그 파일만 head 판으로 덮어쓴다', async () => {
+  const { root } = repo({ ...PLAIN_NODE, assertPattern: PATTERN });
+  write(root, 't/xa.test.mjs', PASSING);
+  const base = commitAll(root, 'base에 xa');
+  // t/xa.test.mjs는 값을 하나 더 내보내고 예외 줄로 판정에서 뺀다. 새 테스트가 그 값을 읽어 단언한다
+  write(root, 't/xa.test.mjs', `${PASSING}export const extra = 1;\n`);
+  const file = 't/x[ab].test.mjs';
+  write(
+    root,
+    file,
+    `${HEAD}import * as xa from './xa.test.mjs';\ntest('extra', () => {\n  assert.equal(xa.extra, 1, 'EXTRA-9c41');\n  console.log('EXTRA-RAN-9c41');\n});\n`,
+  );
+  const exempt = exemptLine('t/xa.test.mjs', blobOf(root, 't/xa.test.mjs'));
+  write(
+    root,
+    PLAN,
+    `# 계획\n\n## 의사결정 로그\n\n${exempt.replace('<한 줄>', '값 하나를 더 내보낸다')}\n`,
+  );
+  commitAll(root, 'pr');
+  // head에서는 통과하는 테스트다(그 이름의 파일이 실행되고 단언까지 간다)
+  assert.match(sh(process.execPath, [file], root, { NODE_TEST_CONTEXT: '' }), /EXTRA-RAN-9c41/);
+  // base 체크아웃의 t/xa.test.mjs는 base 판이라 그 값이 없다 → 새 테스트는 base에서 그 단언으로 실패한다.
+  // 단언 실패(assertion)까지 봐야 그 이름의 파일이 base 체크아웃에 놓여 실행됐다는 것을 안다
+  const r = await check(root, base, true);
+  assert.deepEqual(outcomes(r), { [file]: 'effective', 't/xa.test.mjs': 'exempt' });
+  assert.deepEqual(reasons(r), { [file]: 'assertion', 't/xa.test.mjs': null });
+});
+
+test('`:`으로 시작하는 이름의 테스트 파일도 판정한다(git이 특수 표기로 읽지 않는다)', async (t) => {
+  if (process.platform === 'win32') return t.skip('파일 이름에 :을 쓸 수 없는 환경');
+  const { root, base } = repo({ ...PLAIN_NODE, files: ['*.test.mjs', 't/*.test.mjs'] });
+  write(root, ':!x.test.mjs', `${HEAD}test('ok', () => assert.equal(1, 1));\n`);
+  commitAll(root, 'pr');
+  assert.deepEqual(outcomes(await check(root, base, true)), { ':!x.test.mjs': 'ineffective' });
+});

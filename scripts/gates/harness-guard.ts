@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import type { HarnessConfig } from '../lib/config.ts';
 import { CONFIG_FILE } from '../lib/config.ts';
-import { gitTry, showFile } from '../lib/git.ts';
+import { LITERAL_PATHSPECS, gitTry, showFile } from '../lib/git.ts';
 import { matchesAny } from '../lib/util.ts';
 import { changedFiles, type RiskSignal } from './risk-gate.ts';
 
@@ -286,7 +286,11 @@ export function harnessGuard(o: {
     if (f.startsWith(SELFTEST) && b !== null)
       add(`자체 테스트 파일 ${h === null ? '삭제' : '수정'}: ${f}`);
     if (h !== null && !f.endsWith('.md')) {
-      const d = gitTry(['diff', '-U0', '--no-renames', `${o.base}...HEAD`, '--', f], o.root);
+      // 파일 이름을 글자 그대로 넘긴다. pathspec으로 읽히면 glob에 맞는 다른 파일의 줄이 섞인다
+      const d = gitTry(
+        [LITERAL_PATHSPECS, 'diff', '-U0', '--no-renames', `${o.base}...HEAD`, '--', f],
+        o.root,
+      );
       const addedLines = d.stdout
         .split('\n')
         .filter((l) => l.startsWith('+') && !l.startsWith('+++'));
