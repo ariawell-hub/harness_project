@@ -699,6 +699,135 @@ test('fileKey: 같은 파일은 이름이 달라도 같고, 아직 없는 파일
   assert.equal(fileKey(path.join(root, 'b/none/x')), fileKey(path.join(root, 'a/none/x')));
 });
 
+test('init: 앞의 템플릿이 만드는 폴더를 뒤의 템플릿이 이미 있는 것으로 본다(판정 지적 F14)', () => {
+  const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, [
+    { from: 'templates/first.md', to: 'docs/guide.md' },
+    { from: 'templates/second.md', to: 'docs' },
+    { from: 'templates/first.md', to: 'a/b/c.md' },
+    { from: 'templates/second.md', to: 'a/b' },
+    { from: 'templates/second.md', to: 'a' },
+    { from: 'templates/second.md', to: 'a/b/d.md' },
+  ]);
+  previewThenApply(root, [
+    '- 템플릿 복사 예정: docs/guide.md',
+    '- 건너뜀(이미 있음): docs',
+    '- 템플릿 복사 예정: a/b/c.md',
+    '- 건너뜀(이미 있음): a/b',
+    '- 건너뜀(이미 있음): a',
+    '- 템플릿 복사 예정: a/b/d.md',
+  ]);
+  assert.deepEqual(readdirSync(path.join(root, 'docs')), ['guide.md']);
+  assert.deepEqual(readdirSync(path.join(root, 'a/b')).sort(), ['c.md', 'd.md']);
+  assert.equal(readFileSync(path.join(root, 'a/b/d.md'), 'utf8'), '둘째\n');
+});
+
+test('init: 앞의 템플릿이 만드는 폴더도 정체로 가린다 — 폴더 링크로 본 같은 폴더', (t) => {
+  if (!canSymlink()) return t.skip('심볼릭 링크를 만들 수 없는 환경');
+  const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, [
+    { from: 'templates/first.md', to: 'alias/made/x.md' },
+    { from: 'templates/second.md', to: 'docs/made' },
+  ]);
+  mkdirSync(path.join(root, 'docs'));
+  symlinkSync(path.join(root, 'docs'), path.join(root, 'alias'), 'junction');
+  previewThenApply(root, ['- 템플릿 복사 예정: alias/made/x.md', '- 건너뜀(이미 있음): docs/made']);
+  assert.deepEqual(readdirSync(path.join(root, 'docs/made')), ['x.md']);
+});
+
+test('init: 차례로 처리하면 도중에 실패할 템플릿 목록은 쓰기 전에 이유를 내고 멈춘다(아무것도 쓰지 않는다)', () => {
+  type T = { from: string; to: string; replacePlaceholder?: boolean };
+  const first = 'templates/first.md';
+  const second = 'templates/second.md';
+  const cases: { name: string; templates: T[]; want: RegExp; prepare?: (root: string) => void }[] =
+    [
+      {
+        name: '앞의 템플릿이 만든 폴더를 자리 표시 파일로 읽으려 한다',
+        templates: [
+          { from: first, to: 'docs/guide.md' },
+          { from: second, to: 'docs', replacePlaceholder: true },
+        ],
+        want: /놓일 자리가 폴더다.*docs/,
+      },
+      {
+        name: '있던 폴더를 자리 표시 파일로 읽으려 한다',
+        templates: [
+          { from: first, to: 'a.md' },
+          { from: second, to: 'docs', replacePlaceholder: true },
+        ],
+        want: /놓일 자리가 폴더다.*docs/,
+        prepare: (root) => mkdirSync(path.join(root, 'docs')),
+      },
+      {
+        name: '앞의 템플릿이 만든 파일 아래에 놓으려 한다',
+        templates: [
+          { from: first, to: 'docs' },
+          { from: second, to: 'docs/sub/guide.md' },
+        ],
+        want: /상위 경로가 파일이다.*docs/,
+      },
+      {
+        name: '있던 파일 아래에 놓으려 한다',
+        templates: [
+          { from: first, to: 'a.md' },
+          { from: second, to: 'docs/guide.md' },
+        ],
+        want: /상위 경로가 파일이다.*docs/,
+        prepare: (root) => writeFileSync(path.join(root, 'docs'), '파일\n'),
+      },
+      {
+        name: '원본이 폴더다',
+        templates: [
+          { from: first, to: 'a.md' },
+          { from: 'templates', to: 'b.md' },
+        ],
+        want: /템플릿 원본이 파일이 아니다.*templates/,
+      },
+      {
+        name: '앞의 템플릿이 만든 폴더가 원본이다',
+        templates: [
+          { from: first, to: 'profiles/web/templates/made/x.md' },
+          { from: 'templates/made', to: 'b.md' },
+        ],
+        want: /템플릿 원본이 파일이 아니다.*made/,
+      },
+      {
+        name: '놓일 자리가 /로 끝난다',
+        templates: [
+          { from: first, to: 'a.md' },
+          { from: second, to: 'newdir/' },
+        ],
+        want: /놓일 자리가 폴더 경로다.*newdir/,
+      },
+    ];
+  for (const c of cases) {
+    const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, c.templates);
+    c.prepare?.(root);
+    const listed = snapshot(root);
+    for (const extra of [['--dry-run'], []]) {
+      const r = cli(['init', '--profile', 'web', ...extra], root);
+      assert.equal(r.code, 1, `${c.name}: ${r.stdout}`);
+      assert.match(r.stderr, c.want, c.name);
+      assert.match(r.stderr, /아무것도 쓰지 않았다/, c.name);
+      assert.doesNotMatch(r.stderr, /\n\s+at /, `${c.name}: 스택이 아니라 이유를 낸다`);
+      assert.deepEqual(snapshot(root), listed, c.name);
+    }
+  }
+});
+
+test('init: 폴더인 자리는 자리 표시 교체를 청하지 않으면 전처럼 건너뛴다', () => {
+  const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, [
+    { from: 'templates/first.md', to: 'docs' },
+    { from: 'templates/second.md', to: 'docs/' },
+    { from: 'templates/none.md', to: 'docs' },
+  ]);
+  mkdirSync(path.join(root, 'docs'));
+  previewThenApply(root, [
+    '- 건너뜀(이미 있음): docs',
+    '- 건너뜀(이미 있음): docs/',
+    '- 건너뜀(이미 있음): docs',
+  ]);
+  assert.deepEqual(readdirSync(path.join(root, 'docs')), []);
+});
+
 test('도움말: init의 --repo와 --dry-run을 적는다', () => {
   const r = cli(['--help'], tmp());
   assert.match(r.stdout, /init --profile core\|web \[--repo <폴더>\] \[--dry-run\]/);
