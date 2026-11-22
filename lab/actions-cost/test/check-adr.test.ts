@@ -306,8 +306,6 @@ test('checkAdr 배경: 화면에서 링크가 아닌 글은 기준선 링크로 
     '[Actions 비용\n\n문서](../harness/actions-cost.md)',
     // 글에 보이는 글자가 없다
     '[**](../harness/actions-cost.md)',
-    '[&nbsp;](../harness/actions-cost.md)',
-    '[&#8203;](../harness/actions-cost.md)',
     '[...](../harness/actions-cost.md)',
     // 화면에 보이지 않는 채움 글자(U+3164), 코드 구간을 가리는 데 쓰는 글자(U+E000, U+E001)
     '[\u3164](../harness/actions-cost.md)',
@@ -363,17 +361,15 @@ test('checkAdr 배경: 링크의 글은 어느 문자 체계의 글자·숫자�
     assert.deepEqual(checkAdr(swap(doc, link, shown)), [], shown);
 });
 
-test('checkAdr 배경: 기준선 링크의 글에 글자나 숫자가 없으면 형식 오류다', () => {
+test('checkAdr 배경: 글에 글자나 숫자가 없는 링크는 기준선 링크로 세지 않는다', () => {
   const doc = goodAdr();
   const link = '[Actions 비용 문서](../harness/actions-cost.md)';
-  // 글자·숫자가 아닌 것, 유니코드가 기본으로 표시하지 않는 문자(채움 글자, 폭 없는 글자), 문자 참조는 세지 않는다
+  // 글자·숫자가 아닌 것, 유니코드가 기본으로 표시하지 않는 문자(채움 글자, 폭 없는 글자)는 세지 않는다
   for (const shown of [
     '[](../harness/actions-cost.md)',
     '[ ](../harness/actions-cost.md)',
     '[**](../harness/actions-cost.md)',
     '[...](../harness/actions-cost.md)',
-    '[&nbsp;](../harness/actions-cost.md)',
-    '[&#8203;](../harness/actions-cost.md)',
     '[\u3164](../harness/actions-cost.md)',
     '[\uFFA0](../harness/actions-cost.md)',
     '[\u200B\u00AD](../harness/actions-cost.md)',
@@ -385,15 +381,52 @@ test('checkAdr 배경: 기준선 링크의 글에 글자나 숫자가 없으면 
     '[` `](../harness/actions-cost.md)',
     '[`...`](../harness/actions-cost.md)',
   ])
-    fails(
-      checkAdr(swap(doc, link, shown)),
-      /배경 형식\(\d+째 줄\).*기준선 링크의 글에 글자나 숫자가 없다/,
+    fails(checkAdr(swap(doc, link, shown)), /배경: 기준선 문서로 가는 링크가 없다.*글자나 숫자/);
+  // 바른 링크가 따로 있으면 그런 링크가 더 있어도 된다(다른 링크의 글은 보지 않는다)
+  for (const extra of ['[\u3164]', '[...]', '[&nbsp;]', '[&2026;]', '[`\u200B`]'])
+    assert.deepEqual(
+      checkAdr(swap(doc, link, `${link}와 ${extra}(../harness/actions-cost.md)`)),
+      [],
+      extra,
     );
-  // 바른 링크가 따로 있어도 그런 기준선 링크는 형식 오류다
-  fails(
-    checkAdr(swap(doc, link, `${link}와 [\u3164](../harness/actions-cost.md)`)),
-    /배경 형식\(\d+째 줄\).*기준선 링크의 글에 글자나 숫자가 없다/,
-  );
+});
+
+test('checkAdr 배경: 링크의 글의 문자 참조는 꼴이 맞는 것만 문자 참조로 읽는다', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  // 숫자 참조는 그 문자로 풀어 센다. 문자 참조의 꼴이 아닌 &…;는 글 그대로다
+  for (const shown of [
+    '[&#44032;](../harness/actions-cost.md)',
+    '[&#xAC00;](../harness/actions-cost.md)',
+    '[&#XAC00;](../harness/actions-cost.md)',
+    '[&#36027;](../harness/actions-cost.md)',
+    '[&2026;](../harness/actions-cost.md)',
+    '[&#12345678;](../harness/actions-cost.md)',
+    '[&#x1234567;](../harness/actions-cost.md)',
+    '[&#;7](../harness/actions-cost.md)',
+    '[&a;](../harness/actions-cost.md)',
+    '[&;a](../harness/actions-cost.md)',
+    '[& a;](../harness/actions-cost.md)',
+    '[&amp 문서](../harness/actions-cost.md)',
+    '[&nbsp;&#44032;](../harness/actions-cost.md)',
+  ])
+    assert.deepEqual(checkAdr(swap(doc, link, shown)), [], shown);
+  // 표시되지 않는 문자로 풀리는 숫자 참조, 없는 문자의 숫자 참조, 이름 참조 꼴만 든 글은 세지 않는다
+  for (const shown of [
+    '[&#8203;](../harness/actions-cost.md)',
+    '[&#x200B;&#8205;](../harness/actions-cost.md)',
+    '[&#x3164;](../harness/actions-cost.md)',
+    '[&#xE000;](../harness/actions-cost.md)',
+    '[&#xE001;](../harness/actions-cost.md)',
+    '[&#0;](../harness/actions-cost.md)',
+    '[&#xD800;](../harness/actions-cost.md)',
+    '[&#x110000;](../harness/actions-cost.md)',
+    '[&#160;](../harness/actions-cost.md)',
+    '[&nbsp;](../harness/actions-cost.md)',
+    '[&nbsp;&ZeroWidthSpace;](../harness/actions-cost.md)',
+    '[&frac12;](../harness/actions-cost.md)',
+  ])
+    fails(checkAdr(swap(doc, link, shown)), /배경: 기준선 문서로 가는 링크가 없다.*글자나 숫자/);
 });
 
 test('checkAdr 후보표: 표가 하나이고 머리 줄과 구분 줄이 맞다', () => {
