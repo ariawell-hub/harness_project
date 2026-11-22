@@ -2,7 +2,7 @@
 id: 20261122-reopen-fmt-padding
 issue: 192 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -42,6 +42,7 @@ claimed_at: 2026-11-22T09:22:27+09:00
 - 2026-11-22 `setFrontmatter`가 값과 주석 사이를 공백 하나로 쓰게 고쳤다. 두 파일 32건 모두 통과(있던 테스트 `frontmatter 파싱과 수정(주석 보존)`은 고치지 않았다). 테스트는 포매터(`prettier`, 리포의 설정)를 직접 불러 결과를 검사한다. `origin/main`을 병합했다(PR #185·#189 병합 뒤).
 - 2026-11-22T09:47:36+09:00 step 재작업: 구현 판정 1회차: Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F1: `reopenStep` 테스트가 frontmatter만 포매터에 넣는다. 다시 연 계획 파일 전체는 통과하지 못할 수 있다(진행 로그 절이 없는 계획에서는 `appendProgress`가 제목 바로 아래에 목록을 붙여 포매터가 빈 줄을 넣는다). 맞는 지적이다. 테스트가 파일 전체를 보게 하고 `appendProgress`가 쓰는 글도 포매터의 결과와 같게 고친다.
 - 2026-11-22 구현 판정 1회차의 F1(P1)을 고쳤다. 테스트를 먼저 고쳤다: `reopenStep` 테스트가 계획 파일 전체를 포매터에 넣게 했고(지금의 시험용 계획은 진행 로그에 항목이 있어 통과한다), `appendProgress`의 테스트를 더했다. 고치기 전에 `appendProgress` 테스트가 첫 사례(진행 로그 절이 없다)에서 실패했다(제목 바로 아래에 목록이 붙어 포매터가 빈 줄을 넣는다). `appendProgress`를 고친 뒤 세 파일 41건 모두 통과. 이 계획 자신을 `reopenStep`으로 다시 연 직후 `fmt --check`가 따로 `fmt`를 돌리지 않고 통과했다(고친 `setFrontmatter`로).
+- 2026-11-22T10:13:41+09:00 step 재작업: 구현 판정 2회차: Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F1은 닫혔다. F2: 항목 사이에 빈 줄이 있는 진행 로그에 붙이면 포맷이 깨진다고 했다. 포매터로 확인했다: 지적의 꼴(`- a`, 빈 줄, `- b` 뒤에 바로 붙인 `- c`)은 포매터가 고치지 않는다. 그러나 같은 자리에 실제로 깨지는 꼴이 있었다: 마지막 항목 안에 빈 줄이 있으면(딸린 문단) 포매터가 새 항목 앞에 빈 줄을 넣는다. 마지막 줄만 보고 목록인지 정하던 것을, 끝의 목록 전체를 보고 정하게 고친다(빈 줄이 하나라도 있으면 같은 간격으로 빈 줄을 두고 붙인다). 테스트 먼저.
 
 ## 의사결정 로그
 
