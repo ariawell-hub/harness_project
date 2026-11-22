@@ -17,4 +17,4 @@ review_cycle: on-change
 | [ADR-0005](ADR-0005-windows-native.md)        | macOS와 Windows 네이티브를 함께 쓴다(실행 셸, 줄바꿈, L1 셸 방언, E5 범위)                | 채택      |
 | [ADR-0006](ADR-0006-pr-update-merge.md)       | 뒤처진 PR은 rebase가 아니라 `origin/main` 병합 + 일반 push로 갱신 (R14 유지)              | 채택      |
 | [ADR-0007](ADR-0007-db-postgres-drizzle.md)   | 파일럿 웹 프로젝트의 DB는 PostgreSQL + Drizzle, 일회용 DB는 내장 PostgreSQL(PGlite) (Q10) | 잠정      |
-| [ADR-0008](ADR-0008-actions-cost.md)          | 비공개 리포의 Actions 비용: 예산에 견준 절감 수단의 후보표와 묶음 (Issue #170)            | 제안      |
+| [ADR-0008](ADR-0008-actions-cost.md)          | 비공개 리포의 Actions 비용: 예산에 견준 절감 수단의 후보표와 묶음 (Issue #170)            | 채택      |
