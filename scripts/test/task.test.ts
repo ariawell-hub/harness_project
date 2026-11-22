@@ -11,9 +11,11 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import * as prettier from 'prettier';
 import { planHash, planHashAt } from '../ci/plan-hash.ts';
 import {
   ClaimError,
+  appendProgress,
   claimHeartbeat,
   claimOwner,
   completeStep,
@@ -433,5 +435,86 @@ test('new-task --plan: 마지막 step의 PR이 revert되면 복원하지 않고,
     });
   } finally {
     fx.cleanup();
+  }
+});
+
+test('appendProgress: 붙인 뒤의 계획 파일을 포매터가 고치지 않는다', async () => {
+  const root = tmp();
+  const file = 'plan.md';
+  const ref = { id: '20261122-x', kind: 'small' as const, where: 'active' as const, file };
+  const config = await prettier.resolveConfig(path.join(import.meta.dirname, 'x.md'));
+  const md = { ...config, filepath: 'x.md' };
+  const FRONT = '---\nid: 20261122-x\nstatus: active # draft | active\n---\n\n# 제목\n';
+  const cases: [name: string, body: string][] = [
+    ['진행 로그 절이 없다', '\n- 목표: a\n- 변경: b\n- 검증: c\n\n## 관련 파일·문서\n\n- `a.ts`\n'],
+    ['진행 로그 절이 비어 있고 마지막 절이다', '\n본문\n\n## 진행 로그\n'],
+    [
+      '진행 로그 절이 비어 있고 뒤에 절이 있다',
+      '\n본문\n\n## 진행 로그\n\n## 의사결정 로그\n\n없음.\n',
+    ],
+    ['진행 로그에 항목이 있고 마지막 절이다', '\n본문\n\n## 진행 로그\n\n- 2026-11-22 접수\n'],
+    [
+      '진행 로그에 항목이 있고 뒤에 절이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 2026-11-22 접수\n  - 딸린 줄\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '진행 로그가 주석으로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n<!-- 시간순 -->\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '진행 로그가 문단으로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n아직 없다.\n\n## 발견 사항\n\n없음.\n',
+    ],
+    // 빈 줄이 든 목록: 같은 간격으로 붙인다
+    [
+      '항목 사이에 빈 줄이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n- 둘째 기록\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '앞 항목들만 빈 줄로 떨어져 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n- 둘째 기록\n- 셋째 기록\n',
+    ],
+    [
+      '마지막 항목 안에 빈 줄이 있다(딸린 문단)',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n  딸린 문단\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '딸린 목록의 항목 사이에 빈 줄이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n  - 딸린 항목\n\n  - 딸린 항목 둘\n',
+    ],
+    [
+      '항목 안의 코드 블록에 빈 줄이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n  ```text\n  x\n\n  y\n  ```\n\n## 발견 사항\n\n없음.\n',
+    ],
+    // 목록이 아닌 것으로 끝난다: 빈 줄을 두고 새 목록을 시작한다
+    [
+      '번호 목록으로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n1. 첫 기록\n2. 둘째 기록\n\n## 발견 사항\n\n없음.\n',
+    ],
+    ['번호 목록의 딸린 목록으로 끝난다', '\n본문\n\n## 진행 로그\n\n1. 첫 기록\n   - 딸린 항목\n'],
+    [
+      '코드 블록으로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n```text\n- x\n```\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '표로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n| 날짜 | 한 일 |\n| ---- | ----- |\n| 오늘 | 접수  |\n',
+    ],
+    ['인용으로 끝난다', '\n본문\n\n## 진행 로그\n\n> 인용\n\n## 발견 사항\n\n없음.\n'],
+  ];
+  for (const [name, body] of cases) {
+    const before = FRONT + body;
+    assert.ok(await prettier.check(before, md), `${name}: 붙이기 전의 글이 포맷에 맞다`);
+    write(root, file, before);
+    appendProgress(root, ref, '첫 줄');
+    appendProgress(root, ref, '둘째 줄');
+    const after = readFileSync(path.join(root, file), 'utf8');
+    assert.ok(await prettier.check(after, md), `${name}:\n${after}`);
+    // 붙인 두 줄이 진행 로그 절 안에 차례로 있고, 있던 글은 그대로다
+    const sec = after.slice(after.indexOf('## 진행 로그'));
+    const own = sec.slice(0, sec.indexOf('\n## ', 1) < 0 ? sec.length : sec.indexOf('\n## ', 1));
+    assert.match(own, /^- \S+ 첫 줄\n\n?- \S+ 둘째 줄$/m, `${name}:\n${after}`);
+    for (const line of before.split('\n').filter(Boolean))
+      assert.ok(after.includes(line), `${name}: ${line}`);
   }
 });

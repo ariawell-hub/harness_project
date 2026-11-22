@@ -723,7 +723,30 @@ export function reopenStep(cwd: string, reason: string): void {
   commitPlan(info.root, `plan(${id}): step${step ?? ''} 재작업`);
 }
 
-/** 진행 로그에 한 줄 추가 (소규모 계획은 섹션이 없으면 만든다) */
+/**
+ * 글의 끝이 빈 줄 없이 붙여 쓴 `-` 목록인가. 그 목록에는 새 항목을 바로 아래에 잇는다.
+ * 끝의 목록은 끝에서부터 빈 줄·들여 쓴 줄·`- `로 시작하는 줄이 이어진 곳이다. 그 안에 빈 줄이 하나라도 있으면
+ * (항목 사이를 띄운 목록, 항목 안의 딸린 문단) 붙여 쓴 목록이 아니다: 포매터가 새 항목 앞에 빈 줄을 넣는 꼴이 있다.
+ * 번호 목록·코드 블록·표·인용·문단으로 끝나는 글도 아니다
+ */
+function endsWithTightList(body: string): boolean {
+  const lines = body.split('\n');
+  let k = lines.length;
+  while (
+    k > 0 &&
+    (/^\s*$/.test(lines[k - 1]) || /^\s/.test(lines[k - 1]) || lines[k - 1].startsWith('- '))
+  )
+    k--;
+  while (k < lines.length && /^\s*$/.test(lines[k])) k++;
+  const block = lines.slice(k);
+  return block.length > 0 && block[0].startsWith('- ') && !block.some((l) => /^\s*$/.test(l));
+}
+
+/**
+ * 진행 로그에 한 줄 추가 (소규모 계획은 섹션이 없으면 만든다).
+ * 포매터의 결과와 같게 쓴다: 붙여 쓴 목록의 끝에는 바로 아래에 잇고, 그 밖에는(빈 줄이 든 목록, 제목·주석·문단·
+ * 코드 블록 뒤) 빈 줄을 두며, 파일의 끝은 줄바꿈 하나다.
+ */
 export function appendProgress(root: string, ref: PlanRef, line: string): void {
   const f = path.join(root, ref.file);
   let text = readFileSync(f, 'utf8');
@@ -734,9 +757,16 @@ export function appendProgress(root: string, ref: PlanRef, line: string): void {
     const next = text.slice(start).search(/^## /m);
     const end = next < 0 ? text.length : start + next;
     const body = text.slice(start, end).replace(/\s+$/, '');
-    text = text.slice(0, start) + body + '\n' + entry + '\n\n' + text.slice(end);
+    const inList = endsWithTightList(body);
+    const rest = text.slice(end);
+    text =
+      text.slice(0, start) +
+      body +
+      (inList ? '\n' : '\n\n') +
+      entry +
+      (rest ? '\n\n' + rest : '\n');
   } else {
-    text = text.replace(/\s*$/, '') + `\n\n## 진행 로그\n${entry}\n`;
+    text = text.replace(/\s*$/, '') + `\n\n## 진행 로그\n\n${entry}\n`;
   }
   writeFileSync(f, text);
 }
