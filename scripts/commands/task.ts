@@ -723,7 +723,10 @@ export function reopenStep(cwd: string, reason: string): void {
   commitPlan(info.root, `plan(${id}): step${step ?? ''} 재작업`);
 }
 
-/** 진행 로그에 한 줄 추가 (소규모 계획은 섹션이 없으면 만든다) */
+/**
+ * 진행 로그에 한 줄 추가 (소규모 계획은 섹션이 없으면 만든다).
+ * 포매터의 결과와 같게 쓴다: 목록의 끝에는 바로 아래에 잇고, 제목·주석·문단 뒤에는 빈 줄을 두며, 파일의 끝은 줄바꿈 하나다.
+ */
 export function appendProgress(root: string, ref: PlanRef, line: string): void {
   const f = path.join(root, ref.file);
   let text = readFileSync(f, 'utf8');
@@ -734,9 +737,18 @@ export function appendProgress(root: string, ref: PlanRef, line: string): void {
     const next = text.slice(start).search(/^## /m);
     const end = next < 0 ? text.length : start + next;
     const body = text.slice(start, end).replace(/\s+$/, '');
-    text = text.slice(0, start) + body + '\n' + entry + '\n\n' + text.slice(end);
+    const last = body.slice(body.lastIndexOf('\n') + 1);
+    // 마지막 줄이 목록의 항목이거나 그 항목에 딸린 줄(들여 쓴 줄)이면 목록을 잇는다
+    const inList = /^(?:\s*[-*+] |\s+\S)/.test(last);
+    const rest = text.slice(end);
+    text =
+      text.slice(0, start) +
+      body +
+      (inList ? '\n' : '\n\n') +
+      entry +
+      (rest ? '\n\n' + rest : '\n');
   } else {
-    text = text.replace(/\s*$/, '') + `\n\n## 진행 로그\n${entry}\n`;
+    text = text.replace(/\s*$/, '') + `\n\n## 진행 로그\n\n${entry}\n`;
   }
   writeFileSync(f, text);
 }

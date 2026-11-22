@@ -178,13 +178,19 @@ test('runner: step 완료 여부는 PR head에서 읽는다. 수정하다 실패
   }
 });
 
-test('reopenStep: 다시 연 계획의 frontmatter를 포매터가 고치지 않는다(status 줄의 값과 주석 사이는 공백 하나)', async () => {
+test('reopenStep: 다시 연 계획 파일을 포매터가 고치지 않는다(status 줄의 값과 주석 사이는 공백 하나, 붙인 진행 로그)', async () => {
   const t = setup();
   try {
     const pr = await openPr(t);
     const id = planId(pr.branch);
     const done = path.join(pr.worktree, 'docs/exec-plans/completed', id, 'plan.md');
     assert.match(readFileSync(done, 'utf8'), /^status: completed #/m, '완료 처리된 계획이다');
+    // 처음부터 포맷이 맞는 계획에서 시작한다: 다시 연 뒤에 어긋난 것은 reopenStep이 쓴 글이다
+    const config = await prettier.resolveConfig(path.join(HARNESS_ROOT, 'x.md'));
+    const md = { ...config, filepath: 'x.md' };
+    writeFileSync(done, await prettier.format(readFileSync(done, 'utf8'), md));
+    commitAll(pr.worktree, '계획을 포맷한다');
+    assert.ok(await prettier.check(readFileSync(done, 'utf8'), md));
     reopenStep(pr.worktree, '판정의 지적을 고친다');
     const text = readFileSync(
       path.join(pr.worktree, 'docs/exec-plans/active', id, 'plan.md'),
@@ -192,9 +198,9 @@ test('reopenStep: 다시 연 계획의 frontmatter를 포매터가 고치지 않
     );
     const status = text.split('\n').find((l) => l.startsWith('status:'))!;
     assert.match(status, /^status: active # \S/, status);
-    const fm = text.slice(0, text.indexOf('\n---\n', 4) + 5);
-    const config = await prettier.resolveConfig(path.join(HARNESS_ROOT, 'x.md'));
-    assert.ok(await prettier.check(fm, { ...config, filepath: 'x.md' }), fm);
+    assert.match(text, /^- \S+ step0 재작업: 판정의 지적을 고친다$/m, '진행 로그에 한 줄이 붙었다');
+    // 다시 연 계획 파일 전체가 포매터의 검사를 통과한다(frontmatter와 붙인 진행 로그 모두)
+    assert.ok(await prettier.check(text, md), text);
   } finally {
     t.fx.cleanup();
   }
