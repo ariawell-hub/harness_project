@@ -2,7 +2,7 @@
 id: 20261122-size-scope-warn
 issue: 186 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active    # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -119,6 +119,7 @@ claimed_at: 2026-11-22T02:49:16+09:00 # new-task가 채운다
 - 2026-11-22 09:41 F1 테스트 먼저: 사례를 더한 테스트 커밋(`scope.test.ts` 24건)에서 1건이 실패했다(백틱 둘로 감싼 `outside.ts`가 경로로 뽑힌다). 백틱을 묶음 단위로 읽게 고친 뒤(여는 묶음과 길이가 같은 다음 묶음에서 닫히고, 길이가 1인 스팬만 경로다) AC 명령 열셋(테스트 158건 포함)이 통과한다.
 - 2026-11-22 09:41 제작자가 초안 상태의 head `a40af91`을 승인했다(승인 요청 전). 그 head에 열린 지적(F1)이 있어 고친 커밋을 올린다. head가 바뀌므로 초안을 해제할 때 다시 승인을 요청한다.
 - 2026-11-22T09:57:02+09:00 step1 재작업: PR #195의 두 번째 구현 판정(head 1837152)에서 codex가 F1을 해결로 닫고 F2를 냈다(역슬래시로 막은 백틱 바로 뒤의 코드 스팬을 범위 경로로 읽지 못한다). 맞는 지적이라 코드를 고친다. 오래 열린 지적 표시는 없었다
+- 2026-11-22 09:58 F2 테스트 먼저: 사례를 더한 테스트 커밋(`scope.test.ts` 25건)에서 1건이 실패했다(막은 백틱 뒤의 `real.ts`를 뽑지 못한다). 스팬 밖에서 역슬래시 뒤의 글자를 글자로 읽게 고친 뒤(스팬 안에서는 역슬래시도 글자다) AC 명령 열셋(테스트 159건 포함)이 통과한다. 첫 완료 처리를 구현 판정보다 먼저 한 탓에 step을 한 번 되돌렸다. 판정 횟수를 줄이려고 이번에도 수정과 완료 처리를 함께 올린다.
 
 ## 의사결정 로그
 

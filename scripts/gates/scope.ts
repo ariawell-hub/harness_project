@@ -68,19 +68,49 @@ export function scopePaths(sectionText: string): string[] {
   return out;
 }
 
+/** i에서 시작하는 백틱 묶음의 길이 */
+function tickRun(line: string, i: number): number {
+  let n = 0;
+  while (line[i + n] === '`') n++;
+  return n;
+}
+
 /**
  * 한 줄에서 백틱 하나로 감싼 코드 스팬의 안쪽 글자들. 백틱은 이어진 묶음 단위로 읽는다(CommonMark):
  * 여는 묶음과 길이가 같은 다음 묶음에서 닫히고, 닫히지 않은 묶음은 글자다. 길이가 둘 이상인 스팬(예시,
- * 백틱을 글자로 보이는 표기)과 그 안의 글자는 경로가 아니다
+ * 백틱을 글자로 보이는 표기)과 그 안의 글자는 경로가 아니다.
+ * 스팬 밖에서 역슬래시 뒤의 글자는 글자다(막은 백틱은 스팬을 열지 않는다). 스팬 안에서는 역슬래시도 글자다
  */
 function singleTickSpans(line: string): string[] {
-  const runs = [...line.matchAll(/`+/g)].map((m) => ({ at: m.index, len: m[0].length }));
   const out: string[] = [];
-  for (let i = 0; i < runs.length; i++) {
-    const j = runs.findIndex((r, k) => k > i && r.len === runs[i].len);
-    if (j < 0) continue;
-    if (runs[i].len === 1) out.push(line.slice(runs[i].at + 1, runs[j].at));
-    i = j;
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    const n = tickRun(line, i);
+    if (n === 0) {
+      i++;
+      continue;
+    }
+    // 닫는 묶음: 길이가 같은 다음 백틱 묶음
+    let j = i + n;
+    let close = -1;
+    while (j < line.length) {
+      const m = tickRun(line, j);
+      if (m === n) {
+        close = j;
+        break;
+      }
+      j += m || 1;
+    }
+    if (close < 0) {
+      i += n;
+      continue;
+    }
+    if (n === 1) out.push(line.slice(i + 1, close));
+    i = close + n;
   }
   return out;
 }
