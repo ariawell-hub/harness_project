@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -255,6 +255,8 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - 스스로 찾아 함께 막았다: 링크의 글에서 "보이는 글자"를 한글 음절·로마자·숫자·코드 구간의 닫힌 집합으로(문자 참조, 채움 글자 U+3164만 든 글은 세지 않는다), 코드 구간을 가리는 데 쓰는 글자(U+E000)가 원문에 있는 줄은 읽지 않는다.
   - 실패하는 테스트를 먼저 썼다(커밋 `16aa200`: ADR 검사 61개 가운데 2개, 문서 검사 89개 가운데 1개 실패 → `fe64527`: 61개·89개 통과). 검증자의 재현 입력(실제 ADR의 링크 글 사이에 `_ _ _`)이 형식 오류와 "링크가 없다"로 실패하는 것을 확인했다.
   - AC 12줄과 `check` 통과.
+
+- 2026-11-22T13:36:08+09:00 step2 재작업: 코드 판정 4라운드 F6 대응
 
 ## 의사결정 로그
 
