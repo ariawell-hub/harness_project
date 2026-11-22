@@ -1,9 +1,11 @@
 // init: 대상 리포(--repo), 쓰지 않는 실행(--dry-run), 바뀌는 것이 없으면 설정 파일을 다시 쓰지 않는다(TD-31, Issue #208).
 import assert from 'node:assert/strict';
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -851,6 +853,143 @@ test('init: 구분자가 아닌 글자로 끝나는 이름은 파일 이름이�
   assert.equal(readFileSync(path.join(root, 'guide\\'), 'utf8'), '첫째\n');
   assert.equal(readFileSync(path.join(root, 'docs\\guide.md'), 'utf8'), '둘째\n');
   assert.ok(!existsSync(path.join(root, 'docs')), '역슬래시는 폴더를 만들지 않는다');
+});
+
+type Tpl = { from: string; to: string; replacePlaceholder?: boolean };
+
+/** init을 이 프로세스에서 돌려 종료 코드와 템플릿 줄을 받는다(출력은 삼킨다) */
+function quietInit(root: string, dryRun: boolean): { code: number; lines: string[] } {
+  const out = process.stdout.write;
+  const err = process.stderr.write;
+  let text = '';
+  process.stdout.write = ((x: string) => ((text += x), true)) as typeof process.stdout.write;
+  process.stderr.write = (() => true) as typeof process.stderr.write;
+  try {
+    const code = init(root, 'web', { dryRun });
+    const lines = templateLines(text).map((l) => l.replace('템플릿 복사 예정', '템플릿 복사'));
+    return { code, lines };
+  } finally {
+    process.stdout.write = out;
+    process.stderr.write = err;
+  }
+}
+
+/** 이 작업 전의 템플릿 복사: 차례로, 그 순간의 파일을 보고 정한다. 도중에 예외가 나면 null */
+function sequentialCopy(root: string, templates: Tpl[]): string[] | null {
+  const lines: string[] = [];
+  try {
+    for (const t of templates) {
+      const src = path.join(root, 'profiles/web', t.from);
+      const dst = path.join(root, t.to);
+      if (existsSync(dst)) {
+        const placeholder =
+          t.replacePlaceholder && readFileSync(dst, 'utf8').includes('harness:placeholder');
+        if (!placeholder) {
+          lines.push(`- 건너뜀(이미 있음): ${t.to}`);
+          continue;
+        }
+      }
+      mkdirSync(path.dirname(dst), { recursive: true });
+      copyFileSync(src, dst);
+      lines.push(`- 템플릿 복사: ${t.to}`);
+    }
+  } catch {
+    return null;
+  }
+  return lines;
+}
+
+/** 설정 파일을 뺀 모든 폴더·파일·링크(경로순). 파일은 내용까지 */
+function shape(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const n of readdirSync(dir).sort()) {
+      const f = path.join(dir, n);
+      const rel = path.relative(root, f);
+      if (rel === CONFIG_FILE) continue;
+      const st = lstatSync(f);
+      if (st.isSymbolicLink()) out.push(`링크 ${rel}`);
+      else if (st.isDirectory()) {
+        out.push(`폴더 ${rel}`);
+        walk(f);
+      } else out.push(`파일 ${rel} ${readFileSync(f).toString('base64')}`);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+test('init: 무작위 템플릿 목록 — 미리보기와 실제 적용이 전의 차례 처리와 같고, 도중에 실패하던 목록은 쓰기 전에 멈춘다', (t) => {
+  if (path.sep !== '/') return t.skip('경로 끝의 구분자와 역슬래시를 다르게 다루는 환경');
+  const links = canSymlink();
+  const TO = [
+    ...['a.md', 'docs', 'docs/', 'docs/g.md', 'docs/sub/h.md', 'docs/sub', 'n', 'n/', 'n/m.md'],
+    ...['x.md', 'x.md/', 'x.md/y', 'p.md', 'b\\', 'alias/g.md', 'alias/sub', 'alias/sub/h.md'],
+    ...['s1.md', 's2.md', 'made/z.md', 'made'].map((n) => `profiles/web/templates/${n}`),
+  ];
+  const FROM = [
+    ...['templates/s1.md', 'templates/s2.md', 'templates/s3.md', 'templates/none.md'],
+    ...['templates', 'templates/made', 'templates/made/z.md', 'templates/s1.md/'],
+  ];
+  let seed = 20261122;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const pick = <T>(a: T[]): T => a[Math.floor(rnd() * a.length)];
+  const count = { same: 0, stopped: 0 };
+  for (let i = 0; i < 300; i++) {
+    const docs = rnd() < 0.5;
+    const alias = links && docs && rnd() < 0.6;
+    const have = {
+      x: pick(['', '있던 글\n', PLACEHOLDER]),
+      p: pick(['', '있던 글\n', PLACEHOLDER]),
+    };
+    const templates: Tpl[] = [];
+    for (let k = 1 + Math.floor(rnd() * 5); k > 0; k--) {
+      const r = rnd();
+      templates.push({
+        from: pick(FROM),
+        to: pick(TO),
+        ...(r < 0.4 ? { replacePlaceholder: true } : r < 0.5 ? { replacePlaceholder: false } : {}),
+      });
+    }
+    const make = () => {
+      const root = templateCopy();
+      const dir = path.join(root, 'profiles/web/templates');
+      writeFileSync(path.join(dir, 's1.md'), '첫째\n');
+      writeFileSync(path.join(dir, 's2.md'), PLACEHOLDER);
+      writeFileSync(path.join(dir, 's3.md'), '셋째\n');
+      editProfile(root, (x) => {
+        x.templates = templates;
+      });
+      if (docs) mkdirSync(path.join(root, 'docs'));
+      if (alias) symlinkSync(path.join(root, 'docs'), path.join(root, 'alias'));
+      if (have.x) writeFileSync(path.join(root, 'x.md'), have.x);
+      if (have.p) writeFileSync(path.join(root, 'p.md'), have.p);
+      return root;
+    };
+    const what = JSON.stringify({ i, docs, alias, have, templates });
+    const mine = make();
+    const old = make();
+    const before = shape(mine);
+    const want = sequentialCopy(old, templates);
+    const dry = quietInit(mine, true);
+    assert.deepEqual(shape(mine), before, `미리보기는 쓰지 않는다: ${what}`);
+    const real = quietInit(mine, false);
+    if (want === null) {
+      count.stopped++;
+      assert.deepEqual([dry.code, real.code], [1, 1], `쓰기 전에 멈춘다: ${what}`);
+      assert.deepEqual(shape(mine), before, `멈추면 아무것도 쓰지 않는다: ${what}`);
+    } else {
+      count.same++;
+      assert.deepEqual([dry.code, real.code], [0, 0], `전에 되던 목록은 된다: ${what}`);
+      assert.deepEqual(dry.lines, want, `미리보기: ${what}`);
+      assert.deepEqual(real.lines, want, `실제 적용: ${what}`);
+      assert.deepEqual(shape(mine), shape(old), `결과 파일: ${what}`);
+    }
+  }
+  assert.ok(count.same >= 30 && count.stopped >= 30, JSON.stringify(count));
 });
 
 test('도움말: init의 --repo와 --dry-run을 적는다', () => {
