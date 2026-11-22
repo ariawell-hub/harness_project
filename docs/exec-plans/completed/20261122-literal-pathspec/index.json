@@ -4,7 +4,8 @@
     {
       "step": 0,
       "name": "literal-paths",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-22T22:26:44+09:00"
     }
   ]
 }
