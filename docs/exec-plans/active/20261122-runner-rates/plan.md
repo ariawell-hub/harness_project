@@ -1,0 +1,84 @@
+---
+id: 20261122-runner-rates
+issue: 204 # GitHub Issue 번호
+type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
+status: active # draft | active | blocked | completed | abandoned
+size: medium # small | medium | large (4.3절)
+risk: normal # low | normal | high (10.1절)
+author: claude-code # claude-code | codex | <사람>
+owner: mac-session-2 # 선점한 runner 작업자 또는 사람
+claimed_at: 2026-11-22T15:02:03+09:00 # new-task가 채운다
+---
+
+# actions-cost가 arm64 2코어와 1코어 러너의 단가를 안다 (ADR-0008 B2·B1의 재측정 준비)
+
+## 목표와 수용 기준
+
+ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 → B2 → B1 → F2 → A4 → A5 → B3). 수단은 하나씩 넣고 넣을 때마다 `actions-cost`로 다시 잰다. 그런데 `actions-cost`는 2코어 Linux x64 러너의 단가만 안다. B2가 옮길 arm64 2코어 러너(`ubuntu-24.04-arm`)와 B1이 옮길 1코어 러너(`ubuntu-slim`)의 분은 "단가를 모르는 러너의 분"으로 빠지고, 보존 기록에는 라벨이 `(기타)`로 남아 나중에도 다시 계산할 수 없다. 그 상태로 수단을 넣으면 기록 표의 판단이 `판단 못 함`이 된다.
+
+B2·B1을 넣기 전에 `actions-cost`가 두 러너를 단가로 계산하고 보존 기록에 라벨을 남기게 한다.
+
+수용 기준:
+
+1. 라벨이 `ubuntu-24.04-arm` 하나뿐인 job은 분당 $0.005, `ubuntu-slim` 하나뿐인 job은 분당 $0.002로 청구 분과 금액에 든다. 지금 아는 세 라벨(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04`)은 그대로 분당 $0.006이다.
+2. 보존 기록(`--save`)에 두 라벨이 그대로 남고, 그 기록을 `--from`으로 읽으면 GitHub에서 읽은 입력으로 계산한 것과 같은 값이 나온다. 단가표에 없는 라벨은 지금처럼 `(기타)`로 남는다.
+3. 단가가 다른 러너가 섞인 기간의 합계(전체 금액, PR 하나당 금액, 30일 환산 금액)는 job마다 그 러너의 단가를 곱해 더한 값이다.
+4. 출력에 러너별 표가 있다: 러너마다 돈 job 수, 청구 분, 금액. 단가를 모르는 러너는 `(기타)`, self-hosted 러너는 `self-hosted` 한 줄로 묶이고 청구 분과 금액은 0이다.
+5. 기준선 보존 기록(`lab/actions-cost/2026-11-17_2026-11-20.jsonl`)은 바뀌지 않고, 그 기록의 "기록 칸" 행(청구 4028분, PR 하나당 100.7분, $0.604, head 하나당 21.2분, 30일 환산 $181.26)도 바뀌지 않는다.
+6. 단가의 출처와 확인한 날짜가 코드(`RATE_MILLI`의 주석)와 문서(`docs/harness/actions-cost.md`의 "재는 방법")에 있다. 문서의 기준선 구간은 바뀐 출력과 같다.
+
+## 범위 / 비범위
+
+범위:
+
+- `actions-cost`의 단가표, 계산 결과의 러너별 합계, 출력의 러너별 표와 단가 안내 문장.
+- 문서 `docs/harness/actions-cost.md`의 단가 설명과 기준선 구간(같은 보존 기록으로 다시 계산해 붙인다), 변경 이력 한 줄.
+
+비범위:
+
+- 워크플로의 `runs-on`을 바꾸는 것(B2·B1의 Issue에서 한다. `.github/workflows/`는 제작자가 적용한다).
+- 그 밖의 러너(더 큰 러너, Windows, macOS, `ubuntu-22.04-arm`)의 단가. 쓰기로 한 러너가 아니다.
+- 새 기간을 재서 기록 표에 행을 더하는 것(수단을 넣는 Issue에서 한다).
+- 예산 값과 판단 규칙(`verdictOf`).
+
+## 관련 파일·문서
+
+- `scripts/metrics/actions-cost.ts`
+- `scripts/test/actions-cost.test.ts`
+- `scripts/test/actions-cost-command.test.ts`
+- `docs/harness/actions-cost.md`
+- `docs/harness/CHANGELOG.md`
+- `lab/actions-cost/check-doc.ts`
+- `lab/actions-cost/test/check-doc.test.ts`
+- `lab/actions-cost/README.md`
+- 읽기만: `scripts/commands/actions-cost.ts`, `scripts/metrics/actions-source.ts`, `lab/actions-cost/2026-11-17_2026-11-20.jsonl`, `docs/decisions/ADR-0008-actions-cost.md`, `docs/harness/architecture.md`
+
+## step 목록
+
+- step0 rates: 단가표에 두 러너를 더하고, 러너별 합계와 표를 내고, 문서를 맞춘다.
+
+## 진행 로그
+
+- 2026-11-22 Issue #204를 등록하고(제작자 대화 지시: 묶음 "호스팅 유지"를 차례대로 진행) 계획을 썼다. 계획 검증(G1)을 받은 뒤 구현한다.
+
+## 의사결정 로그
+
+- 결정: 수단(B2)을 넣기 전에 단가표를 먼저 넓힌다. / 이유: 보존 기록은 단가표에 없는 라벨을 `(기타)`로 바꿔 남기므로, 수단을 넣은 뒤에 넓히면 그 사이의 기록은 다시 계산할 수 없다. / 대안: B2의 Issue 안에서 함께 한다(워크플로 변경은 위험도 높음이고 제작자가 적용한다. 스크립트 변경을 거기 섞으면 절차서 1절의 "기준에 해당하는 일과 아닌 일은 계획을 나눈다"에 어긋난다).
+- 결정: 단가는 쓰기로 한 두 러너만 더한다. / 이유: 단가표는 확인한 것만 넣는다(`RATE_MILLI`의 주석). ADR-0008의 "확인한 외부 사실"에 두 러너의 단가와 라벨이 있다(2026-11-22에 공식 문서에서 읽었다). / 대안: arm64의 다른 라벨(`ubuntu-22.04-arm`)도 넣는다(쓰지 않는 러너다).
+- 결정: 러너별 표를 출력에 더한다. / 이유: ADR-0008의 묶음은 단가별 청구 분(분당 $0.005의 분, 분당 $0.002의 분)으로 적혀 있다. 수단을 넣은 뒤 job이 실제로 옮겨 갔는지와 단가별 분을 같은 출력에서 봐야 묶음의 가정과 견줄 수 있다. / 대안: 합계만 낸다(어느 러너에서 돈 분인지 보이지 않는다).
+- 결정: A6은 이 리포에 이미 들어 있어(2026-11-19, Issue #129. `testInertPaths`) 구현할 것이 없다. A6 뒤의 값은 B2를 넣기 직전에 재는 값으로 기록한다. / 이유: 기준선(2026-11-17~20)의 절반이 A6 뒤다. A6만의 기간(2026-11-19부터 나흘)은 2026-11-22가 끝나야 잴 수 있다. / 대안: 겹치는 기간(2026-11-18~21)을 잰다(A6 전의 하루가 섞인다).
+
+## 발견 사항
+
+## 열린 질문
+
+없음.
+
+## 검증 방법과 결과
+
+- step0의 AC(테스트, 기준선 보존 기록이 그대로인지, 기준선의 "기록 칸" 행, 문서의 기준선 구간과 `--from` 출력의 일치, 문서 검사, `check`).
+
+## 다음 할 일
+
+- 계획만 담은 커밋을 push해 초안 PR을 열고 계획 검증(G1)을 받는다. 승인 뒤 step0을 구현한다(테스트 먼저).
+- 이 계획이 병합되면 A6 뒤의 값(2026-11-19~2026-11-22)을 재고, B2(arm64 러너)의 Issue를 등록해 시작한다.

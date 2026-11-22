@@ -1,0 +1,100 @@
+# Step 0: rates
+
+## 읽어야 할 파일
+
+- `docs/harness/architecture.md`
+- `scripts/metrics/actions-cost.ts`(`RATE_MILLI`, `runnerRate`, `keptLabel`, `toSaved`, `parseSaved`, `actionsCost`, `CostReport`, `renderCost`)
+- `scripts/test/actions-cost.test.ts`, `scripts/test/actions-cost-command.test.ts`
+- `docs/harness/actions-cost.md`("재는 방법", "예산", "기준선"의 표식 구간, "판단 절차")
+- `lab/actions-cost/check-doc.ts`, `lab/actions-cost/test/check-doc.test.ts`, `lab/actions-cost/README.md`
+- `docs/decisions/ADR-0008-actions-cost.md`의 "확인한 외부 사실"(읽기만. 단가와 라벨의 출처)
+- Issue #204
+
+## 작업
+
+테스트를 먼저 쓰고 실패하는 것을 확인해 진행 로그에 적는다(R5). 실패하는 테스트만 담은 커밋을 구현 커밋보다 먼저 만든다.
+
+### 1. 단가표 (`scripts/metrics/actions-cost.ts`)
+
+`RATE_MILLI`에 두 줄을 더한다. 값은 천분의 1달러다.
+
+| 라벨               | 러너              | 분당 단가 | 값  |
+| ------------------ | ----------------- | --------- | --- |
+| `ubuntu-24.04-arm` | Linux 2코어 arm64 | $0.005    | 5   |
+| `ubuntu-slim`      | Linux 1코어 x64   | $0.002    | 2   |
+
+- 지금의 세 줄(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04` = 6)은 그대로 둔다.
+- 주석에 러너의 종류, 단가, 출처(`https://docs.github.com/en/billing/reference/actions-runner-pricing`, 라벨은 `https://docs.github.com/en/actions/reference/runners/github-hosted-runners`)와 확인한 날짜(2026-11-22)를 적는다.
+- 그 밖의 규칙은 그대로다: 라벨이 단가표의 라벨 하나뿐일 때만 단가를 안다. 라벨이 여럿이거나 없으면 모르는 러너다. `self-hosted`가 들어 있으면 self-hosted다.
+- 보존 기록은 단가표에 있는 라벨과 `self-hosted`만 그대로 남긴다(`keptLabel`). 두 라벨이 단가표에 들면 그대로 남는다. 따로 목록을 만들지 않는다(단가표와 보존 기록이 받는 라벨이 어긋나지 않게 한다).
+
+### 2. 러너별 합계 (`scripts/metrics/actions-cost.ts`)
+
+`CostReport`에 칸 하나를 더한다.
+
+```ts
+/** 러너별. 이름은 단가표의 라벨, 'self-hosted', '(기타)'(단가를 모르는 러너) 가운데 하나다 */
+byRunner: CostRow[];
+```
+
+- 돈 job만 센다(돌지 않은 job은 다른 표와 같이 들지 않는다).
+- 단가를 아는 러너의 줄: `jobs`는 돈 job 수, `minutes`는 청구 분, `usd`는 그 단가를 곱한 금액이다.
+- `(기타)`와 `self-hosted`의 줄: `jobs`는 돈 job 수이고 `minutes`와 `usd`는 0이다(다른 표가 단가를 모르는 러너의 job을 세는 방식과 같다. 그 분은 지금처럼 `unknownMinutes`, `selfHostedMinutes`에 있다).
+- 순서는 다른 표와 같다(청구 분 내림차순, 같으면 이름 오름차순).
+- 모든 줄의 `jobs`의 합은 `ranJobs`, `minutes`의 합은 `minutes`, `usd`의 합은 `usd`와 같다.
+
+### 3. 출력 (`renderCost`)
+
+- 단가 안내 문장이 세 단가를 모두 적는다: 2코어 Linux x64 분당 $0.006, 2코어 Linux arm64 분당 $0.005, 1코어 Linux 분당 $0.002.
+- "러너별" 표를 "워크플로별" 표 앞에 낸다. 칸은 다른 표와 같다(러너, 돈 job, 청구 분, 금액, 비율).
+- "기록 칸"과 요약의 칸은 바꾸지 않는다.
+
+### 4. 문서
+
+- `docs/harness/actions-cost.md`
+  - "재는 방법"의 **단가** 줄: 세 단가와 라벨, 출처, 확인한 날짜(2026-11-22)를 적는다.
+  - "예산"의 "지금은 단가를 아는 러너가 2코어 Linux뿐이라 $0.18은 30분과 같다"를 고친다: $0.18은 2코어 Linux x64만 쓰면 30분이고, 단가가 낮은 러너에서 돈 분은 그만큼 더 쓸 수 있다는 뜻으로 적는다. `- PR 하나당 예산:` 줄과 예산 값은 바꾸지 않는다.
+  - "기준선"의 표식 구간(`<!-- actions-cost:begin -->`~`<!-- actions-cost:end -->`)을 `node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-17_2026-11-20.jsonl`의 새 출력으로 바꿔 붙인다. 손으로 고치지 않는다.
+  - "기록" 표는 바꾸지 않는다.
+- `docs/harness/CHANGELOG.md`의 "다음 버전"에 한 줄(Issue #204, 검사를 약화하지 않는다는 것).
+- `lab/actions-cost/check-doc.ts`와 그 테스트, `lab/actions-cost/README.md`는 바뀐 출력 때문에 맞지 않는 곳이 있을 때만 고친다. 검사가 보는 것을 줄이지 않는다.
+
+### 5. 테스트 (`scripts/test/actions-cost.test.ts`, 필요하면 `scripts/test/actions-cost-command.test.ts`)
+
+- `runnerRate(['ubuntu-24.04-arm'])`는 `{ kind: 'priced', usdPerMinute: 0.005 }`, `runnerRate(['ubuntu-slim'])`는 `{ kind: 'priced', usdPerMinute: 0.002 }`다. `['ubuntu-24.04-arm', 'gpu']`와 `['ubuntu-22.04-arm']`은 `unknown`이다.
+- 러너가 섞인 입력(x64 2분, arm64 3분, 1코어 4분, 모르는 러너 5분, self-hosted 6분): 청구 분 9, 금액 $0.035(= 2×0.006 + 3×0.005 + 4×0.002), `usdMilli` 35, `unknownMinutes` 5, `selfHostedMinutes` 6. PR 하나에 이어 두고 PR 하나당 금액과 30일 환산 금액이 같은 합에서 나오는지 본다.
+- `byRunner`: 위 입력에서 줄이 다섯이고(세 라벨, `(기타)`, `self-hosted`) 값과 순서가 위 규칙대로다. 줄의 합이 `ranJobs`·`minutes`·`usd`와 같다.
+- 보존 기록: 두 라벨이 파일에 그대로 있고, `parseSaved` → `fromSaved` → `actionsCost`의 결과가 원래 입력의 결과와 같다(`deepEqual`). `ubuntu-22.04-arm` 같은 단가표 밖의 라벨은 `(기타)`로 남고, 보존 기록의 줄에 그런 라벨을 직접 적으면 `parseSaved`가 거부한다.
+- 출력: "러너별" 표가 있고 단가 안내 문장에 `$0.005`와 `$0.002`가 있다.
+
+## Acceptance Criteria
+
+```bash
+node --test scripts/test/actions-cost.test.ts scripts/test/actions-cost-command.test.ts
+node --test lab/actions-cost/test/check-doc.test.ts lab/actions-cost/test/check-adr.test.ts
+git diff --quiet origin/main -- lab/actions-cost/2026-11-17_2026-11-20.jsonl
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-17_2026-11-20.jsonl > "$T/out.md" && grep -q "^| 2026-11-17~2026-11-20 | 4028 *| 100.7 *| \$0.604 *| 21.2 *| \$181.26 *|$" "$T/out.md"
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-17_2026-11-20.jsonl > "$T/out.md" && grep -q "^\*\*러너별\*\*" "$T/out.md" && grep -q "^| ubuntu-latest *| 2384 *| 4028 *| \$24.17 *|" "$T/out.md"
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-17_2026-11-20.jsonl > "$T/out.md" && grep -F "0.005" "$T/out.md" | grep -qF "0.002"
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-17_2026-11-20.jsonl > "$T/out.md" && test -s "$T/out.md" && grep -v "^$" "$T/out.md" > "$T/a" && awk '/<!-- actions-cost:begin -->/{s=1;next} /<!-- actions-cost:end -->/{s=0} s' docs/harness/actions-cost.md | grep -v "^$" > "$T/b" && test -s "$T/b" && cmp "$T/a" "$T/b"
+node lab/actions-cost/check-doc.ts
+node lab/actions-cost/check-adr.ts
+grep -q "ubuntu-24.04-arm" docs/harness/actions-cost.md && grep -q "ubuntu-slim" docs/harness/actions-cost.md
+grep -q "#204" docs/harness/CHANGELOG.md
+node scripts/harness.ts check
+```
+
+- 어느 줄도 GitHub을 읽지 않는다(셋째 줄은 로컬의 `origin/main`과 견준다).
+- 셋째 줄: 기준선 보존 기록이 그대로다. 넷째 줄: 그 기록의 "기록 칸" 행이 그대로다(4028분, 100.7분, $0.604, 21.2분, $181.26).
+- 다섯째 줄: 러너별 표가 있고, 기준선의 돈 job 2384개는 모두 `ubuntu-latest`에서 돌았으므로 그 줄의 청구 분이 전체 4028분이고 금액이 요약의 금액과 같은 $24.17(4028 × $0.006 = $24.168을 소수 둘째 자리로 적은 값)이다.
+- 여섯째 줄: 출력의 한 줄(단가 안내 문장)에 두 단가가 함께 있다.
+- 일곱째 줄: 문서의 기준선 구간이 `--from`의 출력과 같다. 빈 줄은 비교에서 뺀다(prettier가 표식 줄 앞뒤에 빈 줄을 둔다).
+
+## 금지사항
+
+- `.github/workflows/`를 고치지 마라. 이유: `runs-on`을 바꾸는 것은 B2·B1의 Issue이고, 봇은 워크플로 파일을 push할 수 없다.
+- `lab/actions-cost/2026-11-17_2026-11-20.jsonl`을 고치거나 다시 재지 마라. 이유: 보존 기록이 기준선의 기준이다(판단 절차 "기준이 되는 입력").
+- 확인하지 않은 러너의 단가를 넣지 마라. 이유: 단가표에는 출처에서 확인한 것만 넣는다. 틀린 단가는 금액과 예산 판단을 틀리게 한다.
+- 예산 값(`BUDGET`), 판단 규칙(`verdictOf`), "기록" 표의 행을 바꾸지 마라. 이유: 예산은 제작자의 결정이고, 이 step은 재는 도구만 넓힌다.
+- `lab/actions-cost/check-doc.ts`가 보는 것을 줄이지 마라. 이유: 검사를 약화하지 않는다(R4).
+- GitHub을 읽는 명령(`actions-cost --since`)을 AC와 테스트에 넣지 마라. 이유: 지난 기간의 실행 기록도 다시 실행하면 바뀌어 결과가 달라진다.
