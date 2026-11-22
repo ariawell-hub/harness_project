@@ -1,7 +1,7 @@
 // check의 test 건너뛰기(6절, Issue #129): 바뀐 파일이 모두 testInertPaths 안일 때만 test를 돌리지 않는다.
 // 픽스처의 test 명령은 항상 실패한다. 돌았으면 실패, 건너뛰었으면 통과로 구분된다.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { cacheKey, runCheck, testInert, testSkip } from '../commands/check.ts';
@@ -451,6 +451,8 @@ test('이 리포의 설정: 테스트가 읽는 파일은 건너뛰기 대상이
     'docs/harness/design.md',
     // 구조 테스트(q10-trial-workflow.test.ts)가 읽는 워크플로 패치: lab 아래지만 보호 경로라 건너뛰지 않는다(Issue #215)
     'lab/q10-db/q10-trial-workflow.patch',
+    // profile-web-db.test.ts가 웹 프로파일 README의 DB 절과 맞대는 실측 결과: 보호 경로라 건너뛰지 않는다(Issue #225)
+    'lab/q10-db/results/darwin-arm64.json',
   ];
   for (const f of read) assert.equal(testInert(f, cfg), false, f);
   for (const f of [
@@ -459,7 +461,39 @@ test('이 리포의 설정: 테스트가 읽는 파일은 건너뛰기 대상이
     'docs/exec-plans/completed/20261118-z.md',
     'lab/ops-transition/results/target-repo.json',
     'lab/q10-db/README.md',
-    'lab/q10-db/results/darwin-arm64.json',
+    'lab/q10-db/results/linux-x64.json',
   ])
     assert.equal(testInert(f, cfg), true, f);
+});
+
+/** dir 아래의 .ts 파일(하위 폴더 포함). 리포 기준 상대 경로 */
+function tsFiles(dir: string): string[] {
+  return readdirSync(path.join(HARNESS_ROOT, dir), { withFileTypes: true }).flatMap((d) => {
+    const rel = `${dir}/${d.name}`;
+    if (d.isDirectory()) return tsFiles(rel);
+    return d.isFile() && d.name.endsWith('.ts') ? [rel] : [];
+  });
+}
+
+test('이 리포의 설정: scripts/test/의 테스트가 따옴표 안에 적은 lab/ 경로는 건너뛰기 대상이 아니다 (Issue #225)', () => {
+  const cfg = loadConfig(HARNESS_ROOT);
+  // 이 파일은 뺀다: 픽스처와 건너뛰기 대상의 예로 lab/ 경로를 적는다
+  const self = 'scripts/test/check-skip.test.ts';
+  const found = new Set<string>();
+  for (const f of tsFiles('scripts/test')) {
+    if (f === self) continue;
+    for (const m of readFileSync(path.join(HARNESS_ROOT, f), 'utf8').matchAll(
+      /['"`](lab\/[^'"`\s]+)['"`]/g,
+    )) {
+      const rel = m[1];
+      // glob 글자가 든 글이나 리포에 없는 경로는 테스트가 읽는 파일이 아니다
+      if (/[*?[\]{}]/.test(rel)) continue;
+      const abs = path.join(HARNESS_ROOT, rel);
+      if (existsSync(abs) && statSync(abs).isFile()) found.add(rel);
+    }
+  }
+  // 훑기가 헛돌지 않는다: profile-web-db.test.ts가 읽는 결과 파일을 찾는다
+  assert.ok(found.has('lab/q10-db/results/darwin-arm64.json'), [...found].join(', '));
+  for (const f of found)
+    assert.equal(testInert(f, cfg), false, `테스트가 읽는 ${f}가 건너뛰기 대상이다`);
 });
