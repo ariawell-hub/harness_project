@@ -20,14 +20,20 @@ const PATH_IN_DESCRIPTION = 60;
  * - 코드 블록: 여는 펜스(백틱이나 물결 셋 이상)의 글자와 길이를 기억하고, 같은 글자가 그 길이 이상이고 다른 글자가 없는
  *   줄에서만 닫는다. 닫히지 않은 블록은 끝까지다. 펜스 줄 자신도 코드 블록 안으로 친다.
  * - 주석: 닫는 표식(`-->`)이 뒤에 없는 `<!--`는 주석이 아니다. 주석이 닫힌 줄의 나머지 글은 주석이 열린 줄에 이어 붙인다.
- * - 코드 블록 밖, 주석 밖의 `## ` 줄이 나오면 거기서 그친다.
+ * - 주석은 `## ` 줄을 넘지 못한다: 닫는 표식보다 `## ` 줄이 먼저 나오면 그 `<!--`는 닫히지 않은 것이다. 계획 해시의
+ *   섹션 추출은 주석을 모르고 `## ` 줄에서 절을 나눈다. 다음 절의 닫는 표식이 절의 경계를 지우지 못한다.
+ * - 코드 블록 밖의 `## ` 줄이 나오면 거기서 그친다.
  */
 function proseLines(text: string): string[] {
   const all = text.split('\n');
-  /** `-->`가 든 마지막 줄. 닫는 표식이 뒤에 있는지를 줄마다 다시 찾지 않는다 */
-  let lastClose = -1;
-  for (let i = all.length - 1; i >= 0 && lastClose < 0; i--)
-    if (all[i].includes('-->')) lastClose = i;
+  const n = all.length;
+  /** i번째 줄부터 처음 나오는 `-->`가 든 줄과 `## ` 줄의 번호(없으면 n). 여는 표식마다 뒤를 다시 찾지 않는다 */
+  const nextClose = new Array<number>(n + 1).fill(n);
+  const nextHeading = new Array<number>(n + 1).fill(n);
+  for (let i = n - 1; i >= 0; i--) {
+    nextClose[i] = all[i].includes('-->') ? i : nextClose[i + 1];
+    nextHeading[i] = /^##\s/.test(all[i]) ? i : nextHeading[i + 1];
+  }
   const out: string[] = [];
   let open: { ch: string; len: number } | null = null;
   let inComment = false;
@@ -47,8 +53,8 @@ function proseLines(text: string): string[] {
         rest = rest.slice(z + 3);
         continue;
       }
-      // 이 줄에서 닫히지 않는다: 뒤의 줄에 닫는 표식이 있을 때만 주석이다
-      if (i < lastClose) {
+      // 이 줄에서 닫히지 않는다: 뒤의 줄에 닫는 표식이 있고 그보다 먼저(같은 줄 포함) `## ` 줄이 없을 때만 주석이다
+      if (nextClose[i + 1] < nextHeading[i + 1]) {
         kept += rest.slice(0, a);
         inComment = true;
       } else kept += rest;

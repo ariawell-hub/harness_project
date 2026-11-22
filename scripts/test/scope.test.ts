@@ -135,12 +135,31 @@ test('scopePaths: 주석과 코드 블록은 먼저 열린 쪽으로 가린다(�
   assert.deepEqual(scopePaths('- `a.ts` <!-- 설명\n`x.ts` --> `b.ts`'), ['a.ts', 'b.ts']);
   // 닫히지 않은 `<!--`는 주석이 아니다
   assert.deepEqual(scopePaths('- `a.ts` <!-- 닫지 않았다\n- `b.ts`'), ['a.ts', 'b.ts']);
-  // 주석 안의 `## ` 줄에서 절이 끝나지 않는다. 주석 밖, 코드 블록 밖의 `## ` 줄에서는 끝난다
-  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n## 주석 안의 제목\n-->\n- `b.ts`'), [
+  // 주석은 `## ` 줄을 넘지 못한다(계획 해시의 섹션 추출과 같다): 여는 표식과 닫는 표식 사이에 `## ` 줄이 있으면
+  // 그 여는 표식은 닫히지 않은 것이고, 절은 그 줄에서 끝난다. 다음 절의 닫는 표식 뒤에 적은 경로는 뽑히지 않는다
+  assert.deepEqual(
+    scopePaths('- `a.ts` <!-- 닫지 않았다\n- `b.ts`\n## 진행 로그\n- `log.ts`\n-->\n- `late.ts`'),
+    ['a.ts', 'b.ts'],
+  );
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n## 주석 안의 제목\n-->\n- `late.ts`'), ['a.ts']);
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n## 제목 -->\n- `late.ts`'), ['a.ts']);
+  // 닫힌 주석 뒤의 `## ` 줄에서 끝난다. 그 뒤에 닫는 표식이 더 있어도 같다
+  assert.deepEqual(scopePaths('- `a.ts`\n<!-- x -->\n## 다음 절\n- `late.ts`\n-->'), ['a.ts']);
+  // 여는 표식 뒤에 실제 코드 블록이 열리고 그 안에 `## ` 줄이 있다: 전처럼 코드 블록으로 읽는다(절이 끝나지 않는다)
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n~~~\n## 예시\n~~~\n-->\n- `b.ts`'), [
     'a.ts',
     'b.ts',
   ]);
-  assert.deepEqual(scopePaths('- `a.ts`\n<!-- x -->\n## 다음 절\n- `late.ts`'), ['a.ts']);
+  // 긴 입력: 여는 표식마다 뒤의 `## ` 줄과 닫는 표식을 다시 찾지 않는다
+  {
+    const many = Array.from({ length: 20_000 }, (_, i) => `- \`g${i}.ts\` <!-- 닫지 않았다`);
+    const started = Date.now();
+    assert.equal(
+      scopePaths([...many, '## 다음 절', '-->', '- `late.ts`'].join('\n')).length,
+      20_000,
+    );
+    assert.ok(Date.now() - started < 5_000, `걸린 시간 ${Date.now() - started}ms`);
+  }
 });
 
 test('scopePaths: 닫히지 않은 주석 표식이 많은 긴 글도 시간 안에 읽는다', () => {
