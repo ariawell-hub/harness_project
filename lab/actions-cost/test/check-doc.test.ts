@@ -889,3 +889,8 @@ test('checkDoc: 기록 표의 앞뒤에는 빈 줄을 둔다(붙여 쓴 줄은 �
   fails(check(swap(doc, TABLE_HEAD, `표 설명\n${TABLE_HEAD}`)), /기록.*빈 줄/);
   assert.deepEqual(check(swap(doc, row, `${row}\n\n표 아래의 설명이다.`)), []);
 });
+
+test('checkDoc: 파일 머리의 BOM은 떼고 읽는다. 줄 머리의 다른 공백 글자는 형식 오류다', () => {
+  assert.deepEqual(check(`﻿${goodDoc()}`), []);
+  formatOnly(check(swap(goodDoc(), WORD, `${WORD}\n\n　전각 공백으로 들여 쓴 줄`)), /형식.*들여/);
+});

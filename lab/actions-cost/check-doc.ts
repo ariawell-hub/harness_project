@@ -183,7 +183,7 @@ const LINK_TARGET = String.raw`\]\([^()\s"'<>\`]*\)`;
  */
 function lineFormat(line: string, parts: Part[] | null): string | null {
   if (!/^ {0,3}\S/.test(line))
-    return '줄 머리를 네 칸 이상이나 탭으로 들여 쓰지 않는다(들여 쓴 코드 블록을 쓰지 않는다)';
+    return '줄 머리는 공백 세 칸까지만 들여 쓴다(네 칸 이상, 탭, 다른 공백 글자로 들여 쓰지 않는다. 들여 쓴 코드 블록을 쓰지 않는다)';
   if (/^ {0,3}(=+|-+)\s*$/.test(line)) return '밑줄 제목과 가로줄(===, ---)을 쓰지 않는다';
   if (line.includes('\\')) return '역슬래시를 쓰지 않는다(이스케이프한 글자를 가려 읽지 않는다)';
   if (parts === null)
@@ -209,7 +209,8 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
  * 받는 형식: 머리말, 줄 머리의 ``````로 여닫는 코드 블록, 줄 전체가 표식인 표식 구간, 그리고 `lineFormat`을 지킨 줄
  */
 function viewsOf(doc: string, problems: string[]): Views {
-  const raw = doc.split(/\r?\n/);
+  // 파일 머리의 BOM은 글이 아니다
+  const raw = doc.replace(/^\uFEFF/, '').split(/\r?\n/);
   const text = raw.map(() => '');
   const struct = raw.map(() => '');
   const fenced = raw.map(() => false);
