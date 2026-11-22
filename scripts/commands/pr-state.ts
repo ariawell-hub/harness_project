@@ -9,8 +9,9 @@ import { getGitHub, type GitHubPort, type PullRequest } from '../lib/github.ts';
 import { findPlan, findPlanAt, parseBranch, parseDoc, parseIndex, readIndex } from '../lib/plan.ts';
 import { log } from '../lib/util.ts';
 import { readPrLedger } from '../runner/ledger-read.ts';
-import { classifyPr, describeVerdict, requiredStates } from '../runner/pr-state.ts';
+import { classifyPr, describeVerdict, gatesMissing, requiredStates } from '../runner/pr-state.ts';
 import { longOpen } from '../runner/review.ts';
+import { shellQuote } from './standard.ts';
 
 /**
  * 커밋 `rev`의 트리에서 그 브랜치가 맡은 step이 completed인가. 커밋이나 계획을 읽지 못하면 null.
@@ -87,6 +88,16 @@ function logLongOpen(gh: GitHubPort, cfg: HarnessConfig, pr: number): void {
   }
 }
 
+/**
+ * 검증자의 판정은 났는데 게이트 상태가 없는 head의 안내 한 줄(`gatesMissing`이 낸 이름들로 만든다).
+ * 브랜치 이름은 GitHub에서 온 값이고 git은 셸의 특수 문자(`;`, `$`, 백틱, 따옴표)가 든 이름을 받는다.
+ * 이 줄의 명령은 복사해 실행하라는 것이므로 이름을 셸의 낱말 하나로 인용한다. 제어 문자가 든 이름은 넣지 않는다
+ */
+export function gatesMissingLine(names: readonly string[], branch: string): string {
+  const arg = /[\u0000-\u001f\u007f]/.test(branch) ? '<PR의 브랜치 이름>' : shellQuote(branch);
+  return `- 게이트 상태 없음: 검증자의 판정은 났는데 ${names.join(', ')}의 상태가 이 head에 없다. 기다려도 오지 않는다(\`gates\` 실행이 취소됐거나 다른 head에 기록됐다). 고치는 법: \`gh run list --workflow gates --branch ${arg} --limit 5\`로 이 PR의 실행을 찾아 \`gh run rerun <실행 번호>\`로 다시 돌린다`;
+}
+
 export function prState(cwd: string, prNumber: number | null): number {
   const info = repoInfo(cwd);
   const cfg = loadConfig(info.root);
@@ -116,6 +127,8 @@ export function prState(cwd: string, prNumber: number | null): number {
   for (const r of required) {
     log(`- ${r.context} [${r.source}]: ${r.state}${r.description ? ` — ${r.description}` : ''}`);
   }
+  const noGates = gatesMissing(required);
+  if (noGates.length) log(gatesMissingLine(noGates, pr.head));
   logLongOpen(gh, cfg, pr.number);
   const { remote, defaultBranch } = cfg.github;
   const behind = behindOf(info.root, remote, defaultBranch, pr.headSha);
