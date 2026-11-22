@@ -9,7 +9,7 @@
 //      그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절).
 //      만든 뒤 허용 계정이 아닌 계정이 제목·본문을 고쳤으면 그 뒤의 제작자 승인이 있어야 한다(TD-19)
 //   6. 없으면 idle (CI·사람 대기 수 포함)
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { planHashes } from '../ci/plan-hash.ts';
 import { stepCompletedAt } from '../commands/pr-state.ts';
@@ -215,8 +215,16 @@ export function readQuestionState(info: RepoInfo): QuestionState {
   }
 }
 
+/**
+ * 같은 폴더의 임시 파일에 다 쓴 뒤 이름을 바꿔 넣는다. 그 자리에서 덮어쓰면 쓰는 중에 runner가 끝났을 때 빈 파일이
+ * 남고, 빈 파일은 "올리지 못한 질문 없음"으로 읽혀 멈춘 계획의 질문이 다시 올려지지 않는다(Issue #211).
+ * 바꿔 넣으면 어느 순간에 끝나도 마지막으로 저장한 상태나 새 상태가 남는다
+ */
 export function writeQuestionState(info: RepoInfo, s: QuestionState): void {
-  writeFileSync(questionFile(info), JSON.stringify(s, null, 2) + '\n');
+  const file = questionFile(info);
+  const next = `${file}.${process.pid}.tmp`;
+  writeFileSync(next, JSON.stringify(s, null, 2) + '\n');
+  renameSync(next, file);
 }
 
 /**

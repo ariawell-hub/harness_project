@@ -3,7 +3,7 @@
 // 내 PR 갱신 대상 판정(우선순위 2번, ADR-0006),
 // 고친 댓글·Issue의 신뢰 판정(편집 이력, TD-19·TD-26). 가짜 GitHub + 로컬 bare 원격. 실제 gh는 부르지 않는다.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { acceptHint } from '../commands/start.ts';
@@ -1260,6 +1260,44 @@ test('questionBase: 마지막 댓글의 번호가 기준이다. 댓글이 없으
     '0이나 앞 댓글의 번호로 대신하지 않는다',
   );
   assert.equal(questionBase([numbered('abc')]), undefined);
+});
+
+test('writeQuestionState: 상태 파일을 그 자리에서 덮어쓰지 않고 다 쓴 새 파일로 바꿔 넣는다 (Issue #211, 판정 지적 F10)', () => {
+  const dir = tmp('harness-question-atomic-');
+  sh('git', ['init', '-q'], dir);
+  const info = repoInfo(dir);
+  const stateDir = path.join(dir, '.git', 'harness');
+  const f = path.join(stateDir, 'questions.json');
+  const first = {
+    reported: ['a'],
+    waiting: true,
+    stage: 'plan',
+    unposted: true,
+    base: '3',
+  } as const;
+  writeQuestionState(info, { ...first, reported: [...first.reported] });
+  // 그 자리에서 덮어쓰면 쓰는 중에 runner가 끝났을 때 빈 파일이 남고, 빈 파일은 "올리지 못한 질문 없음"으로 읽힌다.
+  // 바꿔 넣으면 어느 순간에 끝나도 전의 내용이나 새 내용만 남는다. 먼저 열어 둔 파일(전의 내용)이 새로 쓴 뒤에도
+  // 그대로인 것으로 확인한다: 같은 파일을 덮어쓰지 않았다
+  const fd = openSync(f, 'r');
+  try {
+    writeQuestionState(info, { ...first, reported: ['a', 'b'], unposted: false });
+    assert.deepEqual(JSON.parse(readFileSync(fd, 'utf8')), first, '전의 파일은 그대로다');
+  } finally {
+    closeSync(fd);
+  }
+  assert.deepEqual(readQuestionState(info), {
+    reported: ['a', 'b'],
+    waiting: true,
+    stage: 'plan',
+    unposted: false,
+    base: '3',
+  });
+  assert.deepEqual(
+    readdirSync(stateDir).filter((n) => n.startsWith('questions')),
+    ['questions.json'],
+    '임시 파일이 남지 않는다',
+  );
 });
 
 test('readQuestionState: unposted·base가 없는 옛 파일을 그대로 읽고, 숫자가 아닌 base는 없는 것으로 읽는다', () => {

@@ -2281,6 +2281,26 @@ const STOP_NOTICE: Partial<Record<StopReason, string>> = {
   error: '오류가 연속으로 나서 멈췄다(runner 로그 runner.jsonl의 error 이벤트에 내용이 있다)',
 };
 
+/**
+ * 전달이 끝나지 않은 질문에 제작자의 답이 이미 달려 있는가(Issue #211): 그 Issue의 마지막 댓글이 기준 뒤의 제작자
+ * 댓글이다(`deliverQuestions`가 질문을 올리지 않고 답으로 넘기는 조건과 같다). 라벨을 붙이지 못해 아직 받지 못한 답이다
+ */
+function answerPending(
+  ctx: Ctx,
+  l: LocalPlan,
+  comments: ReturnType<GitHubPort['comments']>,
+): boolean {
+  const last = comments.at(-1);
+  if (!last) return false;
+  const qs = readQuestionState(repoInfo(l.worktree));
+  return (
+    qs.unposted &&
+    qs.waiting &&
+    commentsAfter(comments, qs.base).includes(last) &&
+    ownerComment(last, ctx.cfg.github.owner)
+  );
+}
+
 /** 정지 알림 댓글 끝의 표식. 같은 작업자·같은 이유의 알림이 마지막 댓글이면 다시 달지 않는다 */
 export function stopMarker(worker: string, reason: string): string {
   return `<!-- harness-runner-stop:${worker.replace(/[^A-Za-z0-9_.-]/g, '_')}:${reason} -->`;
@@ -2291,6 +2311,8 @@ export function stopMarker(worker: string, reason: string): string {
  * 제작자 멘션 댓글(작업자, 이유, 남은 일, 다시 시작하는 명령)을 남긴다.
  * `needs-human`은 붙이지 않고 계획도 멈추지 않는다: 정지는 runner를 다시 시작하면 풀린다. 라벨과 `blocked`는
  * 제작자 답을 기다린다는 뜻이라 다시 시작한 runner가 그 계획을 건너뛴다.
+ * 전달이 끝나지 않은 질문에 제작자가 이미 답한 Issue에는 달지 않는다(`answerPending`): 답은 마지막 댓글일 때만
+ * 받으므로, 그 뒤에 알림을 달면 다음 실행이 그 답을 받지 못하고 질문을 다시 올린다.
  * 알림 실패는 경고만 남긴다(종료를 막지 않는다)
  */
 function notifyStop(ctx: Ctx, stop: StopReason): void {
@@ -2316,8 +2338,14 @@ function notifyStop(ctx: Ctx, stop: StopReason): void {
     const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
     for (const issue of [...new Set(left.map((l) => l.issue))]) {
       try {
-        const last = ctx.gh.comments(issue).at(-1);
+        const comments = ctx.gh.comments(issue);
+        const last = comments.at(-1);
         if (last && last.author === me && last.body.includes(marker)) continue;
+        if (left.some((l) => l.issue === issue && answerPending(ctx, l, comments))) {
+          warn(`#${issue}: 받지 못한 제작자 답이 있어 정지 알림을 달지 않는다`);
+          event(ctx, 'stop-notice-skipped', { issue, reason: stop });
+          continue;
+        }
         const plans = left
           .filter((l) => l.issue === issue)
           .map(

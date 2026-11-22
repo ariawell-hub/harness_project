@@ -1541,6 +1541,61 @@ test('runner: 질문을 계속 올리지 못하면 사람 대기(human)가 아�
   }
 });
 
+test('runner: 전달 대기 중에 받은 제작자 답 뒤에는 정지 알림을 달지 않는다. 라벨이 붙으면 그 답을 받는다 (Issue #211, 판정 지적 F11)', async () => {
+  const stopNotices = (t: Setup) =>
+    t.gh().issues[0].comments.filter((c) => c.body.includes('<!-- harness-runner-stop:'));
+  const limits = { limits: { ...baseLimits(), usageLimitMaxWaitMin: 1, pollSec: 30 } };
+  const t = setup(limits);
+  try {
+    await stageUnposted(t);
+    new FakeGitHub(t.state).ownerComment(1, 'B로 하라');
+    // 댓글은 되는데 라벨만 계속 붙지 않는다: 제작자의 답을 받지 못한 채 대기 상한에 닿는다
+    patchGh(t, (s) => {
+      s.labelFaults = 500;
+    });
+    assert.equal(await run(t.fx.root), 'usage-limit');
+    assert.equal(eventCount(t, 'answered'), 0);
+    assert.equal(botComments(t).length, 0, '제작자가 먼저 답해 질문 댓글은 올리지 않았다');
+    assert.equal(stopNotices(t).length, 0, '받지 못한 답 뒤에 정지 알림을 달지 않는다');
+    assert.equal(t.gh().issues[0].comments.at(-1)!.body, 'B로 하라', '답이 마지막 댓글로 남는다');
+    assert.equal(eventCount(t, 'stop-notice-skipped'), 1);
+    assert.equal(qsOf(t).unposted, true);
+
+    // 라벨 장애가 풀린 다음 실행: 그 답을 받고, 같은 질문을 다시 올리지 않는다
+    patchGh(t, (s) => {
+      s.labelFaults = 0;
+    });
+    await onceRunner(t.fx.root);
+    assert.equal(eventCount(t, 'answered'), 1);
+    assert.equal(botComments(t).length, 0);
+    assert.equal(qsOf(t).unposted, false);
+  } finally {
+    t.fx.cleanup();
+  }
+  // 견줌: 받지 못한 답이 없으면(질문 댓글은 올라갔고 라벨만 붙지 않는다) 정지 알림을 지금처럼 단다
+  const c = setup(limits);
+  try {
+    await gammaIssue(c);
+    patchGh(c, (s) => {
+      s.labelFaults = 500;
+    });
+    assert.equal(await run(c.fx.root), 'usage-limit');
+    assert.equal(botComments(c).length, 1);
+    assert.equal(stopNotices(c).length, 1);
+    assert.equal(eventCount(c, 'stop-notice-skipped'), 0);
+    // 그 뒤에 제작자가 답하면(마지막 댓글이다) 라벨이 붙는 대로 받는다
+    new FakeGitHub(c.state).ownerComment(1, 'A로 하라');
+    patchGh(c, (s) => {
+      s.labelFaults = 0;
+    });
+    await onceRunner(c.fx.root);
+    assert.equal(eventCount(c, 'answered'), 1);
+    assert.equal(botComments(c).length, 1, '질문을 다시 올리지 않는다');
+  } finally {
+    c.fx.cleanup();
+  }
+});
+
 test('runner: 라벨은 댓글 뒤에 붙인다. 댓글은 올라갔는데 라벨을 붙이지 못하면 올린 것으로 적고 라벨만 다시 붙인다 (Issue #211)', async () => {
   const t = setup();
   try {
