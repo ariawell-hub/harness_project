@@ -32,7 +32,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 범위:
 
 - `lab/q10-db/run.ts`(새 파일)와 그 테스트, `lab/q10-db/README.md`(절차를 명령 하나로, CI에서 돌리는 법, "잰 머신" 표), 워크플로 패치 `lab/q10-db/q10-trial-workflow.patch`.
-- `lab/q10-db/trial.ts`에서 `--out`을 지운다(결과를 검사 없이 임의의 경로에 쓰던 옵션).
+- `lab/q10-db/trial.ts`에서 `--out`을 지운다(결과를 검사 없이 임의의 경로에 쓰던 옵션). 인자 검사를 `lab/q10-db/trial-args.ts`(새 파일)로 뗀다.
 - `.github/workflows/q10-trial.yml`(새 파일. 제작자가 올린다. `docs/SECURITY.md`의 "워크플로 변경 절차").
 - 워크플로의 구조를 단언하는 테스트 `scripts/test/q10-trial-workflow.test.ts`(새 파일).
 - 결과 파일 `lab/q10-db/results/linux-<arch>.json`, `lab/q10-db/results/win32-<arch>.json`.
@@ -51,6 +51,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 
 - `lab/q10-db/run.ts`, `lab/q10-db/test/run.test.ts`, `lab/q10-db/README.md`, `lab/q10-db/q10-trial-workflow.patch`, `lab/q10-db/results/**`
 - `lab/q10-db/verify-artifacts.ts`, `lab/q10-db/test/verify-artifacts.test.ts`, `lab/q10-db/test/confirmed.test.ts`
+- `lab/q10-db/trial-args.ts`
 - `lab/q10-db/trial.ts`(`--out`을 지운다. 그 밖에는 실측에서 어긋난 점이 나오면 고친다. 확인 항목과 판정 기준은 바꾸지 않는다), `lab/q10-db/check-results.ts`(실측에서 어긋난 점이 나오면 고친다. 판정 기준은 바꾸지 않는다)
 - `docs/decisions/index.md`, `lab/q10-db/README.md`(확정 상태의 문구)
 - `.github/workflows/q10-trial.yml`
@@ -88,6 +89,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-22 계획 검증 5회차: Claude 승인, Codex 수정 요청(P1 하나). F6·F7은 닫혔다. F8(P1): Windows에서 `trial.ts`를 직접 부를 때 `--out`을 거부하는지 보는 곳이 없다(함수와 `run.ts`만 본다). 맞는 지적이다. 회차마다 `--out`의 다른 조합에서 빈 곳이 하나씩 나왔으므로(F1, F5~F8), 이번에는 지적된 줄만 고치지 않고 진입점(함수, `run.ts`, `trial.ts`)과 OS(macOS, Linux, Windows)의 조합을 표로 모두 적어 빈칸을 찾았다. 빈칸은 둘이었다: Windows에서 `trial.ts`를 명령으로 부르는 경우(F8), Windows와 Linux의 러너에서 `run.ts`를 명령으로 부르는 경우(`run.test.ts`는 러너에서 돌지 않는다. 지적되지 않았지만 같은 종류다). → `out-file.test.ts`에 두 진입점을 실제 명령으로 부르는 사례를 넣었다(모든 OS, macOS·Linux, Windows). `run.ts`의 마지막 단계가 그 파일을 돌리므로 두 러너에서 돌고, step1이 로그에서 건너뛰어지지 않은 것을 확인한다. 보지 않는 것 하나(Linux에서 `--out` 실측의 성공)는 표 아래에 적었다.
 - 2026-11-22 계획 검증 6회차: Claude 승인, Codex 수정 요청(P1 둘). F8은 닫혔다. F9(P1): 두 진입점을 명령으로 부르는 거부 테스트가 실제 작업 트리의 `package.json`을 쓰기 대상으로 준다. 검사가 빠진 코드(구현 전의 실패 확인, 회귀)에서는 덮어쓸 수 있다. F10(P1): Linux에서 `--out`이 정상 경로를 받는지 명령 수준으로 보지 않는다. 둘 다 `--out`의 지적이고, 여섯 회차 동안 이 옵션에서만 일곱 건이 나왔다(F1, F5~F10). 앞의 보고에서 정한 대로 더 고치지 않고 제작자에게 물었다(선택지: `--out`을 없앤다 / 한 번 더 고친다 / 남은 지적을 받아들인다). 답: "`--out`을 없앤다".
 - 2026-11-22 계획을 다시 썼다(`--out`을 없앤다). step0: `run.ts`는 `--skip-fmt`만 받는다. `trial.ts`에서 `--out`을 지운다(인자는 빈 폴더 하나). 경로 검사(`out-file.ts`)와 그 테스트, 진입점·OS 표, Windows에서의 거부 기준은 통째로 뺐다. 절차를 이 머신에서 돌려 보는 AC는 새 임시 폴더의 복제본에서 돌린다(`git clone` 뒤 `run.ts --skip-fmt`. 이 worktree에서 복제하면 같은 커밋이 체크아웃되는 것을 확인했다). `--out`을 받지 않는 것을 보는 테스트는 리포 밖의 임시 폴더만 쓰기 대상으로 준다(F9와 같은 일이 없게). step1: 러너의 로그에서 경로 검사 테스트를 확인하는 항목을 뺐다. 옛 브랜치의 `run.ts`와 테스트는 `--out`을 받는 꼴이라 가져온 뒤 고친다.
+- 2026-11-22 계획 검증 7회차(`--out`을 없앤 계획): Claude 승인, Codex 수정 요청(P1 하나). F1~F10은 모두 닫혔다(F4는 미룸). F11(P1): `trial.ts`를 실제 명령으로 불러 `--out`의 거부를 보는 테스트는, 고치기 전의 코드에서 돌리면(구현 전의 실패 확인) 그 인자가 받아들여져 패키지 설치가 시작된다. "네트워크를 쓰지 않는 테스트"와 어긋난다. 맞는 지적이다. → 인자 검사를 순수 함수(`lab/q10-db/trial-args.ts`의 `parseTrialArgs`)로 떼고 테스트는 그 함수와 연결(글)을 본다. `trial.ts`는 불러오기만 해도 실측이 돌기 때문에 테스트가 불러오거나 실행하지 않는다. 실제 명령으로 보는 것은 구현 뒤의 AC 한 줄로 옮겼다(리포 밖의 임시 폴더만 쓴다).
 
 ## 의사결정 로그
 
