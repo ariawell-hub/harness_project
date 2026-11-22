@@ -482,6 +482,7 @@ test('init: 프로파일이 정한 github 항목을 적용하고, --owner·--bot
   assert.equal(loadConfig(root).github.bot, 'profile-bot');
   // 명령줄의 값은 프로파일의 값 위에 적는다. 주지 않은 것은 프로파일의 값이다
   const again = templateCopy();
+  gitInit(again);
   editProfile(again, (x) => {
     x.config.github = github;
   });
