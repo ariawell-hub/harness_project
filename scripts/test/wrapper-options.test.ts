@@ -639,9 +639,8 @@ const BOUNDARY = [
   `env -S 'T a\\cb c'`,
   // 네 번 나눈다
   `env -S -i -S -i -S -i -S 'T a'`,
-  // 같은 옵션을 되풀이하지 않고 네 번, 다섯 번 나눈다(조사용)
+  // 같은 옵션을 되풀이하지 않고 네 번 나눈다
   `env -S -uA -S -uB -S -uC -S 'T a'`,
-  `env -S -uA -S -uB -S -uC -S -uD -S 'T a'`,
 ];
 
 test('실제 실행 대조: 래퍼가 tool을 실행하는 꼴에서는 분석기도 그 명령을 낸다', (t) => {
@@ -764,12 +763,18 @@ test('실제 실행 대조: 래퍼가 tool을 실행하는 꼴에서는 분석�
   }
   // 다섯 번 나누는 꼴: 실제로는 tool이 실행되고, 훅은 그 호출을 막는다
   if (splits) {
-    const five = `env -S -i -S -i -S -i -S -i -S '${tool} a'`;
-    const r = exec(five);
-    if (r.argv === null)
-      notRun.push(`다섯 번 나누는 꼴: 종료 코드 ${r.status}, ${r.stderr.trim()}`);
-    else assert.deepEqual(r.argv, [tool, 'a']);
-    assert.equal(rule(five), 'R4');
+    for (const five of [
+      `env -S -i -S -i -S -i -S -i -S '${tool} a'`,
+      `env -S -uA -S -uB -S -uC -S -uD -S '${tool} a'`,
+    ]) {
+      const r = exec(five);
+      if (r.argv === null)
+        notRun.push(
+          `다섯 번 나누는 꼴 ${five.slice(0, 16)}: 종료 코드 ${r.status}, ${r.stderr.trim()}`,
+        );
+      else assert.deepEqual(r.argv, [tool, 'a']);
+      assert.equal(rule(five), 'R4');
+    }
   }
   if (notRun.length) {
     const version = spawnSync('env', ['--version'], {
