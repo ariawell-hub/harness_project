@@ -703,54 +703,53 @@ test('checkDoc: 잰 명령과 다시 계산하는 명령은 코드로 적은 명
   assert.deepEqual(check(block), []);
 });
 
-const fence = (s: string) => `\`\`\`text\n${s}\n\`\`\``;
-const comment = (s: string) => `<!--\n${s}\n-->`;
+const F3 = '```';
+const fence = (s: string) => `${F3}text\n${s}\n${F3}`;
+const BEGIN_MARK = '<!-- actions-cost:begin -->';
+const END_MARK = '<!-- actions-cost:end -->';
+const WORD = '포함 사용량은';
 
-test('checkDoc: 코드 블록이나 주석 안의 줄은 절·예산 줄·항목·표로 치지 않는다', () => {
+/** 어긋난 점이 모두 형식의 것이고 그 가운데 `re`에 맞는 것이 있다(다른 절의 오류로 번지지 않는다) */
+function formatOnly(problems: string[], re: RegExp): void {
+  fails(problems, re);
+  assert.deepEqual(
+    problems.filter((p) => !p.startsWith('형식')),
+    [],
+  );
+}
+
+test('checkDoc: 코드 블록 안의 줄은 절·예산 줄·항목·표로 치지 않는다', () => {
   const doc = goodDoc();
   const budget = '- PR 하나당 예산: 30분($0.18, 2코어 Linux 기준)';
   fails(check(swap(doc, budget, fence(budget))), /예산.*PR 하나당 예산/);
-  fails(check(swap(doc, budget, comment(budget))), /예산.*PR 하나당 예산/);
-  fails(check(swap(doc, budget, `<!-- ${budget} -->`)), /예산.*PR 하나당 예산/);
   const item = doc.split('\n').find((l) => l.startsWith(HEADS[5]));
   assert.ok(item);
-  fails(check(swap(doc, item, comment(item))), /판단 절차.*효과가 없을 때/);
   fails(check(swap(doc, item, fence(item))), /판단 절차.*효과가 없을 때/);
   const table = `${TABLE_HEAD}\n${TABLE_RULE}\n${recordRow(BASE, BASELINE_FILE, '기준선', '예산 안')}`;
   fails(check(swap(doc, table, fence(table))), /기록.*표/);
-  fails(check(swap(doc, table, comment(table))), /기록.*표/);
   fails(check(swap(doc, '## 예산\n', `${fence('## 예산')}\n`)), /## 예산/);
   const date = '- 잰 날짜: 2026-11-22';
-  fails(check(swap(doc, date, comment(date))), /기준선.*잰 날짜/);
-});
-
-test('checkDoc: 주석 안의 글은 본문·낱말·명령으로 치지 않는다', () => {
-  const doc = goodDoc();
-  const why = sectionOf(doc, '왜 재는가');
-  const body = why.split('\n').slice(2).join('\n');
-  fails(check(swap(doc, why, `## 왜 재는가\n\n<!--\n${body}-->\n\n`)), /왜 재는가/);
-  const from = `\`${FROM_COMMAND}\``;
-  fails(check(swap(doc, from, `<!-- ${from} -->`)), /기준선.*다시 계산하는 명령/);
+  fails(check(swap(doc, date, fence(date))), /기준선.*잰 날짜/);
 });
 
 test('checkDoc: 코드 블록 안의 글은 본문의 낱말로 친다(명령 예시를 코드 블록에 적는다)', () => {
   const doc = swap(
     goodDoc(),
     '`node scripts/harness.ts actions-cost --since <날짜> --until <날짜>`로 잰다.',
-    '아래 명령으로 잰다.\n\n```bash\nnode scripts/harness.ts actions-cost --since <날짜> --until <날짜>\n```\n',
+    `아래 명령으로 잰다.\n\n${F3}bash\nnode scripts/harness.ts actions-cost --since <날짜> --until <날짜>\n${F3}\n`,
   );
   assert.deepEqual(check(doc), []);
 });
 
 test('checkDoc: 표식이 코드 블록 안에 있으면 표식 구간으로 치지 않는다', () => {
   const doc = goodDoc();
-  const begin = doc.indexOf('<!-- actions-cost:begin -->');
-  const end = doc.indexOf('<!-- actions-cost:end -->') + '<!-- actions-cost:end -->'.length;
+  const begin = doc.indexOf(BEGIN_MARK);
+  const end = doc.indexOf(END_MARK) + END_MARK.length;
   const wrapped = `${doc.slice(0, begin)}${fence(doc.slice(begin, end))}${doc.slice(end)}`;
   fails(check(wrapped), /기준선.*표식 구간/);
 });
 
-// ---- 코드 판정 2라운드(F3의 남은 경우, F5) ----
+// ---- 코드 판정 2라운드(F3의 남은 경우) ----
 
 test('checkDoc: 판단 절차에서 두 칸보다 덜 들여 쓴 줄은 그 항목의 내용이 아니다', () => {
   const doc = goodDoc();
@@ -759,44 +758,112 @@ test('checkDoc: 판단 절차에서 두 칸보다 덜 들여 쓴 줄은 그 항�
   // 공백 한 칸으로 시작하는 목록 항목은 화면에서 같은 수준의 별개 항목이다
   const sibling = `${HEADS[4]}\n - 이 줄은 한 칸 들여 쓴 별개의 목록 항목이고 스무 자를 넘는다.`;
   fails(check(swap(doc, line, sibling)), /판단 절차.*판단 시점 3.*20자/);
-  // 두 칸 넘게 들여 쓴 줄(이어지는 글, 하위 목록)은 그 항목의 내용이다
+  // 두 칸이나 세 칸 들여 쓴 줄(이어지는 글, 하위 목록)은 그 항목의 내용이다
   const nested = `${HEADS[4]}\n  - 30일 환산 금액을 계정의 월 예산과 견줘 감당할 수 있는지 본다.`;
   assert.deepEqual(check(swap(doc, line, nested)), []);
 });
 
-test('checkDoc: 백틱 안의 주석 시작 문자열은 주석이 아니다', () => {
+// ---- 코드 판정 3라운드(F6, F7): 검사가 읽는 형식만 받는다. 벗어난 문서는 "형식"으로 거부한다 ----
+// Markdown을 흉내 내어 해석하지 않는다: 해석이 GitHub과 어긋나는 자리마다 가려진 글이 통과하거나(F6)
+// 바른 문서의 뒤쪽이 통째로 가려졌다(F5, F7).
+
+test('checkDoc 형식: 코드 밖에 HTML 태그와 주석을 쓰지 않는다(표식 두 줄만 예외)', () => {
   const doc = goodDoc();
-  const shown = swap(doc, '포함 사용량은', '표식은 `<!--`로 시작하는 주석이다. 포함 사용량은');
-  assert.deepEqual(check(shown), []);
-  const pair = swap(doc, '포함 사용량은', '표식은 `<!-- … -->` 꼴이다. 포함 사용량은');
-  assert.deepEqual(check(pair), []);
-  const double = swap(doc, '포함 사용량은', '표식은 ``<!-- ` -->`` 꼴이다. 포함 사용량은');
-  assert.deepEqual(check(double), []);
-  // 백틱 안의 낱말은 화면에 보이므로 낱말로 친다. 주석 안의 백틱은 주석이다
-  const hidden = swap(doc, '포함 사용량은', '<!-- `포함 사용량`은 -->무료 분은');
-  fails(check(hidden), /왜 재는가.*포함 사용량/);
+  // 주석으로 가린 글은 통과하지 못한다. 주석을 풀어 읽지 않으므로 다른 오류로 번지지도 않는다
+  const budget = '- PR 하나당 예산: 30분($0.18, 2코어 Linux 기준)';
+  formatOnly(check(swap(doc, budget, `<!--\n${budget}\n-->`)), /형식.*HTML/);
+  fails(check(swap(doc, budget, `<!-- ${budget} -->`)), /형식.*HTML/);
+  formatOnly(check(swap(doc, WORD, `<!-- 메모 -->${WORD}`)), /형식.*HTML/);
+  formatOnly(check(swap(doc, WORD, `<!-- ${WORD} -->무료 분은`)), /형식.*HTML/);
+  formatOnly(check(swap(doc, WORD, `<span hidden>${WORD}</span>`)), /형식.*HTML/);
+  formatOnly(check(swap(doc, '## 예산\n', '<details>\n\n## 예산\n')), /형식.*HTML/);
+  // 표식은 줄 전체가 표식일 때만 표식이다
+  fails(check(swap(doc, BEGIN_MARK, `  ${BEGIN_MARK}`)), /형식.*HTML/);
+  fails(check(swap(doc, END_MARK, `${END_MARK} 끝`)), /형식.*HTML/);
 });
 
-test('checkDoc: 주석이 닫힌 뒤의 글은 화면에 보이는 글이다', () => {
+test('checkDoc 형식: 역슬래시를 쓰지 않는다(이스케이프한 백틱 뒤의 주석이 코드로 읽히지 않는다)', () => {
   const doc = goodDoc();
-  assert.deepEqual(check(swap(doc, '포함 사용량은', '<!-- 메모 -->포함 사용량은')), []);
-  assert.deepEqual(check(swap(doc, '포함 사용량은', '<!-- 메모\n메모 끝 -->포함 사용량은')), []);
+  // F6: 화면에서는 주석이 가려지는데 백틱 한 쌍 사이의 글로 읽혔다
+  formatOnly(check(swap(doc, WORD, `\\\`<!-- ${WORD} -->\` 무료 분은`)), /형식.*역슬래시/);
+  formatOnly(check(swap(doc, WORD, `\\*${WORD}`)), /형식.*역슬래시/);
 });
 
-test('checkDoc: 들여 쓴 코드 블록 안의 표와 표식은 표·표식으로 치지 않는다', () => {
+test('checkDoc 형식: 백틱 안의 <는 글이다. 백틱의 짝은 한 줄 안에서 맞아야 한다', () => {
   const doc = goodDoc();
-  const table = `${TABLE_HEAD}\n${TABLE_RULE}\n${recordRow(BASE, BASELINE_FILE, '기준선', '예산 안')}`;
-  const indent = (s: string, n: number) =>
-    s
-      .split('\n')
-      .map((l) => ' '.repeat(n) + l)
-      .join('\n');
-  // 목록 항목 아래에 들여 쓴 코드 블록
-  fails(check(swap(doc, table, `- 예시\n\n${indent(fence(table), 2)}`)), /기록.*표/);
-  // 네 칸 들여 쓴 줄은 코드다
-  fails(check(swap(doc, table, indent(table, 4))), /기록.*표/);
-  const begin = '<!-- actions-cost:begin -->';
-  fails(check(swap(doc, begin, `    ${begin}`)), /기준선.*표식 구간/);
+  // F5: 백틱 안의 주석 시작 문자열이 뒤의 문서를 가리지 않는다
+  assert.deepEqual(check(swap(doc, WORD, `표식은 \`<!--\`로 시작하는 주석이다. ${WORD}`)), []);
+  assert.deepEqual(check(swap(doc, WORD, `표식은 \`<!-- … -->\` 꼴이다. ${WORD}`)), []);
+  assert.deepEqual(check(swap(doc, WORD, `표식은 \`\`<!-- \` -->\`\` 꼴이다. ${WORD}`)), []);
+  // 짝이 없는 백틱, 줄을 넘는 코드 구간
+  formatOnly(check(swap(doc, WORD, `\`${WORD}`)), /형식.*백틱의 짝/);
+  formatOnly(check(swap(doc, WORD, `\`\`a\` ${WORD}`)), /형식.*백틱의 짝/);
+  fails(check(swap(doc, WORD, `\`포함\n사용량은\``)), /형식.*백틱의 짝/);
+  // 표의 칸은 백틱 안의 |에서도 갈리므로 |가 있는 줄에서는 백틱 안에도 <를 쓰지 않는다
+  fails(
+    check(swap(doc, '예산 안. 설명 한 줄', '예산 안. `a | <!-- 예산 밖 --> | b`')),
+    /형식.*표의 칸/,
+  );
+  formatOnly(check(swap(doc, '예산 안. 설명 한 줄', '예산 안. `<분>` 설명')), /형식.*표의 칸/);
+});
+
+test('checkDoc: 명령은 백틱 묶음의 길이가 같은 코드 구간 전체로 읽는다', () => {
+  const doc = goodDoc();
+  const from = `\`${FROM_COMMAND}\``;
+  // 화면에는 "<명령>`.bak"이 한 덩어리의 코드로 보인다
+  fails(check(swap(doc, from, `\`\`${FROM_COMMAND}\`.bak\`\``)), /기준선.*다시 계산하는 명령/);
+  assert.deepEqual(check(swap(doc, from, `\`\`${FROM_COMMAND}\`\``)), []);
+});
+
+test('checkDoc 형식: 코드 블록은 줄 머리의 백틱 세 개로만 여닫는다', () => {
+  const doc = goodDoc();
+  // F7: 들여 쓴 물결 줄 하나가 뒤의 절을 가리지 않는다. 그 줄만 형식 오류다
+  formatOnly(check(swap(doc, END_MARK, `${END_MARK}\n\n    ~~~~`)), /형식.*코드 블록은/);
+  formatOnly(check(swap(doc, END_MARK, `${END_MARK}\n\n    ${F3}`)), /형식.*코드 블록은/);
+  const budget = '- PR 하나당 예산: 30분($0.18, 2코어 Linux 기준)';
+  fails(check(swap(doc, budget, `~~~\n${budget}\n~~~`)), /형식.*코드 블록은/);
+  fails(check(swap(doc, budget, `${F3}\`\n${budget}\n${F3}\``)), /형식.*코드 블록은/);
+  fails(
+    check(swap(doc, budget, `- 예시\n\n  ${F3}text\n  ${budget}\n  ${F3}`)),
+    /형식.*코드 블록은/,
+  );
+  fails(check(swap(doc, budget, `${F3} text\n${budget}\n${F3}`)), /형식.*코드 블록은/);
+  // 닫히지 않은 코드 블록이 문서의 끝까지 삼키지 않는다
+  formatOnly(check(`${doc}\n${F3}bash\nnode x\n`), /형식.*닫히지/);
+  // 코드 블록 안의 백틱 세 개 줄은 화면에서 블록을 닫을 수 있다
+  formatOnly(
+    check(swap(doc, END_MARK, `${END_MARK}\n\n${F3}text\n ${F3}\n${F3}`)),
+    /형식.*코드 블록 안/,
+  );
+});
+
+test('checkDoc 형식: 줄 머리를 네 칸 이상이나 탭으로 들여 쓰지 않는다', () => {
+  const doc = goodDoc();
   const date = '- 잰 날짜: 2026-11-22';
-  fails(check(swap(doc, date, `    ${date}`)), /기준선.*잰 날짜/);
+  formatOnly(check(swap(doc, date, `${date}\n\n    들여 쓴 코드`)), /형식.*들여/);
+  fails(check(swap(doc, date, `    ${date}`)), /형식.*들여/);
+  fails(check(swap(doc, date, `\t${date}`)), /형식.*들여/);
+  const row = recordRow(BASE, BASELINE_FILE, '기준선', '예산 안');
+  fails(check(swap(doc, row, `    ${row}`)), /형식.*들여/);
+});
+
+test('checkDoc 형식: 밑줄 제목·가로줄·참조 정의·그림·제목을 단 링크를 쓰지 않는다', () => {
+  const doc = goodDoc();
+  // 밑줄 제목은 검사가 모르는 절을 만든다
+  formatOnly(check(swap(doc, '## 기록\n', '## 기록\n\n가짜 절\n---\n')), /형식.*밑줄/);
+  formatOnly(check(swap(doc, '## 기록\n', '## 기록\n\n가짜 문서\n===\n')), /형식.*밑줄/);
+  // 화면에 나오지 않는 글
+  formatOnly(check(swap(doc, WORD, `${WORD}\n\n[//]: # (가려진 글)\n`)), /형식.*참조 정의/);
+  formatOnly(check(swap(doc, WORD, `[무료 분](x.md "${WORD}")`)), /형식.*링크/);
+  formatOnly(check(swap(doc, WORD, `[무료 분](x.md\n"${WORD}")`)), /형식.*링크/);
+  formatOnly(check(swap(doc, WORD, `![${WORD}](x.png)`)), /형식.*그림/);
+});
+
+test('checkDoc: 링크의 주소는 글로 세지 않는다', () => {
+  const doc = goodDoc();
+  assert.deepEqual(check(swap(doc, WORD, '[포함 사용량](../x.md)은')), []);
+  const line = doc.split('\n').find((l) => l.startsWith(HEADS[4]));
+  assert.ok(line);
+  const link = `${HEADS[4]} [가](${'a'.repeat(40)}.md)`;
+  fails(check(swap(doc, line, link)), /판단 절차.*판단 시점 3.*20자/);
 });
