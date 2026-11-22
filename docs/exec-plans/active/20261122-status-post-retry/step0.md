@@ -73,7 +73,12 @@ retry?: Partial<StatusRetry>;
 - 모든 테스트는 `apiUrl`을 이 서버로 준다. GitHub으로 가는 요청이 없어야 한다(이 변경 전의 코드로 돌려도 그렇다).
 - 가짜 시계를 쓰는 테스트: `sleep`은 받은 값을 적고 가짜 시계를 그만큼(정한 값이 있으면 그만큼 더) 돌린다. 실제로 기다리지 않는다. 서버는 요청마다 가짜 시계를 정한 만큼 돌릴 수 있다(요청에 걸린 시간을 흉내 낸다).
 - 실제 시간을 쓰는 테스트(11, 12): `sleep`과 `now`를 주지 않고 `retry`로 값을 짧게 준다.
-- `record.ts`는 네임스페이스로 가져온다(`import * as record`). 이 변경 전의 코드에서 `STATUS_RETRY`가 없어도 파일 전체가 가져오기에서 죽지 않고 테스트마다 단언으로 실패하게 한다.
+- `record.ts`는 네임스페이스로 가져온다(`import * as record`). 이 변경 전의 코드에서 `STATUS_RETRY`가 없어도 파일 전체가 가져오기에서 죽지 않게 한다.
+- 상태 쓰기의 결과는 값으로 받아 단언한다(도우미 `outcome(<쓰기>, 최대 3초)`): 끝났으면 `ok`, 예외면 `rejected: <오류의 글>`, 3초 안에 끝나지 않았으면 `pending`이다. `pending`이면 서버에 남은 연결을 닫는다(답하지 않고 둔 요청이 뒤에 남지 않는다).
+  - 성공해야 하는 쓰기는 모두 `assert.equal(await outcome(…), 'ok')`로 본다. 쓰기를 그대로 `await`하지 않는다.
+  - 이유: 이 변경 전의 코드는 5xx에서 바로 예외를 던지고, 답이 없는 요청을 30초 기다린 뒤 예외를 던진다. 그대로 `await`하면 그 예외가 단언보다 먼저 테스트를 끝내고(단언 실패가 아니다) 30초가 걸린다. 값으로 받으면 이 변경 전의 코드에서도 테스트마다 단언에 닿아 단언 실패로 끝나고, 답이 없는 경우도 3초 안에 `pending`으로 단언 실패가 된다.
+  - 실제 시간 테스트에서 예외여야 하는 쓰기도 `outcome`으로 받아 글 전체를 견준다(`assert.equal`). 가짜 시계 테스트의 예외는 `assert.rejects`로 본다(바로 끝난다).
+  - 확인: 이 변경 전의 코드로 새 파일을 돌리면 13건이 모두 단언 실패(`ERR_ASSERTION`)로 끝나고 전체가 5초 안에 끝난다(초안으로 쟀다: 3.4초).
 
 테스트(14건):
 
@@ -87,8 +92,8 @@ retry?: Partial<StatusRetry>;
 8. 상한(가짜 시계): 요청마다 20초가 걸린 것으로 치고 500만 주면, 요청 셋 뒤 예외다(`… (3회 시도) (시간 상한)`). `sleep`은 `[2000, 6000]`. 계산: 첫 다시 시도 뒤 22초, 둘째 뒤 48초를 쓰고, 셋째는 `48 + 15 + 5 > 60`이라 보내지 않는다. 다시 시도에 쓴 시간(가짜 시계에서 첫 요청의 20초를 뺀 값)은 48초다.
 9. 상한은 poster의 상태 전체에 걸린다(가짜 시계): 한 poster로 (a) 빠른 500 셋 뒤 201(23초를 쓴다) → (b) 500 하나 뒤 201인데 요청이 30초 걸린다(`23 + 2 + 5 ≤ 60`이라 다시 보낸다. 55초를 쓴 것이 된다) → (c) 500이면 `55 + 2 + 5 > 60`이라 요청 하나로 예외다(글이 ` (시간 상한)`으로 끝나고 시도 수는 없다). 새 poster는 새 상한으로 다시 보낸다.
 10. 대기가 길어진 경우(가짜 시계): 한 poster로 23초를 쓴 뒤, 다음 상태가 500을 받는다. 대기 전 계산(`23 + 2 + 5 ≤ 60`)은 통과하는데 2초 대기가 34초 걸린 것으로 친다 → 남은 시간 3초 < 5초 → 대기 뒤에 요청을 보내지 않고 예외다(그 상태에 서버가 받은 요청은 하나, 글이 ` (시간 상한)`으로 끝난다). 경계의 반대쪽: 새 poster에서 2초 대기가 50초 걸려도(남은 시간 10초) 다시 보내 성공한다(요청 둘).
-11. 요청의 시간 제한(실제 시간, `retry: { timeoutMs: 300, waitsMs: [10, 10, 10], minRequestMs: 100 }`): 서버가 첫 요청에 답하지 않고 둘째 요청에 늦은 201로 답한다. 예외 없이 끝나고, 요청은 둘이고 내용이 같고, 로그 줄은 `record: 커밋 상태 기록 다시 시도(plan-gate): 응답 없음(TimeoutError), 0.01초 뒤 2/4번째` 하나다. 걸린 시간은 0.3초 이상 5초 미만이다. 둘째 요청이 앞 요청의 만료된 신호를 물려받았다면 보내자마자 끊겨 이 테스트가 실패한다. 이어서 서버가 네 번 모두 답하지 않으면(`timeoutMs: 100`) 요청 넷 뒤 `응답 없음(TimeoutError) (4회 시도)`로 끝난다.
-12. 다시 보내는 요청의 시간 제한(실제 시간, `retry: { timeoutMs: 20000, budgetMs: 500, waitsMs: [10, 10, 10], minRequestMs: 100 }`): 500 뒤에 답하지 않는 요청. 다시 보낸 요청이 남은 시간(0.5초쯤)에 끊겨 `응답 없음(TimeoutError) (2회 시도) (시간 상한)`으로 끝난다. 걸린 시간은 0.3초 이상 5초 미만이다(20초를 기다리지 않는다).
+11. 요청의 시간 제한(실제 시간, `retry: { timeoutMs: 300, waitsMs: [10, 10, 10], minRequestMs: 100 }`): 서버가 첫 요청에 답하지 않고 둘째 요청에 늦은 201로 답한다. `outcome`이 `ok`다(이 변경 전의 코드에서는 3초 뒤 `pending`이라 여기서 단언 실패다). 요청은 둘이고 내용이 같고, 로그 줄은 `record: 커밋 상태 기록 다시 시도(plan-gate): 응답 없음(TimeoutError), 0.01초 뒤 2/4번째` 하나다. 걸린 시간은 0.3초 이상 3초 미만이다(첫 요청이 시간 제한까지 기다렸다). 둘째 요청이 앞 요청의 만료된 신호를 물려받았다면 보내자마자 끊겨 `ok`가 되지 못한다. 이어서 서버가 네 번 모두 답하지 않으면(`timeoutMs: 100`) `outcome`이 `rejected: 커밋 상태 기록 실패(plan-gate): 응답 없음(TimeoutError) (4회 시도)`이고 요청은 넷이다.
+12. 다시 보내는 요청의 시간 제한(실제 시간, `retry: { timeoutMs: 20000, budgetMs: 500, waitsMs: [10, 10, 10], minRequestMs: 100 }`): 500 뒤에 답하지 않는 요청. 다시 보낸 요청이 남은 시간(0.5초쯤)에 끊겨 `outcome`이 `rejected: 커밋 상태 기록 실패(plan-gate): 응답 없음(TimeoutError) (2회 시도) (시간 상한)`이다. 요청은 둘이고 걸린 시간은 0.3초 이상 3초 미만이다(20초를 기다리지 않는다).
 13. 명령 실행(`node scripts/harness.ts record-status`): 호출하는 쪽을 고치지 않아도 다시 시도하는지 본다. 이 테스트만 기본값으로 실제 2초를 기다린다.
     - 입력은 `scripts/test/record.test.ts`의 `gatesFile`·`statusArgs`와 같은 꼴이다: 결과 파일은 `{ version: 1, headSha, results }`이고 `results`는 `RECORDED_CONTEXTS`의 context마다 `{ context, state: 'success', description: '통과', details: [] }`다. 인자는 `--results <파일> --head-sha <40자리 SHA> --repo-slug o/r --target-url https://example.invalid/run/1`이고 `--head-sha`는 결과 파일의 `headSha`와 같다. 환경 변수는 `GITHUB_API_URL`(가짜 서버), `GH_TOKEN`(테스트용 토큰), `SELFTEST_B64`(빈 값)다.
     - 서버는 둘째 요청(둘째 상태의 첫 요청)에만 500으로 답한다.
@@ -102,13 +107,13 @@ retry?: Partial<StatusRetry>;
 - `docs/harness/design.md` 10.4절: 기계 판정을 `gates` 워크플로가 기록한다는 항목 아래에 항목 하나(한 줄)를 더한다. 그 줄에 아래가 모두 있어야 한다(AC가 그 줄에서 본다).
   - 값의 이름 `STATUS_RETRY`와 Issue 번호.
   - 다시 보내는 오류: `HTTP 5xx`와 `응답 없음`(연결 끊김, 요청의 시간 제한).
-  - 횟수와 대기: 요청은 상태 하나에 `4번까지`, 대기 2초·6초·15초.
-  - 시간 상한: 다시 시도가 더하는 시간은 poster 하나에 `60초`. 남은 시간이 5초보다 적으면 보내지 않고, 다시 보내는 요청의 시간 제한은 남은 시간을 넘지 않는다.
+  - 횟수와 대기: 요청은 상태 하나에 `4번까지`, 대기는 `2초, 6초, 15초`.
+  - 시간 상한: 다시 시도가 더하는 시간은 poster 하나에 `60초`. 상한까지 `남은 시간이 5초`보다 적으면 보내지 않고(대기 전에도, 대기 뒤에도 본다), 다시 보내는 요청의 `시간 제한은 30초와 남은 시간 가운데 작은 값`이다.
   - 제외: `HTTP 4xx`는 다시 보내지 않는다.
   - 마지막 실패: 모두 실패하면 전처럼 job이 실패한다(`fail-closed`).
   - 로그 줄의 형식: `record: 커밋 상태 기록 다시 시도(<context>): …`. 토큰과 응답 본문은 넣지 않는다.
 - `docs/harness/design.md`의 버전과 변경 이력 한 줄: `10.4절`, `Issue #220`, `TD-48` 해결을 적는다.
-- `docs/harness/CHANGELOG.md`: 한 항목(한 줄). `Issue #220`, `STATUS_RETRY`, 위의 다시 보내는 오류·제외·횟수·상한·마지막 실패·로그 줄의 형식을 적는다.
+- `docs/harness/CHANGELOG.md`: 한 항목(한 줄). `Issue #220`, `STATUS_RETRY`와, 위 10.4절 항목의 내용(다시 보내는 오류, 횟수와 대기, 시간 상한, 제외, 마지막 실패, 로그 줄의 형식)을 같은 글귀로 적는다(AC가 두 곳에서 같은 글귀를 본다).
 - `docs/exec-plans/tech-debt-tracker.md`: TD-48을 `해결(#220: …)`로 닫는다. "발견 사항"을 새 행 하나로 더한다(상태 `열림`). 새 행의 번호는 push 직전의 `origin/main` 기준 다음 번호다.
 - 이 계획의 "발견 사항"에 `→ 처리: TD-<새 번호>`를 적는다.
 
@@ -121,9 +126,9 @@ test "$(git diff --name-only origin/main...HEAD -- scripts .github harness.confi
 test "$(git diff --diff-filter=A --name-only origin/main...HEAD -- scripts)" = "scripts/test/status-poster.test.ts"
 grep -qE '^export const STATUS_RETRY: StatusRetry = \{$' scripts/ci/record.ts
 test "$(grep -c '^test(' scripts/test/status-poster.test.ts)" = 14
-awk '/^### 10\.4 /{f=1;next} /^### |^## /{f=0} f' docs/harness/design.md | grep -F 'STATUS_RETRY' | grep -F 'Issue #220' | grep -F 'HTTP 5xx' | grep -F '응답 없음' | grep -F '4번까지' | grep -F '60초' | grep -F 'HTTP 4xx' | grep -F 'fail-closed' | grep -qF '`record: 커밋 상태 기록 다시 시도(<context>): '
+awk '/^### 10\.4 /{f=1;next} /^### |^## /{f=0} f' docs/harness/design.md | grep -F 'STATUS_RETRY' | grep -F 'Issue #220' | grep -F 'HTTP 5xx' | grep -F '응답 없음' | grep -F '4번까지' | grep -F '2초, 6초, 15초' | grep -F '60초' | grep -F '남은 시간이 5초' | grep -F '시간 제한은 30초와 남은 시간 가운데 작은 값' | grep -F 'HTTP 4xx' | grep -F 'fail-closed' | grep -qF '`record: 커밋 상태 기록 다시 시도(<context>): '
 grep -E '^  - v0\.7\.[0-9]+ \(2026-11-[0-9]+\): .*Issue #220' docs/harness/design.md | grep -F '10.4절' | grep -qF 'TD-48'
-grep -F 'Issue #220' docs/harness/CHANGELOG.md | grep -F 'STATUS_RETRY' | grep -F 'HTTP 5xx' | grep -F '응답 없음' | grep -F '4번까지' | grep -F '60초' | grep -F 'HTTP 4xx' | grep -F 'fail-closed' | grep -qF '`record: 커밋 상태 기록 다시 시도(<context>): '
+grep -F 'Issue #220' docs/harness/CHANGELOG.md | grep -F 'STATUS_RETRY' | grep -F 'HTTP 5xx' | grep -F '응답 없음' | grep -F '4번까지' | grep -F '2초, 6초, 15초' | grep -F '60초' | grep -F '남은 시간이 5초' | grep -F '시간 제한은 30초와 남은 시간 가운데 작은 값' | grep -F 'HTTP 4xx' | grep -F 'fail-closed' | grep -qF '`record: 커밋 상태 기록 다시 시도(<context>): '
 grep -qE '^\| TD-48 .*\| 해결\(#220' docs/exec-plans/tech-debt-tracker.md
 grep -qE '^\| TD-[0-9]+ +\| .*githubLedgerApi.*\| 열림 *\|$' docs/exec-plans/tech-debt-tracker.md
 test "$(grep -c '→ 처리: TD-' docs/exec-plans/*/20261122-status-post-retry/plan.md)" = 1
