@@ -590,3 +590,85 @@ test('check-adr 명령: 인자가 틀리거나 파일을 읽지 못하면 1이�
   // 절대 경로를 오류 글에 옮기지 않는다
   assert.ok(!missing.stderr.includes(dir));
 });
+
+// ---- 화면에는 값으로 보이는데 검사가 읽지 않는 줄을 받지 않는다 ----
+
+test('checkAdr 형식: 표식 구간과 들여 쓴 제목을 받지 않는다', () => {
+  const doc = goodAdr();
+  // 문서 검사의 표식 구간 안의 줄은 읽히지 않는다. ADR에서는 표식 줄이 형식 오류다
+  const hidden = `<!-- actions-cost:begin -->\n${row('Z1')}\n<!-- actions-cost:end -->`;
+  fails(checkAdr(swap(doc, '\n## 묶음', `\n${hidden}\n\n## 묶음`)), /형식/);
+  fails(checkAdr(`${doc}\n ## 배경\n\n들여 쓴 둘째 절이다.\n`), /형식.*제목/);
+});
+
+test('checkAdr: 표는 후보표 절에만 둔다', () => {
+  const doc = goodAdr();
+  const second = `${TABLE_HEAD}\n${TABLE_RULE}\n${row('G1')}`;
+  fails(checkAdr(`${doc}\n${second}\n`), /표: .*되돌리는 조건.*후보표/);
+  fails(checkAdr(swap(doc, '## 배경\n', `## 배경\n\n${second}\n`)), /표: .*배경/);
+});
+
+test('checkAdr 머리: 모양만 바꾼 둘째 상태 줄과 이어 쓴 줄을 받지 않는다', () => {
+  const doc = goodAdr();
+  const line = '- 상태: 제안 (제작자가 묶음을 고르면 채택으로 바꾼다)';
+  fails(checkAdr(swap(doc, line, `${line}\n- **상태**: 채택`)), /머리.*상태.*더 있다/);
+  fails(checkAdr(swap(doc, line, `${line}\n * 상태 : 채택`)), /머리.*상태.*더 있다/);
+  fails(checkAdr(swap(doc, line, `${line}\n이었다가 채택`)), /머리.*다음 줄/);
+  fails(checkAdr(swap(doc, line, '- 상태: 제안채택')), /머리.*제안.*채택/);
+});
+
+test('checkAdr 묶음: 묶음에는 정한 줄만 적는다', () => {
+  const doc = goodAdr();
+  const per = '- PR당 금액: $0.140';
+  // 모양만 바꾼 둘째 줄, 이어 쓴 줄, 풀어 쓴 글
+  for (const extra of [
+    ' - PR당 금액: $0.010',
+    '- **PR당 금액**: $0.010',
+    '* PR당 금액: $0.010',
+    '아니, $0.010이다',
+  ])
+    fails(checkAdr(swap(doc, per, `${per}\n${extra}`)), /묶음 가.*정한 줄/);
+  fails(checkAdr(swap(doc, per, `${per}\n\n#### 덧붙임`)), /묶음.*제목/);
+  fails(
+    checkAdr(swap(doc, '- PR당 청구 분(분당 $0.002): 10.0', '- PR당 청구 분(1코어): 10.0')),
+    /묶음 가.*정한 줄/,
+  );
+});
+
+test('checkAdr 묶음: 첫 묶음 앞에는 풀어 쓴 문단만 둔다', () => {
+  const doc = goodAdr();
+  const intro = (text: string) => swap(doc, '## 묶음\n', `## 묶음\n\n${text}\n`);
+  assert.deepEqual(checkAdr(intro('예산에 드는 조합과 가장 싼 조합을 적는다.')), []);
+  fails(checkAdr(intro('- 월 금액(PR 100개): $1.00')), /묶음.*첫 묶음 제목 앞/);
+  fails(checkAdr(intro('**PR당 금액**: $0.001')), /묶음.*묶음 밖/);
+});
+
+test('checkAdr 묶음: 이름이 후보의 ID와 같은 꼴이면 실패한다', () => {
+  fails(checkAdr(goodAdr({ bundles: [GA, { ...NA, name: 'A1' }] })), /묶음.*이름.*A1.*꼴/);
+});
+
+test('checkAdr 결정: 목록에는 정한 줄만 적고 이어 쓰지 않는다', () => {
+  const doc = goodAdr();
+  const order = PROPOSED[1];
+  fails(checkAdr(swap(doc, order, `${order}\n→ C1`)), /결정.*다음 줄/);
+  fails(checkAdr(swap(doc, order, `${order}\n* 순서: C1`)), /결정.*목록/);
+  fails(checkAdr(swap(doc, order, `${order}\n> - 순서: C1`)), /결정.*목록/);
+  fails(checkAdr(swap(doc, PROPOSED[2], `${PROPOSED[2]}\n\n**순서**: C1 → C2`)), /결정.*"순서:"/);
+  fails(
+    checkAdr(swap(doc, PROPOSED[2], `${PROPOSED[2]}\n- 결정한 사람: 제작자(2026-11-23)`)),
+    /결정.*제안.*결정한 사람/,
+  );
+});
+
+test('checkAdr 결정(채택): 추천 묶음과 이유는 남겨도 된다', () => {
+  const kept = [
+    '- 추천 묶음: 나',
+    ...ADOPTED,
+    '- 이유: 제작자가 보장을 덜 잃는 쪽을 골랐다고 적었다.',
+  ];
+  assert.deepEqual(checkAdr(goodAdr({ status: '채택', decision: kept })), []);
+  fails(
+    checkAdr(goodAdr({ status: '채택', decision: ['- 추천 묶음: 다', ...ADOPTED] })),
+    /결정.*추천 묶음.*다/,
+  );
+});
