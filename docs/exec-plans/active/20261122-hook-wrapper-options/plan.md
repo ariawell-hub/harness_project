@@ -2,7 +2,7 @@
 id: 20261122-hook-wrapper-options
 issue: 193 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -144,6 +144,7 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
 - 2026-11-22 실제 실행 대조(이 Mac): 대조한 틀 61개, 건너뛴 틀 66개(이 Mac에 없는 래퍼, 돌리지 않기로 한 래퍼, 그 옵션을 모르는 구현), 경계 사례 3개, 구현마다 갈리는 꼴 가운데 견준 것 11개(`env =x tool a`는 이 Mac에서 실행되지 않아 견주지 않았다). 실행되지 않는 꼴 여덟은 모두 그 이름의 가짜 실행 파일이 뒤의 낱말을 그대로 받았고 훅이 읽은 명령과 통째로 같았다. 읽지 못한 꼴 47개 가운데 이 Mac에서 무엇인가 실행된 꼴은 29개이고 모두 훅이 R4로 막는다. `-S`의 문자열 안에 줄바꿈이 든 꼴은 이 Mac에서 `tool`이 `a`, `b` 둘을 받았다(훅은 R4). CI(uutils)의 대조는 `check`에서 돈다.
 - 2026-11-22 판정만 한 것(금지 호출 열둘. main과 이 브랜치): `nice -n 5 C`, `sudo -u someone C`, `env BUILD-MODE=local C`는 main에서 열하나가 통과하고(`psql -c x`만 R13) 이 브랜치에서 열둘 모두 그대로 쓴 것과 같은 규칙으로 막힌다. `env -S "C"`는 main에서 열둘 모두 통과하고 이 브랜치에서 열둘 모두 R4다. `env -S "node -v"`는 통과에서 R4로 바뀐다(받아들인 대가). **바뀌는 판정(제작자 결정)**: `env A=1 -i C`, `env A=1 -u HOME C`, `env A=1 -- C`는 main에서 열둘 모두 그 호출의 규칙으로 막히고, 이 브랜치에서는 열하나가 통과한다(`psql -c x`만 R13. `tool-x C`와 같다). `env -uSHELL C`는 양쪽 모두 열둘이 막힌다.
 - 2026-11-22 `origin/main`(`337e006`)을 병합했다(충돌 없음). 문서를 반영했다: 설계서 13.1절과 버전 이력(v0.7.76), CHANGELOG, architecture, TD-62 (3). 다른 세션의 초안 PR #199도 v0.7.76을 쓴다: 먼저 병합되는 쪽이 그 번호를 갖고, 나중 쪽이 main을 병합할 때 번호를 올린다.
+- 2026-11-22T19:06:02+09:00 step0 재작업: 구현 판정 16회차(head `88b677b`): Claude 승인(지적 없음), Codex 수정 요청(새 지적 없음. F9·F10을 비롯한 나머지 지적은 해소를 확인했다). Codex가 F4를 다시 열었다: 수용 기준 7은 입력을 4배로 늘린 판정 시간이 8배를 넘지 않는다는 것인데, 테스트가 "8배와 1초 가운데 큰 값"으로 견줘 50ms에서 800ms로 16배 늘어도 통과한다. 맞는 지적이다(이 Mac에서 여덟 꼴의 판정 시간은 1~120ms에서 4~500ms로 늘어 1초 하한 때문에 비율 검사가 걸리지 않는다). `pr-state`가 F4를 오래 열린 지적으로 내어 제작자에게 물었고, 제작자가 "테스트만 고친다"를 골랐다(2026-11-22 대화). 시간 테스트를 고친다.
 
 ## 의사결정 로그
 
