@@ -445,6 +445,109 @@ test('resolvesInside: 실제 위치로 본다 — 없는 경로는 있는 상위
   assert.ok(!resolvesInside(root, path.join(root, 'dangling')));
 });
 
+/** 리포의 웹 프로파일 파일을 읽어 고친 뒤 다시 쓴다 */
+function editProfile(
+  root: string,
+  edit: (p: {
+    version: string;
+    config: Record<string, unknown>;
+    templates: { from: string; to: string; replacePlaceholder?: boolean }[];
+  }) => void,
+): { version: string; config: Record<string, unknown> } {
+  const pf = path.join(root, 'profiles/web/profile.json');
+  const p = JSON.parse(readFileSync(pf, 'utf8'));
+  edit(p);
+  writeFileSync(pf, JSON.stringify(p, null, 2) + '\n');
+  return p;
+}
+
+test('init: 프로파일이 정한 github 항목을 적용하고, --owner·--bot은 그 위에 적는다(판정 지적 F10)', () => {
+  const root = templateCopy();
+  const before = JSON.parse(cfgText(root)) as Record<string, unknown>;
+  const github = { ...(before.github as object), owner: 'profile-owner', bot: 'profile-bot' };
+  const p = editProfile(root, (x) => {
+    x.config.github = github;
+  });
+  assert.equal(init(root, 'web', {}), 0);
+  // 전의 구현과 같은 결과: 프로파일의 항목을 덮어쓴 뒤의 github이 남는다
+  assert.equal(
+    cfgText(root),
+    JSON.stringify(
+      { ...before, ...p.config, profile: 'web', profileVersion: `web@${p.version}`, github },
+      null,
+      2,
+    ) + '\n',
+  );
+  assert.equal(loadConfig(root).github.owner, 'profile-owner');
+  assert.equal(loadConfig(root).github.bot, 'profile-bot');
+  // 명령줄의 값은 프로파일의 값 위에 적는다. 주지 않은 것은 프로파일의 값이다
+  const again = templateCopy();
+  editProfile(again, (x) => {
+    x.config.github = github;
+  });
+  const r = cli(['init', '--profile', 'web', '--owner', 'cli-owner', '--dry-run'], again);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /github\.owner/);
+  assert.match(r.stdout, /github\.bot/);
+  assert.equal(init(again, 'web', { owner: 'cli-owner' }), 0);
+  assert.equal(loadConfig(again).github.owner, 'cli-owner');
+  assert.equal(loadConfig(again).github.bot, 'profile-bot');
+});
+
+test('init: 같은 자리에 놓이는 템플릿이 여럿이면 앞의 것만 복사하고, 미리보기도 같게 알린다(판정 지적 F11)', () => {
+  const make = (first: string, second: { replacePlaceholder?: boolean } = {}) => {
+    const root = templateCopy();
+    gitInit(root);
+    const dir = path.join(root, 'profiles/web/templates');
+    writeFileSync(path.join(dir, 'first.md'), first);
+    writeFileSync(path.join(dir, 'second.md'), '둘째\n');
+    editProfile(root, (x) => {
+      x.templates = [
+        { from: 'templates/first.md', to: 'guide.md' },
+        { from: 'templates/second.md', to: 'guide.md', ...second },
+        // 적는 꼴이 달라도 같은 자리다
+        { from: 'templates/second.md', to: './sub/../guide.md' },
+      ];
+    });
+    return root;
+  };
+  const lines = (out: string) =>
+    out.split('\n').filter((l) => l.startsWith('- ') && l.includes('guide.md'));
+
+  // 뒤의 템플릿은 앞의 것이 복사한 파일을 이미 있는 것으로 보고 건너뛴다
+  const root = make('첫째\n');
+  const listed = snapshot(root);
+  const dry = cli(['init', '--profile', 'web', '--dry-run'], root);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(lines(dry.stdout), [
+    '- 템플릿 복사 예정: guide.md',
+    '- 건너뜀(이미 있음): guide.md',
+    '- 건너뜀(이미 있음): ./sub/../guide.md',
+  ]);
+  assert.deepEqual(snapshot(root), listed);
+  const real = cli(['init', '--profile', 'web'], root);
+  assert.equal(real.code, 0, real.stderr);
+  assert.deepEqual(lines(real.stdout), [
+    '- 템플릿 복사: guide.md',
+    '- 건너뜀(이미 있음): guide.md',
+    '- 건너뜀(이미 있음): ./sub/../guide.md',
+  ]);
+  assert.equal(readFileSync(path.join(root, 'guide.md'), 'utf8'), '첫째\n');
+  assert.ok(!existsSync(path.join(root, 'sub')));
+
+  // 앞의 것이 자리 표시 파일이고 뒤의 것이 자리 표시 파일을 바꾸는 템플릿이면 뒤의 것으로 바뀐다(전과 같다)
+  const swap = make(PLACEHOLDER, { replacePlaceholder: true });
+  const swapDry = cli(['init', '--profile', 'web', '--dry-run'], swap);
+  assert.deepEqual(lines(swapDry.stdout), [
+    '- 템플릿 복사 예정: guide.md',
+    '- 템플릿 복사 예정: guide.md',
+    '- 건너뜀(이미 있음): ./sub/../guide.md',
+  ]);
+  assert.ok(!existsSync(path.join(swap, 'guide.md')));
+  assert.equal(init(swap, 'web', {}), 0);
+  assert.equal(readFileSync(path.join(swap, 'guide.md'), 'utf8'), '둘째\n');
+});
+
 test('도움말: init의 --repo와 --dry-run을 적는다', () => {
   const r = cli(['--help'], tmp());
   assert.match(r.stdout, /init --profile core\|web \[--repo <폴더>\] \[--dry-run\]/);
