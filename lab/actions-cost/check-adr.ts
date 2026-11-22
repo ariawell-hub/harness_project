@@ -326,9 +326,15 @@ function checkCell(at: string, name: string, cell: string, problems: string[]): 
     }
     if (!/https:\/\/[^\s,)]+\.[^\s,)]+/.test(m[1]))
       problems.push(`${at}: "${name}" 칸의 괄호 안에 출처의 https:// 주소가 없다`);
-    const days = m[1].match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+    // 확인한 날짜는 출처 주소 밖에서만 찾는다: 주소 안에 든 날짜(.../blog/2026-11-01/...)는 확인일이 아니다.
+    // 주소(`이름://`부터 공백·쉼표·닫는 괄호 앞까지)를 빼고, 남은 글에서 홀로 선 날짜만 센다
+    // (`이름://` 없이 적은 주소의 경로나 글 제목 안의 날짜도 세지 않는다)
+    const outside = m[1].replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s,)]*/g, ' ');
+    const days = outside.match(/(?<![\w/.-])\d{4}-\d{2}-\d{2}(?![\w/-])/g) ?? [];
     if (!days.length || !days.every(realDay))
-      problems.push(`${at}: "${name}" 칸의 괄호 안에 실재하는 날짜(YYYY-MM-DD)가 없다`);
+      problems.push(
+        `${at}: "${name}" 칸의 괄호 안, 출처 주소 밖에 실재하는 날짜(YYYY-MM-DD)가 없다`,
+      );
   }
 }
 

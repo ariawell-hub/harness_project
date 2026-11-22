@@ -552,6 +552,34 @@ test('checkAdr 후보표: 확인 상태에는 출처와 날짜, 또는 확인하
   assert.deepEqual(check('확인 못 함: 개인 계정에서 쓸 수 있는지 공개 문서에 없다'), []);
 });
 
+test('checkAdr 후보표: 확인 상태의 날짜는 출처 주소 밖에서만 찾는다(Issue #210)', () => {
+  const check = (v: string) => checkAdr(goodAdr({ rows: rowsWith('B1', { 5: v }) }));
+  const NO_DAY = /후보표 B1 행.*확인 상태.*날짜/;
+  // 주소 안의 날짜는 확인일이 아니다
+  for (const v of [
+    '확인함(https://example.com/blog/2026-11-01/pricing)',
+    '확인함(https://example.com/2026-11-01)',
+    '확인함(https://example.com/a?d=2026-11-01)',
+    '확인함(https://example.com/a, http://example.com/2026-11-01/b)',
+    // `이름://` 없이 적은 주소의 경로, 글 제목 안의 날짜, 뒤에 숫자가 붙은 것
+    '확인함(https://example.com/a, example.com/2026-11-01/b)',
+    '확인함(https://example.com/a, 2026-11-01-coming-soon)',
+    '확인함(https://example.com/a, 2026-11-223)',
+  ])
+    fails(check(v), NO_DAY);
+  // 주소 밖에 확인일이 있으면 통과한다. 주소 안의 날짜는 실재하지 않아도 된다
+  for (const v of [
+    '확인함(https://example.com/blog/2026-11-01/pricing, 2026-11-22)',
+    '확인함(https://example.com/blog/2026-02-30/pricing, 2026-11-22)',
+    '확인함(https://example.com/a,2026-11-22)',
+    '확인함(2026-11-22, https://example.com/a)',
+    '확인함(https://example.com/a, 2026-11-22에 확인)',
+  ])
+    assert.deepEqual(check(v), [], v);
+  // 주소 밖의 날짜가 실재하지 않으면 실패한다(그대로)
+  fails(check('확인함(https://example.com/blog/2026-11-01/pricing, 2026-02-30)'), NO_DAY);
+});
+
 test('checkAdr 묶음: 둘 이상이고 이름이 겹치지 않는다', () => {
   fails(checkAdr(goodAdr({ bundles: [GA] })), /묶음.*둘 이상/);
   fails(checkAdr(goodAdr({ bundles: [] })), /묶음.*둘 이상/);
