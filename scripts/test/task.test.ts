@@ -465,6 +465,42 @@ test('appendProgress: 붙인 뒤의 계획 파일을 포매터가 고치지 않�
       '진행 로그가 문단으로 끝난다',
       '\n본문\n\n## 진행 로그\n\n아직 없다.\n\n## 발견 사항\n\n없음.\n',
     ],
+    // 빈 줄이 든 목록: 같은 간격으로 붙인다
+    [
+      '항목 사이에 빈 줄이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n- 둘째 기록\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '앞 항목들만 빈 줄로 떨어져 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n- 둘째 기록\n- 셋째 기록\n',
+    ],
+    [
+      '마지막 항목 안에 빈 줄이 있다(딸린 문단)',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n  딸린 문단\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '딸린 목록의 항목 사이에 빈 줄이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n  - 딸린 항목\n\n  - 딸린 항목 둘\n',
+    ],
+    [
+      '항목 안의 코드 블록에 빈 줄이 있다',
+      '\n본문\n\n## 진행 로그\n\n- 첫 기록\n\n  ```text\n  x\n\n  y\n  ```\n\n## 발견 사항\n\n없음.\n',
+    ],
+    // 목록이 아닌 것으로 끝난다: 빈 줄을 두고 새 목록을 시작한다
+    [
+      '번호 목록으로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n1. 첫 기록\n2. 둘째 기록\n\n## 발견 사항\n\n없음.\n',
+    ],
+    ['번호 목록의 딸린 목록으로 끝난다', '\n본문\n\n## 진행 로그\n\n1. 첫 기록\n   - 딸린 항목\n'],
+    [
+      '코드 블록으로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n```text\n- x\n```\n\n## 발견 사항\n\n없음.\n',
+    ],
+    [
+      '표로 끝난다',
+      '\n본문\n\n## 진행 로그\n\n| 날짜 | 한 일 |\n| ---- | ----- |\n| 오늘 | 접수  |\n',
+    ],
+    ['인용으로 끝난다', '\n본문\n\n## 진행 로그\n\n> 인용\n\n## 발견 사항\n\n없음.\n'],
   ];
   for (const [name, body] of cases) {
     const before = FRONT + body;
@@ -477,7 +513,7 @@ test('appendProgress: 붙인 뒤의 계획 파일을 포매터가 고치지 않�
     // 붙인 두 줄이 진행 로그 절 안에 차례로 있고, 있던 글은 그대로다
     const sec = after.slice(after.indexOf('## 진행 로그'));
     const own = sec.slice(0, sec.indexOf('\n## ', 1) < 0 ? sec.length : sec.indexOf('\n## ', 1));
-    assert.match(own, /^- \S+ 첫 줄\n- \S+ 둘째 줄$/m, `${name}:\n${after}`);
+    assert.match(own, /^- \S+ 첫 줄\n\n?- \S+ 둘째 줄$/m, `${name}:\n${after}`);
     for (const line of before.split('\n').filter(Boolean))
       assert.ok(after.includes(line), `${name}: ${line}`);
   }
