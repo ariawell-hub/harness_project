@@ -2,7 +2,7 @@
 id: 20261122-hook-wrapper-options
 issue: 193 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -102,6 +102,7 @@ L1 훅의 규칙 가운데 명령의 이름과 인자의 자리로 고르는 것
 - 2026-11-22 계획을 고친다(step0의 "작업": 실제 실행 대조의 겹친 사례, 실행 환경의 서술). 이 계획은 아직 main에 없으므로 절차서 2절대로 한다: 되돌리는 커밋으로 PR의 변경을 계획만 남기고(코드·테스트·문서를 main의 내용으로 되돌렸다. force push는 하지 않는다) 계획 검증을 다시 받은 뒤 코드를 다시 올린다. 구현은 커밋 `4711732`에 그대로 있다.
 - 2026-11-22 고친 계획의 계획 검증(6회차): Claude·Codex 모두 승인(지적 없음). 계획 해시 `e8111660b067`, head `8e1009d`.
 - 2026-11-22 구현을 다시 올렸다. 코드(`wrappers.ts`, `shell.ts`, `rules.ts`)는 커밋 `4711732`의 것 그대로다(처음 올린 `eb9d88b`와 같다). 테스트는 실제 실행 대조만 고친 계획에 맞췄다: 네 번·다섯 번 나누는 사례를 `-u`로 겹친 꼴로 바꿨고, `tool`이 실행되지 않은 사례는 그 머신의 `env`가 낸 종료 코드·오류·버전과 함께 모아 실패로 낸다(조사 때 넣은 것을 남겼다. 단언의 기준은 같다: 실행되지 않으면 실패). 문서(설계서 v0.7.75, CHANGELOG, architecture, TD-62 (3))를 다시 넣었다. 이 Mac에서 새 테스트 19건 통과(대조한 틀 53개, 경계 사례 14개). CI(uutils)에서는 조사용 head `4711732`에서 `-u`로 겹친 꼴이 실행되고 인자 차이가 0건인 것을 보았다.
+- 2026-11-22T12:50:41+09:00 step0 재작업: 구현 판정 7회차: Claude 승인, Codex 수정 요청(F9·F10, P1 둘, 재현됨). 둘 다 맞는 지적이다(`env --` 뒤의 낱말을 옵션으로 다시 읽는다, `env`의 할당을 셸의 식별자 꼴로만 읽는다). 고치려면 step의 "작업"(`env`의 할당과 `--`)을 고쳐야 해서 계획 검증을 다시 받는다.
 
 ## 의사결정 로그
 
