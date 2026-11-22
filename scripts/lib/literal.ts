@@ -4,7 +4,10 @@
 
 /** 글 안의 가장 긴 백틱 줄의 길이 */
 function longestTicks(s: string): number {
-  return Math.max(0, ...(s.match(/`+/g) ?? []).map((x) => x.length));
+  // 묶음을 하나씩 본다. 배열을 함수 인자로 펼치면 묶음이 아주 많은 글에서 호출 인자 한도를 넘는다
+  let max = 0;
+  for (const m of s.matchAll(/`+/g)) max = Math.max(max, m[0].length);
+  return max;
 }
 
 /**

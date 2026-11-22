@@ -362,6 +362,16 @@ async function askQuestions(
   stage: 'plan' | 'step' = 'plan',
 ): Promise<void> {
   const info = repoInfo(l.worktree);
+  // 댓글의 글을 먼저 만든다. 여기서 실패하면 계획을 멈추거나 질문을 올린 것으로 적지 않는다
+  const body = questionComment({
+    owner: ctx.cfg.github.owner,
+    stage,
+    step: l.step,
+    planId: l.id,
+    planFile: ref.file,
+    branch: l.branch,
+    questions: fresh,
+  });
   setPlanStatus(
     l.worktree,
     'blocked',
@@ -373,15 +383,6 @@ async function askQuestions(
     reported: [...prev.reported, ...fresh.map((q) => q.title)],
     waiting: true,
     stage,
-  });
-  const body = questionComment({
-    owner: ctx.cfg.github.owner,
-    stage,
-    step: l.step,
-    planId: l.id,
-    planFile: ref.file,
-    branch: l.branch,
-    questions: fresh,
   });
   try {
     ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
