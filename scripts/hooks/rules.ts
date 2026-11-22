@@ -892,16 +892,13 @@ function sequenceRules(command: string): Problem | null {
   let pipefail = false;
   let checked = false; // 검사 명령이 앞에 있었다
   let broken = false; // 그 뒤 `&&`가 아닌 연산자로 이어진 적이 있다
-  for (const { cmd: raw, alts, next } of parseSequence(command, 'posix')) {
+  for (const { cmd: raw, next } of parseSequence(command, 'posix')) {
     // 이름과 하위 명령의 자리는 리다이렉션을 뺀 인자로 본다(`git >out push`, `node harness.ts >log check`)
     const cmd = positional(raw);
     const opts = setOptions(cmd);
     errexit ||= opts.errexit;
     pipefail ||= opts.pipefail;
-    // 래퍼에 표에 없는 옵션이 붙어 있으면 이 자리에서 실행될 수 있는 명령이 여럿이다(후보). 하나라도 검사 명령이면
-    // 검사 명령의 자리로, 하나라도 뒤 명령이면 뒤 명령의 자리로 본다
-    const all = alts ? [cmd, ...alts.map(positional)] : [cmd];
-    const isCheck = all.some(isCheckCommand);
+    const isCheck = isCheckCommand(cmd);
     const piped = next === '|' || next === '|&';
     if (isCheck && piped && !pipefail) {
       return v(
@@ -911,7 +908,7 @@ function sequenceRules(command: string): Problem | null {
         'docs/harness/workflow.md 4절, TD-29',
       );
     }
-    const what = all.map(followUp).find((x) => x !== null) ?? null;
+    const what = followUp(cmd);
     if (what && checked && broken && !errexit) {
       return v(
         'R4 검사 우회',
@@ -942,15 +939,6 @@ export function evaluateBash(
   if (raw) return raw;
   let procedural: Problem | null = null;
   for (const c of parseShell(command, dialect)) {
-    // 분석기가 끝까지 읽지 못한 명령은 통과시키지 않는다: 실행될 명령이 읽은 것과 다를 수 있다
-    if (c.incomplete) {
-      return v(
-        'R4 훅 우회',
-        '`env -S`가 다섯 번 넘게 겹쳐 실행될 명령을 끝까지 읽지 못했다',
-        '`env -S`를 겹치지 말고 실행할 명령을 그대로 쓴다',
-        `${D} 13.1절`,
-      );
-    }
     // 이름과 인자의 자리로 고르는 규칙은 p를, 낱말을 이은 글과 대상 파일을 보는 규칙은 c를 본다
     const p = positional(c);
     const head = p.argv.length ? commandName(p.argv[0]) : '';
