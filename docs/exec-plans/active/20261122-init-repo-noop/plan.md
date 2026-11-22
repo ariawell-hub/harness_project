@@ -2,7 +2,7 @@
 id: 20261122-init-repo-noop
 issue: 208 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -71,6 +71,7 @@ claimed_at: 2026-11-22T19:09:47+09:00 # new-task가 채운다
 - 2026-11-22 19:36 테스트 먼저: 테스트만 담은 커밋(`scripts/test/init.test.ts`)에서 그 파일 전체가 실패했다(`scripts/commands/init.ts`에 `changedKeys`·`resolvesInside`가 없어 읽지 못한다). 구현 뒤 AC의 테스트 파일 넷이 모두 통과했다.
 - 2026-11-22 19:36 구현 뒤의 확인(이 worktree에서 실제 명령): `init --profile web --dry-run`은 바뀔 항목과 템플릿 넷의 복사 예정, 남은 수동 작업을 출력했고 `git status`에 바뀐 파일이 없었다. `init --profile core`는 "다시 쓰지 않았다"를 출력하고 설정 파일이 그대로였다. `run --dry-run`은 실행 없이 종료 코드 2였다.
 - 2026-11-22 19:36 문서: 설계서 v0.7.77, 새 기술 부채 행 TD-67로 적었다. 다른 세션의 PR #197이 승인 대기이고 v0.7.77을 쓴다. 그 PR이 먼저 병합되면 main을 병합하며 번호를 다음 것으로 옮긴다. 구현과 완료 처리를 한 번에 올린다.
+- 2026-11-22T19:55:23+09:00 step0 재작업: 구현 판정 1회차 지적 F10·F11(codex P1): 프로파일의 github 항목이 사라진다, 같은 자리의 뒤 템플릿이 앞의 것을 덮어쓴다
 
 ## 의사결정 로그
 
