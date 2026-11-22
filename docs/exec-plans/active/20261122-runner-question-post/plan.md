@@ -2,7 +2,7 @@
 id: 20261122-runner-question-post
 issue: 211 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -77,6 +77,7 @@ runner는 세션이 계획의 "열린 질문"에 남긴 질문을 Issue 댓글�
 - 2026-11-22 `Comment`에 `id`가 들어가 그것을 직접 만드는 테스트 둘(`next.test.ts`의 `said`, `task.test.ts`의 `comment`)에 `id`를 채웠다(단언은 그대로다). 가짜 GitHub의 장치와 `commentId`(번호 변환)의 단위 테스트를 `next.test.ts`에 더했다.
 - 2026-11-22 이벤트 이름(`questions-unposted`, `questions-posted`, `questions-hold`, `questions-reset`, `wait-questions`): 문서와 지표 코드에 이벤트 이름의 목록이 없어(`scripts/runner/run.ts`만 쓴다) 더하지 않았다.
 - 2026-11-22 설계서 v0.7.79(4.5절의 열린 질문 항목에 문장 하나, 버전 이력), CHANGELOG 한 줄.
+- 2026-11-22T23:13:56+09:00 step0 재작업: 구현 판정 1회차(head `b705635`. 원장의 7라운드): Claude 승인(지적 없음), Codex 수정 요청(P1 둘. F1~F9는 닫힌 채다). F10(재현됨): 질문 상태 파일을 그 자리에서 덮어써, 쓰는 중에 runner가 끝나면 빈 파일이 "올리지 못한 질문 없음"으로 읽혀 멈춘 계획이 다시 올려지지 않는다. F11: 제작자가 이미 답했는데 라벨만 계속 붙지 않아 대기 상한으로 멈추면, 정지 알림이 그 답 뒤에 달려 답이 마지막 댓글이 아니게 되고 다음 실행이 질문을 다시 올린다. 둘 다 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 
 ## 의사결정 로그
 
