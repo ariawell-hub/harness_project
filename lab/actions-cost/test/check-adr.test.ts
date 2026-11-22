@@ -278,6 +278,10 @@ test('checkAdr 배경: 링크의 글에 코드나 짝이 맞는 대괄호가 있
     '[Actions 비용 문서 `a[0]`](../harness/actions-cost.md)',
     '[`[예시](x.md)` 말고 Actions 비용 문서](../harness/actions-cost.md)',
     '[Actions 비용 문서 [기준선]](../harness/actions-cost.md)',
+    // 보이지 않는 글자만 든 코드 구간이 있어도 다른 곳에 보이는 글자가 있으면 센다
+    '[`\u200B` 문서](../harness/actions-cost.md)',
+    '[`\u200B` `actions-cost.md`](../harness/actions-cost.md)',
+    '[`\u200B[``기준선`](../harness/actions-cost.md)',
   ])
     assert.deepEqual(checkAdr(swap(doc, link, shown)), [], shown);
 });
@@ -305,9 +309,17 @@ test('checkAdr 배경: 화면에서 링크가 아닌 글은 기준선 링크로 
     '[&nbsp;](../harness/actions-cost.md)',
     '[&#8203;](../harness/actions-cost.md)',
     '[...](../harness/actions-cost.md)',
-    // 화면에 보이지 않는 채움 글자(U+3164), 코드 구간을 가리는 데 쓰는 글자(U+E000)
+    // 화면에 보이지 않는 채움 글자(U+3164), 코드 구간을 가리는 데 쓰는 글자(U+E000, U+E001)
     '[\u3164](../harness/actions-cost.md)',
     '[\uE000](../harness/actions-cost.md)',
+    '[\uE001](../harness/actions-cost.md)',
+    // 코드 구간도 내용에 보이는 글자가 있어야 한다
+    '[`\u200B`](../harness/actions-cost.md)',
+    '[`\u3164`](../harness/actions-cost.md)',
+    '[` `](../harness/actions-cost.md)',
+    '[`\u200B` `\u2060`](../harness/actions-cost.md)',
+    '[** `\u200B` **](../harness/actions-cost.md)',
+    '[`\u200D`\u200B](../harness/actions-cost.md)',
   ])
     fails(checkAdr(swap(doc, link, shown)), /배경.*링크/);
 });
