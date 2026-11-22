@@ -24,7 +24,7 @@
 | `ubuntu-slim`      | Linux 1코어 x64   | $0.002    | 2   |
 
 - 지금의 세 줄(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04` = 6)은 그대로 둔다.
-- `RATE_MILLI` 바로 위의 주석(`/**`로 시작해 `const RATE_MILLI` 줄 앞에서 끝나는 주석 하나)에 러너의 종류, 두 라벨, 단가, 출처의 주소 둘(단가 `https://docs.github.com/en/billing/reference/actions-runner-pricing`, 라벨 `https://docs.github.com/en/actions/reference/runners/github-hosted-runners`)과 확인한 날짜 `2026-11-22`를 적는다. AC가 이 주석에서 주소 둘, 날짜, 두 라벨을 찾는다.
+- `RATE_MILLI` 바로 위의 주석(줄 머리의 `/**`로 시작하고, 닫는 `*/`가 `const RATE_MILLI` 줄의 바로 앞 줄에 있는 주석 블록 하나. 주석과 선언 사이에 다른 줄을 두지 않는다)에 러너의 종류, 두 라벨, 단가, 출처의 주소 둘(단가 `https://docs.github.com/en/billing/reference/actions-runner-pricing`, 라벨 `https://docs.github.com/en/actions/reference/runners/github-hosted-runners`)과 확인한 날짜 `2026-11-22`를 적는다. AC가 이 주석에서 주소 둘, 날짜, 두 라벨을 찾는다.
 - 그 밖의 규칙은 그대로다: 라벨이 단가표의 라벨 하나뿐일 때만 단가를 안다. 라벨이 여럿이거나 없으면 모르는 러너다. `self-hosted`가 들어 있으면 self-hosted다.
 - 보존 기록은 단가표에 있는 라벨과 `self-hosted`만 그대로 남긴다(`keptLabel`). 두 라벨이 단가표에 들면 그대로 남는다. 따로 목록을 만들지 않는다(단가표와 보존 기록이 받는 라벨이 어긋나지 않게 한다).
 
@@ -87,7 +87,7 @@ T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2
 node lab/actions-cost/check-doc.ts
 node lab/actions-cost/check-adr.ts
 T=$(mktemp -d) && awk '/^## 재는 방법/{s=1;next} /^## /{s=0} s' docs/harness/actions-cost.md | grep "^- \*\*단가\*\*:" > "$T/l" && test "$(grep -c "" "$T/l")" = 1 && grep -qF "https://docs.github.com/en/billing/reference/actions-runner-pricing" "$T/l" && grep -qF "https://docs.github.com/en/actions/reference/runners/github-hosted-runners" "$T/l" && grep -qF "2026-11-22" "$T/l" && grep -qF "ubuntu-24.04-arm" "$T/l" && grep -qF "ubuntu-slim" "$T/l" && grep -qF "0.006" "$T/l" && grep -qF "0.005" "$T/l" && grep -qF "0.002" "$T/l"
-T=$(mktemp -d) && awk '/^\/\*\*/{c=""} {c=c"\n"$0} /^const RATE_MILLI/{print c; exit}' scripts/metrics/actions-cost.ts > "$T/c" && grep -q "^const RATE_MILLI" "$T/c" && grep -qF "https://docs.github.com/en/billing/reference/actions-runner-pricing" "$T/c" && grep -qF "https://docs.github.com/en/actions/reference/runners/github-hosted-runners" "$T/c" && grep -qF "2026-11-22" "$T/c" && grep -qF "ubuntu-24.04-arm" "$T/c" && grep -qF "ubuntu-slim" "$T/c"
+T=$(mktemp -d) && awk '/^\/\*\*/{c="";o=1} o{c=c"\n"$0} /\*\/ *$/{if(o){o=0;e=NR}} /^const RATE_MILLI/{if(e==NR-1)print c;exit}' scripts/metrics/actions-cost.ts > "$T/c" && test -s "$T/c" && grep -qF "https://docs.github.com/en/billing/reference/actions-runner-pricing" "$T/c" && grep -qF "https://docs.github.com/en/actions/reference/runners/github-hosted-runners" "$T/c" && grep -qF "2026-11-22" "$T/c" && grep -qF "ubuntu-24.04-arm" "$T/c" && grep -qF "ubuntu-slim" "$T/c"
 grep -q "#204" docs/harness/CHANGELOG.md
 node scripts/harness.ts check
 ```
@@ -98,7 +98,7 @@ node scripts/harness.ts check
 - 여섯째 줄: 출력의 한 줄(단가 안내 문장)에 세 단가가 함께 있다.
 - 일곱째 줄: 문서의 기준선 구간이 `--from`의 출력과 같다. 빈 줄은 비교에서 뺀다(prettier가 표식 줄 앞뒤에 빈 줄을 둔다).
 - 열째 줄: 문서의 "재는 방법" 절에 `- **단가**:` 줄이 하나이고, 그 줄에 출처의 주소 둘, 확인한 날짜, 두 라벨, 세 단가가 있다.
-- 열한째 줄: `const RATE_MILLI` 바로 위의 주석 하나(와 그 선언 줄)를 잘라, 출처의 주소 둘, 확인한 날짜, 두 라벨이 있는지 본다. 주석이 없거나 다른 곳에만 적혀 있으면 실패한다.
+- 열한째 줄: `const RATE_MILLI`에 바로 붙은 주석 블록만 자른다(줄 머리의 `/**`에서 시작해 닫는 `*/`가 선언의 바로 앞 줄에 있는 것). 그 블록에 출처의 주소 둘, 확인한 날짜, 두 라벨이 있는지 본다. 주석이 없거나, 주석과 선언 사이에 다른 선언·줄 주석·빈 줄이 끼어 있거나, 다른 곳의 주석에만 적혀 있으면 자른 것이 비어 실패한다.
 
 ## 금지사항
 
