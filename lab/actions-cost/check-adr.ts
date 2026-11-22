@@ -202,12 +202,27 @@ function linksOn(line: string): { target: string; label: string | null }[] {
 }
 
 /**
+ * 문자 참조의 꼴(CommonMark): 십진 숫자 참조(&#숫자 1~7자리;), 16진 숫자 참조(&#x 1~6자리;),
+ * 이름 참조(&이름;. HTML의 이름은 로마자로 시작하고 로마자·숫자가 이어지며 2~31자다).
+ * 이 꼴이 아닌 &…;(예: &2026;)는 문자 참조가 아니라 글 그대로다
+ */
+const CHAR_REF = /&(?:#([0-9]{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,30}));/g;
+
+/**
  * 링크의 글에 글자나 숫자가 있는가: SHOWN이나, 내용에 SHOWN이 있는 코드 구간(CODE_MARK)이 있다.
- * 문자 참조(&이름;)는 무엇으로 표시되는지 풀어 읽지 않고 뺀다
+ * 숫자 참조는 그 문자로 풀어 같은 기준으로 센다(없는 문자는 세지 않는다).
+ * 이름 참조 꼴은 무엇으로 표시되는지 이름표 없이는 알 수 없어 세지 않는다(그 이름의 로마자도 세지 않는다)
  */
 const lettered = (label: string): boolean => {
-  const text = label.replace(/&[#\w]+;/g, '');
-  return SHOWN.test(text) || text.includes(CODE_MARK);
+  if (label.includes(CODE_MARK)) return true;
+  const text = label.replace(CHAR_REF, (_, dec?: string, hex?: string) => {
+    if (dec === undefined && hex === undefined) return '';
+    const cp = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? '', 16);
+    if (cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return '';
+    const ch = String.fromCodePoint(cp);
+    return SHOWN.test(ch) ? ch : '';
+  });
+  return SHOWN.test(text);
 };
 
 function checkBackground(
@@ -239,18 +254,14 @@ function checkBackground(
         problems.push(
           `배경 형식(${i + 1}째 줄): 기준선 링크의 여는 대괄호가 같은 줄에 없다(링크는 [글](주소)를 한 줄에 적는다)`,
         );
-      // 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다
-      else if (link.label.includes('](')) continue;
-      else if (!lettered(link.label))
-        problems.push(
-          `배경 형식(${i + 1}째 줄): 기준선 링크의 글에 글자나 숫자가 없다(문장 부호·기호, 표시되지 않는 문자, 문자 참조는 세지 않는다)`,
-        );
-      else linked = true;
+      // 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다. 글에 글자나 숫자가 없는 링크는 세지 않을 뿐이다
+      // (바른 링크가 따로 있으면 그런 링크가 더 있어도 된다)
+      else if (!link.label.includes('](') && lettered(link.label)) linked = true;
     }
   }
   if (!linked)
     problems.push(
-      '배경: 기준선 문서로 가는 링크가 없다(주소는 ../harness/actions-cost.md 그대로 적는다)',
+      '배경: 기준선 문서로 가는 링크가 없다(주소는 ../harness/actions-cost.md 그대로 적는다. 글에 글자나 숫자가 있는 링크만 센다)',
     );
   if (!new RegExp(`(?<![\\d.,])${BUDGET.minutesPerPr}분`).test(body.join('\n')))
     problems.push(`배경: 예산("${BUDGET.minutesPerPr}분")이 없다`);
