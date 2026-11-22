@@ -65,7 +65,7 @@
 
 ### 7. runner의 대응 집계 (`scripts/runner/review.ts`)
 
-`settledResponses`(대응한 뒤 닫힌 지적)는 "`open`이 아닌 지적"을 닫힌 것으로 본다. `parked`는 닫힌 것이 아니므로 뺀다: 아직 세지 않은 대응이 붙은 지적이 `parked`인 동안에는 성공으로도 실패로도 세지 않고 그 대응 기록을 그대로 둔다(`failedResponses`는 `open`만 봐서 이미 세지 않는다). 그 지적이 `open`으로 돌아와 판정을 받으면 지금의 규칙대로 센다(열려 있으면 실패, `fixed`·`rejected`·`deferred`·`accepted`면 닫힘).
+`settledResponses`(대응한 뒤 닫힌 지적)는 "`open`이 아닌 지적"을 닫힌 것으로 본다. `parked`는 닫힌 것이 아니므로 뺀다(바꾸는 줄은 이 함수의 본문 안에만 둔다. 함수 위의 설명 주석은 그대로 두고, 설명이 필요하면 본문 안의 주석으로 적는다): 아직 세지 않은 대응이 붙은 지적이 `parked`인 동안에는 성공으로도 실패로도 세지 않고 그 대응 기록을 그대로 둔다(`failedResponses`는 `open`만 봐서 이미 세지 않는다). 그 지적이 `open`으로 돌아와 판정을 받으면 지금의 규칙대로 센다(열려 있으면 실패, `fixed`·`rejected`·`deferred`·`accepted`면 닫힘).
 
 그 밖의 runner 코드는 고치지 않는다. 읽어서 확인한 것을 진행 로그에 적는다: 대응할 지적(`openBlocking`), 오래 열린 지적(`longOpen`), 교착(`deadlocked`)은 `open`만 본다. 발산 판단(`divergence.ts`)은 `open`과 닫힌 상태(`fixed`·`rejected`·`accepted`)만 세므로 `parked`인 지적은 새 지적으로도 해소로도 세지 않는다.
 
@@ -135,7 +135,9 @@ test "$(grep -c -F '계획만 남긴 동안, 앞선 구현 판정에서 나온 �
 test "$(grep -c -F '상태가 `parked`인 지적은 구현 대기다.' scripts/cross-review/prompt.md)" = 1
 grep -q 'parked' scripts/cross-review/ledger.md && grep -q 'planRound' scripts/cross-review/ledger.md
 grep -q '#212' docs/harness/CHANGELOG.md
-test -z "$(git diff --name-only "$(git merge-base HEAD origin/main)" HEAD -- .github scripts/runner/run.ts scripts/runner/next.ts scripts/runner/divergence.ts scripts/cross-review/prompt-plan.md scripts/ci/rebuttal.ts scripts/ci/owner-accept.ts)"
+BASE="$(git merge-base HEAD origin/main)" && git diff --quiet "$BASE" HEAD -- .github scripts/cross-review/prompt-plan.md scripts/ci/rebuttal.ts scripts/ci/owner-accept.ts
+BASE="$(git merge-base HEAD origin/main)" && N="$(git diff --name-only "$BASE" HEAD -- scripts/runner)" && test "$N" = "scripts/runner/review.ts"
+BASE="$(git merge-base HEAD origin/main)" && D="$(git diff -U0 "$BASE" HEAD -- scripts/runner/review.ts)" && test -n "$D" && test "$(printf '%s\n' "$D" | grep '^@@' | grep -v -c -F 'export function settledResponses(')" = 0
 node scripts/harness.ts check
 node scripts/harness.ts self-test
 node scripts/harness.ts lint
@@ -144,8 +146,11 @@ node scripts/harness.ts fmt --check
 ```
 
 - 셋째·넷째 줄: 설계서에는 정한 항목 하나가 들어가고, 바뀌는 줄은 머리말의 버전(한 줄을 고친다), 버전 이력(한 줄을 더한다), 10.2절의 새 항목(한 줄을 더한다)뿐이다. `origin/main`이 필요하다(`git fetch origin`).
-- 아홉째 줄: 워크플로, runner의 주 흐름(`run.ts`)·할 일 고르기·발산 판단, 계획 검증 프롬프트, 반박·제작자 승인의 판별 코드는 바뀌지 않는다.
-- 열째 줄: 전체 `check`(포맷·정적 검사·모든 테스트·빌드·문서 검사·우회 탐지·시크릿 스캔)가 통과해야 한다. 그 뒤의 `lint`·`doc-lint`·`fmt --check`는 `check`에 들어 있지만 실패한 곳을 바로 보려고 따로 둔다.
+- 아홉째~열한째 줄은 명령이 실패해도 통과하지 않는다: 기준 커밋을 구하지 못하거나(`origin/main`이 없다) `git diff`가 실패하면 그 줄이 실패한다(`&&`로 이었고, 결과가 비어도 통과하는 비교를 쓰지 않는다).
+- 아홉째 줄: 워크플로(`.github/**`), 계획 검증 프롬프트, 반박·제작자 승인의 판별 코드는 바뀌지 않는다(`git diff --quiet`는 차이가 있으면 1, 실패하면 그 밖의 값으로 끝난다).
+- 열째 줄: `scripts/runner/` 아래에서 바뀌는 파일은 `review.ts` 하나뿐이다(`ledger-read.ts`를 포함해 다른 runner 파일이 바뀌면 실패한다).
+- 열한째 줄: `review.ts`에서 바뀌는 줄은 모두 `settledResponses` 함수의 본문 안에 있다. 문맥 없는 diff(`-U0`)의 hunk 머리글은 바뀐 줄을 감싼 함수의 선언 줄을 싣는다: 머리글에 그 선언이 없는 hunk가 하나라도 있으면 실패한다. 그래서 함수 위의 설명 주석은 고치지 않고, 필요한 설명은 함수 본문 안의 주석으로 적는다.
+- 열두째 줄: 전체 `check`(포맷·정적 검사·모든 테스트·빌드·문서 검사·우회 탐지·시크릿 스캔)가 통과해야 한다. 그 뒤의 `lint`·`doc-lint`·`fmt --check`는 `check`에 들어 있지만 실패한 곳을 바로 보려고 따로 둔다.
 
 ## 금지사항
 
