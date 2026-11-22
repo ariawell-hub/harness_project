@@ -72,6 +72,26 @@ test('scopePaths: 백틱 하나로 감싼 코드 스팬만 경로다(둘 이상�
   );
 });
 
+test('scopePaths: 역슬래시로 막은 백틱은 코드 스팬을 열지 않는다(스팬 밖에서만)', () => {
+  // 막은 백틱 바로 뒤의 스팬: 첫 백틱은 글자이고 둘째 백틱이 스팬을 연다
+  assert.deepEqual(scopePaths('- \\``real.ts`'), ['real.ts']);
+  assert.deepEqual(scopePaths('- 글자 백틱 \\` 과 `a.ts`'), ['a.ts']);
+  // 막은 백틱 둘 사이의 글자는 스팬이 아니다
+  assert.deepEqual(scopePaths('- \\`not.ts\\`'), []);
+  // 역슬래시 둘 뒤의 백틱은 막히지 않았다(앞의 둘이 역슬래시 하나다)
+  assert.deepEqual(scopePaths('- \\\\`b.ts`'), ['b.ts']);
+  // 스팬 안에서는 역슬래시가 글자다: 스팬은 다음 백틱에서 닫힌다
+  assert.deepEqual(scopePaths('- `src\\` 그리고 `c.ts`'), ['src\\', 'c.ts']);
+  // 막은 백틱이 백틱 둘 묶음의 길이를 바꾸지 않는다
+  assert.deepEqual(scopePaths('- \\```x.ts`` 와 `d.ts`'), ['d.ts']);
+  // 줄 끝의 역슬래시
+  assert.deepEqual(scopePaths('- `e.ts` \\'), ['e.ts']);
+  // 계획 전체에서: 막은 백틱 뒤에 적은 경로만 바뀌면 통과다
+  const paths = planScopePaths(plan('- \\``real.ts`'));
+  assert.deepEqual(paths, ['real.ts']);
+  assert.deepEqual(judgeScope(['real.ts'], paths).outside, []);
+});
+
 test('scopePaths: HTML 주석과 코드 블록 안의 글자는 넣지 않는다', () => {
   assert.deepEqual(scopePaths('<!-- `x.ts` -->\n- `a.ts`\n<!--\n- `y.ts`\n-->\n- `b.ts`'), [
     'a.ts',
