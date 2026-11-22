@@ -639,6 +639,9 @@ const BOUNDARY = [
   `env -S 'T a\\cb c'`,
   // 네 번 나눈다
   `env -S -i -S -i -S -i -S 'T a'`,
+  // 같은 옵션을 되풀이하지 않고 네 번, 다섯 번 나눈다(조사용)
+  `env -S -uA -S -uB -S -uC -S 'T a'`,
+  `env -S -uA -S -uB -S -uC -S -uD -S 'T a'`,
 ];
 
 test('실제 실행 대조: 래퍼가 tool을 실행하는 꼴에서는 분석기도 그 명령을 낸다', (t) => {
@@ -775,7 +778,7 @@ test('실제 실행 대조: 래퍼가 tool을 실행하는 꼴에서는 분석�
     });
     const which = (version.stdout ?? '').split('\n')[0] || '(env --version이 버전을 내지 않는다)';
     assert.fail(
-      `tool이 실행되지 않은 사례 ${notRun.length}개(env: ${which}):\n${notRun.join('\n')}`,
+      `tool이 실행되지 않은 사례 ${notRun.length}개(env: ${which}):\n${notRun.join('\n')}\n차이 ${diffs.length}개:\n${diffs.join('\n')}`,
     );
   }
   t.diagnostic(`대조한 틀 ${compared}개, 건너뛴 틀 ${skipped}개, 경계 사례 ${boundary}개`);
