@@ -269,6 +269,45 @@ test('checkAdr 배경: 기준선 링크의 주소는 ADR 폴더에서 본 기준
   );
 });
 
+test('checkAdr 배경: 링크의 글에 코드·대괄호·줄바꿈이 있어도 화면에서 링크이면 센다', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  for (const shown of [
+    '[Actions 비용 문서 `actions-cost.md`](../harness/actions-cost.md)',
+    '[`actions-cost.md`](../harness/actions-cost.md)',
+    '[Actions 비용 문서 `a[0]`](../harness/actions-cost.md)',
+    '[`[예시](x.md)` 말고 Actions 비용 문서](../harness/actions-cost.md)',
+    '[Actions 비용 문서 [기준선]](../harness/actions-cost.md)',
+    '[Actions 비용\n문서](../harness/actions-cost.md)',
+    '[Actions 비용 `actions-cost.md`\n문서](../harness/actions-cost.md)',
+  ])
+    assert.deepEqual(checkAdr(swap(doc, link, shown)), [], shown);
+});
+
+test('checkAdr 배경: 화면에서 링크가 아닌 글은 기준선 링크로 세지 않는다', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  for (const shown of [
+    // 코드로 적은 링크 예시
+    '`[Actions 비용 문서](../harness/actions-cost.md)`',
+    '[Actions 비용 문서 `actions-cost.md](../harness/actions-cost.md)` 참고',
+    // 글에 코드가 있어도 주소가 틀리면 세지 않는다
+    '[Actions 비용 문서 `actions-cost.md`](../missing/actions-cost.md)',
+    // 글 안에 링크가 있으면 바깥은 링크가 아니다
+    '[Actions [비용](../missing/x.md) 문서](../harness/actions-cost.md)',
+    // 여는 대괄호가 없다
+    'Actions 비용 문서](../harness/actions-cost.md)',
+    'Actions] 비용 문서](../harness/actions-cost.md)',
+    // 여는 대괄호가 다른 목록 항목에 있다
+    '[Actions 비용\n- 문서](../harness/actions-cost.md)',
+    // 여는 대괄호가 다른 문단에 있다
+    '[Actions 비용\n\n문서](../harness/actions-cost.md)',
+    // 글이 강조 표시뿐이다
+    '[**](../harness/actions-cost.md)',
+  ])
+    fails(checkAdr(swap(doc, link, shown)), /배경.*링크/);
+});
+
 test('checkAdr 후보표: 표가 하나이고 머리 줄과 구분 줄이 맞다', () => {
   const doc = goodAdr();
   const second = `${TABLE_HEAD}\n${TABLE_RULE}\n${row('G1')}`;
