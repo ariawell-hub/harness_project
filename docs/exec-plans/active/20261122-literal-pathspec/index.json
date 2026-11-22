@@ -1,0 +1,10 @@
+{
+  "plan": "20261122-literal-pathspec",
+  "steps": [
+    {
+      "step": 0,
+      "name": "literal-paths",
+      "status": "pending"
+    }
+  ]
+}
