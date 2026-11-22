@@ -1,5 +1,6 @@
 // 판단 절차 문서(docs/harness/actions-cost.md)가 비어 있거나 값이 보존 기록과 다르면 실패하게 하는 검사
 // (계획 20261121-actions-cost-design step1). 낱말을 찾는 대신 문서의 구조와 값을 읽는다.
+// 화면에 보이는 문서를 본다: 주석 안의 글은 없는 것으로 치고, 코드 블록 안의 줄은 절·항목·표로 치지 않는다.
 // GitHub을 읽지 않는다: 값은 보존 기록(lab/actions-cost/*.jsonl)으로만 계산한다. 지난 기간의 실행 기록도
 // 다시 실행하면 바뀌므로, 읽으면 바르게 적은 기준선이 뒤에 실패한다.
 // 글의 옳고 그름(설명이 맞는가, 절차가 쓸 만한가)은 보지 않는다. 그것은 PR 검증이 본다.
@@ -110,13 +111,83 @@ export function verdictOf(r: CostReport): Verdict {
 const dense = (lines: string[]) => lines.join('').replace(/\s/g, '').length;
 const blank = (line: string) => /^\s*$/.test(line);
 
-/** 여섯 절의 본문(제목 다음 줄부터 다음 `## ` 전까지). 없거나 두 번 있는 절은 넣지 않는다 */
-function sections(lines: string[], problems: string[]): Map<Title, string[]> {
+/**
+ * 문서의 줄을 보는 세 가지 눈. 줄 번호는 셋이 같다.
+ * - `raw`: 파일의 글 그대로. 표식 구간을 계산한 출력과 견줄 때 쓴다.
+ * - `text`: 화면에 보이는 글. 주석(`<!-- … -->`) 안의 글을 뺐다. 코드 블록 안의 글은 보이므로 남긴다.
+ * - `struct`: 문서의 뼈대를 찾는 눈. `text`에서 코드 블록의 줄까지 비웠다. 제목, 목록 항목, 표, 표식을 여기서 찾는다.
+ * `fenced`는 코드 블록 안의 줄(여닫는 줄 제외)이다. 표식 줄은 주석이지만 `text`·`struct`에 남긴다
+ */
+interface Views {
+  raw: string[];
+  text: string[];
+  struct: string[];
+  fenced: boolean[];
+}
+
+function viewsOf(doc: string): Views {
+  const raw = doc.split(/\r?\n/);
+  const text: string[] = [];
+  const struct: string[] = [];
+  const fenced: boolean[] = [];
+  /** 열린 코드 블록의 여는 표시(`\`\`\`` 또는 `~~~`). 같은 글자가 그 길이 이상 나와야 닫힌다 */
+  let fence: string | null = null;
+  let inComment = false;
+  for (const line of raw) {
+    if (fence !== null) {
+      const closes = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line);
+      text.push(closes ? '' : line);
+      struct.push('');
+      fenced.push(!closes);
+      if (closes) fence = null;
+      continue;
+    }
+    fenced.push(false);
+    if (inComment) {
+      // 여러 줄 주석의 안. 닫는 표시가 있는 줄까지 통째로 없는 것으로 친다
+      if (line.includes('-->')) inComment = false;
+      text.push('');
+      struct.push('');
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (open) {
+      fence = open[1];
+      text.push('');
+      struct.push('');
+      continue;
+    }
+    if (line.trim() === BEGIN || line.trim() === END) {
+      text.push(line);
+      struct.push(line);
+      continue;
+    }
+    // 한 줄 안에서 닫힌 주석을 빼고, 닫히지 않은 주석은 그 자리부터 뺀다
+    let shown = line.replace(/<!--.*?-->/g, '');
+    const at = shown.indexOf('<!--');
+    if (at >= 0) {
+      shown = shown.slice(0, at);
+      inComment = true;
+    }
+    text.push(shown);
+    struct.push(shown);
+  }
+  return { raw, text, struct, fenced };
+}
+
+/** 절의 본문이 놓인 줄의 범위(제목 다음 줄부터 다음 `## ` 전까지) */
+interface Range {
+  from: number;
+  to: number;
+}
+
+/** 여섯 절의 범위. 없거나 두 번 있는 절은 넣지 않는다. 제목은 `struct`에서 찾는다 */
+function sections(lines: string[], problems: string[]): Map<Title, Range> {
   const heads = lines.flatMap((l, i) => {
     const m = /^## (.+?)\s*$/.exec(l);
     return m ? [{ title: m[1], i }] : [];
   });
-  const found = new Map<Title, string[]>();
+  const found = new Map<Title, Range>();
   for (const title of SECTIONS) {
     const hits = heads.filter((h) => h.title === title);
     if (hits.length !== 1) {
@@ -128,7 +199,7 @@ function sections(lines: string[], problems: string[]): Map<Title, string[]> {
       continue;
     }
     const next = heads.find((h) => h.i > hits[0].i);
-    found.set(title, lines.slice(hits[0].i + 1, next ? next.i : lines.length));
+    found.set(title, { from: hits[0].i + 1, to: next ? next.i : lines.length });
   }
   const order = heads
     .map((h) => h.title)
@@ -220,29 +291,41 @@ function realDay(day: string): boolean {
   return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === day;
 }
 
+/**
+ * 코드로 적은 글: 코드 구간(백틱)의 글과 코드 블록의 줄. 명령은 여기서 찾는다.
+ * 본문에 풀어 쓴 글은 명령으로 치지 않는다(복사해 실행할 글이 무엇인지 가릴 수 없다)
+ */
+function codeTexts(v: Views, lines: number[]): string[] {
+  return lines.flatMap((i) =>
+    v.fenced[i] ? [v.raw[i].trim()] : [...v.text[i].matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()),
+  );
+}
+
 function checkBaseline(
-  body: string[],
-  lines: string[],
+  v: Views,
+  r: Range,
   load: (name: string) => Loaded | string,
   problems: string[],
 ): void {
-  // 표식 구간은 문서 전체에 하나이고 이 절 안에 있다
-  const count = (mark: string) => lines.filter((l) => l.trim() === mark).length;
-  const begin = body.findIndex((l) => l.trim() === BEGIN);
-  const end = body.findIndex((l) => l.trim() === END);
+  // 표식 구간은 문서 전체에 하나이고 이 절 안에 있다. 표식은 struct에서 찾는다(코드 블록 안의 것은 표식이 아니다)
+  const count = (mark: string) => v.struct.filter((l) => l.trim() === mark).length;
+  const within = (mark: string) => {
+    for (let i = r.from; i < r.to; i++) if (v.struct[i].trim() === mark) return i;
+    return -1;
+  };
+  const begin = within(BEGIN);
+  const end = within(END);
   const one = count(BEGIN) === 1 && count(END) === 1;
-  const region = one && begin >= 0 && end > begin ? body.slice(begin + 1, end) : null;
+  const region = one && begin >= 0 && end > begin ? v.raw.slice(begin + 1, end) : null;
   if (region === null)
     problems.push(
       one
         ? '기준선: 표식 구간이 "기준선" 절 안에 없다(시작 표식 다음에 끝 표식이 와야 한다)'
         : `기준선: 표식 구간이 문서에 하나가 아니다(시작 표식 ${count(BEGIN)}개, 끝 표식 ${count(END)}개)`,
     );
-  /** 표식 구간 밖의 글. 구간을 가를 수 없으면 표식 줄만 뺀 절 전체다 */
-  const outside =
-    region === null
-      ? body.filter((l) => l.trim() !== BEGIN && l.trim() !== END)
-      : [...body.slice(0, begin), ...body.slice(end + 1)];
+  /** 표식 구간 밖의 줄 번호. 구간을 가를 수 없으면 절 전체다 */
+  const outside: number[] = [];
+  for (let i = r.from; i < r.to; i++) if (region === null || i < begin || i > end) outside.push(i);
 
   const loaded = load(BASELINE_FILE);
   if (typeof loaded === 'string') problems.push(`기준선: ${loaded}`);
@@ -262,7 +345,7 @@ function checkBaseline(
       );
   }
 
-  const dated = outside.filter((l) => l.includes('잰 날짜:'));
+  const dated = outside.map((i) => v.struct[i]).filter((l) => l.includes('잰 날짜:'));
   if (!dated.length) problems.push('기준선: "잰 날짜: <YYYY-MM-DD>" 줄이 표식 구간 밖에 없다');
   for (const l of dated) {
     const m = /잰 날짜:\s*(\d{4}-\d{2}-\d{2})(?!\d)/.exec(l);
@@ -271,11 +354,16 @@ function checkBaseline(
     else if (m[1] < DECIDED)
       problems.push(`기준선: 잰 날짜 ${m[1]}이 ${DECIDED}보다 앞선다(기준선은 그 뒤에 쟀다)`);
   }
-  const text = outside.join('\n');
-  if (!text.includes(SAVE_COMMAND))
-    problems.push(`기준선: 잰 명령이 표식 구간 밖에 없다(${SAVE_COMMAND})`);
-  if (!text.includes(FROM_COMMAND))
-    problems.push(`기준선: 다시 계산하는 명령이 표식 구간 밖에 없다(${FROM_COMMAND})`);
+  // 명령은 코드로 적은 글 전체가 같아야 한다. 포함하는지만 보면 다른 파일을 가리키는 명령(…jsonl.bak)이 통과한다
+  const commands = codeTexts(v, outside);
+  if (!commands.includes(SAVE_COMMAND))
+    problems.push(
+      `기준선: 잰 명령이 표식 구간 밖에 코드(백틱이나 코드 블록)로 적혀 있지 않다. 명령 전체가 같아야 한다(${SAVE_COMMAND})`,
+    );
+  if (!commands.includes(FROM_COMMAND))
+    problems.push(
+      `기준선: 다시 계산하는 명령이 표식 구간 밖에 코드(백틱이나 코드 블록)로 적혀 있지 않다. 명령 전체가 같아야 한다(${FROM_COMMAND})`,
+    );
 }
 
 function checkProcedure(body: string[], problems: string[]): void {
@@ -293,12 +381,14 @@ function checkProcedure(body: string[], problems: string[]): void {
       );
       continue;
     }
-    // 내용은 머리 뒤부터 다음 머리 전까지다
-    const next = starts.find((s) => s.i > hits[0].i);
-    const content = [
-      body[hits[0].i].slice(item.head.length),
-      ...body.slice(hits[0].i + 1, next ? next.i : body.length),
-    ];
+    // 내용은 머리 뒤의 글과 그 항목에 속한 줄(들여 쓴 이어지는 줄)이다.
+    // 들여 쓰지 않은 줄(다음 목록 항목, 문단)을 만나면 끝난다: 화면에서 그 항목의 내용이 아니다
+    const content = [body[hits[0].i].slice(item.head.length)];
+    for (let j = hits[0].i + 1; j < body.length; j++) {
+      if (blank(body[j])) continue;
+      if (!/^\s/.test(body[j])) break;
+      content.push(body[j]);
+    }
     const n = dense(content);
     if (n < 20)
       problems.push(`판단 절차: "${item.head}"의 내용이 공백을 빼고 20자보다 짧다(${n}자)`);
@@ -340,8 +430,12 @@ function checkRecord(
     problems.push(`기록: 표의 머리 줄이 다르다(| ${TABLE_HEAD.join(' | ')} |여야 한다)`);
     return;
   }
-  if (rule === undefined || !cellsOf(rule).every((c) => /^:?-+:?$/.test(c))) {
-    problems.push('기록: 표의 둘째 줄이 구분 줄(| --- | … |)이 아니다');
+  // 구분 줄의 칸 수가 머리 줄과 다르면 화면에서 표가 되지 않는다
+  const ruleCells = rule === undefined ? [] : cellsOf(rule);
+  if (ruleCells.length !== TABLE_HEAD.length || !ruleCells.every((c) => /^:?-+:?$/.test(c))) {
+    problems.push(
+      `기록: 표의 둘째 줄이 머리 줄과 칸 수가 같은 구분 줄(| --- | … |, ${TABLE_HEAD.length}칸)이 아니다`,
+    );
     return;
   }
   if (!rows.length) problems.push('기록: 표에 데이터 행이 없다(기준선 행이 있어야 한다)');
@@ -404,21 +498,22 @@ function checkRecord(
 /** 어긋난 점의 목록. 없으면 빈 배열 */
 export function checkDoc(i: DocInputs): string[] {
   const problems: string[] = [];
-  const lines = i.doc.split(/\r?\n/);
-  const found = sections(lines, problems);
+  const v = viewsOf(i.doc);
+  const found = sections(v.struct, problems);
   const load = loader(i);
+  const part = (lines: string[], r: Range) => lines.slice(r.from, r.to);
   for (const p of PROSE) {
-    const body = found.get(p.title);
-    if (body) checkProse(p.title, p.words, body, problems);
+    const r = found.get(p.title);
+    if (r) checkProse(p.title, p.words, part(v.text, r), problems);
   }
   const budget = found.get('예산');
-  if (budget) checkBudget(budget, problems);
+  if (budget) checkBudget(part(v.struct, budget), problems);
   const baseline = found.get('기준선');
-  if (baseline) checkBaseline(baseline, lines, load, problems);
+  if (baseline) checkBaseline(v, baseline, load, problems);
   const procedure = found.get('판단 절차');
-  if (procedure) checkProcedure(procedure, problems);
+  if (procedure) checkProcedure(part(v.struct, procedure), problems);
   const record = found.get('기록');
-  if (record) checkRecord(record, load, problems);
+  if (record) checkRecord(part(v.struct, record), load, problems);
   return problems;
 }
 
