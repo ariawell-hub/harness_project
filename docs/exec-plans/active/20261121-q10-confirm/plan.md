@@ -20,7 +20,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 
 수용 기준:
 
-1. 실물 확인의 절차가 OS와 무관한 명령 하나다: `node lab/q10-db/run.ts`. 실행, 포맷, 결과 검사, 테스트(검사 스크립트의 테스트와 `--out` 경로 검사의 테스트)를 차례로 돌리고, 하나가 실패하면 그 자리에서 멈추고 0이 아닌 종료 코드로 끝난다(뒤 단계를 돌리지 않는다. 테스트가 본다). `--skip-fmt`는 포맷 단계를 뺀다(하네스의 의존성을 설치하지 않은 CI 러너용). `--out <파일>`은 결과를 리포 밖에 쓰고 그 파일을 검사한다(작업 트리를 바꾸지 않는다). `--out`의 경로가 리포 안을 가리키거나(심볼릭 링크를 거친 것 포함) 이미 있는 항목이면 `run.ts`와 `trial.ts`가 아무것도 실행하기 전에 거부한다. 있는 파일을 덮어쓰지 않는다. 검사한 폴더와 여는 폴더를 같게 하고(부모 폴더에 들어간 뒤 그 폴더를 검사하고 파일 이름만으로 연다) 연 파일 디스크립터에 쓴다. 부모 경로의 심볼릭 링크가 리포 안을 가리키게 바뀌어도(검사 전, 검사와 여는 것 사이, 연 뒤) 리포 안에 파일이 생기지 않는다(테스트와 AC가 본다). `--out`은 macOS와 Linux에서만 받는다(Windows에서는 거부한다. CI와 기본 절차는 `--out`을 쓰지 않는다).
+1. 실물 확인의 절차가 OS와 무관한 명령 하나다: `node lab/q10-db/run.ts`. 실행, 포맷, 결과 검사, 검사 스크립트의 테스트를 차례로 돌리고, 하나가 실패하면 그 자리에서 멈추고 0이 아닌 종료 코드로 끝난다(뒤 단계를 돌리지 않는다. 테스트가 본다). `--skip-fmt`는 포맷 단계를 뺀다(하네스의 의존성을 설치하지 않은 CI 러너용). 결과를 쓰는 곳은 `lab/q10-db/results/<platform>-<arch>.json` 하나다: 결과를 다른 경로에 쓰는 옵션(`trial.ts`의 `--out`)은 없앤다(`run.ts`와 `trial.ts`가 `--out`을 받지 않는다. 테스트와 AC가 본다).
 2. 워크플로 `.github/workflows/q10-trial.yml`이 있다. 손으로만 실행되고(`workflow_dispatch`), `ubuntu-latest`와 `windows-latest`에서 `node lab/q10-db/run.ts --skip-fmt`를 돌려 `lab/q10-db/results/`를 실행 산출물로 올린다. 비밀·environment·캐시를 쓰지 않고, 권한은 `contents: read`뿐이며, 액션은 커밋 SHA로 고정한다. 구조를 단언하는 테스트가 `check`에 든다(워크플로 파일이 없거나 다르면 실패한다). 워크플로 파일의 내용은 리포의 패치(`lab/q10-db/q10-trial-workflow.patch`)와 같다(테스트가 본다).
 3. `lab/q10-db/results/`에 `linux-<arch>.json`과 `win32-<arch>.json`이 있다. 둘 다 워크플로의 실행 산출물이고(실행 주소를 README의 "잰 머신" 표에 적는다. `node lab/q10-db/verify-artifacts.ts`가 그 실행이 `main`의 `q10-trial` 실행이고 두 OS의 job이 성공했으며 그 산출물의 결과가 커밋한 결과 파일과 값으로 같은 것을 확인한다), 각각 `node lab/q10-db/check-results.ts <이름>`을 통과한다. `node lab/q10-db/check-results.ts --confirm`이 종료 코드 0이다.
 4. ADR-0007의 상태가 채택이고, 세 환경의 실측(어디서 쟀는지 포함)과 남은 한계(Windows는 CI 러너에서 쟀다. 제작자의 Windows PC에서는 TD-14의 실기 검증 때 다시 돌린다)가 적혀 있다. 설계서 18절의 Q10 행과 19절 "현재 위치"가 확정으로 적혀 있다. 기술 부채 표 TD-14의 `lab/q10-db` 항목이 결과에 맞게 고쳐져 있다. `profiles/web/README.md`의 "잠정" 문구가 확정에 맞게 고쳐져 있다. 이 문서들과 ADR 목록(`docs/decisions/index.md`), `lab/q10-db/README.md`가 같은 확정 상태를 말하는지 테스트(`lab/q10-db/test/confirmed.test.ts`)가 본다.
@@ -32,7 +32,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 범위:
 
 - `lab/q10-db/run.ts`(새 파일)와 그 테스트, `lab/q10-db/README.md`(절차를 명령 하나로, CI에서 돌리는 법, "잰 머신" 표), 워크플로 패치 `lab/q10-db/q10-trial-workflow.patch`.
-- `--out` 경로 검사 `lab/q10-db/out-file.ts`(새 파일)와 그 테스트, `lab/q10-db/trial.ts`의 `--out` 처리(경로 검사, 새 파일로만 쓰기).
+- `lab/q10-db/trial.ts`에서 `--out`을 지운다(결과를 검사 없이 임의의 경로에 쓰던 옵션).
 - `.github/workflows/q10-trial.yml`(새 파일. 제작자가 올린다. `docs/SECURITY.md`의 "워크플로 변경 절차").
 - 워크플로의 구조를 단언하는 테스트 `scripts/test/q10-trial-workflow.test.ts`(새 파일).
 - 결과 파일 `lab/q10-db/results/linux-<arch>.json`, `lab/q10-db/results/win32-<arch>.json`.
@@ -50,9 +50,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 ## 관련 파일·문서
 
 - `lab/q10-db/run.ts`, `lab/q10-db/test/run.test.ts`, `lab/q10-db/README.md`, `lab/q10-db/q10-trial-workflow.patch`, `lab/q10-db/results/**`
-- `lab/q10-db/out-file.ts`, `lab/q10-db/test/out-file.test.ts`
 - `lab/q10-db/verify-artifacts.ts`, `lab/q10-db/test/verify-artifacts.test.ts`, `lab/q10-db/test/confirmed.test.ts`
-- `lab/q10-db/trial.ts`(`--out`의 경로 검사와 새 파일로만 쓰기. 그 밖에는 실측에서 어긋난 점이 나오면 고친다. 확인 항목과 판정 기준은 바꾸지 않는다), `lab/q10-db/check-results.ts`(실측에서 어긋난 점이 나오면 고친다. 판정 기준은 바꾸지 않는다)
+- `lab/q10-db/trial.ts`(`--out`을 지운다. 그 밖에는 실측에서 어긋난 점이 나오면 고친다. 확인 항목과 판정 기준은 바꾸지 않는다), `lab/q10-db/check-results.ts`(실측에서 어긋난 점이 나오면 고친다. 판정 기준은 바꾸지 않는다)
 - `docs/decisions/index.md`, `lab/q10-db/README.md`(확정 상태의 문구)
 - `.github/workflows/q10-trial.yml`
 - `scripts/test/q10-trial-workflow.test.ts`
@@ -87,6 +86,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
   - F6(P1): Windows에서 `--out`을 거부하기로 했는데, 테스트는 "리포 밖 새 경로는 통과"를 요구하고 링크 사례만 건너뛰게 돼 있었고 AC의 실측 줄도 `--out`의 성공을 요구했다. → 통과 사례와 `--out` 실측은 macOS·Linux의 기준으로 적고, Windows의 기준(유효한 새 경로도 거부한다, 자식 프로세스를 띄우지 않는다, 파일이 생기지 않는다)을 따로 두었다. 검사 함수와 `run.ts`의 인자 해석이 `platform`을 인자로 받아, 그 사례를 모든 OS의 테스트에서 본다.
   - F7(P1): `out-file.test.ts`가 Linux에서 도는 곳이 없었다(`check`는 `scripts/test/` 아래만 돌리고, `run.ts`의 마지막 단계는 `check-results.test.ts`만 돌렸다). 앞 회차에 "Linux에서는 CI의 테스트가 본다"고 적은 것은 틀렸다. → `run.ts`의 마지막 단계가 `out-file.test.ts`도 돌린다. 워크플로가 `run.ts`를 부르므로 Linux와 Windows 러너에서 돈다(워크플로 파일과 패치는 바뀌지 않는다). `run.test.ts`가 단계 목록에 그 테스트가 든 것을 보고, step1이 두 job의 로그에서 그 테스트가 돌았고 실패가 없는 것(Linux에서 링크 사례가 건너뛰어지지 않은 것)을 확인한다.
 - 2026-11-22 계획 검증 5회차: Claude 승인, Codex 수정 요청(P1 하나). F6·F7은 닫혔다. F8(P1): Windows에서 `trial.ts`를 직접 부를 때 `--out`을 거부하는지 보는 곳이 없다(함수와 `run.ts`만 본다). 맞는 지적이다. 회차마다 `--out`의 다른 조합에서 빈 곳이 하나씩 나왔으므로(F1, F5~F8), 이번에는 지적된 줄만 고치지 않고 진입점(함수, `run.ts`, `trial.ts`)과 OS(macOS, Linux, Windows)의 조합을 표로 모두 적어 빈칸을 찾았다. 빈칸은 둘이었다: Windows에서 `trial.ts`를 명령으로 부르는 경우(F8), Windows와 Linux의 러너에서 `run.ts`를 명령으로 부르는 경우(`run.test.ts`는 러너에서 돌지 않는다. 지적되지 않았지만 같은 종류다). → `out-file.test.ts`에 두 진입점을 실제 명령으로 부르는 사례를 넣었다(모든 OS, macOS·Linux, Windows). `run.ts`의 마지막 단계가 그 파일을 돌리므로 두 러너에서 돌고, step1이 로그에서 건너뛰어지지 않은 것을 확인한다. 보지 않는 것 하나(Linux에서 `--out` 실측의 성공)는 표 아래에 적었다.
+- 2026-11-22 계획 검증 6회차: Claude 승인, Codex 수정 요청(P1 둘). F8은 닫혔다. F9(P1): 두 진입점을 명령으로 부르는 거부 테스트가 실제 작업 트리의 `package.json`을 쓰기 대상으로 준다. 검사가 빠진 코드(구현 전의 실패 확인, 회귀)에서는 덮어쓸 수 있다. F10(P1): Linux에서 `--out`이 정상 경로를 받는지 명령 수준으로 보지 않는다. 둘 다 `--out`의 지적이고, 여섯 회차 동안 이 옵션에서만 일곱 건이 나왔다(F1, F5~F10). 앞의 보고에서 정한 대로 더 고치지 않고 제작자에게 물었다(선택지: `--out`을 없앤다 / 한 번 더 고친다 / 남은 지적을 받아들인다). 답: "`--out`을 없앤다".
+- 2026-11-22 계획을 다시 썼다(`--out`을 없앤다). step0: `run.ts`는 `--skip-fmt`만 받는다. `trial.ts`에서 `--out`을 지운다(인자는 빈 폴더 하나). 경로 검사(`out-file.ts`)와 그 테스트, 진입점·OS 표, Windows에서의 거부 기준은 통째로 뺐다. 절차를 이 머신에서 돌려 보는 AC는 새 임시 폴더의 복제본에서 돌린다(`git clone` 뒤 `run.ts --skip-fmt`. 이 worktree에서 복제하면 같은 커밋이 체크아웃되는 것을 확인했다). `--out`을 받지 않는 것을 보는 테스트는 리포 밖의 임시 폴더만 쓰기 대상으로 준다(F9와 같은 일이 없게). step1: 러너의 로그에서 경로 검사 테스트를 확인하는 항목을 뺐다. 옛 브랜치의 `run.ts`와 테스트는 `--out`을 받는 꼴이라 가져온 뒤 고친다.
 
 ## 의사결정 로그
 
@@ -97,8 +98,9 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 결정: step을 둘로 나눈다. / 이유: 손으로 도는 워크플로는 기본 브랜치에 있어야 실행할 수 있다. 워크플로가 병합된 뒤에 돌려 결과를 받는다.
 - 결정: 위험도 high. / 이유: 워크플로(보호 경로)를 더하고 DB·마이그레이션 도구 결정을 확정한다.
 - 결정: 다시 시작하는 브랜치의 접두어를 `chore`로 한다. / 이유: 브랜치 이름은 `<type>/<계획 id>-s<step>`이고 같은 이름의 원격 브랜치를 다른 커밋으로 다시 만들 수 없다(지우고 다시 만드는 것은 force push와 같다). 게이트는 접두어가 아니라 계획 id와 step 번호로 계획을 찾는다. 추가하는 것이 CI 워크플로와 실험 폴더의 실행 스크립트라 `chore`가 맞다. / 버린 대안: 옛 브랜치에서 제작자가 워크플로를 지우고 다시 올리기(제작자 작업 2회).
-- 결정: `--out`의 결과 파일을 실측 전에 열어 둔다. / 이유: 검사한 대상에 쓰려면 경로가 아니라 연 파일에 써야 한다(Node에는 폴더를 기준으로 여는 방법이 없다). / 대가: `--out`으로 돌린 실측이 실패하면 빈 파일이 남는다. 경로로 지우면 같은 문제가 생기므로 지우지 않는다. 빈 파일은 결과 검사를 통과하지 못한다. 결과를 리포의 `results/`에 쓰는 기본 경로는 전과 같다(실패하면 쓰지 않는다). / 버린 대안: 끝에 한 번 더 검사하고 경로로 쓴다(검사와 쓰기 사이의 틈이 남는다), 심볼릭 링크가 든 경로를 모두 거부한다(macOS의 임시 폴더 경로가 심볼릭 링크를 거쳐 `mktemp -d`의 폴더를 쓸 수 없다).
+- 결정(철회, 2026-11-22): `--out`의 결과 파일을 실측 전에 열어 둔다. → `--out`을 없애면서 필요 없어졌다(아래).
 - 2026-11-22 계획 검증이 5회차까지 왔다. 앞의 보고에서 "같은 자리에서 한 번 더 지적이 나오면 먼저 묻겠다"고 했으나 묻지 않고 고쳤다. 이유: F8은 새 지적이고 맞는 지적이며 고칠 것이 테스트 설계다(절차서 7절의 "묻지 않고 진행한다"). `pr-state`에 "오래 열린 지적" 줄이 없다(같은 지적이 다시 열린 것이 아니다). 추천안이 분명한 질문은 하지 않는다(7절). 대신 대응하는 방법을 바꿨다(지적된 곳만 고치기 → 조합을 표로 전부 점검). 제작자에게는 그대로 보고한다. 대안으로 검토한 것: `--out`을 이 계획에서 빼는 것. 고르지 않았다 — `--out`은 main의 `trial.ts`에 이미 있고 검사 없이 쓰므로(F1), 빼지 않는 한 고쳐야 하며, 빼면 작업 트리를 바꾸지 않고 돌려 보는 절차(README)가 없어진다.
+- 결정(제작자, 2026-11-22 대화): `--out`을 없앤다. / 이유: 결과를 임의의 경로에 쓰는 옵션은 작업 트리의 파일을 덮어쓸 수 있다(F1). 안전하게 만들려면 경로 검사, 검사와 쓰기 사이의 틈, OS마다 다른 동작, 진입점마다의 검증이 따라오고(F5~F10), 계획 검증 여섯 회차 동안 지적이 이 옵션에서만 나왔다. 확정 조건(세 환경의 결과 파일)에 필요한 기능이 아니고 CI의 실측도 쓰지 않는다. 없애면 지적의 대상이 사라지고 main에 있는 검사 없는 `--out`도 함께 없어진다. / 대가: "작업 트리를 바꾸지 않고 돌려 보기"가 옵션 하나에서 "임시 폴더에 복제해 돌리기"로 바뀐다. / 버린 대안: 한 번 더 고친다(계획과 코드가 더 커지고 다음 회차에 또 나올 수 있다), 남은 지적을 제작자가 받아들인다(구현 판정에서 다시 나올 수 있다).
 
 ## 발견 사항
 
@@ -114,7 +116,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 ## 검증 방법과 결과
 
 - 각 step의 AC 명령과 `node scripts/harness.ts check`.
-- 수용 기준 1: `node --test lab/q10-db/test/run.test.ts`와 `node --test lab/q10-db/test/out-file.test.ts`, `node lab/q10-db/run.ts --out <리포 밖 파일>`을 실제로 돌린 결과, 작업 트리의 있는 파일을 `--out`으로 주면 거부되고 그 파일이 그대로인 것(step0 AC).
+- 수용 기준 1: `node --test lab/q10-db/test/run.test.ts`, 새 임시 폴더의 복제본에서 `node lab/q10-db/run.ts --skip-fmt`를 실제로 돌린 결과(이 작업 트리의 결과 폴더가 그대로다), `--out`을 주면 `run.ts`와 `trial.ts`가 사용법을 내고 끝나는 것(step0 AC).
 - 수용 기준 2: `node --test scripts/test/q10-trial-workflow.test.ts`, 받은 브랜치의 트리가 기준 커밋에 패치를 적용한 트리와 같은지(SECURITY.md의 비교 명령, 진행 로그에 적는다).
 - 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`, 출처 확인 `node lab/q10-db/verify-artifacts.ts`(step1 AC. 출력을 진행 로그와 PR 본문에 옮긴다).
 - 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
