@@ -2,7 +2,7 @@
 id: 20261122-plan-review-parked
 issue: 212 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -81,6 +81,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - 2026-11-23T00:47:36+09:00 step0 재작업: 구현 판정 1회차(head `9781e46`. 원장의 4라운드): Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨). F7: 계획만 담은 head의 기록에서 검증자가 `fixed`였던 코드 지적을 판정으로 다시 열면(`resolutions`의 `open`, 같은 지적의 재등록), 판정을 반영한 뒤에는 구현 대기로 맞추지 않아 그 기록의 `review-ledger`가 막는다(다음 기록에서야 `parked`가 된다). 코드를 되돌린 head에는 고친 내용도 없어 검증자가 다시 열 수 있으므로 실제로 나는 경우다. 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 - 2026-11-23 F7 테스트 먼저: `ledger-store.test.ts`에 "계획만 담은 head에서 그 판정이 다시 연 코드 지적도 같은 기록에서 구현 대기가 된다"(resolutions로 다시 열기, 같은 지적의 재등록, 계획 전용 판정에서 등록된 지적은 막는다, 코드가 섞인 head는 지금처럼 막는다)를 더하고 고치기 전에 돌렸다. 실패했다(`parked`를 기대했는데 `open`). 고친 뒤 `ledger-store.test.ts` 19건이 통과한다.
 - 2026-11-23 F7 수정: `recordLedger`가 저장하기 전에 `parkFor`를 한 번 더 적용한다(`scripts/ci/ledger-store.ts`). 원장 형식 문서(`ledger.md`)의 "순서" 항목을 맞췄다.
+- 2026-11-23T01:17:07+09:00 step0 재작업: 구현 판정 2회차(head `1890c5c`. 원장의 5라운드): Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨. F7은 fixed). F8: 판정이 다시 연 지적은 게시 시각(`openedAt`)이 지워진 채 같은 기록에서 `parked`로 저장되는데, 원장을 읽을 때 게시 시각은 `open`인 지적에만 채워, 코드가 돌아온 첫 기록에서 그 지적이 게시 시각 없이 `open`으로 돌아와 그 사이에 단 제작자 승인이 거부된다(다음 기록부터는 그 승인이 게시 시각보다 앞서 영영 거부된다). 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 
 ## 의사결정 로그
 
