@@ -50,6 +50,7 @@ node scripts/harness.ts new-task --issue 42 --slug login-rate-limit --size mediu
 
 - frontmatter의 `id`·`issue`·`owner`는 바꾸지 않는다. 다 채웠으면 `status: active`.
 - 필수 섹션: **목표와 수용 기준**, **범위**, **검증 방법**. "관련 파일·문서"는 범위 검사 기준이 된다.
+- "관련 파일·문서"에는 바꿀 파일·폴더의 경로를 백틱으로 감싸 적는다(glob을 쓸 수 있고, 폴더는 그 아래 전부다). 읽기만 할 파일은 `읽기만`으로 시작하는 항목에 따로 적는다. 그 항목의 경로는 범위에 넣지 않는다(`scope`, R18).
 - step으로 나누고 `index.json`에 적는다: `{"step": 0, "name": "kebab-name", "status": "pending"}`
 
 ### step 설계 원칙
@@ -148,6 +149,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
 - `gh pr merge --auto --squash`로 자동 병합을 켠다. 필수 체크가 통과하면 GitHub이 병합한다.
 - 필수 체크는 `check`(GitHub Actions)와 검증 App이 기록하는 `revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`·`review/claude`·`review/codex`·`review-ledger`다. `review-ledger`는 지적 원장에 열린 P0·P1이 없어야 통과한다(8절). 등록 상태는 `node scripts/harness.ts required-checks`로 확인한다. PR 화면의 체크 요약과 `gh pr checks`는 출처를 보지 않는다. 필수 체크별 상태(기대 출처가 쓴 결과만)와 지금 무엇을 기다리는지는 worktree에서 `node scripts/harness.ts pr-state`로 본다(`--pr <번호>`로 다른 PR. 읽기만 한다). 병합 가능 여부는 `mergeStateStatus`로 본다.
 - 경고 판정 `pr-size`는 필수 체크가 아니다. PR의 변경 줄 수(추가 + 삭제. 문서·테스트·생성 파일·lockfile·바이너리 제외)가 상한(`harness.config.json`의 `prSize.maxLines`, 없으면 400)을 넘으면 커밋 상태의 설명이 `경고: `로 시작한다. 상태는 `success`라 병합을 막지 않는다. 경고가 나오면 step을 더 잘게 나눌 수 있는지 본다(R15).
+- 경고 판정 `scope`도 필수 체크가 아니다. PR이 바꾼 파일 가운데 계획의 "관련 파일·문서"에 없는 것이 있으면 커밋 상태의 설명이 `경고: `로 시작하고, 판정 job 요약에 그 파일들이 나온다(계획 자신의 파일은 늘 범위 안이다). 의도한 변경이면 PR 본문에 이유를 적는다. 검증자가 확인한다(R18).
 - `harness.config.json`의 `protectedPaths`나 `github.owner`를 바꾸면 같은 PR에서 `node scripts/harness.ts codeowners --write`로 `.github/CODEOWNERS`를 다시 만든다. 이 파일은 손으로 고치지 않는다. 어긋나면 `check`의 doc-lint 단계가 실패한다.
 - **위험도 높음**(`risk-gate`): 계획 `risk: high`, 경로 표의 높음 경로, 바이너리 파일, 운영 단계의 보호 경로가 있으면 `risk-gate`가 실패로 남는다. 제작자에게 현재 head 승인을 요청한다(Issue에 `needs-human`). 제작자가 GitHub 웹·모바일에서 승인하면 `review-trigger` → `gates`가 다시 판정한다. 승인 뒤 새 커밋을 push하면 다시 승인받아야 한다. 에이전트는 승인하지 않는다(R20).
 - **승인 요청 전 조건**: 승인은 head 커밋에 묶여 있어 승인 뒤 커밋이 올라가면 철회된다(#62, #63에서 재승인). 승인이 필요한 PR은 초안(`gh pr create --draft`)으로 올리고, 아래가 모두 끝난 뒤에 worktree 안에서 `node scripts/harness.ts pr-ready`로 초안을 해제하며 승인을 요청한다.
