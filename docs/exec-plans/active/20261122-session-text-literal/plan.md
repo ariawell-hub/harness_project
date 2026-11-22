@@ -23,13 +23,16 @@ claimed_at: 2026-11-22T10:40:57+09:00 # new-task가 채운다
 수용 기준:
 
 1. 열린 질문의 글은 Issue 댓글에서 펜스 코드 블록 하나 안에 글자 그대로 들어간다.
-   - 글에 멘션(`@계정`), `#번호`, Markdown, HTML 주석, 코드 펜스(백틱 셋 이상의 줄, `~~~`)가 있어도 블록은 댓글의 마지막 줄에서만 닫힌다. 여는 펜스의 백틱 수는 글 안의 가장 긴 백틱 줄보다 하나 많고 셋 이상이다.
+   - 질문 블록의 글은 `openQuestions`가 계획에서 뽑은 글(`OpenQuestion.text`)이다. 뽑을 때 HTML 주석은 빠지고 블록 끝의 공백은 떼어진다. 이 추출은 지금과 같고 바꾸지 않는다.
+   - 그 글에 멘션(`@계정`), `#번호`, Markdown, 닫히지 않은 HTML 주석, 코드 펜스(백틱 셋 이상의 줄, `~~~`)가 있어도 블록은 댓글의 마지막 줄에서만 닫힌다. 여는 펜스의 백틱 수는 글 안의 가장 긴 백틱 줄보다 하나 많고 셋 이상이다.
    - runner가 쓰는 부분은 그대로다: 제작자 멘션으로 시작하는 첫 문장(`runner의 … 세션이 질문 N건을 남겼다. …`), 계획·답하는 법 두 항목. 지표(`scripts/metrics/source.ts`)가 그 문장으로 에스컬레이션을 센다.
-   - 블록 안의 글은 계획의 "열린 질문"에 적힌 질문 블록의 글과 같다(줄 바꿈 글자 `\r\n`·`\r`만 `\n`으로 맞춘다).
+   - 블록 안의 글은 뽑은 글들을 빈 줄 하나로 이은 것과 같다. 다른 것은 둘뿐이다: 줄 바꿈 글자(`\r\n`, 홀로 있는 `\r`)를 `\n`으로 맞추고 앞뒤의 빈 줄을 뗀다.
+   - 계획 본문에서 댓글까지를 테스트가 확인한다: 계획의 "열린 질문"에 적은 질문을 `openQuestions`로 뽑아 댓글 본문을 만든 결과를 본다.
 2. 교착 보고의 반박 줄(`반박 N: 근거 … · 요지 …`)은 근거와 요지를 각각 코드 스팬 하나로 적는다. 값에 백틱·멘션·`#번호`가 있어도 스팬 안에 글자 그대로 남는다. 값이 비면 지금처럼 `—`다.
 3. 반박의 요지는 한 곳(`scripts/ci/rebuttal.ts`)의 규칙으로 검사한다.
    - 받지 않는 글자: 제어 문자(Cc), 형식 문자(Cf: 폭 없는 글자, 방향 바꿈 문자, 태그 문자 등), 짝 없는 서러게이트(Cs), 사용자 정의 영역(Co), 줄·단락 구분자(Zl, Zp), 기본 무시 글자(`Default_Ignorable_Code_Point`: 변형 선택자, 한글 채움 문자 등).
    - 길이 규칙(1자 이상 300자 이하)은 그대로다. 위 글자가 없는 요지(한글, 영문, 구두점, 짝이 맞는 이모지, 결합 문자, 줄 바꿈 없는 공백)는 지금처럼 전달된다.
+   - 댓글에서 뽑은 요지는 앞뒤 공백을 떼기(`trim`) 전에 받지 않는 글자를 검사한다. 그 글자가 요지의 앞이나 끝에만 있어도(탭, U+FEFF 등) 그 반박은 버려진다. 지금은 떼는 과정에서 사라져 받아들여진다. 길이는 지금처럼 앞뒤 공백을 뗀 글로 센다. job 사이로 넘긴 값은 지금처럼 떼지 않고 값 그대로 검사한다.
    - 판정 워크플로의 두 자리(댓글에서 고르는 `parseRebuttals`, job 사이에 넘긴 값을 다시 읽는 `parseRebuttalData`)와 runner(`sessionRebuttal`)가 같은 함수로 검사한다. runner가 따로 두던 줄 구분자 검사(`scripts/runner/review.ts`의 `LINE_SEPARATOR`)는 없앤다.
 4. 코드 스팬과 코드 블록을 만드는 함수는 한 곳(`scripts/lib/literal.ts`)에 있고, 판정 job 요약의 `cellCode`(`scripts/ci/gates.ts`)도 그 함수를 쓴다. `cellCode`의 결과는 글자까지 그대로다.
 5. 검사를 약화하지 않는다(R4). 반박 형식 규칙은 받지 않는 것이 늘어나는 쪽으로만 바뀐다. 기존 테스트의 단언은 지우지 않는다(문구가 바뀐 댓글을 보는 단언은 새 문구로 맞춘다).
@@ -60,7 +63,7 @@ claimed_at: 2026-11-22T10:40:57+09:00 # new-task가 채운다
 - `scripts/lib/literal.ts`(새 파일)
 - `scripts/runner/run.ts`, `scripts/runner/review.ts`
 - `scripts/ci/rebuttal.ts`, `scripts/ci/gates.ts`
-- `scripts/test/literal.test.ts`(새 파일), `scripts/test/rebuttal.test.ts`, `scripts/test/runner.test.ts`, `scripts/test/runner-review.test.ts`
+- `scripts/test/literal.test.ts`(새 파일), `scripts/test/markdown-model.ts`(새 파일. 테스트들이 함께 쓰는 코드 스팬·펜스 블록 모델), `scripts/test/rebuttal.test.ts`, `scripts/test/runner.test.ts`, `scripts/test/runner-review.test.ts`
 - `docs/harness/workflow.md`(8절), `docs/harness/architecture.md`(파일 표), `docs/harness/CHANGELOG.md`
 - `docs/harness/design.md`(0절 머리말·변경 이력, 4.5절, 10.2절 (4), 14.6절), `docs/exec-plans/tech-debt-tracker.md`(TD-36 행, 새 행 둘)
 - 읽기만: `scripts/ci/ledger.ts`(`cell`, `oneLine`), `scripts/lib/plan.ts`(`openQuestions`), `scripts/metrics/source.ts`(`classifyEscalation`), `scripts/lib/revert-marker.ts`, `scripts/selftest/fake-agent.ts`, `scripts/test/helpers.ts`, `scripts/test/scope.test.ts`(`tableCells`, `codeSpanText`), `scripts/test/pr-size.test.ts`, `scripts/test/metrics-steady.test.ts`
@@ -72,6 +75,7 @@ claimed_at: 2026-11-22T10:40:57+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-22 10:41 `new-task --issue 198`로 시작했다(제작자 대화 지시의 다음 순서, TD-36). 계획을 쓰기 전에 runner가 댓글을 다는 일곱 자리와 반박 형식 코드를 읽었고, GitHub Markdown API로 문자 참조·코드 스팬·코드 블록의 렌더링을 확인했다("발견 사항").
+- 2026-11-22 10:56 계획 검증 1회차(PR #199, head `92c1029`): claude 승인(P2 둘, 미룸), codex 수정 요청(P1 셋). 오래 열린 지적 표시는 없었다. 셋 다 맞는 지적이라 계획을 고쳤다. F3: 질문의 글은 `openQuestions`가 뽑은 글이라 HTML 주석과 끝의 공백은 이미 빠져 있다. 보존 기준의 입력을 그 글로 적고 계획 본문에서 댓글까지 보는 테스트를 더했다. F4: 댓글 파서가 요지를 `trim`한 뒤 검사해 앞뒤의 금지 글자가 사라진다. 떼기 전에 검사하게 했다. F5: 설계서의 세 절, 새 기술 부채 행 둘, 발견 사항의 처리 표기를 AC가 확인하게 했다. 미룬 P2 둘(F1 앞뒤 빈 줄, F2 300자 자르기가 서러게이트 쌍을 가른다)도 함께 반영했다.
 
 ## 의사결정 로그
 
