@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { changedKeys, init, resolvesInside } from '../commands/init.ts';
+import { changedKeys, fileKey, init, resolvesInside } from '../commands/init.ts';
 import { CONFIG_FILE, loadConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { gitInit, HARNESS_ROOT, tmp } from './helpers.ts';
@@ -547,6 +547,156 @@ test('init: 같은 자리에 놓이는 템플릿이 여럿이면 앞의 것만 �
   assert.ok(!existsSync(path.join(swap, 'guide.md')));
   assert.equal(init(swap, 'web', {}), 0);
   assert.equal(readFileSync(path.join(swap, 'guide.md'), 'utf8'), '둘째\n');
+});
+
+/** 템플릿 줄(복사·복사 예정·건너뜀)만 뽑는다 */
+const templateLines = (out: string) =>
+  out.split('\n').filter((l) => /^- (템플릿 복사|템플릿 복사 예정|건너뜀\(이미 있음\)): /.test(l));
+
+/** 웹 프로파일의 템플릿 목록을 바꾼 리포. files는 profiles/web/templates 아래에 쓸 원본이다 */
+function templateRepo(
+  files: Record<string, string>,
+  templates: { from: string; to: string; replacePlaceholder?: boolean }[],
+): string {
+  const root = templateCopy();
+  gitInit(root);
+  for (const [name, text] of Object.entries(files))
+    writeFileSync(path.join(root, 'profiles/web/templates', name), text);
+  editProfile(root, (x) => {
+    x.templates = templates;
+  });
+  return root;
+}
+
+/** 미리보기의 템플릿 줄이 want이고 파일이 그대로인지, 이어서 실제 적용의 줄이 같은 결정인지 본다 */
+function previewThenApply(root: string, want: string[]): void {
+  const listed = snapshot(root);
+  const dry = cli(['init', '--profile', 'web', '--dry-run'], root);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(templateLines(dry.stdout), want);
+  assert.deepEqual(snapshot(root), listed);
+  const real = cli(['init', '--profile', 'web'], root);
+  assert.equal(real.code, 0, real.stderr);
+  assert.deepEqual(
+    templateLines(real.stdout),
+    want.map((l) => l.replace('템플릿 복사 예정', '템플릿 복사')),
+  );
+}
+
+test('init: 앞의 템플릿이 바꾼 파일을 뒤의 템플릿이 원본으로 쓰면 바뀐 뒤의 글로 본다(판정 지적 F13)', () => {
+  // 1) 프로파일 안의 자리 표시 원본(ph.md)을 일반 글로 바꾼다 2) 그 원본을 doc.md로 복사한다
+  // 3) doc.md가 자리 표시 파일이면 바꾼다 — 2)가 복사한 것은 일반 글이라 건너뛴다(차례로 처리한 결과)
+  const root = templateRepo(
+    { 'normal.md': '일반 글\n', 'ph.md': PLACEHOLDER, 'second.md': '둘째\n' },
+    [
+      { from: 'templates/normal.md', to: 'profiles/web/templates/ph.md', replacePlaceholder: true },
+      { from: 'templates/ph.md', to: 'doc.md' },
+      { from: 'templates/second.md', to: 'doc.md', replacePlaceholder: true },
+    ],
+  );
+  previewThenApply(root, [
+    '- 템플릿 복사 예정: profiles/web/templates/ph.md',
+    '- 템플릿 복사 예정: doc.md',
+    '- 건너뜀(이미 있음): doc.md',
+  ]);
+  assert.equal(readFileSync(path.join(root, 'doc.md'), 'utf8'), '일반 글\n');
+  assert.equal(readFileSync(path.join(root, 'profiles/web/templates/ph.md'), 'utf8'), '일반 글\n');
+
+  // 복사할 글도 그 시점의 것이다: 앞의 템플릿이 바꾼 원본(ph.md)으로 뒤의 템플릿이 자리 표시 파일을 바꾼다
+  const swap = templateRepo(
+    { 'normal.md': PLACEHOLDER, 'ph.md': PLACEHOLDER, 'second.md': '둘째\n' },
+    [
+      { from: 'templates/second.md', to: 'profiles/web/templates/ph.md', replacePlaceholder: true },
+      {
+        from: 'templates/normal.md',
+        to: 'profiles/web/templates/ph.md',
+        replacePlaceholder: false,
+      },
+      { from: 'templates/normal.md', to: 'doc.md' },
+      { from: 'templates/ph.md', to: 'doc.md', replacePlaceholder: true },
+    ],
+  );
+  previewThenApply(swap, [
+    '- 템플릿 복사 예정: profiles/web/templates/ph.md',
+    '- 건너뜀(이미 있음): profiles/web/templates/ph.md',
+    '- 템플릿 복사 예정: doc.md',
+    '- 템플릿 복사 예정: doc.md',
+  ]);
+  // ph.md는 1)에서 '둘째'가 됐고, doc.md는 자리 표시 글(normal.md)로 만들어졌다가 그 '둘째'로 바뀐다
+  assert.equal(readFileSync(path.join(swap, 'doc.md'), 'utf8'), '둘째\n');
+});
+
+test('init: 경로가 달라도 같은 파일을 가리키면 같은 자리다 — 안을 가리키는 폴더 링크(판정 지적 F11)', (t) => {
+  if (!canSymlink()) return t.skip('심볼릭 링크를 만들 수 없는 환경');
+  const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, [
+    { from: 'templates/first.md', to: 'docs/guide.md' },
+    { from: 'templates/second.md', to: 'alias/guide.md' },
+    { from: 'templates/second.md', to: 'alias/new/x.md' },
+    { from: 'templates/first.md', to: 'docs/new/x.md' },
+  ]);
+  mkdirSync(path.join(root, 'docs'));
+  symlinkSync(path.join(root, 'docs'), path.join(root, 'alias'), 'junction');
+  previewThenApply(root, [
+    '- 템플릿 복사 예정: docs/guide.md',
+    '- 건너뜀(이미 있음): alias/guide.md',
+    '- 템플릿 복사 예정: alias/new/x.md',
+    '- 건너뜀(이미 있음): docs/new/x.md',
+  ]);
+  assert.equal(readFileSync(path.join(root, 'docs/guide.md'), 'utf8'), '첫째\n');
+  assert.equal(readFileSync(path.join(root, 'docs/new/x.md'), 'utf8'), '둘째\n');
+});
+
+test('init: 실제 적용은 그 순간의 파일로 정한다 — 이름의 대소문자만 다른 두 자리', () => {
+  const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, [
+    { from: 'templates/first.md', to: 'Guide.md' },
+    { from: 'templates/second.md', to: 'guide.md' },
+  ]);
+  assert.equal(init(root, 'web', {}), 0);
+  // 대소문자를 가리지 않는 파일 시스템에서는 둘이 같은 파일이라 뒤의 것을 건너뛴다(앞의 것을 덮어쓰지 않는다).
+  // 가리는 파일 시스템에서는 다른 파일이라 둘 다 복사한다. 어느 쪽이든 앞의 것은 그대로다
+  assert.equal(readFileSync(path.join(root, 'Guide.md'), 'utf8'), '첫째\n');
+  const names = readdirSync(root).filter((n) => n.toLowerCase() === 'guide.md');
+  if (names.length === 2) assert.equal(readFileSync(path.join(root, 'guide.md'), 'utf8'), '둘째\n');
+  else assert.deepEqual(names, ['Guide.md']);
+});
+
+test('init: 복사할 템플릿의 원본이 없으면 아무것도 쓰지 않고 종료 코드 1이다', () => {
+  const root = templateRepo({ 'first.md': '첫째\n' }, [
+    { from: 'templates/first.md', to: 'a.md' },
+    { from: 'templates/none.md', to: 'b.md' },
+  ]);
+  const listed = snapshot(root);
+  for (const extra of [[], ['--dry-run']]) {
+    const r = cli(['init', '--profile', 'web', ...extra], root);
+    assert.equal(r.code, 1, r.stdout);
+    assert.match(r.stderr, /템플릿 원본이 없다: .*none\.md/);
+    assert.match(r.stderr, /아무것도 쓰지 않았다/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, '스택이 아니라 이유를 낸다');
+    assert.deepEqual(snapshot(root), listed);
+  }
+  // 건너뛸 템플릿의 원본은 읽지 않으므로 없어도 된다(전과 같다)
+  writeFileSync(path.join(root, 'b.md'), '있던 글\n');
+  assert.equal(init(root, 'web', {}), 0);
+  assert.equal(readFileSync(path.join(root, 'b.md'), 'utf8'), '있던 글\n');
+  assert.equal(readFileSync(path.join(root, 'a.md'), 'utf8'), '첫째\n');
+});
+
+test('fileKey: 같은 파일은 이름이 달라도 같고, 아직 없는 파일은 있는 상위 폴더와 나머지 경로로 가린다', (t) => {
+  const root = tmp('harness-init-key-');
+  mkdirSync(path.join(root, 'a'));
+  writeFileSync(path.join(root, 'a/f'), '');
+  writeFileSync(path.join(root, 'a/g'), '');
+  assert.equal(fileKey(path.join(root, 'a/f')), fileKey(path.join(root, 'a/../a/f')));
+  assert.notEqual(fileKey(path.join(root, 'a/f')), fileKey(path.join(root, 'a/g')));
+  linkSync(path.join(root, 'a/f'), path.join(root, 'hard'));
+  assert.equal(fileKey(path.join(root, 'hard')), fileKey(path.join(root, 'a/f')), '하드 링크');
+  assert.equal(fileKey(path.join(root, 'a/none/x')), fileKey(path.join(root, 'a/none/x')));
+  assert.notEqual(fileKey(path.join(root, 'a/none/x')), fileKey(path.join(root, 'a/none/y')));
+  assert.notEqual(fileKey(path.join(root, 'a/none')), fileKey(path.join(root, 'none')));
+  if (!canSymlink()) return t.skip('심볼릭 링크를 만들 수 없는 환경');
+  symlinkSync(path.join(root, 'a'), path.join(root, 'b'), 'junction');
+  assert.equal(fileKey(path.join(root, 'b/f')), fileKey(path.join(root, 'a/f')), '폴더 링크');
+  assert.equal(fileKey(path.join(root, 'b/none/x')), fileKey(path.join(root, 'a/none/x')));
 });
 
 test('도움말: init의 --repo와 --dry-run을 적는다', () => {
