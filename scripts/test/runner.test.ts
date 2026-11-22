@@ -533,6 +533,12 @@ test('questionComment: 계획 작성 세션의 문구와 멘션 없는 설정, �
   assert.equal(classifyEscalation(noOwner), 'question');
 });
 
+test('questionComment: 백틱 묶음이 아주 많은 질문도 예외 없이 댓글 본문이 된다(판정 지적 F7)', () => {
+  const text = `### 질문: 큰 질문\n\n${'`a'.repeat(200_000)}`;
+  const body = questionComment({ ...QUESTION_ARGS, questions: [{ title: '큰 질문', text }] });
+  assert.equal(assertQuestionBlock(body).text, text);
+});
+
 test('questionComment: 계획 본문에서 댓글까지 — openQuestions가 뽑은 글이 블록 안에 그대로 들어간다', () => {
   const section = [
     '## 열린 질문',

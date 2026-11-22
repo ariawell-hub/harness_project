@@ -114,6 +114,16 @@ test('literalBlock: 줄 바꿈 글자를 맞추고 앞뒤 빈 줄을 뗀다. 그
   }
 });
 
+test('literalSpan·literalBlock: 백틱 묶음이 아주 많은 글도 예외 없이 감싼다(판정 지적 F7)', () => {
+  // 묶음마다 인자 하나를 만들어 함수에 펼치면 호출 인자 한도를 넘는다
+  const many = '`a'.repeat(200_000);
+  assert.equal(literalSpan(many), `\`\` ${many} \`\``);
+  assert.equal(literalBlock(many), `\`\`\`text\n${many}\n\`\`\``);
+  const longer = `${many}\n${'`'.repeat(5)}\n끝`;
+  assertOneBlock(literalBlock(longer), longer, '묶음 20만 개와 백틱 다섯의 줄');
+  assert.equal(literalBlock(longer).split('\n')[0], `${'`'.repeat(6)}text`);
+});
+
 test('literalBlock: 비었거나 공백뿐이면 빈 글자다', () => {
   for (const s of ['', ' ', '\n\n', ' \r\n \n'])
     assert.equal(literalBlock(s), '', JSON.stringify(s));
