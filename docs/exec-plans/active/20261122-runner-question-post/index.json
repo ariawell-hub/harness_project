@@ -1,0 +1,10 @@
+{
+  "plan": "20261122-runner-question-post",
+  "steps": [
+    {
+      "step": 0,
+      "name": "question-post",
+      "status": "in_progress"
+    }
+  ]
+}
