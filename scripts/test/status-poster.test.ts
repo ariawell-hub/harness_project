@@ -25,6 +25,11 @@ const PAYLOAD: StatusPayload = { context: 'plan-gate', state: 'success', descrip
 type Step = number | 'drop' | 'hang' | 'slow' | [code: number, takesMs: number];
 const srv = {
   script: [] as Step[],
+  /**
+   * context마다 정한 응답. 그 context의 요청에는 여기서 먼저 꺼내 쓰고, 없거나 다 썼으면 `script`에서 꺼낸다.
+   * 동시에 보낸 요청이 서버에 닿는 순서는 정해져 있지 않아, 동시에 쓰는 테스트는 이것으로 응답을 정한다
+   */
+  byContext: {} as Record<string, Step[]>,
   /** 요청 하나가 걸린 것으로 칠 시간(가짜 시계를 이만큼 돌린다) */
   takesMs: 0,
   requests: [] as { method: string; url: string; auth: string; body: unknown }[],
@@ -45,7 +50,9 @@ before(async () => {
         auth: req.headers.authorization ?? '',
         body: JSON.parse(body || 'null'),
       });
-      const next = srv.script.shift() ?? 201;
+      const context = (srv.requests.at(-1)?.body as { context?: unknown } | null)?.context;
+      const own = typeof context === 'string' ? srv.byContext[context] : undefined;
+      const next = own?.shift() ?? srv.script.shift() ?? 201;
       const [step, takes] = Array.isArray(next) ? next : [next, srv.takesMs];
       clock.t += takes;
       if (step === 'drop') return void req.socket.destroy();
@@ -65,6 +72,7 @@ after(() => {
 });
 beforeEach(() => {
   srv.script = [];
+  srv.byContext = {};
   srv.takesMs = 0;
   srv.requests = [];
   clock.t = 0;
@@ -294,7 +302,8 @@ test('상한은 poster 하나가 쓰는 상태 전체에 걸린다: 앞의 상�
   const two = poster();
   srv.script = [500, 500, 500];
   assert.equal(await outcome(two.post({ ...PAYLOAD, context: 'a' })), 'ok');
-  srv.script = [500, 500, [201, TIMEOUT], [201, TIMEOUT]];
+  // 응답은 context마다 정한다: 둘 다 첫 요청은 빠른 500, 다시 보낸 요청은 30초 걸리는 201이다
+  srv.byContext = { x: [500, [201, TIMEOUT]], y: [500, [201, TIMEOUT]] };
   srv.requests = [];
   clock.sleeps = [];
   const got = await Promise.all(
