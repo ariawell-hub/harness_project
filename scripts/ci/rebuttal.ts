@@ -12,6 +12,23 @@ const EVIDENCE_MAX = 300;
 /** 한 PR에서 넘기는 반박 수의 상한(열린 지적 수를 넘을 수 없다) */
 const MAX_REBUTTALS = 60;
 
+/**
+ * 요지에 받지 않는 글자(10.2절 (4), 14.6절). 요지는 검증자 입력과 runner의 보고에 그대로 쓰인다.
+ * 줄을 나누는 글자(제어 문자 Cc, 줄·단락 구분자 Zl·Zp), 보이지 않는 글자(형식 문자 Cf와 기본 무시 글자:
+ * 폭 없는 글자, 방향 바꿈 문자, 태그 문자, 변형 선택자, 한글 채움 문자), 글자가 아닌 것(짝 없는 서러게이트 Cs,
+ * 사용자 정의 영역 Co)을 막는다. 보이지 않는 글자는 검증자에게 숨은 글을 넘기는 길이다.
+ * 미할당(Cn)은 넣지 않는다: Node의 유니코드 버전에 따라 달라져 runner와 CI의 판정이 갈릴 수 있다
+ */
+const SUMMARY_DENY = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
+
+/**
+ * 요지 규칙: 1자 이상 SUMMARY_MAX자 이하이고 받지 않는 글자가 없다.
+ * 판정 워크플로(댓글에서 고를 때와 job 사이로 넘긴 값을 다시 읽을 때)와 runner가 이 함수 하나로 본다
+ */
+export function validSummary(s: string): boolean {
+  return s.length > 0 && s.length <= SUMMARY_MAX && !SUMMARY_DENY.test(s);
+}
+
 export interface Rebuttal {
   /** 원장의 open 지적 ID */
   id: string;
@@ -47,12 +64,12 @@ function validEvidence(e: string, repo: string): boolean {
   );
 }
 
-/** 한 건이 규칙에 맞는가: 원장의 open 지적, 근거 형식, 요지 한 줄·길이 */
+/** 한 건이 규칙에 맞는가: 원장의 open 지적, 근거 형식, 요지 규칙(`validSummary`) */
 function valid(r: Rebuttal, ledger: Ledger, repo: string): boolean {
   if (!RESOLUTION_ID_RE.test(r.id)) return false;
   if (!ledger.findings.some((e) => e.id === r.id && e.status === 'open')) return false;
   if (!validEvidence(r.evidence, repo)) return false;
-  return r.summary.length > 0 && r.summary.length <= SUMMARY_MAX && !/\p{Cc}/u.test(r.summary);
+  return validSummary(r.summary);
 }
 
 const LINES = [/^- 지적: (\S+)$/, /^- 근거: (\S+)$/, /^- 요지: (.+)$/] as const;
@@ -82,6 +99,8 @@ export function parseRebuttals(o: {
       if (lines.length !== LINES.length) continue;
       const m = lines.map((l, i) => LINES[i].exec(l));
       if (m.some((x) => !x)) continue;
+      // 받지 않는 글자는 앞뒤 공백을 떼기 전에 본다(trim은 탭·U+FEFF·줄 구분자도 떼어 내 검사를 비켜 가게 한다)
+      if (SUMMARY_DENY.test(m[2]![1])) continue;
       const r: Rebuttal = { id: m[0]![1], evidence: m[1]![1], summary: m[2]![1].trim() };
       if (valid(r, o.ledger, o.repo)) latest.set(r.id, r);
     }
