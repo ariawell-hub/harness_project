@@ -3,6 +3,8 @@
 // Windows 네이티브의 PowerShell·cmd 방언과 `powershell -Command`·`-EncodedCommand`·`cmd /c` 재귀도 다룬다(ADR-0005).
 // 완벽한 셸 파서가 아니다. L1은 빠른 피드백이며, 보장은 권한·L3가 한다(13.2절). R20만 예외다.
 
+import { isWrapper, skipWrapperOptions, splitEnvString } from './wrappers.ts';
+
 export type Dialect = 'posix' | 'powershell' | 'cmd';
 
 /** 방언별 이스케이프 문자: POSIX `\`, PowerShell 백틱, cmd `^` */
@@ -31,21 +33,39 @@ export interface SimpleCommand {
   assigns: Record<string, string>;
   /** env -u NAME, unset NAME */
   unsets: string[];
+  /**
+   * 이 조각을 끝까지 읽지 못했다(`env -S`가 한도보다 겹쳤다). 실행될 명령이 여기 담긴 것과 다를 수 있으므로
+   * 규칙이 그 호출을 막는다
+   */
+  incomplete?: true;
 }
 
-const WRAPPERS = new Set([
-  'sudo',
-  'command',
-  'builtin',
-  'exec',
-  'nohup',
-  'time',
-  'nice',
-  'ionice',
-  'doas',
+/** `env`와 GNU 도구의 다른 이름. 옵션은 normalize가 따로 읽는다(할당과 `-u`를 모으고 `-S`의 문자열을 나눈다) */
+const ENV_NAMES = new Set(['env', 'genv']);
+/** `env`의 값을 받지 않는 짧은 옵션과 값을 받는 짧은 옵션 */
+const ENV_FLAGS = new Set(['i', '0', 'v']);
+const ENV_VALUES = new Set(['u', 'C', 'P', 'a', 'S']);
+/** `env`의 긴 옵션: 값을 받는 것(`--이름 값`, `--이름=값`)과 받지 않는 것(값은 `=`로만 붙는다) */
+const ENV_LONG_VALUES = new Set(['chdir', 'argv0']);
+const ENV_LONG_FLAGS = new Set([
+  'ignore-environment',
+  'null',
+  'debug',
+  'list-signal-handling',
+  'block-signal',
+  'default-signal',
+  'ignore-signal',
+  'help',
+  'version',
 ]);
+/** `env -S`를 한 조각에서 나누는 횟수의 한도. 겹칠 때마다 남은 글을 다시 읽으므로 한도가 없으면 비용이 제곱으로 는다 */
+const MAX_ENV_SPLITS = 4;
+/** 모르는 옵션이 붙은 래퍼 뒤에서 내는 후보의 한도(한 조각) */
+const MAX_ALTS = 8;
+/** 분석기가 읽은 낱말의 수. 판정에는 쓰지 않는다: 읽은 양이 입력 길이에 비례하는지 테스트가 본다 */
+export const parseWork = { words: 0 };
 /**
- * 명령 앞에 서는 낱말(POSIX 방언): 뒤에 명령이 이어지는 bash의 예약어와 zsh의 명령 앞 수식어. `time`은 WRAPPERS에 있다.
+ * 명령 앞에 서는 낱말(POSIX 방언): 뒤에 명령이 이어지는 bash의 예약어와 zsh의 명령 앞 수식어. `time`은 래퍼의 옵션 표(wrappers.ts)에 있다.
  * 따옴표로 묶었거나 할당 뒤에 온 것은 셸에서 예약어가 아니지만(없는 명령으로 실패한다) 구별하지 않고 벗긴다. 벗기는 쪽이 막는 쪽이다
  */
 const BEFORE_COMMAND = new Set([
@@ -695,6 +715,22 @@ function powershellScript(args: string[]): string | null {
   return null;
 }
 
+/** 한 조각을 읽은 결과 */
+interface PieceRead {
+  /** 읽은 낱말 목록(`env -S`의 문자열을 나눠 넣은 뒤의 것)과 그 리다이렉션 */
+  source: string[];
+  redirs: (Redir | undefined)[] | undefined;
+  /** 후보가 시작하는 자리(source의 자리). 표에 없는 옵션을 만나지 않았으면 비어 있다 */
+  alts: number[];
+  /** `env -S`가 한도보다 겹쳐 끝까지 읽지 못했다 */
+  incomplete: boolean;
+}
+
+/**
+ * 한 조각(단순 명령의 낱말들)을 명령으로 읽어 out에 넣는다. 먼저 넣는 것이 주 해석이다.
+ * 래퍼에 표에 없는 옵션이 붙어 있으면(값을 받는지 알 수 없다) 그 뒤의 낱말에서 시작하는 명령을 후보로 뒤에 넣는다.
+ * 후보에서 다시 후보를 내지 않는다
+ */
 function normalize(
   words: string[],
   out: SimpleCommand[],
@@ -705,6 +741,37 @@ function normalize(
   /** 제어문의 낱말(`then`, `do` …)을 벗기지 않는다(검사 순서용 분석: `if 검사; then push; fi`의 push는 조건 안에 있다) */
   keepControl = false,
 ): void {
+  const one = (w: string[], r: (Redir | undefined)[] | undefined): PieceRead => {
+    const mark = out.length;
+    const read = normalizeOne(w, out, depth, dialect, r, tail, keepControl, 0);
+    if (read.incomplete) {
+      // 이 조각이 낸 첫 명령에 표시한다. 낸 명령이 없으면 빈 명령에 달아 낸다
+      if (out.length > mark) out[mark].incomplete = true;
+      else out.push({ argv: [], assigns: {}, unsets: [], incomplete: true });
+    }
+    return read;
+  };
+  const main = one(words, redirs);
+  for (const k of main.alts) one(main.source.slice(k), main.redirs?.slice(k));
+}
+
+/** 붙어 있던 낱말에서 뗀 리다이렉션 */
+function detached(r: Redir): Redir {
+  return { arg: null, needsTarget: r.needsTarget, pre: '', targets: r.targets };
+}
+
+function normalizeOne(
+  words: string[],
+  out: SimpleCommand[],
+  depth: number,
+  dialect: Dialect,
+  redirs: (Redir | undefined)[] | undefined,
+  tail: Tail | undefined,
+  keepControl: boolean,
+  /** 이 조각에서 `env -S`의 문자열을 나눈 횟수 */
+  splits: number,
+): PieceRead {
+  parseWork.words += words.length;
   const assigns: Record<string, string> = {};
   const unsets: string[] = [];
   const hasRedirs = redirs?.some((r) => r !== undefined) ?? false;
@@ -736,6 +803,38 @@ function normalize(
   const strip = dialect === 'posix';
   /** 벗긴 예약어·수식어. 뒤에 명령이 없으면(`then`뿐인 줄) 전처럼 이 낱말을 담은 명령을 낸다 */
   const reserved: string[] = [];
+  /** 표에 없는 옵션을 처음 만난 뒤 명령이 시작한다고 본 자리(words의 자리). 그 뒤의 낱말에서 후보를 낸다. 없으면 -1 */
+  let unsureFrom = -1;
+  let incomplete = false;
+  /**
+   * words[j]부터 count개의 낱말을 insert로 바꾼 낱말 목록과 리다이렉션. 그 낱말들 사이에 있던 리다이렉션과
+   * 그 낱말에 붙어 있던 리다이렉션은 그 자리에 남긴다(`env -S "…">out`)
+   */
+  const replaced = (
+    j: number,
+    count: number,
+    insert: string[],
+  ): [string[], (Redir | undefined)[] | undefined] => {
+    if (!hasRedirs) return [source.slice(0, j).concat(insert, source.slice(j + count)), undefined];
+    const a = at[j];
+    const b = at[Math.min(j + count, at.length) - 1];
+    const w = source.slice(0, a).concat(insert);
+    const r = redirs!.slice(0, a).concat(insert.map(() => undefined));
+    let jj = j;
+    for (let k = a; k <= b; k++) {
+      const rd = redirs![k];
+      if (jj < at.length && at[jj] === k) {
+        jj++;
+        if (!rd) continue;
+        w.push(source[k].slice(rd.pre.length));
+        r.push(detached(rd));
+        continue;
+      }
+      w.push(source[k]);
+      r.push(rd);
+    }
+    return [w.concat(source.slice(b + 1)), r.concat(redirs!.slice(b + 1))];
+  };
   let i = 0;
   // 앞의 할당과 래퍼, 명령 앞에 서는 낱말을 벗긴다
   for (;;) {
@@ -758,63 +857,98 @@ function normalize(
       continue;
     }
     const w = commandName(raw);
-    if (w === 'env') {
+    if (ENV_NAMES.has(w)) {
       i++;
       while (i < words.length) {
         const x = words[i];
-        if (x === '-u' || x === '--unset') {
-          if (words[i + 1]) unsets.push(words[i + 1]);
-          i += 2;
-        } else if (x.startsWith('--unset=')) {
-          unsets.push(x.slice(8));
-          i++;
-        } else if (x.startsWith('-u') && x.length > 2) {
-          unsets.push(x.slice(2));
-          i++;
-        } else if (x.startsWith('-')) i++;
-        else if (ASSIGN_RE.test(x)) {
-          const mm = ASSIGN_RE.exec(x)!;
+        if (!x.startsWith('-')) {
+          const mm = ASSIGN_RE.exec(x);
+          if (!mm) break;
           assigns[mm[1]] = mm[2];
           i++;
-        } else break;
+          continue;
+        }
+        // `-`(혼자 쓴 것은 `-i`와 같다)와 `--`
+        if (x === '-' || x === '--') {
+          i++;
+          continue;
+        }
+        if (x.startsWith('--')) {
+          const eq = x.indexOf('=');
+          const name = eq < 0 ? x.slice(2) : x.slice(2, eq);
+          const value = eq < 0 ? words[i + 1] : x.slice(eq + 1);
+          const count = eq < 0 ? 2 : 1;
+          if (name === 'unset') {
+            // `--unset=이름`은 그대로 담고, 띄어 쓴 값은 있을 때만 담는다(전과 같다)
+            if (eq >= 0) unsets.push(x.slice(eq + 1));
+            else if (value) unsets.push(value);
+            i += count;
+          } else if (name === 'split-string') {
+            if (value !== undefined) {
+              if (splits < MAX_ENV_SPLITS) {
+                const [w2, r2] = replaced(i, count, splitEnvString(value));
+                return normalizeOne(w2, out, depth, dialect, r2, tail, keepControl, splits + 1);
+              }
+              incomplete = true;
+            }
+            i += count;
+          } else if (ENV_LONG_VALUES.has(name)) i += count;
+          else {
+            // 표에 없는 긴 옵션: 값을 받는지 알 수 없다
+            if (!ENV_LONG_FLAGS.has(name) && unsureFrom < 0) unsureFrom = i + 1;
+            i++;
+          }
+          continue;
+        }
+        // 묶은 짧은 옵션: 값을 받는 글자에서 끝난다. 그 글자가 낱말의 끝이면 다음 낱말이 값이고, 아니면 나머지 글자가 값이다
+        let step = 1;
+        for (let k = 1; k < x.length; k++) {
+          const ch = x[k];
+          if (ENV_FLAGS.has(ch)) continue;
+          if (!ENV_VALUES.has(ch)) {
+            if (unsureFrom < 0) unsureFrom = i + 1;
+            break;
+          }
+          const attached = k < x.length - 1;
+          const value = attached ? x.slice(k + 1) : words[i + 1];
+          step = attached ? 1 : 2;
+          if (ch === 'u') {
+            if (value) unsets.push(value);
+          } else if (ch === 'S' && value !== undefined) {
+            if (splits < MAX_ENV_SPLITS) {
+              // 문자열의 낱말을 그 옵션의 자리에 넣고 처음부터 다시 읽는다. 앞에 묶여 있던 옵션(`-iS`의 `-i`)은 남긴다
+              const insert = k > 1 ? [x.slice(0, k)] : [];
+              const [w2, r2] = replaced(i, step, insert.concat(splitEnvString(value)));
+              return normalizeOne(w2, out, depth, dialect, r2, tail, keepControl, splits + 1);
+            }
+            incomplete = true;
+          }
+          break;
+        }
+        i += step;
       }
       continue;
     }
-    if (WRAPPERS.has(w)) {
-      i++;
-      while (i < words.length && words[i].startsWith('-')) i++;
-      continue;
-    }
-    if (w === 'timeout') {
-      i++;
-      while (i < words.length && words[i].startsWith('-')) i++;
-      i++; // 시간 인자
-      continue;
-    }
-    if (w === 'xargs') {
-      i++;
-      while (i < words.length && words[i].startsWith('-')) {
-        // 값을 받는 옵션
-        if (['-I', '-n', '-P', '-L', '-d', '-E', '-s'].includes(words[i])) i++;
-        i++;
-      }
+    if (isWrapper(w)) {
+      const r = skipWrapperOptions(w, words, i + 1);
+      if (r.unsure && unsureFrom < 0) unsureFrom = r.next;
+      i = r.next;
       continue;
     }
     break;
   }
+  // 후보: 표에 없는 옵션 뒤의 낱말 가운데 `-`로 시작하지 않는 낱말마다, 앞에서부터 MAX_ALTS개까지
+  const alts: number[] = [];
+  if (unsureFrom >= 0)
+    for (let j = unsureFrom + 1; j < words.length && alts.length < MAX_ALTS; j++)
+      if (!words[j].startsWith('-')) alts.push(hasRedirs ? at[j] : j);
+  const read: PieceRead = { source, redirs, alts, incomplete };
   let argv: string[];
   let own: (Redir | undefined)[];
   if (!hasRedirs) {
     argv = words.slice(i);
     own = argv.map(() => undefined);
   } else {
-    /** 붙어 있던 낱말에서 뗀 리다이렉션 */
-    const detached = (r: Redir): Redir => ({
-      arg: null,
-      needsTarget: r.needsTarget,
-      pre: '',
-      targets: r.targets,
-    });
     /** 명령 이름이 든 낱말의 원래 자리. 이름이 없으면 끝 */
     const n = i < words.length ? at[i] : source.length;
     // 이름 앞: 벗긴 낱말은 버리고, 리다이렉션(연산자와 대상, 벗긴 낱말에 붙어 있던 것)은 차례대로 모아 끝으로 옮긴다
@@ -860,7 +994,7 @@ function normalize(
   }
   if (argv.length === 0) {
     if (Object.keys(assigns).length) out.push({ argv: [], assigns, unsets });
-    return;
+    return read;
   }
   let args = hasRedirs ? shellArgs(argv, own) : undefined;
   /** 이 조각의 인자(리다이렉션을 뺀 것). 인자 자리의 중괄호에서 나뉜 나머지는 넣지 않는다: 재귀로 다시 읽을 글에 쓴다 */
@@ -888,7 +1022,7 @@ function normalize(
       assigns,
       unsets: [...unsets, ...argv.slice(1).filter((a) => !a.startsWith('-'))],
     });
-    return;
+    return read;
   }
   if (
     head === 'export' ||
@@ -903,10 +1037,10 @@ function normalize(
       if (mm) a[mm[1]] = mm[2];
     }
     out.push({ ...base, assigns: a, unsets });
-    return;
+    return read;
   }
   out.push({ ...base, assigns, unsets });
-  if (depth >= MAX_DEPTH) return;
+  if (depth >= MAX_DEPTH) return read;
   // 재귀: bash -c "...", eval ..., powershell -Command ..., cmd /c ..., iex ...
   // 셸이 넘기는 인자로 본다: 리다이렉션이 끼어도(`bash >out -c "…"`, `eval >out "…"`) 같은 글을 다시 읽는다
   if (SHELLS.has(head)) {
@@ -929,6 +1063,7 @@ function normalize(
     const rest = plain.slice(1).filter((x) => !/^-c(o(m(m(a(n(d)?)?)?)?)?)?$/i.test(x));
     parseInto(rest.join(' '), out, depth + 1, 'powershell');
   }
+  return read;
 }
 
 /** 이 낱말들만 앞에 있으면 그 뒤의 `[[`는 명령의 첫 낱말 자리에 있다(조건식의 시작) */
@@ -1006,7 +1141,10 @@ export function parseShell(src: string, dialect: Dialect = 'posix'): SimpleComma
 }
 
 export interface SequencedCommand {
+  /** 이 자리의 명령(주 해석) */
   cmd: SimpleCommand;
+  /** 래퍼에 표에 없는 옵션이 붙어 있을 때, 이 자리에서 실행될 수 있는 다른 명령(후보). 없으면 두지 않는다 */
+  alts?: SimpleCommand[];
   /** 이 명령 바로 뒤의 연산자(`&&`, `||`, `;`, `|`, `|&`, `&`). 줄바꿈은 `;`, 마지막 명령은 null */
   next: string | null;
 }
@@ -1025,7 +1163,8 @@ export function parseSequence(src: string, dialect: Dialect = 'posix'): Sequence
     if (cur.length) {
       const one: SimpleCommand[] = [];
       normalize(cur, one, MAX_DEPTH, dialect, curRedirs, undefined, true);
-      if (one.length) out.push({ cmd: one[0], next: op });
+      if (one.length > 1) out.push({ cmd: one[0], alts: one.slice(1), next: op });
+      else if (one.length) out.push({ cmd: one[0], next: op });
     }
     cur = [];
     curRedirs = [];
