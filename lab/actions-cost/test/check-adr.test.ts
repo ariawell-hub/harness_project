@@ -237,6 +237,38 @@ test('checkAdr 배경: 본문, 기준선 문서로 가는 링크, 예산이 있�
   fails(checkAdr(swap(doc, 'PR 하나당 30분이다', 'PR 하나당 서른 분이다')), /배경.*30분/);
 });
 
+test('checkAdr 배경: 기준선 링크의 주소는 ADR 폴더에서 본 기준선 문서 그대로다', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  // 파일 이름만 같고 닿지 않는 주소, 같은 문서를 다르게 적은 주소
+  for (const target of [
+    '../missing/actions-cost.md',
+    'actions-cost.md',
+    '../actions-cost.md',
+    '../../docs/harness/actions-cost.md',
+    './../harness/actions-cost.md',
+    '../harness/./actions-cost.md',
+    '/docs/harness/actions-cost.md',
+    'https://example.com/docs/harness/actions-cost.md',
+    '../harness/actions-cost.md?plain=1',
+    '../harness/actions-cost.md/',
+  ])
+    fails(checkAdr(swap(doc, link, `[Actions 비용 문서](${target})`)), /배경.*링크/);
+  // 글이 없는 링크는 화면에 보이지 않는다
+  fails(checkAdr(swap(doc, link, '[](../harness/actions-cost.md)')), /배경.*링크/);
+  fails(checkAdr(swap(doc, link, '[ ](../harness/actions-cost.md)')), /배경.*링크/);
+  // 바른 주소 뒤의 절 이름은 받는다
+  assert.deepEqual(
+    checkAdr(swap(doc, link, '[Actions 비용 문서](../harness/actions-cost.md#기준선)')),
+    [],
+  );
+  // 틀린 링크가 있어도 바른 링크가 하나 있으면 된다
+  assert.deepEqual(
+    checkAdr(swap(doc, link, `${link}와 [다른 문서](../missing/actions-cost.md)`)),
+    [],
+  );
+});
+
 test('checkAdr 후보표: 표가 하나이고 머리 줄과 구분 줄이 맞다', () => {
   const doc = goodAdr();
   const second = `${TABLE_HEAD}\n${TABLE_RULE}\n${row('G1')}`;
