@@ -2,7 +2,7 @@
 // 필수 체크는 설정(ci.requiredChecks)의 context마다 "기대 출처가 쓴 가장 최근 결과"로 본다.
 // 체크 요약(statusCheckRollup)은 출처를 보지 않아, 봇 PAT이나 PR 워크플로가 쓴 같은 이름의 결과도 통과로 보인다(Q20).
 import { ACTIONS_APP_ID } from '../ci/protection.ts';
-import { LEDGER_CONTEXT } from '../ci/results.ts';
+import { GATE_CONTEXTS, LEDGER_CONTEXT, REVIEW_CONTEXTS } from '../ci/results.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import type { CommitCheck, PullRequest } from '../lib/github.ts';
 
@@ -49,6 +49,21 @@ export function requiredStates(
       at: latest?.at ?? '',
     };
   });
+}
+
+/**
+ * 검증자의 판정은 모두 났는데(승인이든 수정 요청이든) 상태가 없는 게이트의 이름(설정 순서).
+ * 게이트는 push 직후에 돌고 판정보다 먼저 끝난다. 판정이 난 뒤에도 게이트 상태가 없으면 기다려도 오지 않는다:
+ * `gates` 실행이 취소됐거나 다른 head에 기록됐다(Issue #181). 필수 체크에 검증자 판정이 없으면 빈 배열이다
+ */
+export function gatesMissing(required: readonly RequiredState[]): string[] {
+  const has = (list: readonly string[], context: string) => list.includes(context);
+  const reviews = required.filter((r) => has(REVIEW_CONTEXTS, r.context));
+  if (reviews.length === 0) return [];
+  if (reviews.some((r) => r.state !== 'success' && r.state !== 'failure')) return [];
+  return required
+    .filter((r) => has(GATE_CONTEXTS, r.context) && r.state === 'missing')
+    .map((r) => r.context);
 }
 
 /**
