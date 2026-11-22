@@ -165,6 +165,34 @@ function statusOf(head: string[], problems: string[]): Status | null {
   return m[1] as Status;
 }
 
+/** 코드 구간을 가린 글자. 코드 안의 대괄호와 괄호는 링크의 문법이 아니다 */
+const CODE_MARK = '\uE000';
+
+/**
+ * 한 문단(줄바꿈으로 이은 줄. 코드 구간은 CODE_MARK로 가렸다)에서 화면에 링크로 보이는 것의 주소.
+ * `](주소)`에서 거슬러 올라가 짝이 맞는 여는 대괄호를 찾는다. 여는 대괄호가 없거나, 글에 보이는
+ * 글자가 없거나, 글 안에 링크가 있으면(그때 바깥 대괄호는 링크가 아니다) 세지 않는다
+ */
+function linkTargets(para: string): string[] {
+  const targets: string[] = [];
+  for (const m of para.matchAll(/\]\(([^()\s"'<>|`\uE000]*)\)/g)) {
+    let depth = 0;
+    let open = -1;
+    for (let j = m.index - 1; j >= 0 && open < 0; j--) {
+      if (para[j] === ']') depth++;
+      else if (para[j] === '[') {
+        if (depth === 0) open = j;
+        else depth--;
+      }
+    }
+    if (open < 0) continue;
+    const label = para.slice(open + 1, m.index);
+    if (label.includes('](') || !/[^\s*_[\]]/.test(label)) continue;
+    targets.push(m[1]);
+  }
+  return targets;
+}
+
 function checkBackground(
   raw: string[],
   struct: string[],
@@ -175,17 +203,26 @@ function checkBackground(
   const body = struct.slice(r.from, r.to);
   const n = dense(body);
   if (n < 100) problems.push(`배경: 본문이 공백을 빼고 100자보다 짧다(${n}자)`);
-  // 링크의 주소는 struct에서 빠져 있다. 코드 구간 밖의 링크를 raw에서 찾는다.
+  // 링크의 주소는 struct에서 빠져 있다. raw에서 문단마다 찾는다(링크의 글은 줄을 넘을 수 있다).
   // 주소는 ADR 폴더(docs/decisions)에서 본 기준선 문서 그대로여야 한다(뒤에 #절 이름만 받는다).
-  // 파일 이름만 같은 다른 주소나 같은 문서를 다르게 적은 주소, 글이 없는 링크는 세지 않는다
+  // 파일 이름만 같은 다른 주소나 같은 문서를 다르게 적은 주소는 세지 않는다
   let linked = false;
+  let para: string[] = [];
+  const flush = (): void => {
+    if (linkTargets(para.join('\n')).some((t) => BASELINE_LINK.test(t))) linked = true;
+    para = [];
+  };
   for (let i = r.from; i < r.to; i++) {
-    if (fenced[i] || struct[i] === '') continue;
-    for (const p of partsOf(raw[i]) ?? [])
-      if (!p.code)
-        for (const m of p.s.matchAll(/\[([^[\]]*)\]\(([^()\s"'<>|`]*)\)/g))
-          if (/[^\s*_]/.test(m[1]) && BASELINE_LINK.test(m[2])) linked = true;
+    const parts = fenced[i] || blank(raw[i]) ? null : partsOf(raw[i]);
+    if (!parts) {
+      flush();
+      continue;
+    }
+    // 목록 항목·인용·제목은 새 블록을 연다. 앞 줄의 여는 대괄호와 이어지지 않는다
+    if (LISTISH.test(raw[i]) || /^ {0,3}#/.test(raw[i])) flush();
+    para.push(parts.map((p) => (p.code ? CODE_MARK : p.s)).join(''));
   }
+  flush();
   if (!linked)
     problems.push(
       '배경: 기준선 문서로 가는 링크가 없다(주소는 ../harness/actions-cost.md 그대로 적는다)',
