@@ -39,14 +39,21 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * 러너의 분당 단가(천분의 1달러). 확인한 것만 넣는다. 모르는 러너는 금액을 내지 않고 분만 보인다.
- * 2코어 Linux x64(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04`. 청구 항목 `actions_linux`): 분당 $0.006.
- * 출처: https://docs.github.com/en/billing/reference/actions-runner-pricing (2026-11-21에 확인).
- * 같은 문서가 job마다 분 단위로 올림한다고 적는다. 단가를 더하거나 바꿀 때는 출처와 확인한 날짜를 여기 적는다.
+ * - Linux 2코어 x64(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04`. 청구 항목 `actions_linux`): 분당 $0.006.
+ * - Linux 2코어 arm64(`ubuntu-24.04-arm`): 분당 $0.005.
+ * - Linux 1코어 x64(`ubuntu-slim`): 분당 $0.002.
+ * 단가의 출처: https://docs.github.com/en/billing/reference/actions-runner-pricing
+ * 라벨의 출처: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+ * 둘 다 2026-11-22에 확인했다(ADR-0008의 "확인한 외부 사실"). 단가의 출처가 job마다 분 단위로 올림한다고 적는다.
+ * 단가를 더하거나 바꿀 때는 출처와 확인한 날짜를 여기 적는다. 쓰기로 한 러너만 넣는다(`ubuntu-22.04-arm`은 없다).
+ * 보존 기록은 이 표의 라벨만 그대로 남긴다(`keptLabel`). 표에 없는 라벨의 분은 나중에 단가를 더해도 다시 계산할 수 없다.
  */
 const RATE_MILLI: ReadonlyMap<string, number> = new Map([
   ['ubuntu-latest', 6],
   ['ubuntu-24.04', 6],
   ['ubuntu-22.04', 6],
+  ['ubuntu-24.04-arm', 5],
+  ['ubuntu-slim', 2],
 ]);
 const SELF_HOSTED = 'self-hosted';
 
@@ -123,6 +130,10 @@ export function runnerRate(labels: string[]): {
 
 const rateMilli = (labels: string[]) =>
   labels.length === 1 && !labels.includes(SELF_HOSTED) ? RATE_MILLI.get(labels[0]) : undefined;
+
+/** 러너별 표의 이름: 단가를 아는 러너는 그 라벨, self-hosted가 든 것은 'self-hosted', 그 밖은 '(기타)' */
+const runnerName = (labels: string[]) =>
+  labels.includes(SELF_HOSTED) ? SELF_HOSTED : rateMilli(labels) === undefined ? OTHER : labels[0];
 
 // ---- 보존 기록 ----
 
@@ -344,6 +355,8 @@ export interface CostReport {
   subMinuteMinutes: number;
   /** 다시 실행한 시도(시도 번호 2부터)의 청구 분 */
   rerunMinutes: number;
+  /** 러너별. 이름은 단가표의 라벨, 'self-hosted', '(기타)'(단가를 모르는 러너) 가운데 하나다. '(기타)'와 'self-hosted'의 청구 분과 금액은 0이다 */
+  byRunner: CostRow[];
   byWorkflow: CostRow[];
   byJob: CostRow[];
   byDay: CostRow[];
@@ -397,6 +410,7 @@ export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames
   const saved = toSaved(jobs, known);
   const days = daysOf(period);
   const total = acc();
+  const byRunner = new Map<string, Acc>();
   const byWorkflow = new Map<string, Acc>();
   const byJob = new Map<string, Acc>();
   const byDay = new Map<string, Acc>(days.map((d) => [d, acc()]));
@@ -453,6 +467,7 @@ export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames
       add(a);
     };
     add(total);
+    at(byRunner, runnerName(s.labels));
     at(byWorkflow, s.workflow);
     at(byJob, s.workflow === OTHER ? OTHER : `${s.workflow} / ${s.job}`);
     at(byDay, s.day);
@@ -477,6 +492,7 @@ export function actionsCost(jobs: JobRecord[], period: Period, known: KnownNames
     subMinuteJobs,
     subMinuteMinutes,
     rerunMinutes,
+    byRunner: rows(byRunner, (k) => k),
     byWorkflow: rows(byWorkflow, (k) => k),
     byJob: rows(byJob, (k) => k),
     byDay: rows(byDay, (k) => k),
@@ -566,7 +582,7 @@ export function renderCost(report: CostReport, period: Period): string {
     '**Actions 비용: 비공개 리포였다면 청구됐을 값**',
     [
       '- 청구 분은 job마다 돈 초를 분으로 올림한 값이다(최소 1분). 다시 실행한 시도는 따로 센다. 돌지 않은 job은 0분이다.',
-      '- 금액은 러너 단가를 곱한 값이다(2코어 Linux 분당 $0.006). 단가를 모르는 러너와 self-hosted 러너의 분은 청구 분과 금액에 넣지 않고 따로 적는다.',
+      '- 금액은 job마다 러너 단가를 곱해 더한 값이다(2코어 Linux x64 분당 $0.006, 2코어 Linux arm64 분당 $0.005, 1코어 Linux 분당 $0.002). 단가를 모르는 러너와 self-hosted 러너의 분은 청구 분과 금액에 넣지 않고 따로 적는다.',
       '- "PR 하나당 청구 분(PR 밖 포함)"과 "PR 하나당 금액(PR 밖 포함)"은 전체 청구 분과 전체 금액을 PR 수로 나눈 값이다. 분자에 PR 밖 실행(main 등)과 PR을 찾지 못한 실행이 들어 있다. 예산과는 금액으로 견준다.',
       '- "PR head 하나당 청구 분"은 push를 직접 세지 않고 PR head로 센 추정값이다. head가 있는 실행만 센다.',
       '- 공개 리포에서는 실제 청구가 아니다. 검증자의 구독 사용량은 들어 있지 않다.',
@@ -585,6 +601,8 @@ export function renderCost(report: CostReport, period: Period): string {
       ],
       [recordCells(r, period)],
     ),
+    '**러너별**',
+    table(cols('러너'), costRows(r.byRunner)),
     '**워크플로별**',
     table(cols('워크플로'), costRows(r.byWorkflow)),
     '**job별**',

@@ -859,6 +859,24 @@ test('checkDoc 형식: 밑줄 제목·가로줄·참조 정의·그림·제목�
   formatOnly(check(swap(doc, WORD, `![${WORD}](x.png)`)), /형식.*그림/);
 });
 
+test('checkDoc 형식: 모양이 다른 가로줄도 쓰지 않는다', () => {
+  const doc = goodDoc();
+  // 가로줄은 앞뒤의 줄을 다른 블록으로 가른다(줄을 넘는 글이 화면에서 이어지지 않는다)
+  for (const rule of [
+    '***',
+    '___',
+    '* * *',
+    '- - -',
+    '_ _ _',
+    '  ***',
+    '*  *  *',
+    '_____',
+    '- - - -',
+    '* * * ',
+  ])
+    formatOnly(check(swap(doc, '## 기록\n', `## 기록\n\n가짜 절\n\n${rule}\n`)), /형식.*가로줄/);
+});
+
 test('checkDoc: 링크의 주소는 글로 세지 않는다', () => {
   const doc = goodDoc();
   assert.deepEqual(check(swap(doc, WORD, '[포함 사용량](../x.md)은')), []);

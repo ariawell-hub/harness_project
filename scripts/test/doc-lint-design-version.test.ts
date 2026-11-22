@@ -1,6 +1,6 @@
 // doc-lint가 설계서 머리말의 버전·최종 갱신을 변경 이력과 견주는지 본다(Issue #175 step1, TD-33).
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { designVersionProblems, docLint } from '../gates/doc-lint.ts';
@@ -165,6 +165,35 @@ test('design-version: 머리말이나 변경 이력을 읽지 못하면 통과�
   assert.equal(p[0].rule, RULE);
   assert.ok(p[0].what.includes(String(lineNo(bad, badLine))), p[0].what);
   assert.ok(!p[0].what.includes('날짜가 없다'), p[0].what);
+});
+
+test('design-version: 머리말은 정한 형식대로만 읽는다(`최종 갱신:` 앞의 공백, ` · `의 공백, 날짜 뒤)', () => {
+  const onlyHead = (line: string) => {
+    const p = designVersionProblems(design(line, ITEMS));
+    assert.equal(p.length, 1, line);
+    assert.equal(p[0].rule, RULE);
+    assert.ok(p[0].what.includes('머리말'), p[0].what);
+  };
+  // 두 부분이 붙었다: 형식 오류 한 건. 버전이 어긋나 있어도 비교 문제는 함께 나오지 않는다
+  onlyHead('> 버전 v0.7.3 · 상태: 초안최종 갱신: 2026-11-21');
+  onlyHead('> 버전 v0.7.2 · 상태: 초안최종 갱신: 2026-11-20');
+  onlyHead('> 버전 v0.7.3 ·최종 갱신: 2026-11-21');
+  // 다른 자리(지금도 거부한다)
+  onlyHead('> 버전 v0.7.3· 상태: 초안 · 최종 갱신: 2026-11-21');
+  onlyHead('> 버전 v0.7.3 ·상태: 초안 · 최종 갱신: 2026-11-21');
+  onlyHead('> 버전 v0.7.3 · 상태: 초안 · 최종 갱신: 2026-11-21 끝');
+  // 그대로 통과하는 꼴
+  for (const line of [
+    head('0.7.3', '2026-11-21'),
+    '> 버전 v0.7.3 · 최종 갱신: 2026-11-21',
+    `${head('0.7.3', '2026-11-21')}  `,
+  ])
+    assert.deepEqual(designVersionProblems(design(line, ITEMS)), [], line);
+  // 실제 설계서
+  assert.deepEqual(
+    designVersionProblems(readFileSync(path.join(HARNESS_ROOT, DESIGN), 'utf8')),
+    [],
+  );
 });
 
 /** 설정·지도·색인과 설계서를 둔 리포. 커밋까지 한다 */

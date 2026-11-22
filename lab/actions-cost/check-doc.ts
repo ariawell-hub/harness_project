@@ -109,9 +109,9 @@ export function verdictOf(r: CostReport): Verdict {
 }
 
 /** 공백을 뺀 글자 수 */
-const dense = (lines: string[]) => lines.join('').replace(/\s/g, '').length;
+export const dense = (lines: string[]) => lines.join('').replace(/\s/g, '').length;
 /** 빈 줄: 공백과 탭만 있는 줄. 다른 공백 글자(줄바꿈 없는 공백 등)만 있는 줄은 화면에서 빈 줄이 아니다 */
-const blank = (line: string) => /^[ \t]*$/.test(line);
+export const blank = (line: string) => /^[ \t]*$/.test(line);
 
 /**
  * 문서의 줄을 보는 눈. 줄 번호는 모두 같다.
@@ -122,7 +122,7 @@ const blank = (line: string) => /^[ \t]*$/.test(line);
  * - `codes`: 그 줄의 코드 구간(백틱)에 든 글.
  * 머리말(frontmatter)과 표식 구간 안의 줄은 `text`·`struct`에서 비운다. 표식 줄은 남긴다
  */
-interface Views {
+export interface Views {
   raw: string[];
   text: string[];
   struct: string[];
@@ -130,7 +130,7 @@ interface Views {
   codes: string[][];
 }
 
-interface Part {
+export interface Part {
   code: boolean;
   s: string;
 }
@@ -139,7 +139,7 @@ interface Part {
  * 한 줄을 코드 구간(백틱)과 그 밖의 글로 가른다. 코드 구간은 길이가 같은 백틱 묶음 한 쌍의 사이다.
  * 짝이 없는 묶음이 있으면 null이다(줄을 넘는 코드 구간은 받지 않는다)
  */
-function partsOf(line: string): Part[] | null {
+export function partsOf(line: string): Part[] | null {
   const parts: Part[] = [];
   let plain = '';
   let i = 0;
@@ -189,6 +189,9 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
   if (!/^ {0,3}\S/.test(line))
     return '줄 머리는 공백 세 칸까지만 들여 쓴다(들여 쓴 코드 블록을 쓰지 않는다)';
   if (/^ {0,3}(=+|-+)\s*$/.test(line)) return '밑줄 제목과 가로줄(===, ---)을 쓰지 않는다';
+  // 가로줄은 -, *, _ 가운데 한 글자를 셋 이상, 사이에 공백을 두어도 된다. 앞뒤의 줄을 다른 블록으로 가른다
+  if (/^ {0,3}([-*_])( *\1){2,} *$/.test(line))
+    return '가로줄(***, ___, - - - 같은 줄)을 쓰지 않는다';
   if (line.includes('\\')) return '역슬래시를 쓰지 않는다(이스케이프한 글자를 가려 읽지 않는다)';
   if (parts === null)
     return '백틱의 짝이 한 줄 안에서 맞지 않는다(코드 구간은 한 줄 안에서 여닫는다)';
@@ -210,9 +213,11 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
 
 /**
  * 문서를 줄 단위로 읽는다. 형식을 벗어난 줄은 `problems`에 넣고 글로 남긴다(뒤의 줄을 가리지 않는다).
- * 받는 형식: 머리말, 줄 머리의 ``````로 여닫는 코드 블록, 줄 전체가 표식인 표식 구간, 그리고 `lineFormat`을 지킨 줄
+ * 받는 형식: 머리말, 줄 머리의 ``````로 여닫는 코드 블록, 줄 전체가 표식인 표식 구간, 그리고 `lineFormat`을 지킨 줄.
+ * `markers`가 false면 표식 구간을 받지 않는다(표식 줄은 코드 밖의 `<`라 형식 오류가 된다. 표식 구간이 없는 문서에서
+ * 그 안의 줄이 화면에 보이는 채 읽히지 않는 것을 막는다)
  */
-function viewsOf(doc: string, problems: string[]): Views {
+export function viewsOf(doc: string, problems: string[], markers = true): Views {
   // 파일 머리의 BOM은 글이 아니다
   const raw = doc.replace(/^\uFEFF/, '').split(/\r?\n/);
   const text = raw.map(() => '');
@@ -237,7 +242,7 @@ function viewsOf(doc: string, problems: string[]): Views {
       continue;
     }
     // 표식 구간: 안의 줄은 계산한 출력과 raw로 견줄 뿐 글로 읽지 않는다
-    if (line === BEGIN || line === END) {
+    if (markers && (line === BEGIN || line === END)) {
       keep(i, line);
       const end = line === BEGIN ? raw.indexOf(END, i + 1) : -1;
       if (end > 0) {
@@ -406,7 +411,7 @@ function loader(i: DocInputs): (name: string) => Loaded | string {
 const samePeriod = (a: Period, b: Period) => a.since === b.since && a.until === b.until;
 
 /** 실재하는 날짜(YYYY-MM-DD)인가 */
-function realDay(day: string): boolean {
+export function realDay(day: string): boolean {
   const t = Date.parse(`${day}T00:00:00.000Z`);
   return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === day;
 }
@@ -522,7 +527,7 @@ function checkProcedure(body: string[], problems: string[]): void {
 }
 
 /** 표의 한 줄을 칸으로 가른다(양끝의 `|`를 떼고 칸의 앞뒤 공백을 뺀다) */
-function cellsOf(line: string): string[] {
+export function cellsOf(line: string): string[] {
   return line
     .trim()
     .replace(/^\|/, '')
