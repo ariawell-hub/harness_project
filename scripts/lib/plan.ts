@@ -78,7 +78,10 @@ function formatScalar(v: Scalar): string {
   return String(v);
 }
 
-/** frontmatter의 한 키 값을 바꾼다. 같은 줄의 주석은 보존한다. 키가 없으면 끝에 추가 */
+/**
+ * frontmatter의 한 키 값을 바꾼다. 같은 줄의 주석은 보존한다. 키가 없으면 끝에 추가.
+ * 값과 주석 사이는 공백 하나로 쓴다(포매터의 결과와 같다. 주석의 칸을 보존하면 값이 짧아질 때 공백이 남아 fmt 검사가 실패한다).
+ */
 export function setFrontmatter(text: string, key: string, value: Scalar): string {
   const doc = parseDoc(text);
   if (!doc.frontmatter) throw new Error('frontmatter가 없는 문서다');
@@ -90,9 +93,7 @@ export function setFrontmatter(text: string, key: string, value: Scalar): string
     const valuePart = stripComment(m[2]);
     const comment = m[2].slice(valuePart.length);
     const head = `${key}: ${formatScalar(value)}`;
-    if (!comment) return head;
-    const col = line.length - comment.length;
-    return (head.length < col ? head.padEnd(col) : head + ' ') + comment;
+    return comment ? `${head} ${comment}` : head;
   });
   if (!found) lines.push(`${key}: ${formatScalar(value)}`);
   return `---\n${lines.join('\n')}\n---\n${doc.body}`;
@@ -174,6 +175,27 @@ export function openQuestions(body: string): OpenQuestion[] {
  * "읽어야 할 파일"은 안내라 넣지 않는다
  */
 export const STEP_BOUND_SECTIONS = ['작업', 'Acceptance Criteria', '금지사항'] as const;
+
+/** 계획 검증의 해시에 넣는 plan.md의 섹션(제목이 이 말로 시작한다. section과 같은 규칙) */
+export const PLAN_BOUND_SECTIONS = ['목표와 수용 기준', '범위', '관련 파일'] as const;
+
+/** 해시에 넣는 섹션 글자의 정규화: 줄 끝 공백과 섹션 앞뒤 빈 줄을 뗀다. 줄 안의 글자는 그대로 둔다 */
+export function normalizeBound(content: string | null): string {
+  return (content ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''))
+    .join('\n')
+    .replace(/^\n+|\n+$/g, '');
+}
+
+/**
+ * 해시에 넣는 plan.md 한 섹션의 글자 그대로(섹션이 없으면 ''). body는 frontmatter를 뗀 본문이다.
+ * 계획 해시(ci/plan-hash.ts)와 scope(gates/scope.ts)가 함께 쓴다: 범위 경로를 이 글자에서만 읽으므로 범위 경로가 바뀌면 해시도 바뀐다
+ */
+export function boundPlanSection(body: string, s: (typeof PLAN_BOUND_SECTIONS)[number]): string {
+  return normalizeBound(section(body, s));
+}
 
 export function hashText(s: string): string {
   return createHash('sha256').update(s.replace(/\r\n/g, '\n').trim()).digest('hex').slice(0, 16);
