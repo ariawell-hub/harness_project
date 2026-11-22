@@ -64,9 +64,16 @@
 
 `env -S`의 문자열을 나누는 함수 `splitEnvString(text)`도 이 파일에 둔다(3에서 쓴다. 순수 함수다). `env`가 문자열을 인자로 나누는 규칙이다.
 
-- 따옴표 밖의 공백(스페이스·탭·줄바꿈)에서 나눈다.
+- 따옴표 밖의 공백 글자(스페이스, 탭, 줄바꿈, 캐리지 리턴, 세로 탭, 폼 피드)에서 나눈다. GNU의 문서는 여섯을 모두 구분자로 적고 FreeBSD의 문서는 스페이스와 탭만 적는다. 더 나누는 쪽으로 읽는다(나뉜 낱말이 명령 이름이 되므로 막는 쪽이다).
 - 작은따옴표·큰따옴표로 묶은 부분은 한 낱말에 든다(따옴표는 뗀다. 빈 따옴표 `''`는 빈 낱말이다).
-- 백슬래시 뒤의 글자는 글자 그대로다(따옴표 밖과 큰따옴표 안에서. 작은따옴표 안의 백슬래시는 글자다). 예외 둘: `\_`는 따옴표 밖에서 낱말을 나누고(큰따옴표 안에서는 공백 글자다), `\c`는 거기서 문자열 읽기를 끝낸다.
+- 백슬래시(따옴표 밖과 큰따옴표 안):
+  - `\f`·`\n`·`\r`·`\t`·`\v`는 그 제어 문자(폼 피드, 줄바꿈, 캐리지 리턴, 탭, 세로 탭)가 되어 낱말 안에 든다. 낱말을 나누지 않는다(`"a\tb"`와 `a\tb`는 가운데에 탭이 든 낱말 하나다).
+  - `\#`·`\$`·`\"`·`\'`·`\\`는 그 글자다(`\#x`는 주석이 아니라 낱말 `#x`다).
+  - `\_`는 따옴표 밖에서 낱말을 나누고 큰따옴표 안에서는 공백 글자다.
+  - `\c`는 따옴표 밖에서 문자열 읽기를 끝낸다(그때까지 읽은 낱말은 남는다). 큰따옴표 안의 `\c`는 두 구현 모두 오류로 끝나고 아무것도 실행하지 않는다. 훅은 따옴표 밖과 같게 읽기를 끝낸다.
+  - 그 밖의 글자가 뒤따르면(`\q`) `env`는 오류로 끝나고 아무것도 실행하지 않는다. 훅은 백슬래시를 떼고 그 글자를 둔다(막는 쪽으로 읽는다).
+- 작은따옴표 안의 백슬래시: `\'`는 작은따옴표, `\\`는 백슬래시다. 그 밖의 백슬래시는 글자 그대로 남는다(`'a\tb'`는 글자 넷 `a\tb`다).
+- 위 규칙은 GNU coreutils의 `env`와 FreeBSD·macOS의 `env`의 문서가 같게 적은 것이다(이스케이프의 표, 작은따옴표 안에서는 `\'`와 `\\`만 읽는다는 것, `\_`의 두 뜻, 낱말 첫 글자의 `#`, `${이름}`만 값으로 바꾼다는 것. 2026-11-22에 두 문서를 읽었다. 계획의 진행 로그). 문서가 다르거나 한쪽에만 적힌 곳은 위에 따로 적었다(구분자, 오류로 끝나는 꼴). macOS에서는 이 Mac의 `env`로 동작을 확인했다. 두 환경 모두 실제 실행 대조 테스트(4)가 그 머신의 `env`와 견준다: macOS는 로컬, Linux(GNU)는 CI의 `check`. 대조하는 사례에는 두 구현이 같게 읽는 꼴만 넣는다(따옴표 밖의 줄바꿈 구분자와 오류로 끝나는 꼴은 넣지 않는다).
 - 낱말의 첫 글자가 따옴표 밖의 `#`이면 문자열의 끝까지 주석이다(낱말 가운데의 `#`은 글자다).
 - 닫히지 않은 따옴표는 문자열의 끝까지를 한 낱말로 본다(`env`는 오류로 끝나지만 막는 쪽으로 읽는다).
 - `${이름}`은 풀지 않고 글자 그대로 둔다. `env`는 환경 변수의 값으로 바꾸지만 훅은 그 값을 모른다(셸이 실행할 때 만드는 인자와 같은 한계다. TD-62 (4)).
@@ -88,19 +95,25 @@
 - `-S 문자열`·`--split-string 문자열`·`--split-string=문자열`·`-S문자열`(묶은 꼴 `-iS 문자열` 포함): 문자열을 `splitEnvString`으로 낱말로 나눠 **그 옵션의 자리에 넣고**, 거기서부터 `env`의 옵션·할당 읽기를 이어 간다(문자열 안에 `env`의 옵션과 할당이 올 수 있다: `env -S "-i A=1 명령"`). 이렇게 읽은 명령이 이 조각의 **주 해석**이다. 따로 더하는 명령이 아니므로 검사 순서용 분석(`parseSequence`)도 이 명령을 그 자리의 명령으로 본다.
   - 문자열 뒤의 낱말은 **경계를 그대로 둔 채** 뒤에 붙는다: `env -S 'tool' 'a b'`가 `tool`에 넘기는 인자는 `a b` 하나이고, `env -S "tool a" '' b`의 인자는 `a`, 빈 낱말, `b` 셋이다. 공백으로 이어 붙여 다시 읽지 않는다.
   - 셸의 연산자는 문자열 안에서 연산자가 아니다: `env -S "git status; echo x"`는 `git`에 `status;`, `echo`, `x`를 넘기는 명령 하나다(`env`가 그렇게 실행한다). 셸 명령 줄로 다시 읽지 않는다(`parseInto`를 쓰지 않는다).
-  - 문자열에서 나온 낱말에 다시 `-S`가 있으면 같은 방식으로 나눈다. 한 조각에서 많아야 4번이다. 그 뒤의 `-S`는 모르는 옵션으로 다룬다(2의 후보를 낸다).
+  - 문자열에서 나온 낱말에 다시 `-S`가 있으면 같은 방식으로 나눈다. 한 조각에서 네 번까지다. 다섯 번째 `-S`를 만나면 더 읽지 않고, 그 조각이 낸 명령에 **끝까지 읽지 못했다**는 표시를 단다(`SimpleCommand`의 새 선택 칸 `incomplete: true`. 그 조각이 낸 명령이 없으면 빈 명령에 달아 낸다). 그 호출은 규칙이 막는다(3-1). 후보로 넘기지 않는다: 다섯 번째 문자열 안에 명령과 인자가 함께 있으면(`-S "tool a"`) 낱말 경계에서 시작하는 후보로는 그 명령을 찾지 못한다(계획 검증 2회차의 F6). 한도를 두는 이유: `-S-S-S…x`처럼 겹치면 나눌 때마다 남은 글을 다시 읽어 비용이 제곱으로 는다.
   - 리다이렉션이 붙은 낱말(`env -S "…">out`)에서는 리다이렉션을 그대로 두고 낱말의 글만 나눈다.
 - `-u`·`--unset`과 할당은 지금 그대로다.
 - 위에 없는 `-`로 시작하는 낱말: 지금처럼 하나를 건너뛰고, 2의 "모르는 옵션"과 같이 후보를 낸다.
 
-### 3-1. 검사 순서 규칙 `scripts/hooks/rules.ts`의 `sequenceRules`
+### 3-1. 규칙 `scripts/hooks/rules.ts`: 검사 순서 규칙과 읽지 못한 명령
 
 `sequenceRules`가 순서의 한 자리를 볼 때 주 해석(`cmd`)과 후보(`alts`)를 함께 본다.
 
 - 주 해석이나 후보 가운데 하나라도 검사 명령이면 그 자리는 검사 명령이다(출력 가림과 "검사가 앞에 있었다"의 판정에 쓴다).
 - 주 해석이나 후보 가운데 하나라도 뒤 명령(push·완료 처리·승인 요청·PR 생성)이면 그 자리는 뒤 명령이다(메시지에는 처음 찾은 것의 이름을 쓴다).
 - `set -e`·`pipefail`은 주 해석에서만 읽는다(지금 그대로다).
-- 후보가 없는 자리의 판정은 지금과 같다. 이 함수의 판정 조건·메시지와 `rules.ts`의 다른 곳은 바꾸지 않는다.
+- 후보가 없는 자리의 판정은 지금과 같다. 이 함수의 판정 조건·메시지는 바꾸지 않는다.
+
+끝까지 읽지 못한 명령: `evaluateBash`가 분석기가 낸 명령 가운데 `incomplete`가 달린 것이 있으면 그 호출을 막는다(방언마다 같다).
+
+- 규칙 이름은 `R4 훅 우회`, 내용은 "`env -S`가 다섯 번 넘게 겹쳐 실행될 명령을 끝까지 읽지 못했다", 고치는 법은 "`env -S`를 겹치지 말고 실행할 명령을 그대로 쓴다"다.
+- 문자열 안에 무엇이 있든 막는다(허용된 명령이어도). 읽지 못한 명령을 통과시키지 않는 것이 목적이다.
+- `rules.ts`에서 고치는 것은 이 둘(검사 순서 규칙이 후보를 함께 본다, 읽지 못한 명령을 막는다)뿐이다. 금지 목록·예외 목록과 다른 규칙의 메시지는 바꾸지 않는다.
 
 ### 4. 테스트 `scripts/test/wrapper-options.test.ts`(새 파일)
 
@@ -127,11 +140,13 @@
   - `sudo -u someone A=1 git status`: `['git', 'status']`이고 `assigns`에 `A: '1'`.
   - `nice --unknown 5 git status`: 첫 명령(주 해석)은 `['5', 'git', 'status']`, 그 뒤의 후보는 `['git', 'status']`, `['status']`다.
   - `nice --unknown a b c d e f g h i j`: 후보는 8개다(`b`부터 `i`까지에서 시작하는 것).
-  - `env -S`(모두 명령 하나다. 후보가 없다): `env -S "git status" --short`는 `['git', 'status', '--short']`. `env -S 'tool' 'a b'`는 `['tool', 'a b']`(뒤 인자의 경계). `env -S "tool a" '' b`는 `['tool', 'a', '', 'b']`(빈 인자). `env -S 'tool "a b"' c`는 `['tool', 'a b', 'c']`(문자열 안의 따옴표). `env -S "git status; echo x"`는 `['git', 'status;', 'echo', 'x']`(연산자가 아니다). `env -S "git status # x" y`는 `['git', 'status', 'y']`(주석). `env -S 'git\_status'`는 `['git', 'status']`. `env -S "-i A=1 git status"`와 `env -iS "A=1 git status"`는 `['git', 'status']`이고 `assigns`에 `A: '1'`. `env -S "-S 'git status'"`, `env -S"git status"`, `env --split-string="git status"`, `env --split-string "git status"`는 `['git', 'status']`.
-  - `-S`가 한 조각에 다섯 번 나오면(`env -S -i -S -i -S -i -S -i -S -i git status`) 다섯째는 모르는 옵션으로 다뤄 뒤의 낱말에서 후보가 나온다(`['git', 'status']`가 낸 명령 가운데 있다).
+  - `env -S`(모두 명령 하나다. 후보가 없다): `env -S "git status" --short`는 `['git', 'status', '--short']`. `env -S 'tool' 'a b'`는 `['tool', 'a b']`(뒤 인자의 경계). `env -S "tool a" '' b`는 `['tool', 'a', '', 'b']`(빈 인자). `env -S 'tool "a b"' c`는 `['tool', 'a b', 'c']`(문자열 안의 따옴표). `env -S "git status; echo x"`는 `['git', 'status;', 'echo', 'x']`(연산자가 아니다). `env -S "git status # x" y`는 `['git', 'status', 'y']`(주석). `env -S 'git\_status'`는 `['git', 'status']`. `env -S "-i A=1 git status"`와 `env -iS "A=1 git status"`는 `['git', 'status']`이고 `assigns`에 `A: '1'`. `env -S "-S 'git status'"`, `env -S"git status"`, `env --split-string="git status"`, `env --split-string "git status"`는 `['git', 'status']`. 이스케이프: `env -S 'tool "a\tb"'`와 `env -S 'tool a\tb'`는 `['tool', 'a<탭>b']`(탭이 든 인자 하나), `env -S "tool 'a\tb'"`는 `['tool', 'a\tb']`(작은따옴표 안: 백슬래시가 남는다), `env -S 'tool \#a "b\"c" \$d'`는 `['tool', '#a', 'b"c', '$d']`, `env -S 'tool a\cb c'`는 `['tool', 'a']`.
+  - `-S` 네 번까지는 읽는다: `env -S -i -S -i -S -i -S "git status"`와 `env -S-S-S-S"git status"`는 명령 하나 `['git', 'status']`이고 `incomplete`가 없으며 통과한다. 네 번째 문자열 안의 금지 호출은 그 호출의 규칙으로 막힌다(`env -S -i -S -i -S -i -S "C"`. 금지 호출 열둘).
+  - 다섯 번째에서는 읽지 못한 명령으로 막는다: `env -S -i -S -i -S -i -S -i -S "git status"`, `env -S-S-S-S-S"git status"`, `env -S -i -S -i -S -i -S -i -S "tool a"`는 낸 명령에 `incomplete`가 있고 R4로 막힌다(문자열 안의 명령이 허용된 것이어도). 금지 호출 열둘을 다섯 번째 문자열에 넣은 꼴(`env -S -i -S -i -S -i -S -i -S "C"`)도 모두 막힌다.
+  - `incomplete`는 그 밖의 명령에는 없다(닫는 꼴·유지하는 꼴·허용의 어느 호출에도 없다).
   - 래퍼뿐인 조각(`nice -n 5`, `sudo -u someone`, `timeout -s KILL 5`, `nice -n`)은 전처럼 명령을 내지 않는다.
 - **`skipWrapperOptions`**(표를 읽는 함수만 따로): 위 "읽는 함수"의 항목마다 한 사례씩(`--`, 값이 붙은 긴 옵션, 값을 띄어 쓴 긴 옵션, 모르는 긴 옵션, 숫자 옵션, 묶은 짧은 옵션의 가운데·끝의 값 글자, 모르는 글자, `-` 하나, 자리 인자, 값이 없는 끝). 표에 든 래퍼 이름마다 `flags`와 `values`에 같은 글자가 없고 `longFlags`와 `longValues`에 같은 이름이 없다.
-- **`splitEnvString`**: 규칙마다 한 사례씩(공백·탭·줄바꿈, 작은따옴표, 큰따옴표, 빈 따옴표, 붙여 쓴 따옴표 `a"b c"d`, 백슬래시, 따옴표 밖과 큰따옴표 안의 `\_`, `\c`, 낱말 첫 글자의 `#`, 낱말 가운데의 `#`, 닫히지 않은 따옴표, `${이름}`, 빈 문자열).
+- **`splitEnvString`**: 규칙마다 한 사례씩. 공백·탭·줄바꿈에서 나눔, 작은따옴표, 큰따옴표, 빈 따옴표, 붙여 쓴 따옴표(`a"b c"d`는 `ab cd`), 제어 문자 이스케이프 다섯(`\f`·`\n`·`\r`·`\t`·`\v`. 따옴표 밖과 큰따옴표 안에서 각각), 글자 이스케이프 다섯(`\#`·`\$`·`\"`·`\'`·`\\`), 따옴표 밖과 큰따옴표 안의 `\_`, `\c`(그때까지의 낱말이 남는다), 정해지지 않은 이스케이프(`\q`는 `q`), 작은따옴표 안의 `\'`·`\\`와 그 밖의 백슬래시(남는다), 낱말 첫 글자의 `#`, 낱말 가운데의 `#`, 닫히지 않은 따옴표, `${이름}`, 빈 문자열, 문자열 끝의 백슬래시 하나(글자로 남는다).
 - **검사 순서 규칙**(R4): 다음 쌍의 판정이 서로 같다(앞의 것은 옵션 없는 래퍼, 뒤의 것은 값을 받는 옵션이 있는 래퍼).
   - `node scripts/harness.ts check; nice git push origin x`와 `node scripts/harness.ts check; nice -n 5 git push origin x`, `…; sudo -u someone git push origin x`, `…; timeout -s KILL 5 git push origin x`: 모두 R4.
   - `node scripts/harness.ts check && nice git push origin x`와 `node scripts/harness.ts check && nice -n 5 git push origin x`: 판정이 같다.
@@ -140,8 +155,8 @@
   - `env -S`(문자열 안의 명령이 그 자리의 명령이다): `node scripts/harness.ts check; env -S "git push origin x"`는 R4이고, `node scripts/harness.ts check && env -S "git push origin x"`는 `node scripts/harness.ts check && git push origin x`와 판정이 같다. `env -S "node scripts/harness.ts check"; git push origin x`는 R4이고, `env -S "node scripts/harness.ts check" && git push origin x`는 `node scripts/harness.ts check && git push origin x`와 판정이 같다. 둘을 각각 감싼 `env -S "node scripts/harness.ts check"; env -S "git push origin x"`는 R4, `&&`로 이으면 감싸지 않은 것과 판정이 같다.
 - **실제 실행 대조**: 임시 폴더에 `tool`이라는 실행 파일(받은 인자의 수와 인자를 환경 변수가 가리키는 파일에 NUL로 구분해 적는 `sh` 스크립트. 공백이 든 인자와 빈 인자를 구별한다)을 만들고 그 폴더를 `PATH`의 앞에 둔 채 `bash -c`로 돌린다. 돌리는 것은 그 래퍼가 이 머신에 있고(`command -v`) 권한이나 시스템 상태를 건드리지 않는 래퍼의 틀뿐이다: `nice`, `env`, `nohup`, `command`, `exec`, `time`, `timeout`·`gtimeout`, `stdbuf`·`gstdbuf`, `caffeinate`, `arch`, `gnice`, `genv`, `unbuffer`, `xargs`·`gxargs`(입력은 빈 줄 하나). `sudo`, `doas`, `ionice`, `chrt`, `taskset`, `setsid`의 틀과 모르는 옵션의 틀은 돌리지 않는다. 래퍼가 없으면 그 틀을 건너뛴다(`t.diagnostic`으로 대조한 틀과 건너뛴 틀의 수를 낸다). Windows에서는 이 테스트를 건너뛴다. 실제로 대조한 틀이 하나 이상이어야 한다(POSIX 환경에서).
   - 닫는 꼴·유지하는 꼴의 틀에 `C`로 `tool a b`를 넣어 돌린다. `tool`이 인자 `a b`로(`xargs`는 `a b`로 시작하는 인자로) 실행된 틀에서는 분석기(`parseShell`)가 낸 명령 가운데 `['tool', 'a', 'b']`가 있는지 본다. 이 틀들에는 모르는 옵션이 없어 후보가 없으므로, 낸 명령은 모두 어느 조각의 주 해석이다. 실행되지 않은 틀(래퍼가 그 옵션을 모른다 등)은 비교하지 않는다.
-  - 인자의 경계: `env -S 'tool' 'a b'`, `env -S "tool a" '' b`, `env -S 'tool "a b"' c`, `env -S 'tool a; b'`, `env -S 'tool a # b' c`, `env -S '-i tool a'`, `nice -n 5 tool 'a b' ''`를 돌려, `tool`이 실제로 받은 인자 배열과 `parseShell`의 첫 명령(`args ?? argv`)이 통째로 같은지 본다. `tool`이 실행되지 않은 사례(그 `env`가 `-S`를 모른다)는 건너뛴다.
-- **입력 길이에 비례하는가**: 입력의 꼴 다섯에 대해 본다. (가) `nice` 뒤에 모르는 옵션 n개와 낱말 n개 (나) `sudo -u a`를 n번 겹친 것 (다) `nice --unknown 5`를 n번 겹친 것(모르는 옵션이 붙은 래퍼를 겹친 입력) (라) `env` 뒤에 `-S -i`를 n번 쓴 것 (마) `timeout -s KILL 5`를 n번 겹친 것.
+  - 인자의 경계: `env -S 'tool' 'a b'`, `env -S "tool a" '' b`, `env -S 'tool "a b"' c`, `env -S 'tool a; b'`, `env -S 'tool a # b' c`, `env -S '-i tool a'`, `nice -n 5 tool 'a b' ''`, 이스케이프가 든 `env -S 'tool "a\tb"'`, `env -S 'tool a\tb'`, `env -S "tool 'a\tb'"`, `env -S 'tool "a\nb" c\_d "e\_f"'`, `env -S 'tool \#a "b\"c" \$d'`, `env -S 'tool a\cb c'`, 네 번 나누는 `env -S -i -S -i -S -i -S 'tool a'`를 돌려, `tool`이 실제로 받은 인자 배열과 `parseShell`의 첫 명령(`args ?? argv`)이 통째로 같은지 본다. `tool`이 실행되지 않은 사례(그 `env`가 `-S`를 모른다)는 건너뛴다. `tool`은 인자를 NUL로 구분해 적으므로 탭·줄바꿈이 든 인자도 그대로 견준다. 다섯 번 나누는 `env -S -i -S -i -S -i -S -i -S 'tool a'`는 실제로는 `tool`이 인자 `a`로 실행되고, 훅은 그 호출을 R4로 막는다(읽지 못한 명령이 통과하지 않는다는 것을 실제 실행과 함께 본다).
+- **입력 길이에 비례하는가**: 입력의 꼴 여섯에 대해 본다. (가) `nice` 뒤에 모르는 옵션 n개와 낱말 n개 (나) `sudo -u a`를 n번 겹친 것 (다) `nice --unknown 5`를 n번 겹친 것(모르는 옵션이 붙은 래퍼를 겹친 입력) (라) `env` 뒤에 `-S -i`를 n번 쓴 것 (마) `timeout -s KILL 5`를 n번 겹친 것 (바) `-S`를 n번 붙여 쓴 낱말 하나(`env -S-S-S…x`).
   - 읽은 낱말 수(실행 환경과 무관한 기준): n이 2,000·20,000·80,000일 때, `parseShell` 한 번과 `parseSequence` 한 번이 각각 `parseWork.words`에 더한 값이 입력의 낱말 수의 50배를 넘지 않는다. 배수는 n과 무관한 상수다(주 해석 하나와 후보 8개, 각각 `-S`로 많아야 4번 더 읽는다: 45배 이하). 다시 읽는 횟수가 입력 길이에 따라 늘면(겹친 래퍼마다 후보를 낸다, 후보에서 다시 후보를 낸다) 이 단언이 실패한다.
   - 시간: n이 20,000일 때 판정(`evaluate`)이 5초 안에 끝난다. n을 80,000으로 늘린 판정 시간은 20,000일 때의 8배와 1초 가운데 큰 값을 넘지 않는다(크기마다 세 번 재어 가장 짧은 값으로 견준다. 선형이면 4배, 제곱이면 16배다. 1초 아래에서는 재는 오차가 비율을 흔들므로 견주지 않는다). 별도 프로세스로 돌려 시간 제한을 건다(`command-position.test.ts`의 방식).
 
@@ -152,7 +167,7 @@
   - 그 줄 바로 아래에 다음 한 줄을 넣는다(글자 그대로).
 
     ```text
-      - 래퍼의 옵션: 다른 명령을 대신 실행하는 명령(`sudo`·`doas`·`nice`·`ionice`·`timeout`·`env`·`xargs`·`exec`·`command`·`builtin`·`nohup`·`time`·`stdbuf`·`setsid`·`caffeinate`·`arch`·`chrt`·`taskset`·`unbuffer`와 `g`가 붙은 이름)은 벗기고 그 뒤의 명령을 본다. 래퍼마다 옵션 표(`scripts/hooks/wrappers.ts`)가 있어 값을 받는 옵션의 값(`nice -n 5`, `sudo -u 사용자`, `timeout -s KILL 5`)과 옵션 뒤의 자리 인자(`timeout`의 시간)를 건너뛴다. 표에 없는 옵션을 만나면 값을 받는지 알 수 없으므로, 뒤의 낱말에서 시작하는 명령도 후보로 보아 규칙을 돌린다(막는 쪽으로 기운다. 후보는 한 명령에 8개까지). `env -S "…"`의 문자열은 `env`의 규칙으로 낱말로 나눠 그 자리의 명령으로 읽는다(뒤 인자의 경계는 그대로다). 검사 순서 규칙(R4)은 순서의 한 자리에서 주 해석과 후보를 함께 본다. 이 머신에 있는 래퍼로는 실제 실행과 대조한다(테스트).
+      - 래퍼의 옵션: 다른 명령을 대신 실행하는 명령(`sudo`·`doas`·`nice`·`ionice`·`timeout`·`env`·`xargs`·`exec`·`command`·`builtin`·`nohup`·`time`·`stdbuf`·`setsid`·`caffeinate`·`arch`·`chrt`·`taskset`·`unbuffer`와 `g`가 붙은 이름)은 벗기고 그 뒤의 명령을 본다. 래퍼마다 옵션 표(`scripts/hooks/wrappers.ts`)가 있어 값을 받는 옵션의 값(`nice -n 5`, `sudo -u 사용자`, `timeout -s KILL 5`)과 옵션 뒤의 자리 인자(`timeout`의 시간)를 건너뛴다. 표에 없는 옵션을 만나면 값을 받는지 알 수 없으므로, 뒤의 낱말에서 시작하는 명령도 후보로 보아 규칙을 돌린다(막는 쪽으로 기운다. 후보는 한 명령에 8개까지). `env -S "…"`의 문자열은 `env`의 규칙으로 낱말로 나눠 그 자리의 명령으로 읽는다(뒤 인자의 경계는 그대로다. 한 명령에서 네 번까지 나누고, 그보다 겹치면 끝까지 읽지 못한 명령으로 보아 R4로 막는다). 검사 순서 규칙(R4)은 순서의 한 자리에서 주 해석과 후보를 함께 본다. 이 머신에 있는 래퍼로는 실제 실행과 대조한다(테스트).
     ```
 
 - 설계서 0절 버전 이력에 항목 하나와 문서 머리의 버전(번호는 push할 때 main의 다음 번호), `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄(Issue #193, 검사를 약화하지 않는다는 것, 막는 쪽으로 기우는 대가). PR 본문에 `- [x] 보호 경로 변경: …` 줄.
@@ -183,14 +198,14 @@ node scripts/harness.ts doc-lint
 node scripts/harness.ts fmt --check
 ```
 
-- 셋째·넷째 줄: 이 PR이 `scripts/test/` 아래에서 바꾼 파일은 새 테스트 파일 하나뿐이고(기존 테스트의 단언을 고치지 않았다), `scripts/hooks/` 아래에서는 `rules.ts`(검사 순서 규칙의 함수 `sequenceRules`만), `shell.ts`, 새 파일 `wrappers.ts`뿐이다. `rules.ts`에서 그 함수 밖을 고치지 않았는지는 자체 리뷰에서 diff로 본다.
+- 셋째·넷째 줄: 이 PR이 `scripts/test/` 아래에서 바꾼 파일은 새 테스트 파일 하나뿐이고(기존 테스트의 단언을 고치지 않았다), `scripts/hooks/` 아래에서는 `rules.ts`(검사 순서 규칙의 함수 `sequenceRules`와 읽지 못한 명령을 막는 차단 하나), `shell.ts`, 새 파일 `wrappers.ts`뿐이다. `rules.ts`에서 그 둘 밖을 고치지 않았는지는 자체 리뷰에서 diff로 본다.
 - 다섯째~여덟째 줄: 설계서에 고정한 줄이 한 번 있고, 지운 문구가 설계서와 기술 부채 표에 없다. 설계서에서 바뀐 줄 수가 정해진 것과 같다: 더한 줄 넷(머리의 버전 줄, 버전 이력의 항목, 13.1절에 넣은 줄, 문구를 지운 줄의 새 꼴), 지운 줄 둘(머리의 버전 줄, 문구를 지운 줄의 옛 꼴). 기술 부채 표는 TD-62 행 하나만 바뀐다.
 - `origin/main`이 필요하다(`git fetch origin`).
 
 ## 금지사항
 
 - 기존 테스트 파일의 단언을 고치거나 지우지 마라. 이유: 지금 막히는 꼴과 분석기의 계약(`argv`, `args`)이 그대로인지를 그 테스트가 본다(R4). 기존 단언과 부딪히면 멈추고 진행 로그에 적는다.
-- `scripts/hooks/rules.ts`의 금지 목록·예외 목록·메시지를 바꾸거나, 막히던 호출이 통과하게 만들지 마라. `rules.ts`에서 고치는 것은 `sequenceRules`가 순서의 한 자리에서 후보(`alts`)를 함께 보게 하는 것 하나다. 이유: 이 step은 분석기가 명령 이름을 찾는 자리를 바로잡는다. 차단을 풀지 않는다.
+- `scripts/hooks/rules.ts`의 금지 목록·예외 목록·메시지를 바꾸거나, 막히던 호출이 통과하게 만들지 마라. `rules.ts`에서 고치는 것은 둘이다: `sequenceRules`가 순서의 한 자리에서 후보(`alts`)를 함께 보게 하는 것, 끝까지 읽지 못한 명령(`incomplete`)을 막는 차단 하나. 이유: 이 step은 분석기가 명령 이름을 찾는 자리를 바로잡는다. 차단을 풀지 않는다.
 - `env -S`의 문자열을 셸 명령 줄로 다시 읽거나, 문자열과 뒤의 낱말을 공백으로 이어 붙이지 마라. 이유: `env`는 문자열만 자기 규칙으로 나누고 뒤 인자의 경계를 지킨다. 이어 붙이면 공백이 든 인자가 갈라져 실제 실행과 달라진다(계획 검증 1회차의 F2).
 - 표에 없는 옵션에서 한 해석만 고르지 마라. 이유: 고르지 않은 쪽이 틈이 된다(의사결정 로그).
 - 테스트나 명령으로 금지 호출을 실제로 실행하지 마라. 판정(`evaluate`)만 하고, 실제 실행 대조는 가짜 명령 `tool`로만 한다. `sudo`·`doas`처럼 권한을 바꾸는 래퍼는 실제로 돌리지 않는다. 이유: R2·R14·R20.
