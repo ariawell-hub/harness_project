@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -257,6 +257,13 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - AC 12줄과 `check` 통과.
 
 - 2026-11-22T13:36:08+09:00 step2 재작업: 코드 판정 4라운드 F6 대응
+
+- 2026-11-22 step2 코드 판정 4라운드(head `06a5ab4`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 1). F5는 `fixed`.
+  - F6(P1. 링크의 글이 폭 없는 글자 하나만 담은 인라인 코드여도 보이는 글로 센다. 3라운드에서 스스로 더한 "글에 보이는 글자가 있어야 한다"가 코드 구간은 내용을 보지 않았다).
+  - 코드 구간을 내용에 보이는 글자(한글 음절·로마자·숫자의 닫힌 집합)가 있는 것과 없는 것으로 나눠 가린다. 대괄호를 찾을 때는 둘 다 가린 채이고, 글이 보이는지는 보이는 글자가 있는 코드 구간만 센다. 보이지 않는 코드 구간이 있어도 글의 다른 곳에 보이는 글자가 있으면 센다.
+  - 실패하는 테스트를 먼저 썼다(커밋 `36a9eb6`: 61개 가운데 1개 실패 → `7aadbe0`: 61개 통과). 검증자의 재현 입력(실제 ADR의 링크 글을 폭 없는 글자만 든 코드로 바꾼 것)이 "링크가 없다"로 실패하는 것을 확인했다.
+  - 이 PR의 네 번째 수정 요청이다. 다음 판정도 수정 요청이면 더 고치지 않고 멈춰 제작자에게 묻는다(절차서 8절, 5회).
+  - AC 12줄과 `check` 통과.
 
 ## 의사결정 로그
 
