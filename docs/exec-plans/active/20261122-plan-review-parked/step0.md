@@ -23,7 +23,8 @@
   - `planOnly`가 거짓이면: 상태가 `parked`인 지적을 모두 `open`으로 바꾼다. 처리 칸은 `구현이 올라와 다시 열림`으로 적는다. `openedAt`은 그대로 둔다.
   - 바뀐 것이 없으면 내용이 같은 원장을 돌려준다(저장 여부를 가르는 비교가 "같다"로 나와야 한다).
 - `applyVerdict`:
-  - `ApplyOptions`에 `planOnly?: boolean`을 더한다. 참이면 이 판정에서 **새로 등록하는** 지적에 `planRound: true`를 적는다.
+  - `ApplyOptions`에 `planOnly?: boolean`을 더한다. 참이면 이 판정에서 **새로 등록하는** 지적에 `planRound: true`를 적는다(`open`으로 등록되든 `deferred`로 등록되든).
+  - 등록할 때의 상태를 정하는 지금의 규칙(P0·P1은 `open`, P2·P3은 `deferred`, 근거 없는 P1은 P2로, 그 검증자의 2라운드부터 바뀌지 않은 파일의 재현되지 않은 새 P1은 동결해 `deferred`)은 **바꾸지 않는다**. 계획 전용 판정에서도 같다. `planRound`는 "구현 대기로 두지 않는다"는 표시일 뿐 등록 상태를 바꾸지 않는다.
   - `resolutions`: `parked`인 지적은 `deferred`·`accepted`처럼 건너뛴다(자기 지적이든 남의 P0에 대한 동의든 반영하지 않는다).
   - 같은 지적의 재등록: `parked`인 지적은 그대로 둔다(다시 열거나 새로 등록하지 않는다. 재현 결과만 지금처럼 적는다).
 - `ledgerStatus`: `parked`는 막지 않는다. 통과할 때와 실패할 때 모두 상태 설명에 수를 적는다(`구현 대기 N`. 0이면 적지 않는다. `제작자 승인 N`을 적는 것과 같은 꼴).
@@ -32,14 +33,16 @@
 ### 2. 기록 job (`scripts/ci/ledger-store.ts`의 `recordLedger`)
 
 - `RecordLedgerOptions`에 `planOnly: boolean`을 더한다(`plan` 옵션과 따로다. `plan`은 계획 해시가 맞을 때만 온다).
-- 읽은 원장에 제작자 승인을 반영한 뒤, **판정을 반영하기 전에** `parkFor(ledger, o.planOnly)`를 적용한다. 판정이 없어도(`verdict`가 null) 적용한다.
+- 읽은 원장에 **제작자 승인을 조회하기 전에** `parkFor(ledger, o.planOnly)`를 적용하고, 승인을 반영한 뒤 한 번 더 적용한다. 그다음에 판정을 반영한다. 판정이 없어도(`verdict`가 null) 적용한다.
+  - 앞의 적용: 코드가 섞인 head에서 되돌아온 지적이 승인 조회의 대상(`open`·`accepted`인 P0·P1이 있을 때만 조회한다)에 들어가게 한다. 저장된 원장에 `parked`뿐이어도 조회하고, 유효한 승인 댓글이 있으면 그 기록에서 `accepted`가 된다.
+  - 뒤의 적용: 계획만 담은 head에서 승인이 철회돼 이 기록에서 `open`으로 돌아온 지적도 구현 대기로 둔다.
 - `applyVerdict`에 `planOnly`를 넘긴다.
 - 그 결과가 읽은 원장과 다르면 지금의 규칙대로 저장한다(구현 대기로 두거나 되돌린 것만 달라도 저장한다).
 - 끝에서 제작자 승인을 다시 반영하는 지금의 순서는 그대로 둔다(되돌아온 지적은 `open`이므로 승인 댓글이 있으면 반영될 수 있다. `parked`는 대상이 아니다).
 
 ### 3. plan job이 넘기는 원장 (`scripts/ci/accept-load.ts`의 `readRoundLedger`)
 
-- 인자에 `planOnly: boolean`을 더하고, 제작자 승인을 반영한 원장에 `parkFor`를 적용해 돌려준다. 저장하지 않는다.
+- 인자에 `planOnly: boolean`을 더하고, 기록 job과 같은 순서로 반영해 돌려준다(`parkFor` → 제작자 승인 → `parkFor`). 저장하지 않는다.
 - 반박(`rebuttals`)은 그 뒤의 원장으로 거른다(`parked`인 지적에 대한 반박은 열린 지적에 대한 것이 아니므로 빠진다. `scripts/ci/rebuttal.ts`는 고치지 않는다).
 
 ### 4. 명령 (`scripts/harness.ts`)
@@ -60,7 +63,13 @@
 
 "오래 열린 지적" 줄을 내는 자리에서, 원장에 `parked`인 지적이 있으면 한 줄을 더 낸다: `- 구현 대기 지적: F9, F10 — 계획만 담은 head라 판정하지 않는다. 구현을 올리면 다시 열려 판정받는다(절차서 2절)`. 지적의 제목·위치는 내지 않는다(지금의 줄과 같다). 없으면 내지 않는다.
 
-### 7. 테스트 먼저 (있던 테스트의 단언은 고치지 않는다)
+### 7. runner의 대응 집계 (`scripts/runner/review.ts`)
+
+`settledResponses`(대응한 뒤 닫힌 지적)는 "`open`이 아닌 지적"을 닫힌 것으로 본다. `parked`는 닫힌 것이 아니므로 뺀다: 아직 세지 않은 대응이 붙은 지적이 `parked`인 동안에는 성공으로도 실패로도 세지 않고 그 대응 기록을 그대로 둔다(`failedResponses`는 `open`만 봐서 이미 세지 않는다). 그 지적이 `open`으로 돌아와 판정을 받으면 지금의 규칙대로 센다(열려 있으면 실패, `fixed`·`rejected`·`deferred`·`accepted`면 닫힘).
+
+그 밖의 runner 코드는 고치지 않는다. 읽어서 확인한 것을 진행 로그에 적는다: 대응할 지적(`openBlocking`), 오래 열린 지적(`longOpen`), 교착(`deadlocked`)은 `open`만 본다. 발산 판단(`divergence.ts`)은 `open`과 닫힌 상태(`fixed`·`rejected`·`accepted`)만 세므로 `parked`인 지적은 새 지적으로도 해소로도 세지 않는다.
+
+### 8. 테스트 먼저 (있던 테스트의 단언은 고치지 않는다)
 
 구현 전에 돌려 실패를 확인하고 진행 로그에 적는다.
 
@@ -79,10 +88,12 @@
 - 같은 head에서 검증자가 `parked`인 지적에 `resolutions`로 `fixed`를 내도 `parked`로 남는다.
 - 코드가 섞인 head(`planOnly: false`): 저장된 원장의 `parked`가 판정 전에 `open`이 되고, 그 판정의 `resolutions`가 `fixed`이면 `fixed`, `open`이거나 없으면 `open`으로 남아 `review-ledger`가 실패한다.
 - 코드가 섞인 head에서 판정이 없을 때(`verdict: null`): `parked`가 `open`으로 저장되고 `review-ledger`가 실패한다.
-- 계획 전용 판정에서 새로 낸 P1(위치가 코드 파일)은 `open`으로 등록되고 `planRound`가 붙으며, 다음 계획 전용 기록에서도 `parked`가 되지 않는다.
+- 저장된 원장에 `parked`인 P1 하나뿐이고(다른 `open`·`accepted` 지적이 없다) 그 지적의 게시 시각 뒤에 달린 유효한 제작자 승인 댓글이 있다: 코드가 섞인 head의 첫 기록에서 승인 댓글을 조회하고(GraphQL 호출이 있다) 그 지적이 `accepted`로 저장되며 `review-ledger`가 통과한다. 계획만 담은 head의 기록에서는 그 지적이 `parked`로 남고 승인되지 않는다.
+- 계획만 담은 head에서 승인 댓글이 지워진 `accepted` 코드 지적: 그 기록에서 `parked`로 저장된다(`open`으로 남지 않는다).
+- 계획 전용 판정에서 그 검증자의 1라운드에 새로 낸 P1(위치가 코드 파일)은 `open`으로 등록되고 `planRound`가 붙으며, 다음 계획 전용 기록에서도 `parked`가 되지 않고 `open`으로 남는다(그 검증자가 닫을 때까지). 2라운드부터의 동결은 지금과 같다: 직전 판정 뒤 바뀌지 않은 파일의 재현되지 않은 새 P1은 계획 전용 판정에서도 `deferred`로 등록되고 `planRound`가 붙는다(등록 규칙은 이 step이 바꾸지 않는다).
 - `parked`가 없는 원장과 `planOnly: false`인 기록은 지금과 같은 결과를 낸다(있던 테스트가 그대로 통과한다).
 
-`scripts/test/accept-load.test.ts`(`readRoundLedger`): `planOnly: true`이면 돌려준 원장에서 코드 지적이 `parked`이고, 그 지적에 대한 반박은 돌려주지 않는다. `planOnly: false`이면 저장된 `parked`가 `open`으로 보인다. 저장(쓰기 호출)은 하지 않는다.
+`scripts/test/accept-load.test.ts`(`readRoundLedger`): `parked`뿐인 원장에서 `planOnly: false`이면 승인 댓글을 조회해 돌려준 원장에서 그 지적이 `accepted`다. `planOnly: true`이면 돌려준 원장에서 코드 지적이 `parked`이고, 그 지적에 대한 반박은 돌려주지 않는다. `planOnly: false`이면 저장된 `parked`가 `open`으로 보인다. 저장(쓰기 호출)은 하지 않는다.
 
 `scripts/test/ledger-accept.test.ts`: `parked`인 P1에 대한 제작자 승인 댓글은 반영되지 않는다(`open`으로 되돌아온 뒤에는 반영된다).
 
@@ -90,9 +101,12 @@
 
 `scripts/test/pr-state.test.ts`: 원장에 `parked`가 있으면 6의 줄이 나오고 지적 번호가 들어 있다. 없으면 나오지 않는다. `parked`인 지적은 "오래 열린 지적"으로 나오지 않는다.
 
-`scripts/test/runner-review.test.ts`: runner가 고칠 지적을 고르는 함수가 `parked`를 고르지 않는다(지금의 코드로 통과하면 그대로 두고 진행 로그에 적는다. 실패하면 멈추고 계획을 고친다: runner 코드는 이 step의 범위가 아니다).
+`scripts/test/runner-review.test.ts`:
 
-### 8. 문서
+- 아직 세지 않은 대응이 붙은 지적이 `parked`이면 `settledResponses`에도 `failedResponses`에도 나오지 않는다(대응 기록이 남는다). 같은 지적이 `open`으로 돌아오고 그 검증자가 대응 head를 판정했으면 `failedResponses`에 나오고, `fixed`가 되면 `settledResponses`에 나온다.
+- `openBlocking`, `longOpen`, `deadlocked`가 `parked`인 지적을 내지 않는다. `divergence`가 `parked`인 지적을 새 지적으로도 해소로도 세지 않는다(이 넷은 지금의 코드로 통과해야 한다. 실패하면 멈추고 계획을 고친다).
+
+### 9. 문서
 
 - `scripts/cross-review/prompt.md`의 "라운드 규칙"에서 `accepted`를 설명한 항목 바로 뒤에 한 항목을 더한다(글자 그대로):
 
@@ -121,7 +135,8 @@ test "$(grep -c -F '계획만 남긴 동안, 앞선 구현 판정에서 나온 �
 test "$(grep -c -F '상태가 `parked`인 지적은 구현 대기다.' scripts/cross-review/prompt.md)" = 1
 grep -q 'parked' scripts/cross-review/ledger.md && grep -q 'planRound' scripts/cross-review/ledger.md
 grep -q '#212' docs/harness/CHANGELOG.md
-test -z "$(git diff --name-only "$(git merge-base HEAD origin/main)" HEAD -- .github scripts/runner scripts/cross-review/prompt-plan.md scripts/ci/rebuttal.ts scripts/ci/owner-accept.ts)"
+test -z "$(git diff --name-only "$(git merge-base HEAD origin/main)" HEAD -- .github scripts/runner/run.ts scripts/runner/next.ts scripts/runner/divergence.ts scripts/cross-review/prompt-plan.md scripts/ci/rebuttal.ts scripts/ci/owner-accept.ts)"
+node scripts/harness.ts check
 node scripts/harness.ts self-test
 node scripts/harness.ts lint
 node scripts/harness.ts doc-lint
@@ -129,7 +144,8 @@ node scripts/harness.ts fmt --check
 ```
 
 - 셋째·넷째 줄: 설계서에는 정한 항목 하나가 들어가고, 바뀌는 줄은 머리말의 버전(한 줄을 고친다), 버전 이력(한 줄을 더한다), 10.2절의 새 항목(한 줄을 더한다)뿐이다. `origin/main`이 필요하다(`git fetch origin`).
-- 아홉째 줄: 워크플로, runner, 계획 검증 프롬프트, 반박·제작자 승인의 판별 코드는 바뀌지 않는다.
+- 아홉째 줄: 워크플로, runner의 주 흐름(`run.ts`)·할 일 고르기·발산 판단, 계획 검증 프롬프트, 반박·제작자 승인의 판별 코드는 바뀌지 않는다.
+- 열째 줄: 전체 `check`(포맷·정적 검사·모든 테스트·빌드·문서 검사·우회 탐지·시크릿 스캔)가 통과해야 한다. 그 뒤의 `lint`·`doc-lint`·`fmt --check`는 `check`에 들어 있지만 실패한 곳을 바로 보려고 따로 둔다.
 
 ## 금지사항
 
@@ -137,6 +153,7 @@ node scripts/harness.ts fmt --check
 - 코드가 섞인 head에서 지적을 `parked`로 두지 마라. `mode`를 알 수 없으면 코드가 섞인 것으로 본다. 이유: fail-closed.
 - 계획 폴더 안 파일에 대한 지적과 계획 전용 판정에서 등록된 지적을 `parked`로 두지 마라. 이유: 계획 검증이 판정해야 할 지적이다.
 - 워크플로 파일(`.github/workflows/**`)을 고치지 마라. 이유: 봇이 고치지 않는다(SECURITY.md "워크플로 변경 절차").
-- `scripts/runner/**`, `scripts/ci/rebuttal.ts`, `scripts/ci/owner-accept.ts`, `scripts/cross-review/prompt-plan.md`를 고치지 마라. 이유: 이 step의 범위가 아니다(고쳐야 하면 멈추고 계획을 고친다).
+- runner에서는 `scripts/runner/review.ts`의 `settledResponses`만 고친다. 그 밖의 `scripts/runner/**`와 `scripts/ci/rebuttal.ts`, `scripts/ci/owner-accept.ts`, `scripts/cross-review/prompt-plan.md`를 고치지 마라. 이유: 이 step의 범위가 아니다(고쳐야 하면 멈추고 계획을 고친다).
+- 등록할 때의 상태를 정하는 규칙(동결 포함)을 바꾸지 마라. 이유: 10.2절 (5)의 규칙이고 이 step의 범위가 아니다.
 - 있던 테스트의 단언을 지우거나 약하게 하지 마라. 이유: R4.
 - `pr-state`의 줄과 로그에 지적의 제목·위치(검증자 출력)를 넣지 마라. 이유: 지금의 "오래 열린 지적" 줄과 같은 이유다(검증자 출력은 PR 내용에 영향받는 글이다).

@@ -21,8 +21,8 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 수용 기준:
 
 1. 계획만 담은 head(`mode=plan`)의 판정에서, 계획 폴더(`docs/exec-plans/`) 밖 파일에 대한 `open` 지적은 원장 상태 `parked`(구현 대기)가 된다. 검증자가 받는 원장에도 `parked`로 보인다. 계획 전용 판정에서 등록된 지적과 계획 폴더 안 파일에 대한 지적은 `parked`가 되지 않는다(계획 검증이 판정할 대상이다)(테스트).
-2. `parked`인 지적은 검증자의 판정(`resolutions`, 같은 지적의 재등록)으로 바뀌지 않고, 제작자 승인(`/harness accept`)과 반박의 대상이 아니다. 검증자가 그 지적을 판정하지 않고 승인하면 계획 승인(G1)이 기록된다(테스트).
-3. 코드가 섞인 head(`mode=code`)의 기록은 판정을 반영하기 **전에** `parked`를 모두 `open`으로 되돌린다. 판정이 없는 기록(판정 실패, 승인 이어받기)에서도 되돌린다. 그래서 코드가 섞인 head에서 `parked`가 남은 채 `review-ledger`가 통과하는 일은 없고, 되돌아온 지적은 그 판정의 `resolutions`로 평소처럼 닫히거나 열린 채 병합을 막는다(테스트).
+2. `parked`인 지적은 검증자의 판정(`resolutions`, 같은 지적의 재등록)으로 바뀌지 않고, 제작자 승인(`/harness accept`)과 반박의 대상이 아니다. runner는 그 지적에 붙은 대응을 성공으로도 실패로도 세지 않는다(`open`으로 돌아와 판정을 받은 뒤에 센다). 검증자가 그 지적을 판정하지 않고 승인하면 계획 승인(G1)이 기록된다(테스트).
+3. 코드가 섞인 head(`mode=code`)의 기록은 제작자 승인을 조회하고 판정을 반영하기 **전에** `parked`를 모두 `open`으로 되돌린다(되돌아온 지적에 유효한 승인 댓글이 있으면 그 기록에서 `accepted`가 된다). 판정이 없는 기록(판정 실패, 승인 이어받기)에서도 되돌린다. 그래서 코드가 섞인 head에서 `parked`가 남은 채 `review-ledger`가 통과하는 일은 없고, 되돌아온 지적은 그 판정의 `resolutions`로 평소처럼 닫히거나 열린 채 병합을 막는다(테스트).
 4. 계획만 담은 head에서 `parked`는 `review-ledger`를 막지 않는다(그 head에는 그 코드가 없다). 상태 설명에 수를 적는다(`구현 대기 N`)(테스트).
 5. 원장 형식: 새 상태 `parked`와 지적의 새 선택 필드(계획 전용 판정에서 등록됐다는 표시)가 있는 원장과 없는 원장을 모두 읽고 쓴다. 모르는 상태와 모르는 필드는 지금처럼 거부한다(테스트).
 6. `pr-state`가 구현 대기인 지적을 한 줄로 알린다(테스트).
@@ -36,6 +36,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - `scripts/ci/ledger.ts`: 상태 `parked`, 지적의 선택 필드, 구현 대기로 두기·되돌리기 함수, 판정 반영(`applyVerdict`)과 `review-ledger` 판정(`ledgerStatus`), 원장 댓글의 표시와 형식 검사.
 - `scripts/ci/ledger-store.ts`(기록 job이 `mode`에 따라 두거나 되돌린다), `scripts/ci/accept-load.ts`(plan job이 판정 job에 넘기는 원장에 같은 규칙을 반영한다), `scripts/ci/review-round.ts`(판정 입력의 원장 파일에 뜻 한 줄), `scripts/harness.ts`(두 명령이 `mode`를 넘긴다).
 - `scripts/commands/pr-state.ts`: 구현 대기 지적을 알리는 줄.
+- `scripts/runner/review.ts`: 대응한 뒤 닫힌 지적을 고르는 함수(`settledResponses`)가 `parked`를 닫힌 것으로 세지 않는다.
 - `scripts/cross-review/prompt.md`, `scripts/cross-review/ledger.md`.
 - 테스트(`scripts/test/**`).
 - `docs/harness/design.md`(10.2절 상태 목록, 0절 버전 이력), `docs/harness/workflow.md`(2절), `docs/harness/CHANGELOG.md`.
@@ -43,7 +44,8 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 비범위:
 
 - 계획 수정의 길 자체(계획만 남기기, 계획만 담은 별도 PR)와 `plan-gate`. 이유: 제작자가 고른 방향은 지금의 길을 그대로 두고 원장만 고친다.
-- runner의 지적 대응(`scripts/runner/review.ts`)과 엇갈림 판단(`divergence.ts`). 이유: 이 코드들은 `open`인 지적만 다뤄서 `parked`를 건드리지 않는다. 읽어서 확인하고, 고쳐야 할 것이 나오면 멈추고 계획을 고친다.
+- runner의 그 밖의 지적 대응 코드(대응할 지적 고르기, 오래 열린 지적, 교착, 발산 판단 `divergence.ts`, 주 흐름 `run.ts`). 이유: 이 코드들은 `open`인 지적과 닫힌 상태만 세어 `parked`를 건드리지 않는다. 테스트로 확인하고, 고쳐야 할 것이 나오면 멈추고 계획을 고친다.
+- 지적을 등록할 때의 상태를 정하는 규칙(2라운드부터의 동결 포함). 이유: 10.2절 (5)의 규칙이고 계획 전용 판정에도 지금 그대로 적용된다. 이 계획은 등록된 뒤의 `open` 지적만 다룬다.
 - 워크플로 파일(`.github/workflows/**`). 이유: 봇이 고치지 않는다. 필요한 값(`mode`)은 이미 넘어온다.
 - 제작자가 올린 워크플로 파일처럼 봇이 되돌릴 수 없는 변경이 있어 계획만 남길 수 없는 PR(PR #188의 F14가 그런 경우였다). 이유: 다른 문제다. 발견 사항에 적는다.
 
@@ -52,11 +54,12 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - `scripts/ci/ledger.ts`, `scripts/ci/ledger-store.ts`, `scripts/ci/accept-load.ts`, `scripts/ci/review-round.ts`
 - `scripts/harness.ts`
 - `scripts/commands/pr-state.ts`
+- `scripts/runner/review.ts`
 - `scripts/cross-review/prompt.md`, `scripts/cross-review/ledger.md`
 - `scripts/test/ledger.test.ts`, `scripts/test/ledger-store.test.ts`, `scripts/test/accept-load.test.ts`, `scripts/test/ledger-accept.test.ts`, `scripts/test/pr-state.test.ts`, `scripts/test/runner-review.test.ts`, `scripts/test/ci.test.ts`
 - `docs/harness/design.md`(10.2절, 0절 버전 이력), `docs/harness/workflow.md`(2절), `docs/harness/CHANGELOG.md`
 - `docs/exec-plans/active/20261122-plan-review-parked/**`
-- 읽기만: `scripts/ci/plan-hash.ts`(`planMode`), `scripts/ci/owner-accept.ts`, `scripts/ci/rebuttal.ts`, `scripts/ci/verdict.ts`, `scripts/ci/record.ts`, `scripts/runner/review.ts`, `scripts/runner/divergence.ts`, `scripts/runner/ledger-read.ts`, `scripts/lib/plan.ts`(`PLANS_DIR`), `.github/workflows/judge-claude.yml`, `.github/workflows/judge-codex.yml`
+- 읽기만: `scripts/ci/plan-hash.ts`(`planMode`), `scripts/ci/owner-accept.ts`, `scripts/ci/rebuttal.ts`, `scripts/ci/verdict.ts`, `scripts/ci/record.ts`, `scripts/runner/run.ts`, `scripts/runner/divergence.ts`, `scripts/runner/ledger-read.ts`, `scripts/lib/plan.ts`(`PLANS_DIR`), `.github/workflows/judge-claude.yml`, `.github/workflows/judge-codex.yml`
 
 ## step 목록
 
@@ -66,6 +69,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 
 - 2026-11-22 접수: PR #197에서 난 맞물림을 제작자에게 보고했고, 제작자가 대화에서 Issue로 등록하라고 정해(2026-11-22) 봇이 Issue #212를 등록했다. Issue에 적은 세 방향((가) 구현 대기로 둔다, (나) 절차만 적는다, (다) 계획 수정의 길을 바꾼다) 가운데 어느 것으로 할지는 하네스 규칙의 변경이라 제작자에게 물었고("반드시 묻는다": 하네스 원칙·규칙 변경), (가)로 정해졌다. `new-task`로 시작했다.
 - 2026-11-22 main(`5e8cc64`)의 코드를 읽었다. 판정 워크플로의 plan job이 PR 전체 변경을 보고 `mode`(`plan` | `code`)를 정하고(`scripts/ci/plan-hash.ts`의 `planMode`), 저장된 원장을 읽어 판정 job에 넘긴다(`review-plan` 명령, `readRoundLedger`). 판정 job은 받은 원장으로 판정 입력 파일을 만든다(`writeRoundInput`). 기록 job은 `record-review --mode`로 `mode`를 받고 `recordLedger`가 원장을 읽어 판정을 반영한 뒤 `review-ledger` 상태를 쓴다(`review-ledger`를 쓰는 곳은 여기뿐이다. 판정이 없어도 쓴다). 상태 값은 `scripts/ci/ledger.ts`의 `ENTRY_STATUSES`에 있고 형식 검사가 이 목록으로 거른다. `deferred`·`accepted`인 지적은 판정으로 바뀌지 않는다(같은 꼴을 `parked`에 쓴다). runner의 지적 대응과 `pr-state`의 "오래 열린 지적"은 `open`인 지적만 본다.
+- 2026-11-22 계획 검증 1회차(head `b467754`): Claude 승인(지적 없음), Codex 수정 요청(P1 넷). F1(계획 전용 2라운드부터는 바뀌지 않은 코드 파일을 위치로 적은 새 P1이 동결돼 `deferred`로 등록되므로, "계획 전용 판정의 새 P1은 `open`으로 등록된다"는 테스트 문장과 맞지 않는다) → 맞다. 동결은 지금의 규칙(10.2절 (5))이고 이 계획은 바꾸지 않는다는 것을 작업·비범위·금지사항에 적고, 테스트를 1라운드(동결되지 않는 경우)와 2라운드(지금처럼 `deferred`)로 나눠 적었다. F2(저장된 원장에 `parked`뿐이면 제작자 승인 조회를 건너뛰어, 되돌아온 지적의 유효한 승인이 첫 코드 기록에서 반영되지 않는다) → 맞다. `parkFor`를 승인 조회 앞에서 먼저 적용한다(뒤에서 한 번 더). F3(runner의 `settledResponses`가 `open`이 아닌 지적을 모두 닫힌 것으로 세어, `parked`가 된 지적의 대응을 성공으로 적는다) → 맞다. `scripts/runner/review.ts`를 범위에 넣어 `parked`를 뺀다. F4(step의 AC에 전체 `check`가 없다) → 넣었다.
 
 ## 의사결정 로그
 
@@ -73,6 +77,9 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - 결정: 새 상태 `parked`를 둔다(있던 상태에 얹지 않는다). / 이유: `deferred`는 병합을 막지 않는 미룸이고 다시 열리지 않는다. `open`인 채로 표시만 더하면 `open`을 보는 모든 곳(검증자의 승인 규칙, runner의 지적 대응, 오래 열린 지적, 반박, 제작자 승인)에 예외를 넣어야 한다. 새 상태는 그 코드들이 이미 `open`만 다뤄서 저절로 빠진다.
 - 결정: 구현 대기로 두는 대상은 **계획 폴더(`docs/exec-plans/`) 밖 파일에 대한 `open` 지적 가운데 계획 전용 판정에서 등록되지 않은 것**이다. 계획 전용 판정에서 등록된 지적에는 표시(선택 필드)를 남긴다. / 이유: 계획만 담은 head가 바꾸는 파일은 그 계획의 폴더뿐이므로 폴더 밖 파일에 대한 지적은 그 head에서 판정할 수 없다. 다만 계획 검증에서 검증자가 위치를 코드 파일로 적은 지적(프롬프트는 계획 파일의 위치를 적으라고 하지만 강제하지 못한다)은 계획에 대한 지적이라 구현 대기로 두면 계획 검증이 그것을 건너뛴다. / 버린 대안: 위치만 본다(위의 경우에 계획 검증이 약해진다), 그 PR이 바꾼 파일 목록과 견준다(기록 job에는 PR의 코드가 없고, 계획만 담은 head에서는 결과가 계획 폴더 기준과 같다).
 - 결정: 계획만 담은 head에서 `parked`는 `review-ledger`를 막지 않는다. 코드가 섞인 head의 기록은 판정을 반영하기 전에 `parked`를 모두 `open`으로 되돌린다. / 이유: 커밋 상태는 head마다 따로 있다. 계획만 담은 head에는 그 지적이 가리키는 코드가 없으므로 그 head의 `review-ledger`가 통과해도 그 코드는 병합되지 않는다. 코드가 올라온 head에서는 기록 job이 반드시 돌고(`review-ledger`를 쓰는 유일한 곳이고 판정이 없어도 쓴다) 거기서 되돌린다. 막게 하면 계획 승인이 난 뒤에도 PR의 분류가 "지적 대응"으로 남아 runner와 대화 세션이 대응할 것이 없는 지적에 묶인다.
+- 결정(계획 검증 1회차 F2 뒤): 구현 대기로 두기·되돌리기를 제작자 승인의 조회 **앞**에서 먼저 하고, 승인을 반영한 뒤 한 번 더 한다. / 이유: 승인 조회는 `open`·`accepted`인 P0·P1이 있을 때만 한다. 되돌리기를 뒤에서만 하면 저장된 원장에 `parked`뿐일 때 조회를 건너뛰어 유효한 승인이 한 기록 늦게 반영된다. 뒤의 적용은 계획만 담은 head에서 승인이 철회돼 그 기록에서 열린 지적을 구현 대기로 두기 위한 것이다.
+- 결정(계획 검증 1회차 F3 뒤): runner의 `settledResponses`에서 `parked`를 뺀다. 발산 판단은 고치지 않는다. / 이유: `parked`는 닫힌 것이 아니라서 대응의 성공으로 세면 실패 횟수가 잘못 0으로 돌아간다. 발산 판단은 `open`과 `fixed`·`rejected`·`accepted`만 세어 `parked`를 세지 않는다. 한 대응 라운드 사이에 `parked`가 `open`으로 돌아오면(계획만 담은 head에서 대응한 뒤 코드가 올라온 경우) 그 지적은 "다시 열린 지적"으로 세어진다: runner는 PR을 계획만 남기지 않고 계획 검증의 대응에서는 계획 파일만 고치므로 runner의 흐름에서는 생기지 않고, 생기더라도 제작자에게 묻는 쪽으로 틀린다.
+- 결정(계획 검증 1회차 F1 뒤): 등록 규칙(동결 포함)은 건드리지 않는다. / 이유: 계획 전용 2라운드부터 바뀌지 않은 파일의 새 P1이 동결되는 것은 지금도 그렇고(계획 파일이든 코드 파일이든), 목표가 계속 움직이는 것을 막는 규칙이다(10.2절 (5)). 이 계획이 다루는 것은 이미 등록돼 `open`인 지적이 계획만 담은 head에서 판정될 수 없다는 문제다.
 - 결정: plan job이 판정 job에 넘기는 원장에 같은 규칙을 반영한다(저장하지는 않는다). 저장은 기록 job이 한다. / 이유: 검증자가 `parked`를 봐야 판정하지 않는다. 제작자 승인(`accepted`)을 반영해 넘기는 지금의 꼴과 같다. 두 곳이 같은 함수를 쓴다.
 - 결정: 프롬프트(`prompt.md`)에 규칙을 적고, 판정 입력의 원장 파일에도 뜻을 한 줄 적는다(지시가 아니라 설명으로). / 이유: 프롬프트는 PR의 첫 판정 때의 버전으로 고정된다(10.2절 (2)). 이미 열린 PR의 검증자는 새 규칙을 읽지 못한다. 옛 프롬프트의 규칙으로도 `parked`는 "`open`·`fixed`·`rejected`인 내 지적"이 아니라 판정 대상이 아니고 "`open`으로 남는 P0·P1"이 아니라 승인을 막지 않는다. 입력 파일의 한 줄은 그 상태가 무엇인지 알려 준다.
 - 결정: 구현 대기에서 되돌아온 지적의 게시 시각(`openedAt`)은 그대로 둔다. / 이유: 그 지적은 전에 `open`으로 게시됐던 것이다. 제작자 승인은 `open`인 지적만 대상이라 구현 대기인 동안에는 반영되지 않는다.
@@ -88,7 +95,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 ## 검증 방법과 결과
 
 - step의 AC 명령과 `node scripts/harness.ts check`, `node scripts/harness.ts self-test`.
-- 수용 기준 1~6: 원장·기록·판정 입력·`pr-state`의 테스트.
+- 수용 기준 1~6: 원장·기록·판정 입력·`pr-state`·runner 대응 집계의 테스트.
 - 수용 기준 7: AC의 문서 비교 줄과 판정 입력 테스트.
 - 수용 기준 8: AC의 워크플로 비교 줄.
 - 결과는 step을 진행하며 적는다.
