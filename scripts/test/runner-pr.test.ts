@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import * as prettier from 'prettier';
 import { reopenStep } from '../commands/task.ts';
 import { readAttempts } from '../lib/attempts.ts';
 import { readApprovalMarker } from '../lib/approval.ts';
@@ -172,6 +173,28 @@ test('runner: step 완료 여부는 PR head에서 읽는다. 수정하다 실패
     assert.deepEqual(p.task.kind === 'fix-pr' ? p.task.failing.map((f) => f.context) : [], [
       'plan-gate',
     ]);
+  } finally {
+    t.fx.cleanup();
+  }
+});
+
+test('reopenStep: 다시 연 계획의 frontmatter를 포매터가 고치지 않는다(status 줄의 값과 주석 사이는 공백 하나)', async () => {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    const id = planId(pr.branch);
+    const done = path.join(pr.worktree, 'docs/exec-plans/completed', id, 'plan.md');
+    assert.match(readFileSync(done, 'utf8'), /^status: completed #/m, '완료 처리된 계획이다');
+    reopenStep(pr.worktree, '판정의 지적을 고친다');
+    const text = readFileSync(
+      path.join(pr.worktree, 'docs/exec-plans/active', id, 'plan.md'),
+      'utf8',
+    );
+    const status = text.split('\n').find((l) => l.startsWith('status:'))!;
+    assert.match(status, /^status: active # \S/, status);
+    const fm = text.slice(0, text.indexOf('\n---\n', 4) + 5);
+    const config = await prettier.resolveConfig(path.join(HARNESS_ROOT, 'x.md'));
+    assert.ok(await prettier.check(fm, { ...config, filepath: 'x.md' }), fm);
   } finally {
     t.fx.cleanup();
   }

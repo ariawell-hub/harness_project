@@ -78,7 +78,10 @@ function formatScalar(v: Scalar): string {
   return String(v);
 }
 
-/** frontmatter의 한 키 값을 바꾼다. 같은 줄의 주석은 보존한다. 키가 없으면 끝에 추가 */
+/**
+ * frontmatter의 한 키 값을 바꾼다. 같은 줄의 주석은 보존한다. 키가 없으면 끝에 추가.
+ * 값과 주석 사이는 공백 하나로 쓴다(포매터의 결과와 같다. 주석의 칸을 보존하면 값이 짧아질 때 공백이 남아 fmt 검사가 실패한다).
+ */
 export function setFrontmatter(text: string, key: string, value: Scalar): string {
   const doc = parseDoc(text);
   if (!doc.frontmatter) throw new Error('frontmatter가 없는 문서다');
@@ -90,9 +93,7 @@ export function setFrontmatter(text: string, key: string, value: Scalar): string
     const valuePart = stripComment(m[2]);
     const comment = m[2].slice(valuePart.length);
     const head = `${key}: ${formatScalar(value)}`;
-    if (!comment) return head;
-    const col = line.length - comment.length;
-    return (head.length < col ? head.padEnd(col) : head + ' ') + comment;
+    return comment ? `${head} ${comment}` : head;
   });
   if (!found) lines.push(`${key}: ${formatScalar(value)}`);
   return `---\n${lines.join('\n')}\n---\n${doc.body}`;
