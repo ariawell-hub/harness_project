@@ -191,6 +191,7 @@ export interface RecordLedgerOptions extends Where {
  * 편집 이력을 읽지 못하면 원장을 쓰지 않고 error다. 이번 판정으로 등록되거나 다시 열린 지적은 게시 시각이 없어
  * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다.
  * 구현 대기(parkFor, Issue #212): 승인을 조회하기 전과 반영한 뒤에 그 head에 맞추고, 그다음에 판정을 반영한다.
+ * 저장하기 전에 한 번 더 맞춘다(그 판정이 다시 연 코드 지적도 이 기록에서 구현 대기가 된다).
  * 판정이 없어도 맞춘다. 맞춘 것만 달라도 저장한다
  */
 export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayload> {
@@ -266,6 +267,9 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
       // 로그에는 읽은 원장 기준의 결과를 낸다(다시 적용한 결과는 같은 승인 목록이라 반영·무시가 같다)
       o.onAccepts?.({ ...accepted.outcome, ledger });
     }
+    // 저장하기 전: 계획만 담은 head에서 이 판정이 다시 연 코드 지적(fixed였던 지적의 open 판정, 같은 지적의 재등록)도
+    // 이 기록에서 구현 대기로 둔다. 계획 전용 판정에서 등록된 지적은 대상이 아니다. 코드가 섞인 head에서는 바뀌는 것이 없다
+    if (ledger) ledger = parkFor(ledger, o.planOnly);
     if (ledger && (stamped || JSON.stringify(ledger) !== before))
       await saveLedger({ ...o, send: o.api.send, commentId: stored.commentId, ledger });
     if (!ledger) return done('success', '원장 없음(등록된 지적이 없다)');

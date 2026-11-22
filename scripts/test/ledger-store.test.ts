@@ -635,6 +635,60 @@ test('recordLedger: 계획 전용 판정에서 등록된 지적은 구현 대기
   assert.doesNotMatch(r2.description, /구현 대기/);
 });
 
+test('recordLedger(계획만 담은 head): 그 판정이 다시 연 코드 지적도 같은 기록에서 구현 대기가 된다 (판정 지적 F7)', async () => {
+  // 앞선 구현 판정에서 고쳐진 코드 지적. 계획만 남긴 head에는 고친 코드도 없어 검증자가 다시 열 수 있다
+  const fixed = () => storedWith(entryOf({ status: 'fixed', note: 'abc1234', openedAt: OPENED }));
+  // (가) resolutions로 다시 연다
+  const a = fixed();
+  const pa = await record(a, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'open', note: '고친 코드가 없다' }]),
+    headSha: H2,
+    ...planOnly(false),
+  });
+  assert.deepEqual(
+    storedOf(a).findings.map((e) => [e.id, e.status, e.note]),
+    [['F1', 'parked', PARK_NOTE]],
+  );
+  assert.equal(pa.state, 'success');
+  assert.match(pa.description, /구현 대기 1/);
+  // (나) 같은 지적을 다시 등록한다(회귀로 다시 열린다)
+  const b = fixed();
+  const pb = await record(b, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ title: '코드 지적' })]),
+    headSha: H2,
+    ...planOnly(false),
+  });
+  assert.deepEqual(
+    storedOf(b).findings.map((e) => [e.id, e.status]),
+    [['F1', 'parked']],
+  );
+  assert.equal(pb.state, 'success');
+  // 계획 전용 판정에서 등록된 지적은 다시 열려도 구현 대기가 되지 않고 막는다
+  const c = storedWith(
+    entryOf({ status: 'fixed', note: 'abc1234', planRound: true, openedAt: OPENED }),
+  );
+  const pc = await record(c, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'open', note: '아직' }]),
+    headSha: H2,
+    ...planOnly(false),
+  });
+  assert.equal(storedOf(c).findings[0].status, 'open');
+  assert.equal(pc.state, 'failure');
+  // 코드가 섞인 head에서 다시 연 지적은 지금처럼 열린 채 막는다
+  const d = fixed();
+  const pd = await record(d, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'open', note: '아직' }]),
+    headSha: H2,
+    changedSinceLastRound: ['src/a.ts'],
+  });
+  assert.equal(storedOf(d).findings[0].status, 'open');
+  assert.equal(pd.state, 'failure');
+});
+
 const PARKED_LINE =
   '- 상태 parked: 구현 대기. 이 head는 계획 파일만 담고 있어 그 지적이 가리키는 코드가 없다. 판정 대상이 아니고, 코드가 다시 올라온 head에서 open으로 돌아간다';
 
