@@ -26,6 +26,10 @@ const oneLine = (s: string) =>
     .replace(/ {2,}/g, ' ')
     .trim();
 
+/** 원장 파일에 적는 구현 대기(parked)의 뜻(Issue #212). 그런 지적이 있을 때만 적는다 */
+export const PARKED_NOTE =
+  '- 상태 parked: 구현 대기. 이 head는 계획 파일만 담고 있어 그 지적이 가리키는 코드가 없다. 판정 대상이 아니고, 코드가 다시 올라온 head에서 open으로 돌아간다';
+
 /** 원장과 직전 판정 이후의 변경을 pr/.harness-review/에 쓴다. 원장이 없으면 아무것도 쓰지 않는다 */
 export function writeRoundInput(o: {
   /** PR head 체크아웃(데이터) */
@@ -85,6 +89,7 @@ export function writeRoundInput(o: {
         ]
       : []),
     ...(note ? [`- ${note}`] : []),
+    ...(o.ledger.findings.some((e) => e.status === 'parked') ? [PARKED_NOTE] : []),
     '',
     'ID | 등급 | 검증자 | 상태 | 위치 | 내용 | 재현 | 처리',
     ...o.ledger.findings.map((e) =>

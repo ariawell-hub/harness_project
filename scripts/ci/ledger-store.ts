@@ -9,6 +9,7 @@ import {
   applyVerdict,
   emptyLedger,
   ledgerStatus,
+  parkFor,
   parseLedger,
   renderLedger,
   type Ledger,
@@ -172,6 +173,12 @@ export interface RecordLedgerOptions extends Where {
    * approved: 이 검증자의 review/*가 success면 true, failure면 false, error면 null
    */
   plan?: { hash: string; approved: boolean | null };
+  /**
+   * 이 head가 계획만 담고 있는가(mode=plan). `plan`과 따로다(`plan`은 계획 해시의 형식이 맞을 때만 온다).
+   * 참이면 그 head에 없는 코드에 대한 열린 지적을 구현 대기(parked)로 두고, 거짓이면 구현 대기를 모두 되돌린다.
+   * mode를 모르면 거짓으로 준다(코드가 섞인 것으로 본다: fail-closed)
+   */
+  planOnly: boolean;
   /** 원장 댓글을 읽고 쓸 API(Pull requests 쓰기 토큰). 토큰을 받지 못했으면 null */
   api: LedgerApi | null;
   post: (p: StatusPayload) => Promise<void>;
@@ -182,7 +189,9 @@ export interface RecordLedgerOptions extends Where {
  * 판정이 없어도 지금 원장으로 판정한다. 원장이 없고 지적도 계획 승인도 없으면 댓글을 만들지 않는다.
  * 제작자 승인: 읽은 원장에 반영하고, 판정을 적용한 뒤 같은 승인 목록으로 한 번 더 반영한다(GraphQL은 한 번).
  * 편집 이력을 읽지 못하면 원장을 쓰지 않고 error다. 이번 판정으로 등록되거나 다시 열린 지적은 게시 시각이 없어
- * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다
+ * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다.
+ * 구현 대기(parkFor, Issue #212): 승인을 조회하기 전과 반영한 뒤에 그 head에 맞추고, 그다음에 판정을 반영한다.
+ * 판정이 없어도 맞춘다. 맞춘 것만 달라도 저장한다
  */
 export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayload> {
   const done = async (state: StatusPayload['state'], description: string) => {
@@ -200,6 +209,8 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
     const before = ledger ? JSON.stringify(ledger) : '';
     // 게시 시각을 채운 것만 달라도 저장한다(before는 채운 뒤의 값이다)
     const stamped = !!stored.stamped;
+    // 승인을 조회하기 전: 코드가 섞인 head에서 되돌아온 지적이 승인 조회의 대상(open·accepted인 P0·P1)에 들어간다
+    if (ledger) ledger = parkFor(ledger, o.planOnly);
     let accepted: Awaited<ReturnType<typeof loadAccepted>> | null = null;
     if (ledger && o.owner && o.api.graphql) {
       try {
@@ -214,7 +225,8 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         // 확인하지 못한 승인을 유지하거나 새로 반영하지 않는다. 원래 예외의 문구(응답 본문일 수 있다)는 버린다
         throw new Error(acceptErrorText(e));
       }
-      ledger = accepted.ledger;
+      // 승인을 반영한 뒤: 계획만 담은 head에서 승인이 철회돼 open으로 돌아온 코드 지적도 구현 대기로 둔다
+      ledger = parkFor(accepted.ledger, o.planOnly);
     }
     const checkBase = () => {
       if (!SHA_RE.test(o.promptBase)) throw new Error('프롬프트 버전 SHA 형식 오류');
@@ -235,6 +247,7 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         headSha: o.headSha,
         changedSinceLastRound: o.changedSinceLastRound,
         repro: o.repro,
+        planOnly: o.planOnly,
       });
     }
     if (o.plan && (ledger || planApproved)) {

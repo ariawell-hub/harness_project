@@ -170,6 +170,7 @@ async function record(
     headSha: H1,
     promptBase: BASE,
     changedSinceLastRound: ['src/b.ts'],
+    planOnly: false,
     repo: 'o/r',
     number: 7,
     recorderBot: BOT,
@@ -179,6 +180,8 @@ async function record(
   });
 }
 const where = { repo: 'o/r', number: 7 };
+/** readRoundLedger의 인자: 코드가 섞인 head */
+const round = { ...where, planOnly: false };
 
 test('ledgerFromComments: openedAt이 없는 열린 지적에만 원장 댓글의 저장 시각을 채운다', () => {
   const l = ledgerOf(
@@ -318,6 +321,7 @@ test('recordLedger: 판정 없이도 승인을 저장하고, 같은 실행의 �
     headSha: H1,
     promptBase: BASE,
     changedSinceLastRound: [],
+    planOnly: false,
     ...where,
     recorderBot: BOT,
     owner: OWNER,
@@ -391,6 +395,7 @@ test('F2(구현 판정): 승인이 철회된 실행의 판정은 그 지적을 �
         headSha: H1,
         promptBase: BASE,
         changedSinceLastRound: [],
+        planOnly: false,
         ...where,
         recorderBot: BOT,
         owner: OWNER,
@@ -587,7 +592,7 @@ test('readRoundLedger: plan job이 판정 job에 넘길 원장에 승인이 반�
     { id: 600, user: { login: 'writer-bot' }, body: rebut('F1') },
     { id: 601, user: { login: 'writer-bot' }, body: rebut('F2') },
   );
-  const o = { get: w.api.get, graphql: w.graphql, ...where, recorderBot: BOT };
+  const o = { get: w.api.get, graphql: w.graphql, ...round, recorderBot: BOT };
   const r = await readRoundLedger({ ...o, owner: OWNER });
   assert.deepEqual(
     r.ledger?.findings.map((e) => [e.id, e.status, e.openedAt]),
@@ -623,7 +628,7 @@ test('readRoundLedger: 편집 이력을 읽지 못하면 저장된 원장을 쓰
   const r = await readRoundLedger({
     get: w.api.get,
     graphql: w.graphql,
-    ...where,
+    ...round,
     recorderBot: BOT,
     owner: OWNER,
   });
@@ -637,7 +642,7 @@ test('readRoundLedger: 편집 이력을 읽지 못하면 저장된 원장을 쓰
   const none = await readRoundLedger({
     get: empty.api.get,
     graphql: empty.graphql,
-    ...where,
+    ...round,
     recorderBot: BOT,
     owner: OWNER,
   });
@@ -650,7 +655,7 @@ test('readRoundLedger: 편집 이력을 읽지 못하면 저장된 원장을 쓰
         throw new Error('GitHub 조회 실패: HTTP 403');
       },
       graphql: w.graphql,
-      ...where,
+      ...round,
       recorderBot: BOT,
       owner: OWNER,
     }),
@@ -794,7 +799,7 @@ test('readRoundLedger: 승인된 P1은 판정 job에 accepted로 넘어가고 �
   const r = await readRoundLedger({
     get: w.api.get,
     graphql: w.graphql,
-    ...where,
+    ...round,
     recorderBot: BOT,
     owner: OWNER,
   });
@@ -809,4 +814,93 @@ test('readRoundLedger: 승인된 P1은 판정 job에 accepted로 넘어가고 �
     r.rebuttals.map((x) => x.id),
     ['F2'],
   );
+});
+
+// --- 구현 대기(parked, Issue #212)
+
+test('readRoundLedger: 구현 대기를 기록 job과 같은 순서로 반영해 넘긴다(저장하지 않는다)', async () => {
+  const PARK_NOTE = '구현 대기: 계획만 담은 head에서는 판정하지 않는다';
+  const sha = 'c'.repeat(40);
+  const rebut = (id: string) => `- 지적: ${id}\n- 근거: ${sha}\n- 요지: 이미 확인한다`;
+  const read = (w: World, planOnly: boolean) =>
+    readRoundLedger({
+      get: w.api.get,
+      graphql: w.graphql,
+      ...where,
+      recorderBot: BOT,
+      owner: OWNER,
+      planOnly,
+    });
+  // 구현 대기뿐인 원장, 코드가 섞인 head: 승인 댓글을 조회해 accepted로 넘긴다
+  const parked = () =>
+    world({
+      ledger: ledgerOf(
+        entry({ severity: 'P1', status: 'parked', note: PARK_NOTE, openedAt: at(1) }),
+      ),
+      ledgerAt: at(1),
+      gql: [accept('F1', 5)],
+    });
+  const a = parked();
+  const code = await read(a, false);
+  assert.equal(a.gqlCalls, 1);
+  assert.equal(code.ledger?.findings[0].status, 'accepted');
+  assert.equal(a.sends, 0);
+  // 승인 댓글이 없으면 저장된 구현 대기가 열림으로 보인다
+  const b = parked();
+  b.gql = [];
+  b.rest.push({ id: 600, user: { login: 'writer-bot' }, body: rebut('F1') });
+  const open = await read(b, false);
+  assert.deepEqual(
+    open.ledger?.findings.map((e) => [e.status, e.openedAt]),
+    [['open', at(1)]],
+  );
+  assert.deepEqual(
+    open.rebuttals.map((x) => x.id),
+    ['F1'],
+    '열림으로 돌아온 지적에 대한 반박은 넘긴다',
+  );
+  assert.equal(b.sends, 0);
+  // 계획만 담은 head: 저장된 열린 코드 지적이 구현 대기로 보이고, 그 지적에 대한 반박은 넘기지 않는다
+  const c = world({
+    ledger: ledgerOf(
+      entry({ severity: 'P1' }),
+      entry({
+        id: 'F2',
+        severity: 'P1',
+        file: 'docs/exec-plans/active/20261122-demo/step0.md',
+        title: '계획의 지적',
+      }),
+    ),
+    ledgerAt: at(1),
+    gql: [],
+  });
+  c.rest.push(
+    { id: 600, user: { login: 'writer-bot' }, body: rebut('F1') },
+    { id: 601, user: { login: 'writer-bot' }, body: rebut('F2') },
+  );
+  const plan = await read(c, true);
+  assert.deepEqual(
+    plan.ledger?.findings.map((e) => [e.id, e.status]),
+    [
+      ['F1', 'parked'],
+      ['F2', 'open'],
+    ],
+  );
+  assert.deepEqual(
+    plan.rebuttals.map((x) => x.id),
+    ['F2'],
+  );
+  assert.equal(c.sends, 0);
+  // 계획만 담은 head에서는 구현 대기인 지적의 승인 댓글을 반영하지 않는다
+  const d = parked();
+  const held = await read(d, true);
+  assert.equal(held.ledger?.findings[0].status, 'parked');
+  assert.equal(d.sends, 0);
+  // 계획만 담은 head에서 승인이 철회된 accepted 코드 지적은 구현 대기로 보인다
+  const e = world({
+    ledger: ledgerOf(entry({ severity: 'P1', status: 'accepted', openedAt: at(1) })),
+    ledgerAt: at(1),
+    gql: [],
+  });
+  assert.equal((await read(e, true)).ledger?.findings[0].status, 'parked');
 });

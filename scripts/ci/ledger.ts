@@ -1,6 +1,7 @@
 // 지적 원장(10.2절 (4)·(5)): PR마다 리뷰 지적의 등급과 처리 상태를 추적한다.
 // 이 파일은 순수 함수만 둔다(네트워크·git 호출 없음). 기록 job이 PR 댓글로 읽고 쓴다(step1).
 // 댓글에는 사람이 읽는 표와 기계가 읽는 숨은 자료가 함께 있고, 기계는 숨은 자료만 읽는다. 형식: scripts/cross-review/ledger.md
+import { PLANS_DIR } from '../lib/plan.ts';
 import { PLAN_HASH_RE, SHA_RE } from './results.ts';
 import {
   LIMITS,
@@ -13,8 +14,18 @@ import {
 
 export const REVIEWERS = ['claude', 'codex'] as const;
 export type Reviewer = (typeof REVIEWERS)[number];
-/** accepted: 제작자가 남은 위험을 받아들인 P0·P1(owner-accept.ts만 만든다). 검증자의 판정으로 바뀌지 않는다 */
-export const ENTRY_STATUSES = ['open', 'fixed', 'rejected', 'deferred', 'accepted'] as const;
+/**
+ * accepted: 제작자가 남은 위험을 받아들인 P0·P1(owner-accept.ts만 만든다). 검증자의 판정으로 바뀌지 않는다.
+ * parked: 구현 대기. 계획만 담은 head에서 판정할 수 없는 코드 지적(parkFor만 만들고 되돌린다, Issue #212)
+ */
+export const ENTRY_STATUSES = [
+  'open',
+  'fixed',
+  'rejected',
+  'deferred',
+  'accepted',
+  'parked',
+] as const;
 export type EntryStatus = (typeof ENTRY_STATUSES)[number];
 export const REPRO_RESULTS = ['', 'reproduced', 'not-reproduced', 'error'] as const;
 export type ReproResult = (typeof REPRO_RESULTS)[number];
@@ -48,6 +59,11 @@ export interface Entry {
    * 이보다 뒤여야 인정된다. 이 파일의 함수는 채우지 않는다(원장을 읽는 쪽이 채운다). 다시 열리면 지운다
    */
   openedAt?: string;
+  /**
+   * 계획 전용 판정(mode=plan)에서 등록된 지적이다. 없으면 코드가 섞인 판정에서 등록된 것이다(이 필드가 생기기 전의
+   * 원장도 그렇게 읽는다). 계획 검증이 판정해야 할 지적이라 구현 대기로 두지 않는다. 등록 상태는 바꾸지 않는다
+   */
+  planRound?: true;
 }
 
 export interface Round {
@@ -116,13 +132,45 @@ export interface ApplyOptions {
   changedSinceLastRound: readonly string[] | null;
   /** 재현 job 결과: 이 판정의 findings 순번 → 결과. PR 코드가 조작할 수 있는 값이다(10.4절) */
   repro?: ReadonlyMap<number, ReproResult>;
+  /** 계획 전용 판정(mode=plan)인가. 참이면 이 판정에서 새로 등록하는 지적에 planRound를 적는다 */
+  planOnly?: boolean;
+}
+
+export const PARK_NOTE = '구현 대기: 계획만 담은 head에서는 판정하지 않는다';
+export const UNPARK_NOTE = '구현이 올라와 다시 열림';
+
+/**
+ * 구현 대기(Issue #212)를 그 head에 맞춘 새 원장을 돌려준다(입력은 바꾸지 않는다. 바뀐 것이 없으면 받은 원장 그대로다).
+ * - 계획만 담은 head(planOnly): 그 head에 없는 코드에 대한 열린 지적을 parked로 둔다. 대상은 open이고, 계획 전용
+ *   판정에서 등록된 것이 아니고(planRound), 위치가 계획 폴더 밖인 지적이다. 계획 폴더 안 파일에 대한 지적과 계획
+ *   전용 판정에서 등록된 지적은 계획 검증이 판정해야 하므로 두지 않는다
+ * - 코드가 섞인 head: parked를 모두 open으로 되돌린다. 건너뛰는 갈래가 없다(계획만 남겼다가 다시 올리는 것으로
+ *   열린 지적을 지울 수 없다, R4). mode를 모르면 부르는 쪽이 이쪽으로 부른다(fail-closed)
+ * 게시 시각(openedAt)은 어느 쪽에서도 그대로 둔다: 되돌아온 지적에 그 사이 달린 제작자 승인이 반영될 수 있다
+ */
+export function parkFor(l: Ledger, planOnly: boolean): Ledger {
+  const inPlans = (file: string) => file.startsWith(`${PLANS_DIR}/`);
+  let changed = false;
+  const findings = l.findings.map((e): Entry => {
+    if (planOnly ? e.status !== 'open' || e.planRound || inPlans(e.file) : e.status !== 'parked')
+      return e;
+    changed = true;
+    return {
+      ...e,
+      rejectedBy: [...e.rejectedBy],
+      status: planOnly ? 'parked' : 'open',
+      note: planOnly ? PARK_NOTE : UNPARK_NOTE,
+    };
+  });
+  return changed ? { ...l, findings } : l;
 }
 
 /**
  * 판정 하나를 원장에 반영한 새 원장을 돌려준다(입력은 바꾸지 않는다).
  * - 새 지적: P0·P1은 open, P2·P3은 deferred. 그 검증자의 2라운드부터는 바뀌지 않은 파일의 P1을 deferred로 등록한다(동결)
  * - resolutions: 자기 지적의 fixed·rejected·open만 반영한다. 남의 P0에 대한 rejected는 동의로 기록한다
- * - accepted(제작자 승인)인 지적은 deferred처럼 판정으로 바뀌지 않는다
+ * - accepted(제작자 승인)와 parked(구현 대기)인 지적은 deferred처럼 판정으로 바뀌지 않는다
+ * - 계획 전용 판정(planOnly)에서 새로 등록하는 지적에는 planRound를 적는다. 등록 상태를 정하는 규칙은 같다
  * - 닫힌 지적이 다시 열리면 openedAt을 지운다(게시 시각을 다시 확인해야 승인을 받을 수 있다)
  */
 export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
@@ -137,7 +185,7 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
 
   for (const r of o.verdict.resolutions) {
     const e = out.findings.find((x) => x.id === r.id);
-    if (!e || e.status === 'deferred' || e.status === 'accepted') continue;
+    if (!e || e.status === 'deferred' || e.status === 'accepted' || e.status === 'parked') continue;
     const own = e.reviewer === o.reviewer;
     const note = oneLine(r.note, LIMITS.note);
     if (e.severity === 'P0' && r.status === 'rejected') {
@@ -164,7 +212,7 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
     const dup = out.findings.find((e) => same(e, f));
     if (dup) {
       if (repro) dup.repro = repro;
-      // 닫힌 지적을 낸 검증자가 같은 지적을 다시 냈다: 회귀로 보고 다시 연다. deferred·accepted는 그대로 둔다
+      // 닫힌 지적을 낸 검증자가 같은 지적을 다시 냈다: 회귀로 보고 다시 연다. deferred·accepted·parked는 그대로 둔다
       if (dup.status === 'fixed' || dup.status === 'rejected') {
         dup.status = 'open';
         delete dup.openedAt;
@@ -200,6 +248,7 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
           : '',
       round,
       rejectedBy: [],
+      ...(o.planOnly ? { planRound: true as const } : {}),
     });
     // 댓글 상한을 넘기는 비차단 지적은 등록하지 않는다. 차단 지적은 넘겨도 등록한다(쓰기 실패는 기록 job이 error로 남긴다)
     if (!blocking && renderLedger(out).length > MAX_BODY) {
@@ -239,17 +288,20 @@ export function applyPlanReview(l: Ledger, o: PlanReviewOptions): Ledger {
 /**
  * review-ledger 판정(R16): open인 P0·P1이 없어야 한다.
  * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다.
- * accepted(제작자 승인)인 P0·P1도 막지 않고 수를 적는다
+ * accepted(제작자 승인)인 P0·P1도 막지 않고 수를 적는다.
+ * parked(구현 대기)도 막지 않고 수를 적는다: 계획만 담은 head에만 있고, 코드가 섞인 head의 기록은 판정 전에 open으로 되돌린다
  */
 export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; description: string } {
   const open = l.findings.filter((e) => BLOCKING.includes(e.severity) && e.status === 'open');
+  const parkedCount = l.findings.filter((e) => e.status === 'parked').length;
+  const parked = parkedCount ? `, 구현 대기 ${parkedCount}` : '';
   if (open.length === 0) {
     const deferred = l.findings.filter((e) => e.status === 'deferred');
     const frozen = deferred.filter((e) => e.severity === 'P1').length;
     const accepted = l.findings.filter((e) => e.status === 'accepted').length;
     return {
       state: 'success',
-      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''}${accepted ? `, 제작자 승인 ${accepted}` : ''})`,
+      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''}${accepted ? `, 제작자 승인 ${accepted}` : ''}${parked})`,
     };
   }
   let ids = open.map((e) => e.id).join(', ');
@@ -258,7 +310,7 @@ export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; descrip
   const accepted = l.findings.filter((e) => e.status === 'accepted').length;
   return {
     state: 'failure',
-    description: `열린 차단 지적 ${open.length}건: ${ids}${accepted ? `, 제작자 승인 ${accepted}` : ''}`,
+    description: `열린 차단 지적 ${open.length}건: ${ids}${accepted ? `, 제작자 승인 ${accepted}` : ''}${parked}`,
   };
 }
 
@@ -344,8 +396,10 @@ const validTime = (v: unknown) =>
 function validEntry(raw: unknown): raw is Entry {
   if (!isObj(raw)) return false;
   // openedAt은 없어도 된다(이 필드가 생기기 전의 원장, 게시 시각을 아직 모르는 지적)
-  const { openedAt, ...e } = raw;
+  // planRound도 없어도 된다(코드가 섞인 판정에서 등록된 지적, 이 필드가 생기기 전의 원장). 있으면 true뿐이다
+  const { openedAt, planRound, ...e } = raw;
   if ('openedAt' in raw && !validTime(openedAt)) return false;
+  if ('planRound' in raw && planRound !== true) return false;
   if (
     !keysAre(e, [
       'id',

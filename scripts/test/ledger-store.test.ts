@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { applyVerdict, emptyLedger, parseLedger, renderLedger, type Ledger } from '../ci/ledger.ts';
+import {
+  applyVerdict,
+  emptyLedger,
+  parseLedger,
+  renderLedger,
+  type Entry,
+  type Ledger,
+} from '../ci/ledger.ts';
 import {
   loadLedger,
   recordCiFailure,
@@ -194,6 +201,7 @@ async function record(
     headSha: H1,
     promptBase: BASE,
     changedSinceLastRound: null,
+    planOnly: false,
     api: f.api,
     post: async (s) => void posted.push(s),
     ...where,
@@ -380,4 +388,280 @@ test('pinnedPrompt: 원장의 1라운드 base SHA의 프롬프트를 쓴다. 없
     () => pinnedPrompt({ baseDir: base, promptBase: old, files: ['../../x.md'] }),
     /파일 이름/,
   );
+});
+
+// ---------- 구현 대기(parked): 계획만 담은 head에서 판정할 수 없는 코드 지적 (Issue #212) ----------
+
+const PLAN_HASH = 'c'.repeat(64);
+const OPENED = '2026-11-22T01:00:00Z';
+const PARK_NOTE = '구현 대기: 계획만 담은 head에서는 판정하지 않는다';
+const entryOf = (over: Partial<Entry> = {}): Entry => ({
+  id: 'F1',
+  severity: 'P1',
+  reviewer: 'codex',
+  file: 'src/a.ts',
+  line: 3,
+  title: '코드 지적',
+  repro: '',
+  status: 'open',
+  note: '',
+  round: 1,
+  rejectedBy: [],
+  ...over,
+});
+const storedWith = (...findings: Entry[]) =>
+  fakeApi([
+    {
+      id: 1,
+      user: { login: BOT },
+      body: renderLedger({
+        ...emptyLedger(BASE),
+        rounds: [{ reviewer: 'codex', head: H1 }],
+        findings,
+      }),
+    },
+  ]);
+const storedOf = (f: ReturnType<typeof fakeApi>): Ledger => {
+  const l = parseLedger(f.comments[0].body);
+  assert.ok(l, '저장된 원장이 없다');
+  return l;
+};
+const planOnly = (approved: boolean | null = true) => ({
+  planOnly: true,
+  plan: { hash: PLAN_HASH, approved },
+});
+/** 편집 이력 GraphQL의 가짜. 부른 횟수를 센다 */
+function gqlOf(nodes: unknown[]) {
+  const g = {
+    calls: 0,
+    graphql: async () => {
+      g.calls++;
+      return {
+        repository: {
+          pullRequest: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+        },
+      };
+    },
+  };
+  return g;
+}
+/** 고쳐지지 않은 제작자의 승인 댓글(GraphQL 꼴). 지적이 게시된 뒤에 달렸다 */
+const acceptNode = (id: string) => ({
+  fullDatabaseId: '7000000005',
+  author: { login: 'maker' },
+  body: `/harness accept ${id}`,
+  createdAt: '2026-11-22T02:00:00Z',
+  lastEditedAt: null,
+  editor: null,
+  userContentEdits: { totalCount: 0 },
+});
+
+test('recordLedger(계획만 담은 head): 앞선 구현 판정의 열린 코드 지적을 구현 대기로 두고, 그 검증자의 계획 승인과 review-ledger를 막지 않는다', async () => {
+  const f = storedWith(entryOf({ openedAt: OPENED }));
+  // Codex가 그 지적에 대한 resolutions 없이 승인을 낸다
+  const p = await record(f, { reviewer: 'codex', verdict: verdict(), headSha: H2, ...planOnly() });
+  const l = storedOf(f);
+  assert.deepEqual(
+    l.findings.map((e) => [e.id, e.status, e.note, e.openedAt]),
+    [['F1', 'parked', PARK_NOTE, OPENED]],
+  );
+  assert.deepEqual(l.planReview, { hash: PLAN_HASH, head: H2, approvals: ['codex'] });
+  assert.equal(p.state, 'success');
+  assert.match(p.description, /구현 대기 1/);
+  // 같은 head에서 검증자가 구현 대기인 지적을 고쳐졌다고 해도 구현 대기로 남는다
+  const again = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'fixed', note: 'abc1234' }]),
+    headSha: H2,
+    ...planOnly(),
+  });
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.status, e.note]),
+    [['parked', PARK_NOTE]],
+  );
+  assert.equal(again.state, 'success');
+  // 판정이 없는 기록(해당 없음·이어받음)도 구현 대기로 둔다
+  const g = storedWith(entryOf({ openedAt: OPENED }));
+  const none = await record(g, { reviewer: 'claude', headSha: H2, ...planOnly(null) });
+  assert.equal(storedOf(g).findings[0].status, 'parked');
+  assert.equal(none.state, 'success');
+});
+
+test('recordLedger(코드가 섞인 head): 구현 대기를 판정 전에 열림으로 되돌린다. 해소되지 않으면 review-ledger가 막는다', async () => {
+  const parked = () => storedWith(entryOf({ status: 'parked', note: PARK_NOTE, openedAt: OPENED }));
+  // 그 판정이 고쳐졌다고 하면 닫힌다
+  const fixed = parked();
+  const ok = await record(fixed, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'fixed', note: 'abc1234' }]),
+    headSha: H2,
+    changedSinceLastRound: ['src/a.ts'],
+  });
+  assert.deepEqual(
+    storedOf(fixed).findings.map((e) => [e.status, e.note]),
+    [['fixed', 'abc1234']],
+  );
+  assert.equal(ok.state, 'success');
+  assert.doesNotMatch(ok.description, /구현 대기/);
+  // 열려 있다고 하거나 판정을 내지 않으면 열린 채로 막는다
+  for (const resolutions of [[{ id: 'F1', status: 'open' as const, note: '' }], []]) {
+    const f = parked();
+    const p = await record(f, {
+      reviewer: 'codex',
+      verdict: verdict([], resolutions),
+      headSha: H2,
+      changedSinceLastRound: ['src/a.ts'],
+    });
+    assert.equal(storedOf(f).findings[0].status, 'open');
+    assert.equal(storedOf(f).findings[0].openedAt, OPENED);
+    assert.equal(p.state, 'failure');
+    assert.match(p.description, /열린 차단 지적 1건: F1/);
+  }
+  // 판정이 없어도(해당 없음, 이어받음, error) 되돌려 저장하고 막는다
+  const f = parked();
+  const p = await record(f, { reviewer: 'claude', headSha: H2 });
+  assert.equal(storedOf(f).findings[0].status, 'open');
+  assert.equal(p.state, 'failure');
+  // 계획 승인을 기록하지 못한 계획 전용 head(--mode가 plan이 아니다)도 코드가 섞인 것으로 본다
+  const unknown = parked();
+  const q = await record(unknown, { reviewer: 'codex', verdict: verdict(), headSha: H2 });
+  assert.equal(storedOf(unknown).findings[0].status, 'open');
+  assert.equal(q.state, 'failure');
+});
+
+test('recordLedger: 구현 대기뿐인 원장도 코드가 섞인 head의 첫 기록에서 제작자 승인을 조회해 반영한다', async () => {
+  const parked = () => storedWith(entryOf({ status: 'parked', note: PARK_NOTE, openedAt: OPENED }));
+  const f = parked();
+  const g = gqlOf([acceptNode('F1')]);
+  const p = await record(f, {
+    reviewer: 'claude',
+    headSha: H2,
+    owner: 'maker',
+    api: { ...f.api, graphql: g.graphql },
+  });
+  assert.equal(g.calls, 1, '저장된 원장에 open·accepted가 없어도 조회한다');
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.status, e.note]),
+    [['accepted', '제작자 승인(댓글 7000000005)']],
+  );
+  assert.equal(p.state, 'success');
+  assert.match(p.description, /제작자 승인 1/);
+  // 계획만 담은 head의 기록에서는 구현 대기로 남고 승인되지 않는다
+  const h = parked();
+  const g2 = gqlOf([acceptNode('F1')]);
+  const q = await record(h, {
+    reviewer: 'claude',
+    headSha: H2,
+    owner: 'maker',
+    api: { ...h.api, graphql: g2.graphql },
+    ...planOnly(null),
+  });
+  assert.equal(storedOf(h).findings[0].status, 'parked');
+  assert.equal(q.state, 'success');
+  assert.match(q.description, /구현 대기 1/);
+  assert.doesNotMatch(q.description, /제작자 승인/);
+});
+
+test('recordLedger(계획만 담은 head): 승인 댓글이 지워진 accepted 코드 지적은 열림이 아니라 구현 대기로 저장된다', async () => {
+  const f = storedWith(
+    entryOf({ status: 'accepted', note: '제작자 승인(댓글 7000000005)', openedAt: OPENED }),
+  );
+  const g = gqlOf([]);
+  const p = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'fixed', note: 'abc1234' }]),
+    headSha: H2,
+    owner: 'maker',
+    api: { ...f.api, graphql: g.graphql },
+    ...planOnly(),
+  });
+  assert.equal(g.calls, 1);
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.status, e.note, e.openedAt]),
+    [['parked', PARK_NOTE, OPENED]],
+  );
+  assert.equal(p.state, 'success');
+  // 승인 댓글이 남아 있으면 accepted 그대로다
+  const kept = storedWith(
+    entryOf({ status: 'accepted', note: '제작자 승인(댓글 7000000005)', openedAt: OPENED }),
+  );
+  await record(kept, {
+    reviewer: 'codex',
+    verdict: verdict(),
+    headSha: H2,
+    owner: 'maker',
+    api: { ...kept.api, graphql: gqlOf([acceptNode('F1')]).graphql },
+    ...planOnly(),
+  });
+  assert.equal(storedOf(kept).findings[0].status, 'accepted');
+});
+
+test('recordLedger: 계획 전용 판정에서 등록된 지적은 구현 대기로 두지 않는다. 등록할 때의 규칙(동결)은 그대로다', async () => {
+  const f = fakeApi([]);
+  // 그 검증자의 1라운드: 위치가 코드 파일인 새 P1도 열림으로 등록되고 planRound가 붙는다
+  const r1 = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ title: '계획이 빠뜨린 것' })]),
+    ...planOnly(false),
+  });
+  assert.equal(r1.state, 'failure');
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.id, e.status, e.planRound]),
+    [['F1', 'open', true]],
+  );
+  // 다음 계획 전용 기록에서도 구현 대기가 되지 않는다(그 검증자가 닫을 때까지)
+  const other = await record(f, { reviewer: 'claude', headSha: H2, ...planOnly(null) });
+  assert.equal(storedOf(f).findings[0].status, 'open');
+  assert.equal(other.state, 'failure');
+  // 2라운드부터의 동결: 직전 판정 뒤 바뀌지 않은 파일의 재현되지 않은 새 P1은 deferred로 등록된다
+  const r2 = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict(
+      [finding({ file: 'src/old.ts', title: '뒤늦은 P1' })],
+      [{ id: 'F1', status: 'fixed', note: 'abc1234' }],
+    ),
+    headSha: H2,
+    changedSinceLastRound: ['docs/exec-plans/active/20261122-demo/step0.md'],
+    ...planOnly(true),
+  });
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.id, e.status, e.planRound]),
+    [
+      ['F1', 'fixed', true],
+      ['F2', 'deferred', true],
+    ],
+  );
+  assert.equal(r2.state, 'success');
+  assert.doesNotMatch(r2.description, /구현 대기/);
+});
+
+const PARKED_LINE =
+  '- 상태 parked: 구현 대기. 이 head는 계획 파일만 담고 있어 그 지적이 가리키는 코드가 없다. 판정 대상이 아니고, 코드가 다시 올라온 head에서 open으로 돌아간다';
+
+test('writeRoundInput: 구현 대기인 지적이 있으면 원장 파일에 그 뜻을 한 줄 적는다. 없으면 적지 않는다', () => {
+  const { root } = roundRepo();
+  const file = path.join(root, '.harness-review/ledger.md');
+  const base = ledgerWith([finding(), finding({ title: '다른 지적' })], 'codex');
+  writeRoundInput({ root, ledger: base, reviewer: 'claude' });
+  assert.ok(
+    !readFileSync(file, 'utf8').includes('parked'),
+    '구현 대기가 없으면 지금의 출력과 같다',
+  );
+  const parked: Ledger = {
+    ...base,
+    findings: base.findings.map((e, i) =>
+      i === 0 ? { ...e, status: 'parked' as const, note: PARK_NOTE } : e,
+    ),
+  };
+  writeRoundInput({ root, ledger: parked, reviewer: 'claude' });
+  const md = readFileSync(file, 'utf8');
+  assert.equal(md.split(PARKED_LINE).length - 1, 1);
+  const lines = md.split('\n');
+  // 머리 항목들의 끝(표 앞의 빈 줄 바로 앞)에 있다
+  const at = lines.indexOf(PARKED_LINE);
+  assert.equal(lines[at + 1], '');
+  assert.match(lines[at + 2], /^ID \| 등급 \| 검증자 \| 상태 /);
+  assert.match(lines[at - 1], /^- /);
+  assert.match(md, /^F1 \| P1 \| codex \| parked \| src\/a\.ts:3 \| /m);
+  assert.match(md, /^F2 \| P1 \| codex \| open \| /m);
 });
