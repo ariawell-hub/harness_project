@@ -73,6 +73,12 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
   - F2(`selftest`가 실제 job의 조건으로 arm64에서 통과하는지 병합 전에 확인하지 않는다. 15분 제한, main의 실행기와 따로 받은 PR 트리, 보고서를 job 출력으로 넘기는 것): 병합 전에 그 조건을 재현할 길이 없어(`gates`는 main의 정의로 돈다) `selftest`를 범위에서 뺐다. 이 계획은 `check` job만 옮긴다. 두 job의 gitleaks 체크섬이 같아야 한다는 테스트는 버전이 같고 체크섬은 아키텍처마다 정해 둔 값이어야 한다는 것으로 바꾼다.
 - 2026-11-22 계획 검증 2라운드(head `a368ab9`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 1). F1·F2는 `fixed`.
   - F3(체크섬 단언을 `ci.test.ts`로 옮기고 `harness-guard.test.ts`에 버전 비교만 남기면, 그 파일은 merge-base에서도 통과해 `test-effect`가 `ineffective`로 막는다): 받아들였다. gitleaks 고정값 단언(job마다 파일의 아키텍처와 체크섬)을 `harness-guard.test.ts`의 그 테스트에 둔다. merge-base의 `check.yml`은 x64라 거기서 실패한다. `ci.test.ts`에는 러너 단언과 gitleaks를 받는 job의 목록을 둔다. 두 파일이 파일마다 merge-base에서 단언 실패로 실패하는지 보는 AC(`test-effect --ci`의 파일별 판정)와, 따로 돌린 결과를 진행 로그에 적는 절차를 더했다.
+- 2026-11-22 계획 검증 3라운드(head `52973df`): 두 검증자 승인(지적 없음). F3은 `fixed`. 계획 승인 해시 `c3d944ce0d2d`.
+- 2026-11-22 step0을 시작했다(측정 전에 할 수 있는 것).
+  - 구조 테스트를 먼저 썼다. 지금 워크플로에서 파일마다 단언 실패로 실패한다: `ci.test.ts` 37개 가운데 1개 실패(러너 테스트. `check/check`가 `ubuntu-latest`), `harness-guard.test.ts` 15개 가운데 1개 실패(`check: arm64 파일의 체크섬`). 워크플로의 세 줄을 로컬에서 바꾼 트리에서는 둘 다 통과한다(37개, 15개).
+  - 패치(`lab/actions-cost/b2-arm64/workflows.patch`)는 그 통과한 트리의 `git diff -- .github/workflows`다. `origin/main`의 트리에 적용하면 `check.yml`의 세 줄만 바뀐다(지운 줄 3, 더한 줄 3). 로컬에서 바꾼 워크플로와 테스트는 되돌렸다. 테스트는 제작자의 워크플로 커밋 뒤에 올린다.
+  - 적용 안내(`lab/actions-cost/b2-arm64/README.md`), 변경 이력, 보존 기록 설명의 문장(PR #205의 F4)을 썼다.
+  - 남은 것: 2026-11-24 00:00(UTC) 뒤의 측정과 기록 표의 행. 그때까지 push하지 않는다(push마다 `check`와 판정이 돌아 재는 기간의 분이 는다. 판정은 측정까지 든 변경으로 한 번에 받는다).
 
 ## 의사결정 로그
 
