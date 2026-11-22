@@ -742,12 +742,17 @@ test('실제 실행 대조: 래퍼가 tool을 실행하는 꼴에서는 분석�
   }
   // 인자의 경계: 첫 명령이 통째로 같다
   let boundary = 0;
+  /** -S를 아는 머신에서 tool이 실행되지 않은 사례(건너뛰지 않는다: 실패다). 그 머신의 env가 낸 종료 코드와 오류를 함께 적는다 */
+  const notRun: string[] = [];
   for (const shape of BOUNDARY) {
     const cmd = shape.replace('T', () => tool);
     if (usesSplit(cmd) ? !splits : !wrappersOf(cmd).every((w) => has(w))) continue;
-    const real = run(cmd);
-    // -S를 아는 머신에서는 건너뛰지 않는다
-    assert.notEqual(real, null, `tool이 실행되지 않았다: ${shape}`);
+    const r = exec(cmd);
+    const real = r.argv;
+    if (real === null) {
+      notRun.push(`${shape}: 종료 코드 ${r.status}, ${r.stderr.trim()}`);
+      continue;
+    }
     boundary += 1;
     const first = parseShell(cmd)[0];
     const ours = first ? (first.args ?? first.argv) : null;
@@ -757,8 +762,21 @@ test('실제 실행 대조: 래퍼가 tool을 실행하는 꼴에서는 분석�
   // 다섯 번 나누는 꼴: 실제로는 tool이 실행되고, 훅은 그 호출을 막는다
   if (splits) {
     const five = `env -S -i -S -i -S -i -S -i -S '${tool} a'`;
-    assert.deepEqual(run(five), [tool, 'a']);
+    const r = exec(five);
+    if (r.argv === null)
+      notRun.push(`다섯 번 나누는 꼴: 종료 코드 ${r.status}, ${r.stderr.trim()}`);
+    else assert.deepEqual(r.argv, [tool, 'a']);
     assert.equal(rule(five), 'R4');
+  }
+  if (notRun.length) {
+    const version = spawnSync('env', ['--version'], {
+      encoding: 'utf8',
+      env: { PATH, LC_ALL: 'C' },
+    });
+    const which = (version.stdout ?? '').split('\n')[0] || '(env --version이 버전을 내지 않는다)';
+    assert.fail(
+      `tool이 실행되지 않은 사례 ${notRun.length}개(env: ${which}):\n${notRun.join('\n')}`,
+    );
   }
   t.diagnostic(`대조한 틀 ${compared}개, 건너뛴 틀 ${skipped}개, 경계 사례 ${boundary}개`);
   assert.deepEqual(diffs, []);
