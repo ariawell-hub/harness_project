@@ -867,3 +867,25 @@ test('checkDoc: 링크의 주소는 글로 세지 않는다', () => {
   const link = `${HEADS[4]} [가](${'a'.repeat(40)}.md)`;
   fails(check(swap(doc, line, link)), /판단 절차.*판단 시점 3.*20자/);
 });
+
+test('checkDoc 형식: 목록이나 인용 안의 참조 정의도 쓰지 않는다', () => {
+  const doc = goodDoc();
+  formatOnly(check(swap(doc, WORD, `${WORD}\n\n- [가]: x "가려진 글"\n`)), /형식.*참조 정의/);
+  formatOnly(check(swap(doc, WORD, `${WORD}\n\n> [가]: x\n`)), /형식.*참조 정의/);
+  formatOnly(check(swap(doc, WORD, `${WORD}\n\n[^1]: 각주\n`)), /형식.*참조 정의/);
+});
+
+test('checkDoc: 코드 블록의 언어 이름에는 공백과 백틱만 쓰지 못한다', () => {
+  assert.deepEqual(check(`${goodDoc()}\n\n${F3}c++\nint x;\n${F3}\n`), []);
+});
+
+test('checkDoc: 기록 표의 앞뒤에는 빈 줄을 둔다(붙여 쓴 줄은 화면에서 표의 행이 된다)', () => {
+  const doc = goodDoc();
+  const row = recordRow(BASE, BASELINE_FILE, '기준선', '예산 안');
+  // |로 시작하지 않아도 화면에서는 표의 행이다. 값을 견주지 않은 행이 표에 보이면 안 된다
+  const loose =
+    '2026-11-21~2026-11-22 | 캐시 | 1 | 1.0 | $0.001 | 1.0 | $1.00 | 없음 | 예산 안. 좋다';
+  fails(check(swap(doc, row, `${row}\n${loose}`)), /기록.*빈 줄/);
+  fails(check(swap(doc, TABLE_HEAD, `표 설명\n${TABLE_HEAD}`)), /기록.*빈 줄/);
+  assert.deepEqual(check(swap(doc, row, `${row}\n\n표 아래의 설명이다.`)), []);
+});
