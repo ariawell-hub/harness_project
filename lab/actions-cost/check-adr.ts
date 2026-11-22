@@ -169,29 +169,35 @@ function statusOf(head: string[], problems: string[]): Status | null {
 const CODE_MARK = '\uE000';
 
 /**
- * 한 문단(줄바꿈으로 이은 줄. 코드 구간은 CODE_MARK로 가렸다)에서 화면에 링크로 보이는 것의 주소.
- * `](주소)`에서 거슬러 올라가 짝이 맞는 여는 대괄호를 찾는다. 여는 대괄호가 없거나, 글에 보이는
- * 글자가 없거나, 글 안에 링크가 있으면(그때 바깥 대괄호는 링크가 아니다) 세지 않는다
+ * 한 줄(코드 구간은 CODE_MARK로 가렸다)에 있는 `](주소)`마다 주소와 링크의 글.
+ * 글은 `](`에서 거슬러 올라가 짝이 맞는 여는 대괄호까지다. 그 줄에 여는 대괄호가 없으면 null이다.
+ * 줄을 넘어 찾지 않는다: 줄을 넘는 글이 화면에서 링크인지는 사이의 줄이 블록을 가르는지(가로줄,
+ * 밑줄 제목, 목록 항목 등)에 달렸고, 그것을 가려 읽을 때마다 새 경우가 나왔다
  */
-function linkTargets(para: string): string[] {
-  const targets: string[] = [];
-  for (const m of para.matchAll(/\]\(([^()\s"'<>|`\uE000]*)\)/g)) {
+function linksOn(line: string): { target: string; label: string | null }[] {
+  const links: { target: string; label: string | null }[] = [];
+  for (const m of line.matchAll(/\]\(([^()\s"'<>|`\uE000]*)\)/g)) {
     let depth = 0;
     let open = -1;
     for (let j = m.index - 1; j >= 0 && open < 0; j--) {
-      if (para[j] === ']') depth++;
-      else if (para[j] === '[') {
+      if (line[j] === ']') depth++;
+      else if (line[j] === '[') {
         if (depth === 0) open = j;
         else depth--;
       }
     }
-    if (open < 0) continue;
-    const label = para.slice(open + 1, m.index);
-    if (label.includes('](') || !/[^\s*_[\]]/.test(label)) continue;
-    targets.push(m[1]);
+    links.push({ target: m[1], label: open < 0 ? null : line.slice(open + 1, m.index) });
   }
-  return targets;
+  return links;
 }
+
+/**
+ * 링크의 글이 화면에 보이는가: 한글 음절이나 로마자, 숫자, 코드 구간이 있다(문자 참조는 뺀다).
+ * 보이는 글자를 닫힌 집합으로 둔다. 유니코드의 "글자"에는 화면에 보이지 않는 채움 글자가 있다.
+ * 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다
+ */
+const shownLabel = (label: string): boolean =>
+  !label.includes('](') && /[A-Za-z0-9가-힣\uE000]/.test(label.replace(/&[#\w]+;/g, ''));
 
 function checkBackground(
   raw: string[],
@@ -203,26 +209,25 @@ function checkBackground(
   const body = struct.slice(r.from, r.to);
   const n = dense(body);
   if (n < 100) problems.push(`배경: 본문이 공백을 빼고 100자보다 짧다(${n}자)`);
-  // 링크의 주소는 struct에서 빠져 있다. raw에서 문단마다 찾는다(링크의 글은 줄을 넘을 수 있다).
+  // 링크의 주소는 struct에서 빠져 있다. raw에서 줄마다 찾는다.
   // 주소는 ADR 폴더(docs/decisions)에서 본 기준선 문서 그대로여야 한다(뒤에 #절 이름만 받는다).
-  // 파일 이름만 같은 다른 주소나 같은 문서를 다르게 적은 주소는 세지 않는다
+  // 파일 이름만 같은 다른 주소나 같은 문서를 다르게 적은 주소는 세지 않는다.
+  // 기준선 링크는 `[글](주소)`를 한 줄에 적은 것만 받는다. 여는 대괄호가 같은 줄에 없으면 형식 오류다
   let linked = false;
-  let para: string[] = [];
-  const flush = (): void => {
-    if (linkTargets(para.join('\n')).some((t) => BASELINE_LINK.test(t))) linked = true;
-    para = [];
-  };
   for (let i = r.from; i < r.to; i++) {
-    const parts = fenced[i] || blank(raw[i]) ? null : partsOf(raw[i]);
-    if (!parts) {
-      flush();
-      continue;
+    // 가린 글자가 원문에 있는 줄은 코드 구간과 구별할 수 없어 읽지 않는다
+    const parts = fenced[i] || blank(raw[i]) || raw[i].includes(CODE_MARK) ? null : partsOf(raw[i]);
+    if (!parts) continue;
+    const line = parts.map((p) => (p.code ? CODE_MARK : p.s)).join('');
+    for (const link of linksOn(line)) {
+      if (!BASELINE_LINK.test(link.target)) continue;
+      if (link.label === null)
+        problems.push(
+          `배경 형식(${i + 1}째 줄): 기준선 링크의 여는 대괄호가 같은 줄에 없다(링크는 [글](주소)를 한 줄에 적는다)`,
+        );
+      else if (shownLabel(link.label)) linked = true;
     }
-    // 목록 항목·인용·제목은 새 블록을 연다. 앞 줄의 여는 대괄호와 이어지지 않는다
-    if (LISTISH.test(raw[i]) || /^ {0,3}#/.test(raw[i])) flush();
-    para.push(parts.map((p) => (p.code ? CODE_MARK : p.s)).join(''));
   }
-  flush();
   if (!linked)
     problems.push(
       '배경: 기준선 문서로 가는 링크가 없다(주소는 ../harness/actions-cost.md 그대로 적는다)',

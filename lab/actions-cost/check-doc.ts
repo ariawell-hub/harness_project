@@ -189,6 +189,9 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
   if (!/^ {0,3}\S/.test(line))
     return '줄 머리는 공백 세 칸까지만 들여 쓴다(들여 쓴 코드 블록을 쓰지 않는다)';
   if (/^ {0,3}(=+|-+)\s*$/.test(line)) return '밑줄 제목과 가로줄(===, ---)을 쓰지 않는다';
+  // 가로줄은 -, *, _ 가운데 한 글자를 셋 이상, 사이에 공백을 두어도 된다. 앞뒤의 줄을 다른 블록으로 가른다
+  if (/^ {0,3}([-*_])( *\1){2,} *$/.test(line))
+    return '가로줄(***, ___, - - - 같은 줄)을 쓰지 않는다';
   if (line.includes('\\')) return '역슬래시를 쓰지 않는다(이스케이프한 글자를 가려 읽지 않는다)';
   if (parts === null)
     return '백틱의 짝이 한 줄 안에서 맞지 않는다(코드 구간은 한 줄 안에서 여닫는다)';

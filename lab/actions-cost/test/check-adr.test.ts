@@ -305,6 +305,9 @@ test('checkAdr 배경: 화면에서 링크가 아닌 글은 기준선 링크로 
     '[&nbsp;](../harness/actions-cost.md)',
     '[&#8203;](../harness/actions-cost.md)',
     '[...](../harness/actions-cost.md)',
+    // 화면에 보이지 않는 채움 글자(U+3164), 코드 구간을 가리는 데 쓰는 글자(U+E000)
+    '[\u3164](../harness/actions-cost.md)',
+    '[\uE000](../harness/actions-cost.md)',
   ])
     fails(checkAdr(swap(doc, link, shown)), /배경.*링크/);
 });
