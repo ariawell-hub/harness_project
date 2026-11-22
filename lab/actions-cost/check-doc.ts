@@ -185,7 +185,6 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
   if (!/^ {0,3}\S/.test(line))
     return '줄 머리를 네 칸 이상이나 탭으로 들여 쓰지 않는다(들여 쓴 코드 블록을 쓰지 않는다)';
   if (/^ {0,3}(=+|-+)\s*$/.test(line)) return '밑줄 제목과 가로줄(===, ---)을 쓰지 않는다';
-  if (/^ {0,3}\[[^\]]*\]:/.test(line)) return '참조 정의([이름]: 주소)를 쓰지 않는다';
   if (line.includes('\\')) return '역슬래시를 쓰지 않는다(이스케이프한 글자를 가려 읽지 않는다)';
   if (parts === null)
     return '백틱의 짝이 한 줄 안에서 맞지 않는다(코드 구간은 한 줄 안에서 여닫는다)';
@@ -194,6 +193,9 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
     return '코드(백틱, 코드 블록) 밖에 `<`를 쓰지 않는다(HTML 태그와 주석을 쓰지 않는다. 표식은 줄 전체가 표식인 두 줄만 둔다)';
   if (line.includes('|') && line.includes('<'))
     return '`|`가 있는 줄에는 백틱 안에도 `<`를 쓰지 않는다(표의 칸은 백틱 안의 `|`에서도 갈린다)';
+  // 참조 정의는 목록·인용 안에서도 화면에 나오지 않는다. 자리를 가리지 않고 "]:"를 받지 않는다
+  if (plain.some((p) => p.s.includes(']:')))
+    return '참조 정의와 각주([이름]: 주소)를 쓰지 않는다(코드 밖에 "]:"를 쓰지 않는다)';
   if (plain.some((p) => p.s.includes('!['))) return '그림(![…](…))을 쓰지 않는다';
   for (const p of plain)
     for (let at = p.s.indexOf(']('); at >= 0; at = p.s.indexOf('](', at + 1))
@@ -240,11 +242,11 @@ function viewsOf(doc: string, problems: string[]): Views {
       continue;
     }
     if (/^\s*(`{3,}|~{3,})/.test(line)) {
-      const end = /^```[A-Za-z0-9_-]*$/.test(line) ? raw.indexOf('```', i + 1) : -1;
-      if (!/^```[A-Za-z0-9_-]*$/.test(line)) {
+      const end = /^```[^\s`]*$/.test(line) ? raw.indexOf('```', i + 1) : -1;
+      if (!/^```[^\s`]*$/.test(line)) {
         bad(
           i,
-          '코드 블록은 줄 머리의 ```(뒤에 언어 이름만)로 열고 줄 머리의 ```로 닫는다(들여 쓴 것, ~~~, 백틱 네 개 이상은 쓰지 않는다)',
+          '코드 블록은 줄 머리의 ```(뒤에 공백 없이 언어 이름만)로 열고 줄 머리의 ```로 닫는다(들여 쓴 것, ~~~, 백틱 네 개 이상은 쓰지 않는다)',
         );
         keep(i, line);
         i++;
@@ -522,16 +524,27 @@ function checkRecord(
 ): void {
   // 표: `|`로 시작하는 줄이 이어진 묶음
   const tables: string[][] = [];
+  const starts: number[] = [];
   let current: string[] | null = null;
-  for (const l of body) {
+  body.forEach((l, i) => {
     if (!/^ {0,3}\|/.test(l)) current = null;
     else if (current) current.push(l);
-    else tables.push((current = [l]));
-  }
+    else {
+      tables.push((current = [l]));
+      starts.push(i);
+    }
+  });
   if (tables.length !== 1) {
     problems.push(`기록: 표가 ${tables.length}개다(하나여야 한다)`);
     return;
   }
+  // 표에 붙여 쓴 줄은 `|`로 시작하지 않아도 화면에서 표의 행이 된다(값을 견주지 않은 행이 표에 보인다)
+  const after = starts[0] + tables[0].length;
+  if (
+    (starts[0] > 0 && !blank(body[starts[0] - 1])) ||
+    (after < body.length && !blank(body[after]))
+  )
+    problems.push('기록: 표의 앞뒤에 빈 줄을 둔다(표에 붙여 쓴 줄은 화면에서 표의 행이 된다)');
   const [head, rule, ...rows] = tables[0];
   if (cellsOf(head).join('\n') !== TABLE_HEAD.join('\n')) {
     problems.push(`기록: 표의 머리 줄이 다르다(| ${TABLE_HEAD.join(' | ')} |여야 한다)`);
