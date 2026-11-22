@@ -189,7 +189,8 @@ export function init(root: string, profile: string, opts: InitOptions): number {
   if (changed.length) written.set(fileKey(cfgPath), Buffer.from(cfgText));
   const kindOf = (f: string): 'none' | 'file' | 'dir' => {
     const k = fileKey(f);
-    if (written.has(k)) return 'file';
+    // 파일 이름에 구분자를 붙인 경로는 없는 것이다(디스크의 파일도 그렇게 답한다)
+    if (written.has(k)) return f.endsWith(path.sep) ? 'none' : 'file';
     if (madeDirs.has(k)) return 'dir';
     try {
       return statSync(f).isDirectory() ? 'dir' : 'file';
@@ -208,7 +209,9 @@ export function init(root: string, profile: string, opts: InitOptions): number {
       return stop('템플릿이 놓일 자리가 폴더다(자리 표시 파일인지 읽을 수 없다)', [dst]);
     const copy = at === 'none' || (replace && contentOf(dst).includes(PLACEHOLDER));
     if (copy) {
-      if (/[\\/]$/.test(t.to))
+      // 구분자는 실행 환경의 것으로 본다. path.join이 놓일 자리 끝의 구분자를 그대로 두고 그 환경의 것으로
+      // 바꾼다(POSIX는 /뿐이라 역슬래시로 끝나는 이름은 파일 이름이다)
+      if (dst.endsWith(path.sep))
         return stop('템플릿이 놓일 자리가 폴더 경로다(구분자로 끝난다)', [dst]);
       const from = kindOf(src);
       if (from === 'none') return stop('템플릿 원본이 없다', [src]);
