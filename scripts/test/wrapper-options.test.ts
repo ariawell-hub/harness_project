@@ -1039,10 +1039,10 @@ test('읽은 낱말 수가 입력의 낱말 수의 상수 배를 넘지 않는�
 });
 
 /**
- * 입력마다 판정에 걸린 시간(ms. 세 번 재어 가장 짧은 값). 자식 프로세스에서 판정하고 시간 제한을 건다.
- * 판정이 예외를 던지면 실패한다
+ * 입력마다 판정에 걸린 시간(ms). 한 번의 측정은 같은 판정을 reps번 되풀이한 합이고, 세 번 재어 가장 짧은 값을 낸다.
+ * 자식 프로세스에서 판정하고 시간 제한을 건다. 판정이 예외를 던지면 실패한다
  */
-function timeEvaluate(inputs: string[]): number[] {
+function timeEvaluate(inputs: string[], reps: number[]): number[] {
   const mod = pathToFileURL(
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'rules.ts'),
   ).href;
@@ -1051,11 +1051,11 @@ function timeEvaluate(inputs: string[]): number[] {
     const { evaluate } = await import(${JSON.stringify(mod)});
     const ctx = { repo: null, hasPlan: () => true, dbPatterns: [], dbClients: ['psql'], dbCommands: () => [], home: '/Users/someone' };
     const times = [];
-    for (const command of JSON.parse(readFileSync(0, 'utf8'))) {
+    for (const [command, reps] of JSON.parse(readFileSync(0, 'utf8'))) {
       let best = Infinity;
       for (let k = 0; k < 3; k++) {
         const t0 = performance.now();
-        evaluate({ kind: 'bash', command, cwd: '/work/repo' }, ctx);
+        for (let r = 0; r < reps; r++) evaluate({ kind: 'bash', command, cwd: '/work/repo' }, ctx);
         best = Math.min(best, performance.now() - t0);
       }
       times.push(best);
@@ -1064,8 +1064,8 @@ function timeEvaluate(inputs: string[]): number[] {
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
-    timeout: 120_000,
-    input: JSON.stringify(inputs),
+    timeout: 300_000,
+    input: JSON.stringify(inputs.map((command, i) => [command, reps[i]])),
   });
   assert.equal(
     r.error,
@@ -1078,13 +1078,46 @@ function timeEvaluate(inputs: string[]): number[] {
   return times;
 }
 
-test('긴 입력의 판정이 시간 안에 끝나고, 입력을 4배로 늘린 시간이 8배를 넘지 않는다', () => {
-  const small = timeEvaluate(SHAPES.map(([, make]) => make(20_000)));
-  const large = timeEvaluate(SHAPES.map(([, make]) => make(80_000)));
-  for (const [i, [name]] of SHAPES.entries()) {
-    assert.ok(small[i] < 5_000, `${name}, n=20000: ${small[i]}ms`);
-    // 선형이면 4배, 제곱이면 16배다. 1초 아래에서는 재는 오차가 비율을 흔들므로 견주지 않는다
-    const limit = Math.max(8 * small[i], 1_000);
-    assert.ok(large[i] <= limit, `${name}: n=20000 ${small[i]}ms → n=80000 ${large[i]}ms`);
+/** 작은 크기의 한 측정이 이만큼(ms)은 걸리게 되풀이한다. 8배가 1초보다 커야 8배 기준이 걸린다(125ms). 재는 오차를 덮게 넉넉히 잡는다 */
+const TARGET_MS = 200;
+const FLOOR_MS = 125;
+
+test('긴 입력의 판정이 시간 안에 끝나고, 입력을 4배로 늘린 시간이 8배를 넘지 않는다', (t) => {
+  const smallInputs = SHAPES.map(([, make]) => make(20_000));
+  const largeInputs = SHAPES.map(([, make]) => make(80_000));
+  // 한 번의 판정 시간(n=20,000)
+  const once = timeEvaluate(
+    smallInputs,
+    SHAPES.map(() => 1),
+  );
+  for (const [i, [name]] of SHAPES.entries())
+    assert.ok(once[i] < 5_000, `${name}, n=20000: ${once[i]}ms`);
+  // 판정 한 번이 짧은 꼴은 재는 오차가 비율을 흔든다. 같은 판정을 되풀이한 합으로 재어 작은 크기의 측정값을 키운다.
+  // 큰 크기도 같은 횟수로 잰다: 합의 비율이 판정 한 번의 비율이다
+  const reps = once.map((ms) => Math.max(1, Math.ceil(TARGET_MS / Math.max(ms, 0.01))));
+  let small = timeEvaluate(smallInputs, reps);
+  // 처음 잰 한 번이 느리게 나와 횟수가 모자라면 횟수를 늘려 다시 잰다(세 번까지)
+  for (let k = 0; k < 3 && small.some((ms) => ms < FLOOR_MS); k++) {
+    for (const [i, ms] of small.entries())
+      if (ms < FLOOR_MS) reps[i] = Math.ceil((reps[i] * TARGET_MS) / Math.max(ms, 0.01));
+    small = timeEvaluate(smallInputs, reps);
   }
+  const large = timeEvaluate(largeInputs, reps);
+  for (const [i, [name]] of SHAPES.entries()) {
+    // 작은 크기의 측정값이 125ms 이상이면 8배가 1초 이상이다: "8배와 1초 가운데 큰 값"이 언제나 8배다(1초가 기준을 가리지 않는다)
+    assert.ok(
+      small[i] >= FLOOR_MS,
+      `${name}: n=20000을 ${reps[i]}번 되풀이한 측정이 ${small[i]}ms로 너무 짧다`,
+    );
+    // 선형이면 4배, 제곱이면 16배다
+    const limit = Math.max(8 * small[i], 1_000);
+    assert.equal(limit, 8 * small[i]);
+    assert.ok(
+      large[i] <= limit,
+      `${name}(${reps[i]}번 되풀이): n=20000 ${small[i]}ms → n=80000 ${large[i]}ms`,
+    );
+  }
+  t.diagnostic(
+    `시간 비(n=80000 / n=20000): ${SHAPES.map(([name], i) => `${name} ${(large[i] / small[i]).toFixed(2)}배`).join(', ')}`,
+  );
 });
