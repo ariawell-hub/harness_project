@@ -7,6 +7,7 @@ import path from 'node:path';
 import { REVIEWERS, cell, roundsOf, type Entry, type Ledger, type Reviewer } from '../ci/ledger.ts';
 import { parseRebuttals, type Rebuttal } from '../ci/rebuttal.ts';
 import { gitTry, harnessStateDir, repoInfo } from '../lib/git.ts';
+import { literalSpan } from '../lib/literal.ts';
 
 /** 대응 한 번. head는 그 대응을 push한 커밋 */
 export interface ReviewResponse {
@@ -245,6 +246,17 @@ export function findingLine(e: Entry): string {
   return `${e.id} [${e.severity}, ${e.reviewer}] ${where} — ${cell(e.title)}`;
 }
 
+/**
+ * 교착 보고(Issue 댓글)의 반박 한 줄: `반박 <N>: 근거 … · 요지 …`. 근거와 요지는 세션이 쓴 글이다.
+ * 코드 스팬에 넣어 댓글에서 멘션·`#번호`·Markdown으로 읽히지 않게 한다(문자 참조로는 멘션이 막히지 않는다, 14.6절).
+ * 값은 앞 300자(코드 포인트)까지만 넣고, 비었으면 `—`다
+ */
+export function rebuttalReportLine(n: number, r: { evidence?: string; summary?: string }): string {
+  // 코드 포인트로 센다(서러게이트 쌍을 가르지 않는다)
+  const span = (v: string | undefined) => literalSpan([...(v ?? '')].slice(0, 300).join('')) || '—';
+  return `반박 ${n}: 근거 ${span(r.evidence)} · 요지 ${span(r.summary)}`;
+}
+
 /** 커밋 메시지 제목에 쓸 지적 제목 앞부분: 한 줄(제어 문자와 유니코드 줄 구분자 없음) */
 export function commitSubject(title: string, max = 60): string {
   return (
@@ -259,8 +271,6 @@ export function commitSubject(title: string, max = 60): string {
 // ---------- 반박 (10.2절 (4), 절차서 8절) ----------
 
 const SHA40 = /^[0-9a-f]{40}$/;
-/** 유니코드 줄·단락 구분자(U+2028, U+2029). 판정 워크플로의 규칙은 제어 문자만 거른다(TD-35) */
-const LINE_SEPARATOR = /[\p{Zl}\p{Zp}]/u;
 
 /**
  * 세션 출력에서 이 지적의 반박을 고른다. 형식·근거가 맞지 않으면 null.
@@ -270,7 +280,7 @@ const LINE_SEPARATOR = /[\p{Zl}\p{Zp}]/u;
  * - 40자 SHA: 원격 브랜치(`<remote>/<지금 브랜치>`)의 조상인 커밋. 검증자는 push된 것만 볼 수 있다
  * - 경로(`경로` 또는 `경로:줄`): worktree에 있고 git이 추적하는 파일
  * - 링크: runner가 확인할 수 없어 받지 않는다
- * 요지에 유니코드 줄 구분자가 있어도 받지 않는다(검증자 입력에서 새 줄로 보일 수 있다)
+ * 요지의 글자 규칙(줄 구분자, 보이지 않는 글자)은 `parseRebuttals`가 본다(`validSummary`). 여기에 다시 적지 않는다
  */
 export function sessionRebuttal(o: {
   output: string;
@@ -290,7 +300,7 @@ export function sessionRebuttal(o: {
     recorderBot: '',
     repo: o.repo,
   }).find((x) => x.id === o.id);
-  if (!r || LINE_SEPARATOR.test(r.summary)) return null;
+  if (!r) return null;
   if (SHA40.test(r.evidence)) {
     const branch = gitTry(['rev-parse', '--abbrev-ref', 'HEAD'], o.worktree);
     const name = branch.ok ? branch.stdout.trim() : '';
