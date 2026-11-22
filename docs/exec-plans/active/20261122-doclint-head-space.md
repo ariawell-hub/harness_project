@@ -2,7 +2,7 @@
 id: 20261122-doclint-head-space
 issue: 191 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -36,6 +36,7 @@ claimed_at: 2026-11-22T09:35:47+09:00
 - 2026-11-22 접수: PR #185의 판정에서 Codex가 낸 지적(F4)을 그 PR의 범위 밖으로 반박했고, 제작자가 대화에서 Issue로 등록하라고 정해(2026-11-22) 봇이 Issue #191을 등록했다. `new-task`로 시작했다.
 - 2026-11-22 테스트를 먼저 썼다. `node --test scripts/test/doc-lint-design-version.test.ts`: 새 테스트가 첫 사례(`> 버전 v0.7.3 · 상태: 초안최종 갱신: 2026-11-21`)에서 실패했다(문제 0건. 기대는 한 건). 있던 11건은 통과.
 - 2026-11-22 `DESIGN_HEAD`가 `최종 갱신:` 바로 앞의 공백을 요구하게 고쳤다. 12건 모두 통과. 실제 설계서의 머리말은 그대로 문제 0건이다(테스트가 본다).
+- 2026-11-22T12:28:51+09:00 step 재작업: 구현 판정 1회차: Claude 승인(P3 하나), Codex 승인(지적 없음). F1(P3): 새 테스트가 `repo` 함수의 문서 주석과 함수 사이에 끼어 들어가, 주석이 테스트 위에 붙어 있다. 맞는 지적이다. 주석을 함수 바로 위로 옮긴다(테스트의 내용과 단언은 그대로다).
 
 ## 의사결정 로그
 
