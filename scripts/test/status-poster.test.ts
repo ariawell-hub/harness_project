@@ -19,9 +19,10 @@ const PAYLOAD: StatusPayload = { context: 'plan-gate', state: 'success', descrip
 
 /**
  * 서버가 요청마다 차례로 쓰는 응답. 숫자는 HTTP 상태, 'drop'은 응답 없이 연결을 끊는다.
- * 'hang'은 연결을 둔 채 답하지 않고, 'slow'는 0.15초 뒤에 201로 답한다. 다 쓰면 201이다
+ * 'hang'은 연결을 둔 채 답하지 않고, 'slow'는 0.15초 뒤에 201로 답한다. 다 쓰면 201이다.
+ * `[코드, ms]`는 그 코드로 답하고 가짜 시계를 `takesMs` 대신 ms만큼 돌린다(요청마다 걸린 시간을 따로 정한다)
  */
-type Step = number | 'drop' | 'hang' | 'slow';
+type Step = number | 'drop' | 'hang' | 'slow' | [code: number, takesMs: number];
 const srv = {
   script: [] as Step[],
   /** 요청 하나가 걸린 것으로 칠 시간(가짜 시계를 이만큼 돌린다) */
@@ -44,8 +45,9 @@ before(async () => {
         auth: req.headers.authorization ?? '',
         body: JSON.parse(body || 'null'),
       });
-      clock.t += srv.takesMs;
-      const step = srv.script.shift() ?? 201;
+      const next = srv.script.shift() ?? 201;
+      const [step, takes] = Array.isArray(next) ? next : [next, srv.takesMs];
+      clock.t += takes;
       if (step === 'drop') return void req.socket.destroy();
       if (step === 'hang') return;
       if (step === 'slow') return void setTimeout(() => res.writeHead(201).end('{}'), 150);
@@ -259,7 +261,7 @@ test('다시 시도가 더하는 시간에 상한이 있다: 느린 요청이 �
   assert.ok(clock.t - 20_000 <= BUDGET);
 });
 
-test('상한은 poster 하나가 쓰는 상태 전체에 걸린다: 앞의 상태가 시간을 썼으면 뒤의 상태는 다시 보내지 않는다', async () => {
+test('상한은 poster 하나가 쓰는 상태 전체에 걸린다: 앞의 상태가 시간을 썼으면 뒤의 상태는 다시 보내지 않는다. 동시에 쓰는 상태도 상한을 함께 쓴다', async () => {
   const { post } = poster();
   // 빠른 5xx 셋: 2 + 6 + 15 = 23초를 쓴다
   srv.script = [500, 500, 500];
@@ -284,6 +286,28 @@ test('상한은 poster 하나가 쓰는 상태 전체에 걸린다: 앞의 상�
   srv.takesMs = 0;
   srv.script = [500];
   assert.equal(await outcome(poster().post(PAYLOAD)), 'ok');
+
+  // 같은 poster로 두 상태를 동시에 써도 상한을 함께 쓴다: 다시 시도는 poster 안에서 한 번에 하나씩 한다.
+  // 새 poster에서 빠른 5xx 셋으로 23초를 쓴 뒤 x와 y를 동시에 쓴다. 둘 다 첫 요청이 빠르게 500을 받는다.
+  // 먼저 다시 보내는 쪽: 23 + 2 + 5 ≤ 60 → 보내고, 그 요청이 30초 걸려 55초를 쓴 것이 된다.
+  // 뒤의 쪽: 55 + 2 + 5 > 60 → 보내지 않는다. 둘이 따로 상한을 보면 둘 다 23초를 보고 다시 보낸다(합해 87초)
+  const two = poster();
+  srv.script = [500, 500, 500];
+  assert.equal(await outcome(two.post({ ...PAYLOAD, context: 'a' })), 'ok');
+  srv.script = [500, 500, [201, TIMEOUT], [201, TIMEOUT]];
+  srv.requests = [];
+  clock.sleeps = [];
+  const got = await Promise.all(
+    ['x', 'y'].map((context) => outcome(two.post({ ...PAYLOAD, context }))),
+  );
+  assert.equal(got.filter((x) => x === 'ok').length, 1, JSON.stringify(got));
+  assert.match(
+    got.find((x) => x !== 'ok') ?? '',
+    /^rejected: 커밋 상태 기록 실패\([xy]\): HTTP 500 .*[^)] \(시간 상한\)$/,
+  );
+  assert.equal(srv.requests.length, 3);
+  assert.deepEqual(clock.sleeps, [W1]);
+  assert.equal(two.lines.length, 4);
 });
 
 test('대기가 예정보다 길어져 상한까지 남은 시간이 모자라면 대기 뒤에도 보내지 않는다', async () => {
