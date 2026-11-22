@@ -222,6 +222,16 @@ export function githubStatusPoster(o: {
   const R: StatusRetry = { ...STATUS_RETRY, ...o.retry };
   /** 이 poster가 다시 시도에 쓴 시간(ms): 대기를 시작한 때부터 그 요청이 끝날 때까지를 더한다 */
   let spentMs = 0;
+  /**
+   * 다시 시도(상한 확인부터 다시 보낸 요청이 끝날 때까지)는 poster 안에서 한 번에 하나씩 한다.
+   * 동시에 쓰는 상태들이 저마다 같은 `spentMs`를 보고 다시 보내면 합해서 상한을 넘는다. 첫 요청은 함께 보내도 된다
+   */
+  let turn: Promise<unknown> = Promise.resolve();
+  const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = turn.then(fn);
+    turn = run.catch(() => undefined);
+    return run;
+  };
   /** 요청 하나. 시간 제한은 요청마다 새로 건다(앞 요청의 만료된 신호를 물려받지 않는다) */
   const once = async (p: StatusPayload, limitMs: number): Promise<PostFailure | null> => {
     // 시간 제한은 정수(ms)여야 한다. 신호는 try 밖에서 만든다: 값이 틀려 나는 예외를 "응답 없음"으로 읽지 않는다
@@ -257,21 +267,24 @@ export function githubStatusPoster(o: {
     for (let sent = 1; f; sent++) {
       const wait = R.waitsMs[sent - 1];
       if (!f.retryable || sent >= R.attempts || wait === undefined) throw failed(p, f, sent, false);
-      // 상한까지 대기 뒤에 요청 하나를 보낼 시간이 남아야 다시 보낸다
-      if (spentMs + wait + R.minRequestMs > R.budgetMs) throw failed(p, f, sent, true);
-      say(
-        `record: 커밋 상태 기록 다시 시도(${p.context}): ${f.what}, ${wait / 1000}초 뒤 ${sent + 1}/${R.attempts}번째`,
-      );
-      const from = now();
-      await sleep(wait);
-      // 대기가 예정보다 길어졌을 수 있다. 남은 시간을 다시 재서, 모자라면 보내지 않고 요청의 시간 제한도 남은 시간으로 줄인다
-      const left = R.budgetMs - spentMs - (now() - from);
-      if (left < R.minRequestMs) {
-        spentMs += now() - from;
-        throw failed(p, f, sent, true);
-      }
-      f = await once(p, Math.min(R.timeoutMs, left));
-      spentMs += now() - from;
+      const last = f;
+      f = await oneAtATime(async () => {
+        // 상한까지 대기 뒤에 요청 하나를 보낼 시간이 남아야 다시 보낸다
+        if (spentMs + wait + R.minRequestMs > R.budgetMs) throw failed(p, last, sent, true);
+        say(
+          `record: 커밋 상태 기록 다시 시도(${p.context}): ${last.what}, ${wait / 1000}초 뒤 ${sent + 1}/${R.attempts}번째`,
+        );
+        const from = now();
+        try {
+          await sleep(wait);
+          // 대기가 예정보다 길어졌을 수 있다. 남은 시간을 다시 재서, 모자라면 보내지 않고 요청의 시간 제한도 남은 시간으로 줄인다
+          const left = R.budgetMs - spentMs - (now() - from);
+          if (left < R.minRequestMs) throw failed(p, last, sent, true);
+          return await once(p, Math.min(R.timeoutMs, left));
+        } finally {
+          spentMs += now() - from;
+        }
+      });
     }
   };
 }
