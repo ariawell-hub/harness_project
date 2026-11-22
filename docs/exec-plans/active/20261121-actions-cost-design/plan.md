@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -228,6 +228,8 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - `docs/decisions/ADR-0008-actions-cost.md`(상태 `제안`): 후보 20개(계획의 18개 + 조사하면서 더한 F1·F2), 묶음 넷(무손실은 월 $42.45로 예산 밖. 호스팅 유지 $17.71, 검증 밖으로 $11.25, 자체 러너 $0.00은 예산 안), 추천 묶음과 넣는 차례.
   - 가리키는 줄: ADR 색인, 설계서 10.4절·18절 Q12·Q13과 버전(v0.7.75), `CHANGELOG`, 기술 부채 표 TD-40·TD-49, `lab/actions-cost/README.md`.
   - 첫 `check`에서 `test`가 46개 실패했다(기술 부채 표에 넣은 ADR 링크. 발견 사항). 링크를 코드 표기 경로로 바꾼 뒤 step2의 AC 12줄과 `check` 통과.
+
+- 2026-11-22T12:38:34+09:00 step2 재작업: 코드 판정 1라운드 F1·F2 대응
 
 ## 의사결정 로그
 
