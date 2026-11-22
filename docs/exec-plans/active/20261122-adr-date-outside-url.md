@@ -2,7 +2,7 @@
 id: 20261122-adr-date-outside-url
 issue: 210 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -38,6 +38,7 @@ claimed_at: 2026-11-22T20:45:40+09:00
 - 2026-11-22 테스트를 먼저 더했다(`check-adr.test.ts`에 하나). 고치기 전: 65건 가운데 그 하나가 실패했다(주소 안에 날짜만 든 칸이 통과했다: "어긋난 점이 없다"). `check-adr.ts`의 "확인 상태" 검사를 고친 뒤 65건 통과. 지금의 ADR-0008은 고친 검사를 통과한다(`node lab/actions-cost/check-adr.ts`: 통과. 주소 안에 날짜가 든 칸 하나에는 확인일이 따로 적혀 있다). README의 설명을 고쳤다.
 - 2026-11-22T20:52:25+09:00 step 재작업: 구현 판정 1회차(head `2fdaaa9`): Codex 수정 요청(F1, P1, 재현됨. Claude는 위험도 기준으로 돌지 않았다). `이름://` 없이 적은 주소의 경로에서 `=` 뒤에 온 날짜를 확인일로 센다. 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 - 2026-11-22 판정 1회차 F1(P1, Codex, 재현됨)을 고쳤다: `확인함(https://example.com/a, example.com/releases/date=2026-11-22)`가 통과했다(`이름://` 없는 주소가 남고, 날짜 앞의 `=`를 경계로 받았다). 맞는 지적이다. 테스트에 사례를 먼저 더해 실패를 확인하고(그 사례가 통과했다: "어긋난 점이 없다"), 날짜를 조각의 처음에서만 찾게 고쳤다. 같은 테스트 하나에 사례를 더했다: 65건 통과(탭으로 띄운 사례는 뺐다: 검사가 문서의 탭을 형식 오류로 먼저 막는다). 지금의 ADR-0008은 그대로 통과한다.
+- 2026-11-22T21:05:11+09:00 step 재작업: 구현 판정 2회차(head `0c09e11`): Codex 수정 요청(F2, P1, 재현됨. F1은 닫혔다). 주소의 질의 안에서 쉼표로 둘러싸인 날짜를 확인일로 센다. 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 
 ## 의사결정 로그
 
