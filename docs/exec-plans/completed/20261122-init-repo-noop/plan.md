@@ -2,7 +2,7 @@
 id: 20261122-init-repo-noop
 issue: 208 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -86,7 +86,7 @@ claimed_at: 2026-11-22T19:09:47+09:00 # new-task가 채운다
 ## 발견 사항
 
 - 명령줄의 옵션 표(`OPTIONS`)가 모든 명령 공용이라, 명령이 읽지 않는 옵션을 오류 없이 받는다. `init --repo`가 그 예였고, 다른 명령도 같다(예: `start --repo <폴더>`는 받아들여지고 무시된다). 옵션을 명령별로 검사하면 이런 오용이 실행 전에 드러난다. → 처리: TD-67
-- README의 "새 프로젝트에 적용하기" 순서(`init` → `pnpm install` → `check`)는 `init`이 설정 파일을 `JSON.stringify`로 다시 써서 `check`의 포맷 검사에서 실패한다(임시 폴더에서 다시 쓴 설정으로 `prettier --check` 실패를 확인했다). → 처리: `README.md`의 적용 순서에 `fmt`를 넣었다
+- README의 "새 프로젝트에 적용하기" 순서(`init` → `pnpm install` → `check`)는 `init`이 설정 파일을 `JSON.stringify`로 다시 써서 `check`의 포맷 검사에서 실패한다(임시 폴더에서 다시 쓴 설정으로 `prettier --check` 실패를 확인했다). → 처리: [README.md](../../../../README.md)
 
 ## 열린 질문
 
