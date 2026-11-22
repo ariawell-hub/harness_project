@@ -92,6 +92,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-22 계획 검증 7회차(`--out`을 없앤 계획): Claude 승인, Codex 수정 요청(P1 하나). F1~F10은 모두 닫혔다(F4는 미룸). F11(P1): `trial.ts`를 실제 명령으로 불러 `--out`의 거부를 보는 테스트는, 고치기 전의 코드에서 돌리면(구현 전의 실패 확인) 그 인자가 받아들여져 패키지 설치가 시작된다. "네트워크를 쓰지 않는 테스트"와 어긋난다. 맞는 지적이다. → 인자 검사를 순수 함수(`lab/q10-db/trial-args.ts`의 `parseTrialArgs`)로 떼고 테스트는 그 함수와 연결(글)을 본다. `trial.ts`는 불러오기만 해도 실측이 돌기 때문에 테스트가 불러오거나 실행하지 않는다. 실제 명령으로 보는 것은 구현 뒤의 AC 한 줄로 옮겼다(리포 밖의 임시 폴더만 쓴다).
 - 2026-11-22 계획 검증 8회차: Claude 승인, Codex 수정 요청(P1 하나). F11은 닫혔다. F12(P1): `trial.ts`를 명령으로 부르는 AC가 종료 코드와 빈 폴더만 봐서, 사용법을 내지 않고 예외로 죽어도 통과한다. 맞는 지적이다. → 그 AC와 `run.ts`의 같은 AC가 표준 오류를 파일로 받아 사용법의 글이 있는지 본다. 두 명령의 사용법 문구와 종료 코드(`run.ts` 2, `trial.ts` 1)를 계획에 적었다.
 - 2026-11-22 계획 검증 9회차: Claude 승인, Codex 수정 요청(새 지적 없음. F12가 남았다). F12: 고친 AC는 표준 오류에 사용법의 글이 **들어 있는지**만 봐서(`grep -F`), 사용법을 담은 예외로 죽어도 통과한다. 맞는 지적이다. → 두 AC가 표준 오류 전체를 기대한 한 줄과 견준다(`test "$(cat …)" = '…'`). 두 명령이 그 경우에 표준 오류에 내는 글을 정확히 한 줄로 정했다.
+- 2026-11-22 계획 검증 10회차: Claude·Codex 모두 승인(지적 없음. F4는 P2로 미뤄 둔 채다). 계획 해시 `49fa50ae8ba1`.
+- 2026-11-22 step0 구현(절차의 (나)): 테스트를 먼저 썼다(`lab/q10-db/test/run.test.ts`). 구현 전에 돌려 실패를 확인했다: `run.ts`가 없어 불러오기에서 실패한다(`ERR_MODULE_NOT_FOUND`. `trial.ts`를 실행하지 않는다). 그 뒤 `run.ts`(`--skip-fmt`만 받는다), `trial-args.ts`(`parseTrialArgs`)를 쓰고 `trial.ts`에서 `--out`을 지웠다. README, 패치(`q10-trial-workflow.patch`. 액션의 SHA와 Node 버전은 지금의 `check.yml`과 같다), CHANGELOG 한 줄. `node --test lab/q10-db/test/run.test.ts lab/q10-db/test/check-results.test.ts` 85건 통과. 구조 테스트(`scripts/test/q10-trial-workflow.test.ts`)는 제작자의 워크플로 커밋 뒤에 올린다. 완료 처리도 그때 한다.
 
 ## 의사결정 로그
 

@@ -2,9 +2,9 @@
 // 빈 폴더에 시험 프로젝트를 만들고 Drizzle과 내장 PostgreSQL(PGlite)을 설치해,
 // PC에 DB 서버 없이 마이그레이션 생성·적용과 폴더별 격리가 되는지 돌려 본다.
 // 이 리포의 설치 정책(pnpm-workspace.yaml, R17)을 시험 프로젝트에 그대로 놓고 설치한다.
-// 결과는 results/<platform>-<arch>.json에 쓴다(실행한 머신마다 파일 하나). --out을 주면 그 파일에 쓴다.
+// 결과는 언제나 results/<platform>-<arch>.json에 쓴다(실행한 머신마다 파일 하나).
 //
-//   node lab/q10-db/trial.ts <빈 폴더> [--out <결과 파일>]
+//   node lab/q10-db/trial.ts <빈 폴더>
 import { spawn, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
@@ -25,6 +25,7 @@ import {
   readRepoPackageManager,
   RESULTS_DIR,
 } from './check-results.ts';
+import { parseTrialArgs } from './trial-args.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -230,13 +231,11 @@ function runCase(project: string, name: string): Promise<CaseResult & { version:
 }
 
 async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
-  const arg = argv[0];
-  const usage = '사용법: node lab/q10-db/trial.ts <빈 폴더> [--out <결과 파일>]';
-  if (!arg || arg.startsWith('--')) fail(usage);
-  if (argv.length !== 1 && !(argv.length === 3 && argv[1] === '--out' && argv[2])) fail(usage);
-  const outFile =
-    argv.length === 3 ? path.resolve(argv[2]) : path.join(RESULTS_DIR, `${NAME}.json`);
+  const parsed = parseTrialArgs(process.argv.slice(2));
+  // 받을 수 없는 인자면 사용법 한 줄을 내고 끝낸다(폴더를 보거나 무엇을 만들기 전에)
+  if ('error' in parsed) fail(parsed.error);
+  const arg = parsed.dir;
+  const outFile = path.join(RESULTS_DIR, `${NAME}.json`);
   if (!existsSync(arg) || !statSync(arg).isDirectory())
     fail('폴더가 없다(새 임시 폴더를 만들어 넘긴다. README의 절차)');
   const root = realpathSync(arg);
@@ -333,11 +332,7 @@ async function main(): Promise<void> {
   };
   mkdirSync(path.dirname(outFile), { recursive: true });
   writeFileSync(outFile, `${JSON.stringify(result, null, 2)}\n`);
-  process.stdout.write(
-    argv.length === 3
-      ? `trial: 결과를 --out 파일에 썼다(${NAME})\n`
-      : `trial: lab/q10-db/results/${NAME}.json을 썼다\n`,
-  );
+  process.stdout.write(`trial: lab/q10-db/results/${NAME}.json을 썼다\n`);
 }
 
 await main();
