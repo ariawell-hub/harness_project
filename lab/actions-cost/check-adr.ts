@@ -165,8 +165,14 @@ function statusOf(head: string[], problems: string[]): Status | null {
   return m[1] as Status;
 }
 
-/** 코드 구간을 가린 글자. 코드 안의 대괄호와 괄호는 링크의 문법이 아니다 */
+/** 화면에 보이는 글자: 한글 음절, 로마자, 숫자. 닫힌 집합이다(유니코드의 "글자"에는 보이지 않는 채움 글자가 있다) */
+const SHOWN = /[A-Za-z0-9가-힣]/;
+/**
+ * 코드 구간을 가린 글자. 코드 안의 대괄호와 괄호는 링크의 문법이 아니다.
+ * 내용에 보이는 글자가 있는 코드 구간은 CODE_MARK, 없는 것(공백, 폭 없는 글자뿐)은 CODE_BLANK로 가린다
+ */
 const CODE_MARK = '\uE000';
+const CODE_BLANK = '\uE001';
 
 /**
  * 한 줄(코드 구간은 CODE_MARK로 가렸다)에 있는 `](주소)`마다 주소와 링크의 글.
@@ -176,7 +182,7 @@ const CODE_MARK = '\uE000';
  */
 function linksOn(line: string): { target: string; label: string | null }[] {
   const links: { target: string; label: string | null }[] = [];
-  for (const m of line.matchAll(/\]\(([^()\s"'<>|`\uE000]*)\)/g)) {
+  for (const m of line.matchAll(/\]\(([^()\s"'<>|`\uE000\uE001]*)\)/g)) {
     let depth = 0;
     let open = -1;
     for (let j = m.index - 1; j >= 0 && open < 0; j--) {
@@ -192,12 +198,14 @@ function linksOn(line: string): { target: string; label: string | null }[] {
 }
 
 /**
- * 링크의 글이 화면에 보이는가: 한글 음절이나 로마자, 숫자, 코드 구간이 있다(문자 참조는 뺀다).
- * 보이는 글자를 닫힌 집합으로 둔다. 유니코드의 "글자"에는 화면에 보이지 않는 채움 글자가 있다.
- * 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다
+ * 링크의 글이 화면에 보이는가: 보이는 글자(SHOWN)나, 내용에 보이는 글자가 있는 코드 구간(CODE_MARK)이
+ * 있다(문자 참조는 뺀다). 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다
  */
-const shownLabel = (label: string): boolean =>
-  !label.includes('](') && /[A-Za-z0-9가-힣\uE000]/.test(label.replace(/&[#\w]+;/g, ''));
+const shownLabel = (label: string): boolean => {
+  if (label.includes('](')) return false;
+  const text = label.replace(/&[#\w]+;/g, '');
+  return SHOWN.test(text) || text.includes(CODE_MARK);
+};
 
 function checkBackground(
   raw: string[],
@@ -216,9 +224,12 @@ function checkBackground(
   let linked = false;
   for (let i = r.from; i < r.to; i++) {
     // 가린 글자가 원문에 있는 줄은 코드 구간과 구별할 수 없어 읽지 않는다
-    const parts = fenced[i] || blank(raw[i]) || raw[i].includes(CODE_MARK) ? null : partsOf(raw[i]);
+    const marked = raw[i].includes(CODE_MARK) || raw[i].includes(CODE_BLANK);
+    const parts = fenced[i] || blank(raw[i]) || marked ? null : partsOf(raw[i]);
     if (!parts) continue;
-    const line = parts.map((p) => (p.code ? CODE_MARK : p.s)).join('');
+    const line = parts
+      .map((p) => (p.code ? (SHOWN.test(p.s) ? CODE_MARK : CODE_BLANK) : p.s))
+      .join('');
     for (const link of linksOn(line)) {
       if (!BASELINE_LINK.test(link.target)) continue;
       if (link.label === null)
