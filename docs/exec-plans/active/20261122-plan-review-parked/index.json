@@ -1,0 +1,10 @@
+{
+  "plan": "20261122-plan-review-parked",
+  "steps": [
+    {
+      "step": 0,
+      "name": "parked",
+      "status": "in_progress"
+    }
+  ]
+}
