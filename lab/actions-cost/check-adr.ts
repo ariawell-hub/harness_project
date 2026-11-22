@@ -326,9 +326,15 @@ function checkCell(at: string, name: string, cell: string, problems: string[]): 
     }
     if (!/https:\/\/[^\s,)]+\.[^\s,)]+/.test(m[1]))
       problems.push(`${at}: "${name}" 칸의 괄호 안에 출처의 https:// 주소가 없다`);
-    const days = m[1].match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+    // 확인한 날짜는 출처 주소 밖에서만 찾는다: 주소 안에 든 날짜(.../blog/2026-11-01/...)는 확인일이 아니다.
+    // 확인일은 공백으로 띄어 적은 낱말이다: 낱말이 날짜 그대로이거나 날짜 뒤에 쉼표 하나가 붙은 것만 센다.
+    // 주소에는 공백이 없으므로 주소는 낱말 하나이고, 그 낱말은 날짜로 시작해 끝나지 않는다(`이름://` 없이 적은
+    // 주소도 같다). 쉼표는 주소 안에도 올 수 있어(질의의 값) 날짜의 앞을 가르는 글자로 보지 않는다
+    const days = m[1].match(/(?<!\S)\d{4}-\d{2}-\d{2}(?=,?(?:\s|$))/g) ?? [];
     if (!days.length || !days.every(realDay))
-      problems.push(`${at}: "${name}" 칸의 괄호 안에 실재하는 날짜(YYYY-MM-DD)가 없다`);
+      problems.push(
+        `${at}: "${name}" 칸의 괄호 안, 출처 주소 밖에 실재하는 날짜(YYYY-MM-DD)가 없다`,
+      );
   }
 }
 
