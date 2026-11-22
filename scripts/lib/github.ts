@@ -19,6 +19,8 @@ export interface ContentHistory {
 }
 
 export interface Comment {
+  /** 댓글 번호(GraphQL `fullDatabaseId`. 숫자로만 된 문자열, 만들어진 순서대로 커진다). 읽지 못했으면 빈 문자열 */
+  id: string;
   author: string;
   body: string;
   createdAt: string;
@@ -396,8 +398,9 @@ const ISSUE_HISTORY_QUERY = `query($owner: String!, $name: String!, $n: Int!) {
     }
   }
 }`;
-// 최근 100개(오래된 것부터). 댓글마다 편집 기록은 20개까지 읽는다
-const COMMENT_FIELDS = `nodes { body createdAt lastEditedAt author { login } editor { login } ${EDITS.replace('100', '20')} }`;
+// 최근 100개(오래된 것부터). 댓글마다 편집 기록은 20개까지 읽는다.
+// 댓글 번호는 fullDatabaseId로 읽는다(databaseId는 32비트 Int라 실제 번호가 넘친다)
+const COMMENT_FIELDS = `nodes { fullDatabaseId body createdAt lastEditedAt author { login } editor { login } ${EDITS.replace('100', '20')} }`;
 const COMMENTS_QUERY = `query($owner: String!, $name: String!, $n: Int!) {
   repository(owner: $owner, name: $name) {
     issueOrPullRequest(number: $n) {
@@ -406,6 +409,12 @@ const COMMENTS_QUERY = `query($owner: String!, $name: String!, $n: Int!) {
     }
   }
 }`;
+
+/** GraphQL `fullDatabaseId`(BigInt: 문자열로 온다)를 댓글 번호로 바꾼다. 숫자로만 된 값이 아니면 빈 문자열 */
+export function commentId(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw : typeof raw === 'number' ? String(raw) : '';
+  return /^\d+$/.test(s) ? s : '';
+}
 
 /** `gh issue list|view --json ISSUE_FIELDS`의 원시 형태 */
 export interface RawIssue {
@@ -562,12 +571,13 @@ export class GhCli implements GitHubPort {
   comments(n: number): Comment[] {
     const r = this.graphql<{
       issueOrPullRequest?: {
-        comments?: { nodes: (RawContent & { body: string })[] } | null;
+        comments?: { nodes: (RawContent & { body: string; fullDatabaseId?: unknown })[] } | null;
       } | null;
     }>(COMMENTS_QUERY, n);
     const nodes = r.issueOrPullRequest?.comments?.nodes;
     if (!nodes) throw new GitHubError(`#${n}의 댓글을 읽지 못했다`);
     return nodes.map((c) => ({
+      id: commentId(c.fullDatabaseId),
       author: c.author?.login ?? '',
       body: c.body,
       createdAt: c.createdAt,
