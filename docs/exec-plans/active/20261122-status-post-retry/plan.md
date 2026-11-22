@@ -2,7 +2,7 @@
 id: 20261122-status-post-retry
 issue: 220 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -81,6 +81,7 @@ claimed_at: 2026-11-22T22:46:11+09:00 # new-task가 채운다
   - 고치다 안 것: 도우미가 끝날 때마다 서버의 연결을 닫게 했더니, 요청 함수가 닫힌 연결을 다시 쓰려다 실패해 다시 시도가 한 번씩 더 돌았다. 연결은 끝나지 않은 경우(`pending`)에만 닫는다.
 - 2026-11-22 23:25 계획 검증 3회차(head `30fc924`): claude 승인(지적 없음), codex는 새 지적 없이 F5만 열어 뒀다(F6은 고쳐진 것으로 닫혔다). 오래 열린 지적 표시는 없었다. F5: 문서 검사가 "대기 전과 뒤에 상한을 본다"와 "토큰·응답 본문을 로그에 넣지 않는다"는 설명을 빼도 통과한다. 맞다. 두 번 고쳤는데도 열려 있어 방법을 바꿨다: 검사할 글귀를 하나씩 더하는 대신, 문서에 적어야 하는 내용 전부를 글귀 14개의 목록으로 step0에 정하고 AC가 설계서 10.4절의 그 줄과 CHANGELOG의 그 줄에서 14개를 모두 보게 했다. 목록 밖에 문서에 적어야 하는 내용은 없다. `origin/main`(#216 병합)도 병합했다.
 - 2026-11-22 23:31 계획 검증 4회차(head `c3402d6`): claude·codex 승인(열린 지적 없음. F5는 고쳐진 것으로 닫혔다). step0을 구현했다. 테스트 먼저: 새 파일 `scripts/test/status-poster.test.ts`의 14건 가운데 13건이 구현 전에 단언 실패로 끝났다(`STATUS_RETRY`가 없다, HTTP 5xx와 끊긴 연결에서 바로 예외라 `outcome`이 `rejected: …`다, 답이 없는 요청에서 3초 뒤 `pending`이다, `record-status`가 종료 코드 1이다). 통과한 1건은 HTTP 4xx가 바로 실패한다는 것으로 지금 동작을 지키는 테스트다. 구현은 `githubStatusPoster` 하나와 `STATUS_RETRY`다. 호출하는 쪽은 고치지 않았다. 문서: 설계서 10.4절 항목과 변경 이력, CHANGELOG, 기술 부채 표(TD-48 해결, 발견 사항을 새 행으로).
+- 2026-11-22T23:59:21+09:00 step0 재작업: 구현 판정 1회차(head `44e8585`): claude 승인, codex 수정 요청 F7(P1, 재현됨) — 같은 poster로 두 상태를 동시에 쓰면 둘 다 다시 시도에 쓴 시간 0을 보고 다시 보내 상한(60초)을 넘길 수 있다. 지금 호출하는 쪽은 차례로 쓰지만 돌려주는 함수는 동시 호출을 막지 않는다. 맞는 지적이라 다시 시도를 poster 안에서 한 번에 하나씩 하게 고친다(테스트 먼저)
 
 ## 의사결정 로그
 

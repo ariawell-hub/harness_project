@@ -4,8 +4,7 @@
     {
       "step": 0,
       "name": "status-retry",
-      "status": "completed",
-      "completed_at": "2026-11-22T23:32:06+09:00"
+      "status": "in_progress"
     }
   ]
 }
