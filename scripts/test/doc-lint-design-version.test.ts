@@ -167,7 +167,6 @@ test('design-version: 머리말이나 변경 이력을 읽지 못하면 통과�
   assert.ok(!p[0].what.includes('날짜가 없다'), p[0].what);
 });
 
-/** 설정·지도·색인과 설계서를 둔 리포. 커밋까지 한다 */
 test('design-version: 머리말은 정한 형식대로만 읽는다(`최종 갱신:` 앞의 공백, ` · `의 공백, 날짜 뒤)', () => {
   const onlyHead = (line: string) => {
     const p = designVersionProblems(design(line, ITEMS));
@@ -197,6 +196,7 @@ test('design-version: 머리말은 정한 형식대로만 읽는다(`최종 갱�
   );
 });
 
+/** 설정·지도·색인과 설계서를 둔 리포. 커밋까지 한다 */
 function repo(designText: string, exclude: string[] = []): string {
   const root = path.join(tmp(), 'r');
   gitInit(root);
