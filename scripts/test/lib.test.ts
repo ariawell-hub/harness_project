@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import * as prettier from 'prettier';
 import { judge, keyFailures, stepTotals, type Attempt } from '../lib/attempts.ts';
 import {
   ConfigError,
@@ -35,6 +36,36 @@ test('frontmatter 파싱과 수정(주석 보존)', () => {
   assert.equal(parseDoc(t2).frontmatter!.status, 'active');
   assert.match(t2, /status: active\s+# 상태/);
   assert.match(setFrontmatter(text, 'owner', 'runner-1'), /owner: runner-1\n---/);
+});
+
+test('setFrontmatter: 값과 주석 사이는 공백 하나다(포매터의 결과와 같다)', async () => {
+  const fm = (status: string, gap = ' ') =>
+    `---\nid: x\nissue: 3 # 번호\nstatus: ${status}${gap}# draft | active | blocked | completed | abandoned\nsize: small\n---\n\n# 제목\n`;
+  const line = (text: string, key: string) => text.split('\n').find((l) => l.startsWith(`${key}:`));
+  const COMMENT = '# draft | active | blocked | completed | abandoned';
+  // 짧아진다(완료한 step을 다시 열 때), 길어진다, 길이가 같다
+  const shorter = setFrontmatter(fm('completed'), 'status', 'active');
+  assert.equal(line(shorter, 'status'), `status: active ${COMMENT}`);
+  assert.equal(
+    line(setFrontmatter(fm('active'), 'status', 'completed'), 'status'),
+    `status: completed ${COMMENT}`,
+  );
+  assert.equal(
+    line(setFrontmatter(fm('active'), 'status', 'failed'), 'status'),
+    `status: failed ${COMMENT}`,
+  );
+  // 손으로 칸을 맞춘 줄도 바꾼 뒤에는 공백 하나다. 다른 줄은 글자 그대로다
+  const aligned = setFrontmatter(fm('completed', '      '), 'status', 'active');
+  assert.equal(line(aligned, 'status'), `status: active ${COMMENT}`);
+  assert.equal(line(aligned, 'issue'), 'issue: 3 # 번호');
+  assert.equal(line(aligned, 'size'), 'size: small');
+  // 주석이 없는 줄, 없는 키
+  assert.equal(line(setFrontmatter(fm('active'), 'size', 'large'), 'size'), 'size: large');
+  assert.match(setFrontmatter(fm('active'), 'owner', 'runner-1'), /\nowner: runner-1\n---\n/);
+  // 바꾼 결과를 포매터가 고치지 않는다
+  const config = await prettier.resolveConfig(path.join(HARNESS_ROOT, 'x.md'));
+  for (const text of [shorter, aligned, setFrontmatter(fm('active'), 'status', 'completed')])
+    assert.ok(await prettier.check(text, { ...config, filepath: 'x.md' }), text);
 });
 
 test('섹션 추출은 코드 블록 안의 ##을 무시한다', () => {
