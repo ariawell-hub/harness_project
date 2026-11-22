@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -240,6 +240,12 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
 
 - 2026-11-22T12:59:39+09:00 step2 재작업: 코드 판정 2라운드 F3·F4 대응
 
+- 2026-11-22 step2 코드 판정 2라운드(head `15d5a2f`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 1, P2 1). F1·F2는 `fixed`.
+  - F3(P1. F1 수정의 회귀: 링크의 글에 인라인 코드가 있으면 바른 기준선 링크를 "링크가 없다"로 거부한다): 링크를 문단마다, 코드 구간을 가린 글에서 찾는다. `](주소)`에서 거슬러 올라가 짝이 맞는 여는 대괄호를 찾는다. 같은 종류(글 안의 짝이 맞는 대괄호, 줄을 넘는 글)도 세게 했고, 화면에서 링크가 아닌 것(코드로 적은 예시, 글 안에 링크가 든 바깥 대괄호, 다른 문단·목록 항목의 여는 대괄호)은 세지 않는다. 실패하는 테스트를 먼저 썼다(커밋 `b19f87c`: 60개 가운데 1개 실패 → `fe443d1`: 60개 통과). 검증자의 재현 입력(실제 ADR의 링크 글에 코드를 넣은 것)이 통과하는 것을 확인했다.
+  - F4(P2, 비차단. "다시 볼 때 먼저 볼 것"은 B1·B3의 작업이 남는 job에 쓰인다고 적었는데 묶음 "검증 밖으로"는 B1·B3 없이 arm64로 셌다): 묶음의 금액이 무엇을 센 값인지와 넘어갈 때 B3은 걷어 내고 B1의 1코어 설정은 남는 두 job에만 해당한다는 것을 적었다(커밋 `8940902`). 금액은 그대로다.
+  - 제작자가 대화에서 "호스팅유지로 진행해달라는 뜻 맞다"고 확인했다(2026-11-22).
+  - AC 12줄과 `check` 통과.
+
 ## 의사결정 로그
 
 - 결정: `metrics`에 잇지 않고 `actions-cost` 명령을 따로 둔다. / 이유: `metrics`의 출력은 `docs/QUALITY_SCORE.md`에 붙이는 주간 지표이고 PR 단위로 읽는다. 비용은 실행마다 job 목록을 읽어야 해 조회 수가 실행 수만큼 든다(1,000건이면 1,000회). 주간 집계가 그만큼 느려지면 안 된다. / 버린 대안: `metrics`에 절을 더하기(느려지고, 출력 문서가 다르다).
@@ -329,7 +335,7 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
 - 수용 기준 8: `node lab/actions-cost/check-adr.ts`와 그 테스트, step2의 AC.
 - 수용 기준 9: `node scripts/harness.ts check`.
 - step0(2026-11-21): AC 1~11 통과(`node --test scripts/test/actions-cost.test.ts scripts/test/actions-cost-command.test.ts` 67개 통과(12라운드 수정 뒤), 명령의 종료 코드와 기록 칸 행, 문서 두 곳). `node scripts/harness.ts check` 통과. 실제 기간(2026-11-17~20)의 값은 진행 로그에 있다. 임시 스크립트의 3,391분은 최근 실행 1,000건만 읽은 값이고, 이 명령은 1,174건을 모두 읽어 4,028분을 낸다.
-- step2(2026-11-22): AC 12줄 통과(`node --test lab/actions-cost/test/check-adr.test.ts` 58개 통과(코드 판정 1라운드 수정 뒤), `node lab/actions-cost/check-adr.ts` 통과, ADR을 망가뜨린 사본 여덟 가지가 각각 실패, 가리키는 줄 네 곳). `node scripts/harness.ts check` 통과.
+- step2(2026-11-22): AC 12줄 통과(`node --test lab/actions-cost/test/check-adr.test.ts` 60개 통과(코드 판정 2라운드 수정 뒤), `node lab/actions-cost/check-adr.ts` 통과, ADR을 망가뜨린 사본 여덟 가지가 각각 실패, 가리키는 줄 네 곳). `node scripts/harness.ts check` 통과.
 
 ## 다음 할 일
 
