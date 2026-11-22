@@ -790,6 +790,14 @@ test('init: 차례로 처리하면 도중에 실패할 템플릿 목록은 쓰�
         want: /템플릿 원본이 파일이 아니다.*made/,
       },
       {
+        name: '앞의 템플릿이 만든 파일의 이름에 /를 붙인 자리',
+        templates: [
+          { from: first, to: 'made' },
+          { from: second, to: 'made/' },
+        ],
+        want: /놓일 자리가 폴더 경로다.*made/,
+      },
+      {
         name: '놓일 자리가 /로 끝난다',
         templates: [
           { from: first, to: 'a.md' },
@@ -826,6 +834,23 @@ test('init: 폴더인 자리는 자리 표시 교체를 청하지 않으면 전�
     '- 건너뜀(이미 있음): docs',
   ]);
   assert.deepEqual(readdirSync(path.join(root, 'docs')), []);
+});
+
+test('init: 구분자가 아닌 글자로 끝나는 이름은 파일 이름이다 — POSIX의 역슬래시(판정 지적 F15)', (t) => {
+  if (path.sep !== '/') return t.skip('역슬래시가 경로 구분자인 환경');
+  const root = templateRepo({ 'first.md': '첫째\n', 'second.md': '둘째\n' }, [
+    { from: 'templates/first.md', to: 'guide\\' },
+    { from: 'templates/second.md', to: 'docs\\guide.md' },
+    { from: 'templates/second.md', to: 'guide\\' },
+  ]);
+  previewThenApply(root, [
+    '- 템플릿 복사 예정: guide\\',
+    '- 템플릿 복사 예정: docs\\guide.md',
+    '- 건너뜀(이미 있음): guide\\',
+  ]);
+  assert.equal(readFileSync(path.join(root, 'guide\\'), 'utf8'), '첫째\n');
+  assert.equal(readFileSync(path.join(root, 'docs\\guide.md'), 'utf8'), '둘째\n');
+  assert.ok(!existsSync(path.join(root, 'docs')), '역슬래시는 폴더를 만들지 않는다');
 });
 
 test('도움말: init의 --repo와 --dry-run을 적는다', () => {
