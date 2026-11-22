@@ -48,6 +48,30 @@ test('scopePaths: 백틱 안의 글자를 순서대로 뽑고, 공백이 든 것
   assert.deepEqual(scopePaths('- src/a.ts\n- 설계서 6절'), []);
 });
 
+test('scopePaths: 백틱 하나로 감싼 코드 스팬만 경로다(둘 이상으로 감싼 것은 예시다)', () => {
+  // 백틱 둘·셋으로 감싼 글자는 경로가 아니다
+  assert.deepEqual(scopePaths('- 예시: ``outside.ts``'), []);
+  assert.deepEqual(scopePaths('- 예시: ```outside.ts```'), []);
+  // 같은 줄에 예시와 정상 경로가 함께 있으면 정상 경로만 뽑는다
+  assert.deepEqual(scopePaths('- ``x.ts``는 예시이고 `y.ts`는 바꾼다'), ['y.ts']);
+  assert.deepEqual(scopePaths('- `y.ts`, ``x.ts``, `z.ts`'), ['y.ts', 'z.ts']);
+  // 백틱 둘로 감싼 스팬 안의 백틱 하나(백틱을 글자로 보이는 표기)는 경로가 아니다
+  assert.deepEqual(scopePaths('- 표기 예: `` `late.ts` ``'), []);
+  assert.deepEqual(scopePaths('- `` `late.ts` ``와 `real.ts`'), ['real.ts']);
+  // 닫히지 않은 백틱 줄은 글자다: 뒤의 스팬을 삼키지 않는다
+  assert.deepEqual(scopePaths('- ``열고 닫지 않은 것과 `a.ts`'), ['a.ts']);
+  assert.deepEqual(scopePaths('- `닫지않음'), []);
+  // 계획 전체에서도 같다: 백틱 둘로 적은 파일을 바꾸면 범위 밖이다
+  assert.deepEqual(planScopePaths(plan('- `src/a.ts`\n- 예시: ``outside.ts``')), ['src/a.ts']);
+  assert.deepEqual(
+    judgeScope(
+      ['outside.ts', 'src/a.ts'],
+      planScopePaths(plan('- `src/a.ts`\n- 예시: ``outside.ts``')),
+    ).outside,
+    ['outside.ts'],
+  );
+});
+
 test('scopePaths: HTML 주석과 코드 블록 안의 글자는 넣지 않는다', () => {
   assert.deepEqual(scopePaths('<!-- `x.ts` -->\n- `a.ts`\n<!--\n- `y.ts`\n-->\n- `b.ts`'), [
     'a.ts',
