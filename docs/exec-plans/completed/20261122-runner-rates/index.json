@@ -1,0 +1,11 @@
+{
+  "plan": "20261122-runner-rates",
+  "steps": [
+    {
+      "step": 0,
+      "name": "rates",
+      "status": "completed",
+      "completed_at": "2026-11-22T15:28:39+09:00"
+    }
+  ]
+}

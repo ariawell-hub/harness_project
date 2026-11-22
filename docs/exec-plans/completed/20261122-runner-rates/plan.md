@@ -2,7 +2,7 @@
 id: 20261122-runner-rates
 issue: 204 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -65,6 +65,12 @@ B2·B1을 넣기 전에 `actions-cost`가 두 러너를 단가로 계산하고 �
   - F2(AC가 출처와 확인한 날짜의 누락을 잡지 못한다): `RATE_MILLI` 바로 위의 주석과 문서 "재는 방법"의 단가 줄을 잘라 주소 둘·날짜·라벨을 찾는 AC 두 줄을 넣었다.
   - F3(러너별 표에 실제 행이 있는지 보지 않는다): 러너가 섞인 입력의 출력에서 러너별 구간만 잘라 다섯 행의 값을 단언하게 했고, 기준선 출력의 AC도 구간을 잘라 본다.
 - 2026-11-22 계획 검증 2라운드(head `b3f3809`): `review/claude` 승인. `review/codex` 수정 요청(새 지적 없음. F1·F3은 `fixed`, F2는 열림: 코드 주석을 자르는 명령이 마지막 `/**`부터 선언까지 읽어, 앞선 주석에 적고 그 뒤에 다른 선언이 끼어도 통과한다). 닫는 `*/`가 선언의 바로 앞 줄에 있는 주석 블록만 자르게 고쳤다. 지금 파일은 블록 7줄이 잘리고, 선언이나 줄 주석을 사이에 끼운 사본은 빈 결과가 나오는 것을 확인했다.
+- 2026-11-22 계획 검증 3라운드(head `c7847ec`): 두 검증자 승인(원장: 계획 검증(G1) 해시 `0f2e06141549`, 승인 claude·codex). 열린 지적 없음.
+- 2026-11-22 step0 구현. 실패하는 테스트를 먼저 썼다(커밋 `3e5a256`: `scripts/test/actions-cost.test.ts` 32개 가운데 6개 실패 → `7df6975`: 32개 통과, 명령 테스트를 더해 73개 통과).
+  - 단가표에 두 줄을 더하고 러너별 합계(`byRunner`)와 러너별 표, 세 단가를 적는 안내 문장을 넣었다. 계산은 이미 job마다 밀리달러 정수로 곱해 더하고 있어 합계의 식은 바꾸지 않았다.
+  - 문서의 기준선 구간은 `--from`의 새 출력으로 바꿔 붙였다. 달라진 것은 단가 안내 문장과 러너별 표(한 줄: `ubuntu-latest` 2384개, 4028분, $24.17)뿐이고 기준선의 값과 기록 표는 그대로다.
+  - `lab/actions-cost/`의 검사 스크립트·테스트·README는 고칠 곳이 없었다(문서 검사 통과, 테스트 153개 통과).
+  - AC 12줄과 `check` 통과.
 
 ## 의사결정 로그
 
@@ -82,8 +88,9 @@ B2·B1을 넣기 전에 `actions-cost`가 두 러너를 단가로 계산하고 �
 ## 검증 방법과 결과
 
 - step0의 AC(테스트, 기준선 보존 기록이 그대로인지, 기준선의 "기록 칸" 행, 문서의 기준선 구간과 `--from` 출력의 일치, 문서 검사, `check`).
+- 결과(2026-11-22): AC 12줄 통과. `scripts/test/actions-cost.test.ts` 32개, `scripts/test/actions-cost-command.test.ts`와 합쳐 73개, `lab/actions-cost/test/` 153개 통과. 타입 검사 통과.
 
 ## 다음 할 일
 
-- 계획만 담은 커밋을 push해 초안 PR을 열고 계획 검증(G1)을 받는다. 승인 뒤 step0을 구현한다(테스트 먼저).
+- PR #205의 코드 판정을 보고, 통과하면 `pr-ready`로 초안을 해제하며 제작자의 head 승인을 요청한다(보호 경로 `scripts/**`, `docs/harness/**`).
 - 이 계획이 병합되면 A6 뒤의 값(2026-11-19~2026-11-22)을 재고, B2(arm64 러너)의 Issue를 등록해 시작한다.
