@@ -565,6 +565,17 @@ test('checkAdr 후보표: 확인 상태의 날짜는 출처 주소 밖에서만 
     '확인함(https://example.com/a, example.com/2026-11-01/b)',
     '확인함(https://example.com/a, 2026-11-01-coming-soon)',
     '확인함(https://example.com/a, 2026-11-223)',
+    // 판정 1회차 F1: `이름://` 없이 적은 주소에서 날짜 앞에 다른 글자가 붙은 꼴. 날짜는 조각의 처음에 와야 한다
+    '확인함(https://example.com/a, example.com/releases/date=2026-11-22)',
+    '확인함(https://example.com/a, example.com/a?d=2026-11-22)',
+    '확인함(https://example.com/a, example.com/a#2026-11-22)',
+    '확인함(https://example.com/a, example.com:2026-11-22)',
+    '확인함(https://example.com/a, a@2026-11-22)',
+    '확인함(https://example.com/a, a+2026-11-22)',
+    '확인함(https://example.com/a, 확인일:2026-11-22)',
+    // 날짜 뒤에 주소가 이어지는 꼴
+    '확인함(https://example.com/a, 2026-11-22.example.com/b)',
+    '확인함(https://example.com/a, 2026-11-22?x)',
   ])
     fails(check(v), NO_DAY);
   // 주소 밖에 확인일이 있으면 통과한다. 주소 안의 날짜는 실재하지 않아도 된다
@@ -574,6 +585,8 @@ test('checkAdr 후보표: 확인 상태의 날짜는 출처 주소 밖에서만 
     '확인함(https://example.com/a,2026-11-22)',
     '확인함(2026-11-22, https://example.com/a)',
     '확인함(https://example.com/a, 2026-11-22에 확인)',
+    '확인함(https://example.com/a,\t2026-11-22)',
+    '확인함(https://example.com/a, 확인 2026-11-22)',
   ])
     assert.deepEqual(check(v), [], v);
   // 주소 밖의 날짜가 실재하지 않으면 실패한다(그대로)

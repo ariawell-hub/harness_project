@@ -327,10 +327,10 @@ function checkCell(at: string, name: string, cell: string, problems: string[]): 
     if (!/https:\/\/[^\s,)]+\.[^\s,)]+/.test(m[1]))
       problems.push(`${at}: "${name}" 칸의 괄호 안에 출처의 https:// 주소가 없다`);
     // 확인한 날짜는 출처 주소 밖에서만 찾는다: 주소 안에 든 날짜(.../blog/2026-11-01/...)는 확인일이 아니다.
-    // 주소(`이름://`부터 공백·쉼표·닫는 괄호 앞까지)를 빼고, 남은 글에서 홀로 선 날짜만 센다
-    // (`이름://` 없이 적은 주소의 경로나 글 제목 안의 날짜도 세지 않는다)
-    const outside = m[1].replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s,)]*/g, ' ');
-    const days = outside.match(/(?<![\w/.-])\d{4}-\d{2}-\d{2}(?![\w/-])/g) ?? [];
+    // 괄호 안의 글을 공백과 쉼표로 나눈 조각의 처음에 온 날짜만 센다(앞이 처음·공백·쉼표다). 주소는 조각 하나라
+    // 그 안의 날짜는 조각의 처음이 아니다(`이름://` 없이 적은 주소도 같다). 날짜 뒤에 ASCII 글자·숫자·기호가
+    // 이어지면 세지 않는다(뒤가 끝·공백·쉼표이거나 한글 같은 ASCII 밖의 글자다)
+    const days = m[1].match(/(?<![^\s,])\d{4}-\d{2}-\d{2}(?![\x21-\x2b\x2d-\x7e])/g) ?? [];
     if (!days.length || !days.every(realDay))
       problems.push(
         `${at}: "${name}" 칸의 괄호 안, 출처 주소 밖에 실재하는 날짜(YYYY-MM-DD)가 없다`,
