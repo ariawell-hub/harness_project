@@ -125,6 +125,52 @@ interface Views {
   fenced: boolean[];
 }
 
+/**
+ * 한 줄에서 주석(`<!-- … -->`)을 뺀다. 코드 구간(백틱) 안의 글은 그대로 둔다: 백틱 안의 `<!--`는 화면에 보이는 글이다.
+ * 코드 구간은 같은 수의 백틱으로 여닫힌 것만 친다(줄을 넘는 코드 구간은 보지 않는다).
+ * `inComment`는 앞 줄에서 열린 주석이 이어지는가이고, 돌려주는 값은 이 줄 끝에서의 상태다
+ */
+function withoutComments(line: string, inComment: boolean): { shown: string; inComment: boolean } {
+  let shown = '';
+  let i = 0;
+  while (i < line.length) {
+    if (inComment) {
+      const close = line.indexOf('-->', i);
+      if (close < 0) return { shown, inComment: true };
+      inComment = false;
+      i = close + 3;
+    } else if (line[i] === '`') {
+      let n = 1;
+      while (line[i + n] === '`') n++;
+      // 같은 길이의 백틱 묶음이 뒤에 있으면 그 사이가 코드 구간이다
+      let close = -1;
+      for (let j = i + n; j < line.length;) {
+        if (line[j] !== '`') {
+          j++;
+          continue;
+        }
+        let k = 1;
+        while (line[j + k] === '`') k++;
+        if (k === n) {
+          close = j;
+          break;
+        }
+        j += k;
+      }
+      const end = close < 0 ? i + n : close + n;
+      shown += line.slice(i, end);
+      i = end;
+    } else if (line.startsWith('<!--', i)) {
+      inComment = true;
+      i += 4;
+    } else {
+      shown += line[i];
+      i++;
+    }
+  }
+  return { shown, inComment };
+}
+
 function viewsOf(doc: string): Views {
   const raw = doc.split(/\r?\n/);
   const text: string[] = [];
@@ -135,7 +181,7 @@ function viewsOf(doc: string): Views {
   let inComment = false;
   for (const line of raw) {
     if (fence !== null) {
-      const closes = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line);
+      const closes = new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line);
       text.push(closes ? '' : line);
       struct.push('');
       fenced.push(!closes);
@@ -143,37 +189,29 @@ function viewsOf(doc: string): Views {
       continue;
     }
     fenced.push(false);
-    if (inComment) {
-      // 여러 줄 주석의 안. 닫는 표시가 있는 줄까지 통째로 없는 것으로 친다
-      if (line.includes('-->')) inComment = false;
-      text.push('');
-      struct.push('');
-      continue;
-    }
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    // 코드 블록은 목록 항목 아래에 들여 써도 코드 블록이다. 주석 안에서는 열리지 않는다
+    const open = inComment ? null : /^\s*(`{3,}|~{3,})/.exec(line);
     if (open) {
       fence = open[1];
       text.push('');
       struct.push('');
       continue;
     }
-    if (line.trim() === BEGIN || line.trim() === END) {
+    if (!inComment && (line.trim() === BEGIN || line.trim() === END)) {
       text.push(line);
       struct.push(line);
       continue;
     }
-    // 한 줄 안에서 닫힌 주석을 빼고, 닫히지 않은 주석은 그 자리부터 뺀다
-    let shown = line.replace(/<!--.*?-->/g, '');
-    const at = shown.indexOf('<!--');
-    if (at >= 0) {
-      shown = shown.slice(0, at);
-      inComment = true;
-    }
-    text.push(shown);
-    struct.push(shown);
+    const w = withoutComments(line, inComment);
+    inComment = w.inComment;
+    text.push(w.shown);
+    struct.push(w.shown);
   }
   return { raw, text, struct, fenced };
 }
+
+/** 네 칸 넘게 들여 쓰지 않은, 글이 있는 줄. 네 칸 들여 쓴 줄은 코드로 보이므로 표·표식·날짜 줄로 치지 않는다 */
+const shallow = (line: string) => /^ {0,3}\S/.test(line);
 
 /** 절의 본문이 놓인 줄의 범위(제목 다음 줄부터 다음 `## ` 전까지) */
 interface Range {
@@ -308,9 +346,10 @@ function checkBaseline(
   problems: string[],
 ): void {
   // 표식 구간은 문서 전체에 하나이고 이 절 안에 있다. 표식은 struct에서 찾는다(코드 블록 안의 것은 표식이 아니다)
-  const count = (mark: string) => v.struct.filter((l) => l.trim() === mark).length;
+  const count = (mark: string) => v.struct.filter((l) => shallow(l) && l.trim() === mark).length;
   const within = (mark: string) => {
-    for (let i = r.from; i < r.to; i++) if (v.struct[i].trim() === mark) return i;
+    for (let i = r.from; i < r.to; i++)
+      if (shallow(v.struct[i]) && v.struct[i].trim() === mark) return i;
     return -1;
   };
   const begin = within(BEGIN);
@@ -345,7 +384,7 @@ function checkBaseline(
       );
   }
 
-  const dated = outside.map((i) => v.struct[i]).filter((l) => l.includes('잰 날짜:'));
+  const dated = outside.map((i) => v.struct[i]).filter((l) => shallow(l) && l.includes('잰 날짜:'));
   if (!dated.length) problems.push('기준선: "잰 날짜: <YYYY-MM-DD>" 줄이 표식 구간 밖에 없다');
   for (const l of dated) {
     const m = /잰 날짜:\s*(\d{4}-\d{2}-\d{2})(?!\d)/.exec(l);
@@ -381,12 +420,12 @@ function checkProcedure(body: string[], problems: string[]): void {
       );
       continue;
     }
-    // 내용은 머리 뒤의 글과 그 항목에 속한 줄(들여 쓴 이어지는 줄)이다.
-    // 들여 쓰지 않은 줄(다음 목록 항목, 문단)을 만나면 끝난다: 화면에서 그 항목의 내용이 아니다
+    // 내용은 머리 뒤의 글과 그 항목에 속한 줄이다: 목록 표시("- ")의 글 자리(두 칸) 넘게 들여 쓴 줄.
+    // 덜 들여 쓴 줄(다음 목록 항목, 문단)을 만나면 끝난다: 화면에서 그 항목의 내용이 아니다
     const content = [body[hits[0].i].slice(item.head.length)];
     for (let j = hits[0].i + 1; j < body.length; j++) {
       if (blank(body[j])) continue;
-      if (!/^\s/.test(body[j])) break;
+      if (!/^( {2,}|\t)/.test(body[j])) break;
       content.push(body[j]);
     }
     const n = dense(content);
@@ -417,7 +456,7 @@ function checkRecord(
   const tables: string[][] = [];
   let current: string[] | null = null;
   for (const l of body) {
-    if (!l.trimStart().startsWith('|')) current = null;
+    if (!/^ {0,3}\|/.test(l)) current = null;
     else if (current) current.push(l);
     else tables.push((current = [l]));
   }
