@@ -34,7 +34,7 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 범위:
 
 - `.github/workflows/check.yml`의 `check` job: `runs-on`, gitleaks 파일 이름, 체크섬(세 줄). 제작자가 올린다(봇은 워크플로 파일을 push할 수 없다. `docs/SECURITY.md` "워크플로 변경 절차").
-- 그 구조를 단언하는 테스트. `selftest`와 `check`의 gitleaks 버전·체크섬이 같아야 한다는 지금의 테스트(`scripts/test/harness-guard.test.ts`)는 버전이 같고 체크섬은 job마다 그 러너의 아키텍처의 값이어야 한다는 것으로 바꾼다(두 job의 러너가 달라져 체크섬이 같을 수 없다. 체크섬을 정해 둔 값과 견주므로 느슨해지지 않는다).
+- 그 구조를 단언하는 테스트. `selftest`와 `check`의 gitleaks 버전·체크섬이 같아야 한다는 지금의 테스트(`scripts/test/harness-guard.test.ts`)는 그 자리에서, 버전이 같고 파일과 체크섬은 job마다 그 러너의 아키텍처의 값이어야 한다는 것으로 바꾼다(두 job의 러너가 달라져 체크섬이 같을 수 없다. 체크섬을 정해 둔 값과 견주므로 느슨해지지 않는다). 고치는 테스트 파일 둘(`ci.test.ts`, `harness-guard.test.ts`)은 파일마다 merge-base에서 단언 실패로 실패해야 한다(`test-effect`).
 - 넣기 전 값의 측정과 기록(보존 기록 파일, 기록 표의 행).
 - 문서 `docs/harness/actions-cost.md`의 보존 기록 설명 한 문장(PR #205 판정의 F4, P2로 미룬 것: 보존 기록에 `self-hosted` 라벨도 그대로 남는다는 것이 빠져 있다), 변경 이력 한 줄.
 
@@ -71,6 +71,8 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 - 2026-11-22 계획 검증 1라운드(PR #207, head `92d908d`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 2). 둘 다 받아들여 계획을 고쳤다.
   - F1(넣기 전 값의 기간 2026-11-19~22는 A6이 들어간 날의 0시부터라 A6 전에 만들어진 실행이 섞인다): A6의 병합 시각을 확인했다(PR #130, 2026-11-19 04:56 UTC). 기간을 그 뒤 첫 UTC 자정부터의 나흘(2026-11-20~2026-11-23)로 바꾸고 파일 이름, 문서 행, AC를 맞췄다. 재는 때는 2026-11-24 00:00(UTC) 뒤다.
   - F2(`selftest`가 실제 job의 조건으로 arm64에서 통과하는지 병합 전에 확인하지 않는다. 15분 제한, main의 실행기와 따로 받은 PR 트리, 보고서를 job 출력으로 넘기는 것): 병합 전에 그 조건을 재현할 길이 없어(`gates`는 main의 정의로 돈다) `selftest`를 범위에서 뺐다. 이 계획은 `check` job만 옮긴다. 두 job의 gitleaks 체크섬이 같아야 한다는 테스트는 버전이 같고 체크섬은 아키텍처마다 정해 둔 값이어야 한다는 것으로 바꾼다.
+- 2026-11-22 계획 검증 2라운드(head `a368ab9`): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 1). F1·F2는 `fixed`.
+  - F3(체크섬 단언을 `ci.test.ts`로 옮기고 `harness-guard.test.ts`에 버전 비교만 남기면, 그 파일은 merge-base에서도 통과해 `test-effect`가 `ineffective`로 막는다): 받아들였다. gitleaks 고정값 단언(job마다 파일의 아키텍처와 체크섬)을 `harness-guard.test.ts`의 그 테스트에 둔다. merge-base의 `check.yml`은 x64라 거기서 실패한다. `ci.test.ts`에는 러너 단언과 gitleaks를 받는 job의 목록을 둔다. 두 파일이 파일마다 merge-base에서 단언 실패로 실패하는지 보는 AC(`test-effect --ci`의 파일별 판정)와, 따로 돌린 결과를 진행 로그에 적는 절차를 더했다.
 
 ## 의사결정 로그
 
