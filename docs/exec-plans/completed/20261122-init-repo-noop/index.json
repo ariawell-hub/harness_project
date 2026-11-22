@@ -1,0 +1,11 @@
+{
+  "plan": "20261122-init-repo-noop",
+  "steps": [
+    {
+      "step": 0,
+      "name": "init-target",
+      "status": "completed",
+      "completed_at": "2026-11-22T20:54:11+09:00"
+    }
+  ]
+}
