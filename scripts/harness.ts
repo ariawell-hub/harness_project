@@ -170,7 +170,11 @@ CI(gates 워크플로, 10.4절):
                                            남긴다(있는 파일은 덮어쓰지 않는다). --from: GitHub 대신 보존 기록으로 계산한다
 
 설정:
-  init --profile core|web [--owner <제작자 계정>] [--bot <봇 계정>]
+  init --profile core|web [--repo <폴더>] [--dry-run] [--owner <제작자 계정>] [--bot <봇 계정>]
+                                           프로파일을 설정에 적용하고 템플릿을 복사한 뒤 남은 수동 작업을 안내한다.
+                                           --repo: 적용할 리포(기본: 명령을 실행한 리포). 프로파일은 그 리포의 profiles/에서 읽는다.
+                                           --dry-run: 파일을 쓰지 않고 바뀔 설정 항목·복사될 템플릿·안내만 출력한다.
+                                           설정의 내용이 그대로면 설정 파일을 다시 쓰지 않는다
 `;
 
 type OptionKind = 'string' | 'boolean';
@@ -222,6 +226,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   only: { type: 'string' },
   harness: { type: 'string' },
   repo: { type: 'string' },
+  'dry-run': { type: 'boolean' },
   'config-root': { type: 'string' },
   'head-ref': { type: 'string' },
   'head-sha': { type: 'string' },
@@ -312,16 +317,29 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write(`알 수 없는 옵션: ${scan.unknown.join(', ')}\n\n${HELP}`);
     return 2;
   }
-  const { values, positionals } = parseArgs({
+  const { values, positionals, tokens } = parseArgs({
     args,
     allowPositionals: true,
     strict: false,
     options: OPTIONS,
+    tokens: true,
   });
   const str = (k: string) => (typeof values[k] === 'string' ? (values[k] as string) : undefined);
   const flag = (k: string) => values[k] === true;
   const cwd = process.cwd();
   const worker = str('worker') ?? process.env.HARNESS_WORKER ?? 'session';
+  // 옵션 표는 모든 명령이 함께 쓴다. --dry-run을 읽지 않는 명령이 조용히 받아 실제로 실행하지 않게 막는다.
+  // 값을 붙인 꼴(--dry-run=false)도 받지 않는다: 불리언으로 읽히지 않아 실제로 쓰게 된다.
+  // 파서가 옵션으로 읽은 토큰을 모두 본다: 같은 옵션을 거듭 주면 마지막 값만 남아, 남은 값만 봐서는 앞의 것을 놓친다
+  const dryTokens = tokens.filter((t) => t.kind === 'option' && t.name === 'dry-run');
+  if (dryTokens.length && cmd !== 'init') {
+    process.stderr.write(`--dry-run은 init에서만 쓴다(${cmd}은 받지 않는다)\n`);
+    return 2;
+  }
+  if (dryTokens.some((t) => t.kind === 'option' && t.value !== undefined)) {
+    process.stderr.write('--dry-run은 값을 받지 않는다\n');
+    return 2;
+  }
 
   if ((STANDARD_COMMANDS as string[]).includes(cmd)) {
     const info = repoInfo(cwd);
@@ -1275,9 +1293,10 @@ async function main(argv: string[]): Promise<number> {
         from: str('from'),
       });
     case 'init':
-      return init(repoInfo(cwd).root, str('profile') ?? '', {
+      return init(path.resolve(str('repo') ?? repoInfo(cwd).root), str('profile') ?? '', {
         owner: str('owner'),
         bot: str('bot'),
+        dryRun: flag('dry-run'),
       });
     default:
       process.stderr.write(`알 수 없는 명령: ${cmd}\n\n${HELP}`);
