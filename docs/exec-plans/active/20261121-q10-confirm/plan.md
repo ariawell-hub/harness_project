@@ -94,6 +94,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-22 계획 검증 9회차: Claude 승인, Codex 수정 요청(새 지적 없음. F12가 남았다). F12: 고친 AC는 표준 오류에 사용법의 글이 **들어 있는지**만 봐서(`grep -F`), 사용법을 담은 예외로 죽어도 통과한다. 맞는 지적이다. → 두 AC가 표준 오류 전체를 기대한 한 줄과 견준다(`test "$(cat …)" = '…'`). 두 명령이 그 경우에 표준 오류에 내는 글을 정확히 한 줄로 정했다.
 - 2026-11-22 계획 검증 10회차: Claude·Codex 모두 승인(지적 없음. F4는 P2로 미뤄 둔 채다). 계획 해시 `49fa50ae8ba1`.
 - 2026-11-22 step0 구현(절차의 (나)): 테스트를 먼저 썼다(`lab/q10-db/test/run.test.ts`). 구현 전에 돌려 실패를 확인했다: `run.ts`가 없어 불러오기에서 실패한다(`ERR_MODULE_NOT_FOUND`. `trial.ts`를 실행하지 않는다). 그 뒤 `run.ts`(`--skip-fmt`만 받는다), `trial-args.ts`(`parseTrialArgs`)를 쓰고 `trial.ts`에서 `--out`을 지웠다. README, 패치(`q10-trial-workflow.patch`. 액션의 SHA와 Node 버전은 지금의 `check.yml`과 같다), CHANGELOG 한 줄. `node --test lab/q10-db/test/run.test.ts lab/q10-db/test/check-results.test.ts` 85건 통과. 구조 테스트(`scripts/test/q10-trial-workflow.test.ts`)는 제작자의 워크플로 커밋 뒤에 올린다. 완료 처리도 그때 한다.
+- 2026-11-22 구현 판정 1회차(head `3ae8632`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F13: README의 파일 표가 포맷 검사에서 실패한다고 했다(검증자는 명령을 실행하지 않았다). 확인했다: 이 작업 트리에서 `node scripts/harness.ts fmt --check`와 `prettier --check lab/q10-db/README.md`가 통과하고, 그 head의 CI `check`(포맷 검사 포함)도 통과했다. 포매터는 표의 칸을 표시 너비로 맞춘다(한글은 두 칸이라 글자 수로는 어긋나 보인다). 파일을 바꾸지 않았다. F13 반박(1회).
 
 ## 의사결정 로그
 
