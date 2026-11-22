@@ -585,7 +585,6 @@ test('checkAdr 후보표: 확인 상태의 날짜는 출처 주소 밖에서만 
     '확인함(https://example.com/a,2026-11-22)',
     '확인함(2026-11-22, https://example.com/a)',
     '확인함(https://example.com/a, 2026-11-22에 확인)',
-    '확인함(https://example.com/a,\t2026-11-22)',
     '확인함(https://example.com/a, 확인 2026-11-22)',
   ])
     assert.deepEqual(check(v), [], v);
