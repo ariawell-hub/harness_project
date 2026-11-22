@@ -749,3 +749,54 @@ test('checkDoc: 표식이 코드 블록 안에 있으면 표식 구간으로 치
   const wrapped = `${doc.slice(0, begin)}${fence(doc.slice(begin, end))}${doc.slice(end)}`;
   fails(check(wrapped), /기준선.*표식 구간/);
 });
+
+// ---- 코드 판정 2라운드(F3의 남은 경우, F5) ----
+
+test('checkDoc: 판단 절차에서 두 칸보다 덜 들여 쓴 줄은 그 항목의 내용이 아니다', () => {
+  const doc = goodDoc();
+  const line = doc.split('\n').find((l) => l.startsWith(HEADS[4]));
+  assert.ok(line);
+  // 공백 한 칸으로 시작하는 목록 항목은 화면에서 같은 수준의 별개 항목이다
+  const sibling = `${HEADS[4]}\n - 이 줄은 한 칸 들여 쓴 별개의 목록 항목이고 스무 자를 넘는다.`;
+  fails(check(swap(doc, line, sibling)), /판단 절차.*판단 시점 3.*20자/);
+  // 두 칸 넘게 들여 쓴 줄(이어지는 글, 하위 목록)은 그 항목의 내용이다
+  const nested = `${HEADS[4]}\n  - 30일 환산 금액을 계정의 월 예산과 견줘 감당할 수 있는지 본다.`;
+  assert.deepEqual(check(swap(doc, line, nested)), []);
+});
+
+test('checkDoc: 백틱 안의 주석 시작 문자열은 주석이 아니다', () => {
+  const doc = goodDoc();
+  const shown = swap(doc, '포함 사용량은', '표식은 `<!--`로 시작하는 주석이다. 포함 사용량은');
+  assert.deepEqual(check(shown), []);
+  const pair = swap(doc, '포함 사용량은', '표식은 `<!-- … -->` 꼴이다. 포함 사용량은');
+  assert.deepEqual(check(pair), []);
+  const double = swap(doc, '포함 사용량은', '표식은 ``<!-- ` -->`` 꼴이다. 포함 사용량은');
+  assert.deepEqual(check(double), []);
+  // 백틱 안의 낱말은 화면에 보이므로 낱말로 친다. 주석 안의 백틱은 주석이다
+  const hidden = swap(doc, '포함 사용량은', '<!-- `포함 사용량`은 -->무료 분은');
+  fails(check(hidden), /왜 재는가.*포함 사용량/);
+});
+
+test('checkDoc: 주석이 닫힌 뒤의 글은 화면에 보이는 글이다', () => {
+  const doc = goodDoc();
+  assert.deepEqual(check(swap(doc, '포함 사용량은', '<!-- 메모 -->포함 사용량은')), []);
+  assert.deepEqual(check(swap(doc, '포함 사용량은', '<!-- 메모\n메모 끝 -->포함 사용량은')), []);
+});
+
+test('checkDoc: 들여 쓴 코드 블록 안의 표와 표식은 표·표식으로 치지 않는다', () => {
+  const doc = goodDoc();
+  const table = `${TABLE_HEAD}\n${TABLE_RULE}\n${recordRow(BASE, BASELINE_FILE, '기준선', '예산 안')}`;
+  const indent = (s: string, n: number) =>
+    s
+      .split('\n')
+      .map((l) => ' '.repeat(n) + l)
+      .join('\n');
+  // 목록 항목 아래에 들여 쓴 코드 블록
+  fails(check(swap(doc, table, `- 예시\n\n${indent(fence(table), 2)}`)), /기록.*표/);
+  // 네 칸 들여 쓴 줄은 코드다
+  fails(check(swap(doc, table, indent(table, 4))), /기록.*표/);
+  const begin = '<!-- actions-cost:begin -->';
+  fails(check(swap(doc, begin, `    ${begin}`)), /기준선.*표식 구간/);
+  const date = '- 잰 날짜: 2026-11-22';
+  fails(check(swap(doc, date, `    ${date}`)), /기준선.*잰 날짜/);
+});
