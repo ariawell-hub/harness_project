@@ -28,6 +28,7 @@ claimed_at: 2026-11-22T21:30:10+09:00
 ## 진행 로그
 
 - 2026-11-22 접수: PR #188의 구현 판정에서 Codex가 낸 F14(P1, 재현됨)가 맞는 지적인데 그 PR 안에서 고칠 수 없어(step0의 금지사항이 `harness.config.json`을 막고, 계획을 고치려면 제작자가 올린 워크플로 파일을 봇이 되돌려야 한다) 제작자에게 물었고, 별도 PR로 먼저 고치기로 정했다(2026-11-22 대화). 봇이 Issue #215를 등록해 `new-task`로 시작했다.
+- 2026-11-22 구현: 테스트를 먼저 고쳤다(`scripts/test/check-skip.test.ts`의 "이 리포의 설정" 테스트에 패치 경로를 "테스트가 읽는 파일"로, `lab/q10-db/README.md`와 `lab/q10-db/results/darwin-arm64.json`을 건너뛰기 대상으로 더했다). 설정을 고치기 전에 돌려 실패를 확인했다: 19건 가운데 그 테스트 1건이 실패한다(`testInert('lab/q10-db/q10-trial-workflow.patch')`가 `true`). 그 뒤 `harness.config.json`의 `protectedPaths`에 경로를 더하고 `codeowners --write`로 `.github/CODEOWNERS`를 다시 만들었다(한 줄이 더해졌다). 같은 테스트 19건 통과. `check`와 `self-test` 통과. CHANGELOG에 한 줄을 더했다(설계서 본문은 바뀌지 않는다).
 
 ## 의사결정 로그
 
