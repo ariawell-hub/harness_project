@@ -21,7 +21,7 @@
    node scripts/harness.ts fmt
    node scripts/harness.ts check
    ```
-   - `init`은 설정 파일(`harness.config.json`)을 다시 쓰므로 `fmt`로 서식을 맞춘 뒤 `check`를 돌린다.
+   - `init`이 설정 파일(`harness.config.json`)을 다시 썼으면(프로파일을 적용해 내용이 달라진 경우다) `fmt`로 서식을 맞춘 뒤 `check`를 돌린다. 내용이 그대로면 `init`은 설정 파일을 다시 쓰지 않는다.
    - 적용하기 전에 `node scripts/harness.ts init --profile web --dry-run`으로 바뀔 설정 항목과 복사될 템플릿을 볼 수 있다(파일을 쓰지 않는다). 다른 폴더에 적용하려면 `--repo <폴더>`를 준다.
 2. **0단계(제작자가 직접)**: 설계서 0절의 전제 조건과 리포 설정.
    - 에이전트 전용 봇 계정 + 이 리포 한정 토큰(contents·pull requests·issues 쓰기, 90일 이하). GitHub Pro.

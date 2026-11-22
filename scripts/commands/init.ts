@@ -139,12 +139,13 @@ export function init(root: string, profile: string, opts: InitOptions): number {
   );
   if (tpl.length) return refuse(tpl);
   const before = JSON.parse(readFileSync(cfgPath, 'utf8')) as Json;
-  const gh = { ...((before.github ?? {}) as Json) };
+  // 프로파일의 항목을 먼저 덮어쓰고, 그 결과의 github에 명령줄의 값을 적는다(프로파일이 github을 정할 수 있다)
+  const merged: Json = { ...before, ...p.config };
+  const gh = { ...((merged.github ?? {}) as Json) };
   if (opts.owner) gh.owner = opts.owner;
   if (opts.bot) gh.bot = opts.bot;
   const cfg: Json = {
-    ...before,
-    ...p.config,
+    ...merged,
     profile: p.name,
     profileVersion: `${p.name}@${p.version}`,
     github: gh,
@@ -152,25 +153,30 @@ export function init(root: string, profile: string, opts: InitOptions): number {
   const dry = opts.dryRun === true;
   const name = `${p.name}@${p.version}`;
   const changed = changedKeys(before, cfg);
-  // 템플릿마다 할 일을 먼저 정한다: 이미 있으면 건너뛰고, 자리 표시 파일이면 바꾼다
-  const jobs = (p.templates ?? []).map((t) => {
+  // 템플릿마다 할 일을 프로파일의 순서대로 먼저 정한다: 이미 있으면 건너뛰고, 자리 표시 파일이면 바꾼다.
+  // 앞의 템플릿이 같은 자리에 복사될 것이면 그 결과(그 원본의 글)가 이미 있는 것으로 본다.
+  // 미리보기와 실제 적용이 이 목록 하나를 쓴다
+  const planned = new Map<string, string>();
+  const jobs: { to: string; src: string; dst: string; copy: boolean; overwrite: boolean }[] = [];
+  for (const t of p.templates ?? []) {
+    const src = path.join(root, 'profiles', profile, t.from);
     const dst = path.join(root, t.to);
-    const exists = existsSync(dst);
+    const earlier = planned.get(dst);
+    const onDisk = existsSync(dst);
+    const exists = earlier !== undefined || onDisk;
     const placeholder =
-      exists && t.replacePlaceholder && readFileSync(dst, 'utf8').includes('harness:placeholder');
-    return {
-      to: t.to,
-      src: path.join(root, 'profiles', profile, t.from),
-      dst,
-      exists,
-      copy: !exists || placeholder === true,
-    };
-  });
+      exists &&
+      t.replacePlaceholder === true &&
+      readFileSync(earlier ?? dst, 'utf8').includes('harness:placeholder');
+    const copy = !exists || placeholder;
+    if (copy) planned.set(dst, src);
+    jobs.push({ to: t.to, src, dst, copy, overwrite: copy && onDisk });
+  }
   // 덮어쓸 파일이 하드 링크로 다른 이름과 이어져 있으면 쓰지 않는다. 그 자리에 쓰면 다른 이름으로
   // 보이는 파일(다른 리포의 설정일 수 있다)도 함께 바뀐다. 어디와 이어졌는지는 알 수 없어 모두 거절한다
   const linked = [
     ...(changed.length ? [cfgPath] : []),
-    ...jobs.filter((j) => j.copy && j.exists).map((j) => j.dst),
+    ...jobs.filter((j) => j.overwrite).map((j) => j.dst),
   ].filter((f) => lstatSync(realpathSync(f)).nlink > 1);
   if (linked.length) return stop('다른 이름과 이어진 파일(하드 링크)에는 쓰지 않는다', linked);
   if (dry) {
