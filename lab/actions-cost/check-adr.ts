@@ -165,11 +165,15 @@ function statusOf(head: string[], problems: string[]): Status | null {
   return m[1] as Status;
 }
 
-/** 화면에 보이는 글자: 한글 음절, 로마자, 숫자. 닫힌 집합이다(유니코드의 "글자"에는 보이지 않는 채움 글자가 있다) */
-const SHOWN = /[A-Za-z0-9가-힣]/;
+/**
+ * 링크의 글로 세는 문자: 유니코드의 글자(L)나 숫자(N)이고 "기본으로 표시하지 않는 문자"
+ * (Default_Ignorable_Code_Point: 한글 채움 글자 U+115F·U+1160·U+3164·U+FFA0 등)가 아닌 것.
+ * 문자 체계를 가리지 않는다. 문장 부호·기호·공백·폭 없는 문자는 세지 않는다
+ */
+const SHOWN = /(?!\p{Default_Ignorable_Code_Point})[\p{L}\p{N}]/u;
 /**
  * 코드 구간을 가린 글자. 코드 안의 대괄호와 괄호는 링크의 문법이 아니다.
- * 내용에 보이는 글자가 있는 코드 구간은 CODE_MARK, 없는 것(공백, 폭 없는 글자뿐)은 CODE_BLANK로 가린다
+ * 내용에 글자나 숫자(SHOWN)가 있는 코드 구간은 CODE_MARK, 없는 것은 CODE_BLANK로 가린다
  */
 const CODE_MARK = '\uE000';
 const CODE_BLANK = '\uE001';
@@ -198,11 +202,10 @@ function linksOn(line: string): { target: string; label: string | null }[] {
 }
 
 /**
- * 링크의 글이 화면에 보이는가: 보이는 글자(SHOWN)나, 내용에 보이는 글자가 있는 코드 구간(CODE_MARK)이
- * 있다(문자 참조는 뺀다). 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다
+ * 링크의 글에 글자나 숫자가 있는가: SHOWN이나, 내용에 SHOWN이 있는 코드 구간(CODE_MARK)이 있다.
+ * 문자 참조(&이름;)는 무엇으로 표시되는지 풀어 읽지 않고 뺀다
  */
-const shownLabel = (label: string): boolean => {
-  if (label.includes('](')) return false;
+const lettered = (label: string): boolean => {
   const text = label.replace(/&[#\w]+;/g, '');
   return SHOWN.test(text) || text.includes(CODE_MARK);
 };
@@ -236,7 +239,13 @@ function checkBackground(
         problems.push(
           `배경 형식(${i + 1}째 줄): 기준선 링크의 여는 대괄호가 같은 줄에 없다(링크는 [글](주소)를 한 줄에 적는다)`,
         );
-      else if (shownLabel(link.label)) linked = true;
+      // 글 안에 링크가 있으면 바깥 대괄호는 링크가 아니다
+      else if (link.label.includes('](')) continue;
+      else if (!lettered(link.label))
+        problems.push(
+          `배경 형식(${i + 1}째 줄): 기준선 링크의 글에 글자나 숫자가 없다(문장 부호·기호, 표시되지 않는 문자, 문자 참조는 세지 않는다)`,
+        );
+      else linked = true;
     }
   }
   if (!linked)
