@@ -110,7 +110,8 @@ export function verdictOf(r: CostReport): Verdict {
 
 /** 공백을 뺀 글자 수 */
 const dense = (lines: string[]) => lines.join('').replace(/\s/g, '').length;
-const blank = (line: string) => /^\s*$/.test(line);
+/** 빈 줄: 공백과 탭만 있는 줄. 다른 공백 글자(줄바꿈 없는 공백 등)만 있는 줄은 화면에서 빈 줄이 아니다 */
+const blank = (line: string) => /^[ \t]*$/.test(line);
 
 /**
  * 문서의 줄을 보는 눈. 줄 번호는 모두 같다.
@@ -173,8 +174,8 @@ function partsOf(line: string): Part[] | null {
   return parts;
 }
 
-/** 링크의 주소: 괄호 안에 공백·괄호·따옴표·백틱 없이 적은 것. 제목을 단 링크는 맞지 않는다 */
-const LINK_TARGET = String.raw`\]\([^()\s"'<>\`]*\)`;
+/** 링크의 주소: 괄호 안에 공백·괄호·따옴표·백틱·`|` 없이 적은 것. 제목을 단 링크는 맞지 않는다. `|`는 표에서 링크보다 먼저 칸을 가른다 */
+const LINK_TARGET = String.raw`\]\([^()\s"'<>|\`]*\)`;
 
 /**
  * 코드 구간 밖의 글 한 줄이 형식을 벗어난 점. 없으면 null.
@@ -182,8 +183,11 @@ const LINK_TARGET = String.raw`\]\([^()\s"'<>\`]*\)`;
  * "백틱 안의 `<`는 글이다"가 참이 된다
  */
 function lineFormat(line: string, parts: Part[] | null): string | null {
+  // 보통 공백이 아닌 공백 글자는 화면에서 빈 줄·칸 구분·줄바꿈으로 다르게 읽힌다
+  if (/[^\S ]/.test(line))
+    return '공백은 보통 공백만 쓴다(탭, 줄바꿈 없는 공백, 전각 공백, 낱개 CR 같은 공백 글자를 쓰지 않는다)';
   if (!/^ {0,3}\S/.test(line))
-    return '줄 머리는 공백 세 칸까지만 들여 쓴다(네 칸 이상, 탭, 다른 공백 글자로 들여 쓰지 않는다. 들여 쓴 코드 블록을 쓰지 않는다)';
+    return '줄 머리는 공백 세 칸까지만 들여 쓴다(들여 쓴 코드 블록을 쓰지 않는다)';
   if (/^ {0,3}(=+|-+)\s*$/.test(line)) return '밑줄 제목과 가로줄(===, ---)을 쓰지 않는다';
   if (line.includes('\\')) return '역슬래시를 쓰지 않는다(이스케이프한 글자를 가려 읽지 않는다)';
   if (parts === null)
@@ -200,7 +204,7 @@ function lineFormat(line: string, parts: Part[] | null): string | null {
   for (const p of plain)
     for (let at = p.s.indexOf(']('); at >= 0; at = p.s.indexOf('](', at + 1))
       if (!new RegExp(`^${LINK_TARGET}`).test(p.s.slice(at)))
-        return '링크의 주소는 한 줄 안에 공백·괄호·따옴표 없이 적는다(제목을 달지 않는다)';
+        return '링크의 주소는 한 줄 안에 공백·괄호·따옴표·`|` 없이 적는다(제목을 달지 않는다)';
   return null;
 }
 
@@ -334,6 +338,10 @@ const NUM = String.raw`(\d+(?:\.\d+)?)(?!\d|[.,]\d)`;
 function checkBudget(body: string[], problems: string[]): void {
   /** 머리로 시작하는 줄이 꼭 하나일 때 머리 뒤의 글 */
   const rest = (head: string): string | null => {
+    // 모양만 다른 둘째 줄(들여 쓴 것, 다른 목록 표시)도 화면에서는 예산 줄로 보인다
+    const key = head.slice(2);
+    if (body.some((l) => l.includes(key) && !l.startsWith(head)))
+      problems.push(`예산: "${key}"가 든 줄이 "${head}" 줄 말고 더 있다(값은 그 한 줄에만 적는다)`);
     const hits = body.filter((l) => l.startsWith(head));
     if (hits.length === 1) return hits[0].slice(head.length);
     problems.push(
@@ -482,6 +490,11 @@ function checkProcedure(body: string[], problems: string[]): void {
     return item ? [{ item, i }] : [];
   });
   for (const item of PROCEDURE) {
+    const key = item.head.slice(2);
+    if (body.some((l) => l.includes(key) && !l.startsWith(item.head)))
+      problems.push(
+        `판단 절차: "${key}"가 든 줄이 "${item.head}" 항목 말고 더 있다(항목은 한 곳에만 적는다)`,
+      );
     const hits = starts.filter((s) => s.item === item);
     if (hits.length !== 1) {
       problems.push(
@@ -535,6 +548,11 @@ function checkRecord(
       starts.push(i);
     }
   });
+  // `|`로 시작하지 않는 줄도 화면에서는 표의 행이나 다른 표가 된다(값을 견주지 않은 표가 보인다)
+  if (body.some((l) => l.includes('|') && !/^ {0,3}\|/.test(l)))
+    problems.push(
+      '기록: 표 밖의 줄에 `|`를 쓰지 않는다(`|`로 시작하지 않는 줄도 화면에서 표가 된다)',
+    );
   if (tables.length !== 1) {
     problems.push(`기록: 표가 ${tables.length}개다(하나여야 한다)`);
     return;

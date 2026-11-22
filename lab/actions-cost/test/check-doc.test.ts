@@ -908,8 +908,10 @@ test('checkDoc 형식: 공백은 보통 공백만 쓴다(다른 공백 글자만
   const row = recordRow(BASE, BASELINE_FILE, '기준선', '예산 안');
   // F8: 줄바꿈 없는 공백만 있는 줄은 화면에서 표를 끝내지 않는다. 그 뒤의 행이 같은 표에 보인다
   fails(check(swap(doc, row, `${row}\n\u00A0\n${LOOSE_ROW}`)), /형식.*공백/);
-  formatOnly(check(swap(doc, row, `${row}\n\u00A0`)), /형식.*공백/);
-  formatOnly(check(swap(doc, row, `${row}\n\u3000\u2003`)), /형식.*공백/);
+  // 그 줄은 빈 줄이 아니므로 "표의 앞뒤에 빈 줄"도 함께 어긋난다
+  fails(check(swap(doc, row, `${row}\n\u00A0`)), /형식.*공백/);
+  fails(check(swap(doc, row, `${row}\n\u00A0`)), /기록.*빈 줄/);
+  fails(check(swap(doc, row, `${row}\n\u3000\u2003`)), /형식.*공백/);
   // 줄 안의 공백 글자, 낱개 CR(화면에서는 줄이 갈린다)
   formatOnly(check(swap(doc, WORD, `포함\u00A0사용량은 ${WORD}`)), /형식.*공백/);
   formatOnly(check(swap(doc, WORD, `${WORD}\r`)), /형식.*공백/);
