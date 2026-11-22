@@ -2,7 +2,7 @@
 id: 20261122-reopen-fmt-padding
 issue: 192 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -39,6 +39,7 @@ claimed_at: 2026-11-22T09:22:27+09:00
 - 2026-11-22 접수: 제작자가 대화에서 Issue로 등록하라고 정했고(2026-11-22) 봇이 Issue #192를 등록했다. PR #185가 병합된 뒤 `new-task`로 시작했다.
 - 2026-11-22 테스트를 먼저 썼다. `node --test scripts/test/lib.test.ts`: 새 테스트 `setFrontmatter: 값과 주석 사이는 공백 하나다`가 실패했다(기대 `status: active # …`, 실제 `status: active    # …`). `node --test scripts/test/runner-pr.test.ts`의 새 테스트 `reopenStep: 다시 연 계획의 frontmatter를 포매터가 고치지 않는다`도 같은 줄에서 실패했다.
 - 2026-11-22 `setFrontmatter`가 값과 주석 사이를 공백 하나로 쓰게 고쳤다. 두 파일 32건 모두 통과(있던 테스트 `frontmatter 파싱과 수정(주석 보존)`은 고치지 않았다). 테스트는 포매터(`prettier`, 리포의 설정)를 직접 불러 결과를 검사한다. `origin/main`을 병합했다(PR #185·#189 병합 뒤).
+- 2026-11-22T09:47:36+09:00 step 재작업: 구현 판정 1회차: Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F1: `reopenStep` 테스트가 frontmatter만 포매터에 넣는다. 다시 연 계획 파일 전체는 통과하지 못할 수 있다(진행 로그 절이 없는 계획에서는 `appendProgress`가 제목 바로 아래에 목록을 붙여 포매터가 빈 줄을 넣는다). 맞는 지적이다. 테스트가 파일 전체를 보게 하고 `appendProgress`가 쓰는 글도 포매터의 결과와 같게 고친다.
 
 ## 의사결정 로그
 
