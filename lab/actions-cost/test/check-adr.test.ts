@@ -348,6 +348,54 @@ test('checkAdr 배경: 기준선 링크는 한 줄에 적는다(줄을 넘는 �
   assert.deepEqual(checkAdr(swap(doc, link, `${link}와 [다른\n글](../other/x.md)`)), []);
 });
 
+test('checkAdr 배경: 링크의 글은 어느 문자 체계의 글자·숫자든 센다', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  for (const shown of [
+    '[`費用基準`](../harness/actions-cost.md)',
+    '[費用基準](../harness/actions-cost.md)',
+    '[`コスト`](../harness/actions-cost.md)',
+    '[Стоимость](../harness/actions-cost.md)',
+    '[`\u0661\u0662`](../harness/actions-cost.md)',
+    '[`\u200B` 費](../harness/actions-cost.md)',
+    '[&amp; 費](../harness/actions-cost.md)',
+  ])
+    assert.deepEqual(checkAdr(swap(doc, link, shown)), [], shown);
+});
+
+test('checkAdr 배경: 기준선 링크의 글에 글자나 숫자가 없으면 형식 오류다', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  // 글자·숫자가 아닌 것, 유니코드가 기본으로 표시하지 않는 문자(채움 글자, 폭 없는 글자), 문자 참조는 세지 않는다
+  for (const shown of [
+    '[](../harness/actions-cost.md)',
+    '[ ](../harness/actions-cost.md)',
+    '[**](../harness/actions-cost.md)',
+    '[...](../harness/actions-cost.md)',
+    '[&nbsp;](../harness/actions-cost.md)',
+    '[&#8203;](../harness/actions-cost.md)',
+    '[\u3164](../harness/actions-cost.md)',
+    '[\uFFA0](../harness/actions-cost.md)',
+    '[\u200B\u00AD](../harness/actions-cost.md)',
+    '[\u2800](../harness/actions-cost.md)',
+    '[`\u200B`](../harness/actions-cost.md)',
+    '[`\u3164`](../harness/actions-cost.md)',
+    '[`\u115F\u1160`](../harness/actions-cost.md)',
+    '[`\u2800`](../harness/actions-cost.md)',
+    '[` `](../harness/actions-cost.md)',
+    '[`...`](../harness/actions-cost.md)',
+  ])
+    fails(
+      checkAdr(swap(doc, link, shown)),
+      /배경 형식\(\d+째 줄\).*기준선 링크의 글에 글자나 숫자가 없다/,
+    );
+  // 바른 링크가 따로 있어도 그런 기준선 링크는 형식 오류다
+  fails(
+    checkAdr(swap(doc, link, `${link}와 [\u3164](../harness/actions-cost.md)`)),
+    /배경 형식\(\d+째 줄\).*기준선 링크의 글에 글자나 숫자가 없다/,
+  );
+});
+
 test('checkAdr 후보표: 표가 하나이고 머리 줄과 구분 줄이 맞다', () => {
   const doc = goodAdr();
   const second = `${TABLE_HEAD}\n${TABLE_RULE}\n${row('G1')}`;
