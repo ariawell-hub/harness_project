@@ -10,6 +10,7 @@ review_cycle: on-change
 
 ## 다음 버전 (미배포)
 
+- 워크플로 패치 `lab/q10-db/q10-trial-workflow.patch`를 보호 경로(`protectedPaths`)에 더했다(#215). 구조 테스트가 읽는 파일이라, 이 패치만 바꾼 변경에서도 `check`가 `test`를 건너뛰지 않는다(보호 경로는 건너뛰기 대상이 아니다). 바꾸려면 제작자 승인이 필요하다. 검사를 약화하지 않는다.
 - 설계서 v0.7.3: main의 "Require approval of the most recent reviewable push"를 구축·운영 단계 모두 끈다(0.2절). Q20 시험 리포 운영 방식(ADR-0004). 대화 세션 MCP 도구가 L1 훅 밖인 문제를 TD-13으로 등록.
 - 설계서 v0.7.4: macOS와 Windows 네이티브 병행(ADR-0005). E5·R20을 에이전트가 실행되는 모든 머신 기준으로, AC·표준 명령은 POSIX `sh` 문법(Windows는 Git Bash), 텍스트 파일 LF 고정, L1 훅의 PowerShell·cmd 방언, 작업자 이름의 머신 간 고유성. Windows 실기 검증은 TD-14, CI OS 행렬은 TD-15.
 - Windows 실행 환경(ADR-0005, PR #9): `.gitattributes` LF 고정(보호 경로), `runShell`이 Windows에서 Git Bash로 실행(없으면 cmd.exe로 대신하지 않고 실패, WSL bash 거부), runner가 시작할 때 에이전트 CLI 실행 파일을 확인(`.cmd` 래퍼뿐이면 `agent-missing`), 개발용 `.env`는 심볼릭 링크 → 하드 링크.

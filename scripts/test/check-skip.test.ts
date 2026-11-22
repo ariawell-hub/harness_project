@@ -449,6 +449,8 @@ test('이 리포의 설정: 테스트가 읽는 파일은 건너뛰기 대상이
     'docs/exec-plans/tech-debt-tracker.md',
     'docs/harness/workflow.md',
     'docs/harness/design.md',
+    // 구조 테스트(q10-trial-workflow.test.ts)가 읽는 워크플로 패치: lab 아래지만 보호 경로라 건너뛰지 않는다(Issue #215)
+    'lab/q10-db/q10-trial-workflow.patch',
   ];
   for (const f of read) assert.equal(testInert(f, cfg), false, f);
   for (const f of [
@@ -456,6 +458,8 @@ test('이 리포의 설정: 테스트가 읽는 파일은 건너뛰기 대상이
     'docs/exec-plans/active/20261116-y/steps/step7.md',
     'docs/exec-plans/completed/20261118-z.md',
     'lab/ops-transition/results/target-repo.json',
+    'lab/q10-db/README.md',
+    'lab/q10-db/results/darwin-arm64.json',
   ])
     assert.equal(testInert(f, cfg), true, f);
 });
