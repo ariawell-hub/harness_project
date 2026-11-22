@@ -2,7 +2,7 @@
 id: 20261122-plan-review-parked
 issue: 212 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -78,6 +78,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - 2026-11-23 구현: `scripts/ci/ledger.ts`(`parked`, `planRound`, `parkFor`, `applyVerdict`, `ledgerStatus`, 형식 검사), `ledger-store.ts`(`recordLedger`: 승인 조회 전과 뒤에 `parkFor`), `accept-load.ts`(`readRoundLedger`: 같은 순서, 반박은 그 뒤의 원장으로 거른다), `review-round.ts`(원장 파일의 한 줄), `scripts/harness.ts`(`record-review`는 `--mode`가 `plan`인지, `review-plan`은 계산한 `mode`), `scripts/commands/pr-state.ts`(구현 대기 지적 줄), `scripts/runner/review.ts`(`settledResponses`의 본문 안만). 여섯 테스트 파일이 모두 통과한다(139건).
 - 2026-11-23 문서: 프롬프트(`prompt.md`)와 설계서 10.2절·절차서 2절에 정한 글을 그대로 넣고, 원장 형식(`ledger.md`)에 `parked` 행, `planRound` 필드, "구현 대기" 절, 판정 반영 규칙을 더했다. 설계서는 v0.7.81로 적었다: main은 v0.7.79이고 먼저 승인을 요청할 PR #214가 v0.7.80을 쓴다(병합 순서가 바뀌면 main을 병합할 때 번호를 맞춘다). 머리말의 최종 갱신 날짜를 새 이력 항목의 날짜(2026-11-23)에 맞췄다(`doc-lint`의 설계서 버전 검사). CHANGELOG 한 줄.
 - 2026-11-23 `origin/main`(`c24444c`)을 구현 커밋 뒤에 병합했다(충돌 없음).
+- 2026-11-23T00:47:36+09:00 step0 재작업: 구현 판정 1회차(head `9781e46`. 원장의 4라운드): Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨). F7: 계획만 담은 head의 기록에서 검증자가 `fixed`였던 코드 지적을 판정으로 다시 열면(`resolutions`의 `open`, 같은 지적의 재등록), 판정을 반영한 뒤에는 구현 대기로 맞추지 않아 그 기록의 `review-ledger`가 막는다(다음 기록에서야 `parked`가 된다). 코드를 되돌린 head에는 고친 내용도 없어 검증자가 다시 열 수 있으므로 실제로 나는 경우다. 맞는 지적이다. 테스트를 먼저 더하고 고친다.
 
 ## 의사결정 로그
 
