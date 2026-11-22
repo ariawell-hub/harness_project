@@ -2,7 +2,7 @@
 id: 20261122-patch-not-inert
 issue: 215 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
