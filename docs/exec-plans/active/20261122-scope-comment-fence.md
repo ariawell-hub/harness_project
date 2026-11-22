@@ -2,7 +2,7 @@
 id: 20261122-scope-comment-fence
 issue: 202 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -42,6 +42,7 @@ claimed_at: 2026-11-22T13:22:05+09:00
 - 2026-11-22 테스트를 먼저 썼다. `node --test scripts/test/scope.test.ts`: 새 테스트 "주석과 코드 블록은 먼저 열린 쪽으로 가린다"가 첫 사례에서 실패했다(`a.ts`만 뽑혔다. 기대는 `a.ts`, `b.ts`). 있던 25건과 긴 입력의 새 테스트는 통과.
 - 2026-11-22 `scopePaths`가 코드 블록과 주석을 한 번의 훑기에서 먼저 열린 쪽으로 가리게 고쳤다(`proseLines`. 있던 `fenced`와 `stripHtmlComments` 호출을 대신한다). 닫는 표식이 뒤에 있는지는 `-->`가 든 마지막 줄의 번호 하나로 본다(줄마다 다시 찾지 않는다). 27건 모두 통과. 있던 테스트의 단언은 고치지 않았다.
 - 2026-11-22 같은 꼴을 훑었다(읽기만): `scripts/lib/plan.ts`의 `stripHtmlComments`를 부르는 다른 곳(`metrics/local.ts`, `plan.ts`의 섹션 내용 읽기)은 펜스를 가리지 않고 주석만 지우므로 이 꼴이 없다. `sections`(계획을 `## ` 제목으로 나누는 함수)에는 같은 꼴이 있다(발견 사항).
+- 2026-11-22T14:01:52+09:00 step 재작업: 구현 판정 1회차(head `98361ad`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F1: 닫는 표식이 뒤에 있는지를 받은 글 전체에서 찾아, "관련 파일" 절의 닫히지 않은 주석 여는 표식이 다음 절에 있는 닫는 표식과 짝이 되고 그 사이의 `## ` 줄(절의 경계)이 주석 안으로 들어간다. 다음 절에 적은 경로가 범위에 든다. 맞는 지적이다(전에는 `## ` 줄에서 먼저 자르고 주석을 지웠다). 주석은 `## ` 줄을 넘지 못하게 고친다. plan-gate도 실패했다: 계획 본문에 주석 표식을 글자 그대로 적어 `- 검증:` 줄이 주석으로 읽혔다. 계획에서 표식을 말로 바꿔 적는다.
 
 ## 의사결정 로그
 
