@@ -2,7 +2,7 @@
 id: 20261121-actions-cost-design
 issue: 170 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -245,6 +245,8 @@ claimed_at: 2026-11-21T13:06:30+09:00 # new-task가 채운다
   - F4(P2, 비차단. "다시 볼 때 먼저 볼 것"은 B1·B3의 작업이 남는 job에 쓰인다고 적었는데 묶음 "검증 밖으로"는 B1·B3 없이 arm64로 셌다): 묶음의 금액이 무엇을 센 값인지와 넘어갈 때 B3은 걷어 내고 B1의 1코어 설정은 남는 두 job에만 해당한다는 것을 적었다(커밋 `8940902`). 금액은 그대로다.
   - 제작자가 대화에서 "호스팅유지로 진행해달라는 뜻 맞다"고 확인했다(2026-11-22).
   - AC 12줄과 `check` 통과.
+
+- 2026-11-22T13:16:58+09:00 step2 재작업: 코드 판정 3라운드 F5 대응
 
 ## 의사결정 로그
 
