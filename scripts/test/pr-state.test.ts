@@ -1,11 +1,12 @@
 // PR 상태 판정(10.3절 "체크 요약 API는 출처를 보지 않는다"). 계획 20261115-runner-pr-flow step0.
 // 필수 체크는 설정의 context마다 기대 출처가 쓴 가장 최근 결과로 본다. 흉내 체크는 없는 것으로 본다.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { applyVerdict, emptyLedger, renderLedger, type Ledger } from '../ci/ledger.ts';
 import { ACTIONS_APP_ID } from '../ci/protection.ts';
+import { gatesMissingLine } from '../commands/pr-state.ts';
 import { newTask } from '../commands/task.ts';
 import { loadConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
@@ -18,8 +19,13 @@ import {
   type CommitCheck,
   type PullRequest,
 } from '../lib/github.ts';
-import { classifyPr, requiredStates, type RequiredState } from '../runner/pr-state.ts';
-import { HARNESS_ROOT, commitAll, makeFixture, sh, write } from './helpers.ts';
+import {
+  classifyPr,
+  gatesMissing,
+  requiredStates,
+  type RequiredState,
+} from '../runner/pr-state.ts';
+import { HARNESS_ROOT, commitAll, makeFixture, sh, tmp, write } from './helpers.ts';
 
 const BOT = 'harness-recorder[bot]';
 const REQUIRED = [
@@ -243,6 +249,48 @@ test('classifyPr 9·10·11: 뒤처짐은 behind(risk-gate만 실패여도), risk
   assert.equal(classify({ 'review/claude': 'failure' }, { behind: true }).kind, 'review');
 });
 
+test('gatesMissing: 검증자의 판정이 모두 났는데 게이트 상태가 없으면 그 이름들을 설정 순서로 낸다(Issue #181)', () => {
+  const missing = (over: Record<string, CommitCheck['state'] | null>) =>
+    gatesMissing(requiredStates(green(over), CI));
+  const noGates = {
+    'plan-gate': null,
+    'risk-gate': null,
+    'deps-guard': null,
+    'harness-guard': null,
+  };
+  assert.deepEqual(missing(noGates), ['plan-gate', 'risk-gate', 'deps-guard', 'harness-guard']);
+  // 판정은 승인이든 수정 요청이든 난 것이다
+  assert.deepEqual(
+    missing({ 'risk-gate': null, 'review/claude': 'failure', 'review/codex': 'failure' }),
+    ['risk-gate'],
+  );
+  assert.deepEqual(missing({ 'deps-guard': null, 'review/codex': 'failure' }), ['deps-guard']);
+  // 판정이 아직 없거나 진행 중이거나 내지 못했으면(error) 게이트가 없어도 알리지 않는다: 아직 기다릴 때다
+  for (const s of [null, 'pending', 'error'] as const) {
+    assert.deepEqual(missing({ ...noGates, 'review/claude': s }), [], String(s));
+    assert.deepEqual(missing({ ...noGates, 'review/codex': s }), [], String(s));
+  }
+  // 게이트가 기록돼 있으면 상태가 무엇이든 빈 배열이다
+  assert.deepEqual(missing({}), []);
+  assert.deepEqual(
+    missing({ 'plan-gate': 'failure', 'risk-gate': 'pending', 'deps-guard': 'error' }),
+    [],
+  );
+  // check(Actions)와 review-ledger는 게이트가 아니다
+  assert.deepEqual(missing({ check: null, 'review-ledger': null }), []);
+  // 필수 체크에 검증자 판정이 없는 리포에서는 알리지 않는다
+  assert.deepEqual(
+    gatesMissing(requiredStates([], { requiredChecks: REQUIRED.slice(0, 5), recorderBot: BOT })),
+    [],
+  );
+  // revert-check도 게이트다(이 리포의 설정에는 있다)
+  const withRevert = {
+    requiredChecks: [{ context: 'revert-check', source: 'recorder' as const }, ...REQUIRED],
+    recorderBot: BOT,
+  };
+  assert.deepEqual(gatesMissing(requiredStates(green(), withRevert)), ['revert-check']);
+});
+
 test('statusToCheck·checkRunToCheck: API 항목을 출처와 함께 옮기고, 모르는 상태는 통과로 보지 않는다', () => {
   const st = statusToCheck(['review/claude', 'success', '승인', BOT, 'https://x/runs/1', 't1']);
   assert.deepEqual(
@@ -385,6 +433,87 @@ test('pr-state 명령: 필수 체크를 출처와 함께 한 줄씩 내고 마�
     const none = cli(['pr-state'], fx.root, state);
     assert.equal(none.code, 1);
     assert.match(none.stderr + none.stdout, /PR이 없다/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('gatesMissingLine: 안내의 명령에 넣는 브랜치 이름은 셸의 낱말 하나로 인용한다(F1)', (t) => {
+  // git이 받는 브랜치 이름에는 셸의 특수 문자가 올 수 있다. 안내를 복사해 실행해도 이름의 일부가 명령으로 읽히면 안 된다
+  const hostile = [
+    'feat/x;touch${IFS}pwned',
+    'feat/$(touch pwned)',
+    'feat/`touch pwned`',
+    "feat/a'b",
+    "feat/a';touch pwned;'",
+    'feat/a&&b|c>d<e',
+    'feat/a"b\\c',
+    'feat/#x!y*z',
+  ];
+  for (const branch of hostile) {
+    const line = gatesMissingLine(['plan-gate', 'risk-gate'], branch);
+    assert.match(line, /게이트 상태 없음/);
+    assert.match(line, /plan-gate, risk-gate/);
+    // 한 줄이다(브랜치 이름이 줄을 나누지 않는다)
+    assert.ok(!line.includes('\n'), line);
+    const m = /gh run list --workflow gates --branch ('.*') --limit 5/.exec(line);
+    assert.ok(m, line);
+    // 인용한 낱말은 작은따옴표 구간과 \'의 연속이다: 따옴표 밖에 다른 글자가 없다
+    assert.match(m[1], /^(?:'[^']*'|\\')+$/, m[1]);
+  }
+  // 줄바꿈이 든 이름은 git이 받지 않지만, 받아도 줄을 나누지 않는다
+  assert.ok(!gatesMissingLine(['plan-gate'], 'a\nb').includes('\n'));
+  // 실제 셸이 그 낱말을 브랜치 이름 그대로 읽는다(POSIX 셸이 있을 때)
+  const probe = runSync('sh', ['-c', 'exit 0']);
+  if (process.platform === 'win32' || probe.code !== 0) {
+    t.skip('sh가 없다');
+    return;
+  }
+  const work = tmp('harness-pr-state-quote-');
+  for (const branch of hostile) {
+    const line = gatesMissingLine(['plan-gate'], branch);
+    const quoted = /--branch ('.*') --limit 5/.exec(line)![1];
+    const r = runSync('sh', ['-c', `printf '%s' ${quoted}`], { cwd: work });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, branch);
+    assert.deepEqual(readdirSync(work), [], branch);
+  }
+});
+
+test('pr-state 명령: 검증자의 판정이 났는데 게이트 상태가 없는 head에서 다시 돌리는 법을 한 줄로 알린다(Issue #181)', async () => {
+  const { fx, state, t, head, gh } = await fixtureWithPR({
+    ci: { requiredChecks: REQUIRED, recorderBot: BOT },
+  });
+  try {
+    gh.setCheck(head, { context: 'check', kind: 'check-run', state: 'success', appId: 15368 });
+    gh.setCheck(head, { context: 'review/claude', state: 'success', creator: BOT });
+    const waiting = cli(['pr-state'], t.worktree, state);
+    assert.equal(waiting.code, 0, waiting.stderr);
+    // 판정 하나가 아직 없다: 게이트가 없어도 알리지 않는다
+    assert.doesNotMatch(waiting.stdout, /게이트 상태 없음/);
+    gh.setCheck(head, { context: 'review/codex', state: 'failure', creator: BOT });
+    const before = readFileSync(state, 'utf8');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    const line = r.stdout.split('\n').find((l) => l.includes('게이트 상태 없음'));
+    assert.ok(line, r.stdout);
+    assert.match(line, /plan-gate, risk-gate, deps-guard, harness-guard/);
+    assert.match(line, /gh run list --workflow gates --branch \S+/);
+    assert.ok(line.includes(`--branch '${t.branch}' `), line);
+    assert.match(line, /gh run rerun <실행 번호>/);
+    // 필수 체크 목록 뒤, 분류 줄 앞이다. 분류는 그대로 wait-ci다
+    const lines = r.stdout.split('\n');
+    const at = lines.indexOf(line);
+    assert.ok(at > lines.findIndex((l) => l.startsWith('- review-ledger [recorder]')), r.stdout);
+    assert.ok(at < lines.findIndex((l) => l.startsWith('분류: ')), r.stdout);
+    assert.match(r.stdout, /분류: wait-ci/);
+    assert.equal(readFileSync(state, 'utf8'), before);
+    // 게이트가 기록되면 그 줄이 없다
+    for (const context of ['plan-gate', 'risk-gate', 'deps-guard', 'harness-guard'])
+      gh.setCheck(head, { context, state: 'success', creator: BOT });
+    const ok = cli(['pr-state'], t.worktree, state);
+    assert.equal(ok.code, 0, ok.stderr);
+    assert.doesNotMatch(ok.stdout, /게이트 상태 없음/);
   } finally {
     fx.cleanup();
   }

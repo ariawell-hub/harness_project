@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.72 · 상태: 초안 · 최종 갱신: 2026-11-22
+> 버전 v0.7.73 · 상태: 초안 · 최종 갱신: 2026-11-22
 
 ---
 
@@ -105,6 +105,7 @@ review_cycle: quarterly
   - v0.7.70 (2026-11-21): 14.3절의 차단 목록을 웹 프로파일이 채웠다(ADR-0007의 Drizzle). 웹 프로파일의 `guard.dbCommands`가 DB에 접속하는 `drizzle-kit`의 하위 명령과 마이그레이션 파일을 지우는 하위 명령을 금지 항목으로 갖고, 판정은 13.1절의 하위 명령 판정이 한다(플래그가 하위 명령 앞에 오는 형태와 플래그의 값에 공백이 든 형태 포함). 파일만 다루는 하위 명령은 막지 않는다. 목록과 훅이 보지 못하는 것은 `profiles/web/README.md`의 "DB" 절에 있다. DB 규칙과 L1 훅의 명령 판정에 남은 틈은 기술 부채 표에 모았다(TD-62). 규칙은 바꾸지 않았다.
   - v0.7.71 (2026-11-21): 제작자 승인(`/harness accept F<번호>`)의 대상을 열린 P0에서 열린 P0·P1로 넓혔다(10.2절 (4), Issue #178). 고칠 수 없는 P1(되돌릴 수 없는 절차에 대한 지적)의 교착을 제작자가 풀 수 있게 한다. 승인을 인정하는 조건(제작자 계정, 승인 줄만 있는 고쳐지지 않은 댓글, 지적이 게시된 뒤)은 그대로다. P2·P3과 동결된 P1은 대상이 아니다. 열린 P1이 있는 판정 실행도 PR 댓글의 편집 이력을 읽는다.
   - v0.7.72 (2026-11-22): L1 훅이 명령의 이름을 찾는 자리를 바로잡았다(13.1절, Issue #182, TD-62 (3)). 분석기가 명령 이름 앞의 리다이렉션을 인자 뒤로 옮기고, 이름에 붙은 리다이렉션을 떼고, bash의 예약어와 zsh의 명령 앞 수식어를 벗기고, `[[ … ]]` 뒤의 낱말을 새 명령으로 본다. 이름과 인자의 자리로 고르는 규칙(R2·R4·R14·R20)은 리다이렉션을 뺀 인자로 판정하고, 파일 이름을 보는 규칙(R10·R20)은 리다이렉션에 붙은 대상도 본다. 규칙의 금지 목록과 예외는 바뀌지 않았다(막는 호출이 는다. 풀리는 호출은 없다). 남는 틈을 13.1절과 TD-62에 적었다.
+  - v0.7.73 (2026-11-22): `gates`가 `pull_request_target` 이벤트에서도 판정할 PR을 API로 다시 조회해 실행 시점의 head를 판정한다(10.4절, Issue #181). 본문 수정의 이벤트에는 수정한 때의 head가 담겨 있어, 직후에 push가 오면 지난 head에 상태를 기록하고 새 head에는 게이트 상태가 남지 않았다. `pr-state`가 판정은 났는데 게이트 상태가 없는 head를 알린다
 
 ### 0.1 전제 조건
 
@@ -972,7 +973,7 @@ pnpm test src/auth/login-guard.spec.ts
 - `plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`는 `gates` 워크플로의 기록 job이 검증 App으로 쓴 커밋 상태다(10.4절). `review/*`(Issue #54)와 `review-ledger`(Issue #55)는 판정 워크플로의 기록 job이 같은 방식으로 쓴다. `revert-check`도 `gates`의 판정 job이 함께 낸다(Issue #102).
 - `revert-check`의 판정(`scripts/gates/revert-check.ts`): 브랜치가 `revert/<40자 SHA>` 꼴일 때만 본다(그 밖의 PR은 "revert PR 아님"으로 통과). 확인 조건은 모두 만족해야 한다. (1) 대상 커밋이 merge-base의 first-parent 이력에 있고 부모가 하나다. (2) `git diff --raw`로 본 PR의 변경(merge-base → head)이 대상의 역(대상 → 대상의 부모)과 경로·모드·blob SHA까지 같다. patch-id나 줄 단위 비교는 공백과 줄 위치를 무시하므로 쓰지 않는다. 대상 뒤에 main이 같은 파일을 다시 바꿨으면 성립하지 않는다. (3) 대상 커밋의 main `check`가 실패했다. 근거는 GitHub Actions App이 만든 이름 `check`의 최신 check run이다(`scripts/ci/revert-evidence.ts`). 커밋 상태는 봇 토큰도 쓸 수 있어 근거로 쓰지 않는다. 조회하지 못하면 `error`다(fail-closed). 조건 (3)이 없으면 봇 토큰을 가진 에이전트가 main의 아무 커밋이나 검증 없이 되돌릴 수 있다.
 - 확인된 revert PR이 면제받는 것은 `plan-gate`의 계획 요구, `review/*` 판정(판정 워크플로의 `plan` job이 같은 함수로 다시 판정해 검증자를 돌리지 않는다), `harness-guard`의 작성자 체크리스트(`CHANGELOG` 한 줄, PR 본문 줄)뿐이다. `risk-gate`·`deps-guard`와 `harness-guard`의 신호·워크플로 검사·자체 테스트는 그대로다. main의 시나리오가 요구하는 동작을 되돌리는 revert PR은 자체 테스트에서 막힌다(TD-41). 훅이나 권한 제한을 더한 커밋의 revert는 완화 신호가 되어 위험도 높음(제작자 head 승인)으로 간다.
-- `risk-gate`의 제작자 승인은 리뷰가 달리거나 철회될 때 다시 판정한다: `review-trigger` 워크플로(`pull_request_review`, PR 쪽 정의라 비밀·권한 없음)가 끝나면 `gates`가 `workflow_run`(main 정의)으로 돌고, 페이로드 대신 head SHA로 API를 조회해 열린 같은 리포 PR의 현재 head에만 판정한다.
+- `risk-gate`의 제작자 승인은 리뷰가 달리거나 철회될 때 다시 판정한다: `review-trigger` 워크플로(`pull_request_review`, PR 쪽 정의라 비밀·권한 없음)가 끝나면 `gates`가 `workflow_run`(main 정의)으로 돌고, 페이로드 대신 head SHA로 API를 조회해 열린 같은 리포 PR의 현재 head에만 판정한다. `pull_request_target`으로 돌 때도 이벤트의 head를 그대로 쓰지 않는다: 이벤트의 PR 번호로 PR을 다시 조회해 실행 시점의 head·본문을 판정한다(`scripts/ci/pr.ts`). 본문 수정(`edited`)의 이벤트에는 수정한 때의 head가 담겨 있고, 같은 PR의 실행은 하나만 남으므로(동시 실행 묶음), 본문 수정 직후에 push가 오면 지난 head를 판정한 실행만 남을 수 있었다(Issue #181). 조회 응답이 그 PR이 아니거나 형식이 틀리면 건너뛰지 않고 실행이 실패한다(상태가 조용히 빠지지 않게 한다). 포크 PR은 전처럼 조회하지 않고 건너뛴다.
 
 **승인 결속 기준**
 
