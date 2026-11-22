@@ -25,28 +25,48 @@ test('조사: env가 할당이나 `--` 뒤의 낱말을 읽는 방법', (t) => {
     chmodSync(file, 0o755);
   };
   fake(tool, 'tool');
-  for (const name of ['-i', '-', '--', '-S', '-u', '-x']) fake(path.join(dash, name), name);
+  for (const name of [
+    '-i',
+    '-',
+    '--',
+    '-S',
+    '-u',
+    '-x',
+    '-iS',
+    '--split',
+    '--split-string',
+    '--unse',
+    '--ignore',
+    'x',
+  ])
+    fake(path.join(dash, name), name);
   const PATH = `${dash}:${process.env.PATH ?? ''}`;
   const shapes = [
-    'env A=1 -i T a',
-    'env A=1 - T a',
-    'env -- - T a',
-    'env -- A=1 - T a',
-    'env A=1 -- T a',
-    "env A=1 -S 'T a'",
-    "env -- -S 'T a'",
-    'env -- -x=1 T a',
-    'env -- -x T a',
-    'env -i -- A-B=1 T a',
-    'env =x T a',
-    'env -- T a',
-    'env - T a',
-    'env A=1 -u HOME T a',
-    "env --split 'T a'",
-    "env --s='T a'",
-    "env --split-s 'T' a",
-    "env -S 'A=1 -i T a'",
-    'env BUILD-MODE=local T a',
+    "env T -S 'a b'",
+    "env T x -S 'a b'",
+    "env A=1 T -S 'a b'",
+    "env -i T -S 'a b'",
+    "env A=1 -x -S 'T a'",
+    "env A=1 -S'T a'",
+    "env A=1 --split-string 'T a'",
+    "env A=1 --split-string='T a'",
+    "env A=1 -iS 'T a'",
+    "env A=1 -S '-i T a'",
+    "env A=1 -S 'B=2 T a'",
+    "env A=1 -S 'T' -S 'a b'",
+    "env -- A=1 -S 'T a'",
+    'env A=1 - B=2 T a',
+    'env A=1 - -i T a',
+    'env - -i T a',
+    'env - A=1 T a',
+    "env - -S 'T a'",
+    'env -- - A=1 T a',
+    "env -S 'A=1 - T a'",
+    "env A=1 --split 'T a'",
+    'env --split x T a',
+    'env --split x -i T a',
+    'env --unse HOME T a',
+    'env --ignore T a',
   ];
   const lines: string[] = [];
   for (const shape of shapes) {
