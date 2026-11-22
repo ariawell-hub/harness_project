@@ -17,7 +17,7 @@ export const GATE_CONTEXTS = [
  * 경고 판정 context(R15·R18, 10.2절 (1)). 병합을 막지 않는다: 필수 체크가 아니고, 경고여도 state는 success다.
  * 경고는 description이 `경고: `로 시작한다
  */
-export const WARN_CONTEXTS = ['pr-size'] as const;
+export const WARN_CONTEXTS = ['pr-size', 'scope'] as const;
 
 /** 기록 job이 커밋 상태로 쓰는 context 전부(필수 판정 뒤에 경고 판정) */
 export const RECORDED_CONTEXTS = [...GATE_CONTEXTS, ...WARN_CONTEXTS] as const;

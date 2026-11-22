@@ -6,6 +6,7 @@ import { formatProblem, matchesAny, WARN_PREFIX } from '../lib/util.ts';
 import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
 import { prSize } from '../gates/pr-size.ts';
+import { scopeCheck } from '../gates/scope.ts';
 import { planGate, type PlanG1 } from '../gates/plan-gate.ts';
 import {
   revertCheck,
@@ -215,6 +216,10 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
       const r = prSize({ root: o.root, base: o.base, cfg: o.cfg });
       return { state: r.state, description: r.description, details: r.details };
     },
+    scope: () => {
+      const r = scopeCheck({ root: o.root, base: o.base, branch: o.branch });
+      return { state: r.state, description: r.description, details: r.details };
+    },
   };
   for (const c of WARN_CONTEXTS)
     results.push(
@@ -236,9 +241,21 @@ export function isWarning(g: GateResult): boolean {
   );
 }
 
+/**
+ * 표의 칸에 넣는 글자를 코드 스팬으로 적는다. 설명에는 PR이 정하는 글자(파일 이름)가 들어간다:
+ * 코드 스팬 안의 글자는 굵게·링크·HTML·멘션으로 읽히지 않고 그대로 보인다.
+ * 구분 백틱은 글자 안의 가장 긴 백틱 줄보다 하나 길게 하고, 표의 칸을 가르는 `|`만 역슬래시로 막는다
+ */
+export function cellCode(s: string): string {
+  const t = s.replace(/[\r\n\u2028\u2029]+/g, ' ');
+  if (!t.trim()) return '';
+  const longest = Math.max(0, ...(t.match(/`+/g) ?? []).map((x) => x.length));
+  const fence = '`'.repeat(longest + 1);
+  return `${fence} ${t.replace(/\|/g, '\\|')} ${fence}`;
+}
+
 /** 판정 job의 $GITHUB_STEP_SUMMARY용 Markdown */
 export function summaryMarkdown(r: GateResults): string {
-  const esc = (s: string) => s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
   const lines = [
     `## 기계 판정 (head \`${r.headSha.slice(0, 12)}\`)`,
     '',
@@ -246,7 +263,7 @@ export function summaryMarkdown(r: GateResults): string {
     '| --- | --- | --- |',
     ...r.results.map(
       (g) =>
-        `| ${g.context} | ${isWarning(g) ? '경고' : STATE_MARK[g.state]} | ${esc(g.description)} |`,
+        `| ${g.context} | ${isWarning(g) ? '경고' : STATE_MARK[g.state]} | ${cellCode(g.description)} |`,
     ),
   ];
   for (const g of r.results) {
