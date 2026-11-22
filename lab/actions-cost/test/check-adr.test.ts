@@ -269,7 +269,7 @@ test('checkAdr 배경: 기준선 링크의 주소는 ADR 폴더에서 본 기준
   );
 });
 
-test('checkAdr 배경: 링크의 글에 코드·대괄호·줄바꿈이 있어도 화면에서 링크이면 센다', () => {
+test('checkAdr 배경: 링크의 글에 코드나 짝이 맞는 대괄호가 있어도 화면에서 링크이면 센다', () => {
   const doc = goodAdr();
   const link = '[Actions 비용 문서](../harness/actions-cost.md)';
   for (const shown of [
@@ -278,8 +278,6 @@ test('checkAdr 배경: 링크의 글에 코드·대괄호·줄바꿈이 있어�
     '[Actions 비용 문서 `a[0]`](../harness/actions-cost.md)',
     '[`[예시](x.md)` 말고 Actions 비용 문서](../harness/actions-cost.md)',
     '[Actions 비용 문서 [기준선]](../harness/actions-cost.md)',
-    '[Actions 비용\n문서](../harness/actions-cost.md)',
-    '[Actions 비용 `actions-cost.md`\n문서](../harness/actions-cost.md)',
   ])
     assert.deepEqual(checkAdr(swap(doc, link, shown)), [], shown);
 });
@@ -302,10 +300,37 @@ test('checkAdr 배경: 화면에서 링크가 아닌 글은 기준선 링크로 
     '[Actions 비용\n- 문서](../harness/actions-cost.md)',
     // 여는 대괄호가 다른 문단에 있다
     '[Actions 비용\n\n문서](../harness/actions-cost.md)',
-    // 글이 강조 표시뿐이다
+    // 글에 보이는 글자가 없다
     '[**](../harness/actions-cost.md)',
+    '[&nbsp;](../harness/actions-cost.md)',
+    '[&#8203;](../harness/actions-cost.md)',
+    '[...](../harness/actions-cost.md)',
   ])
     fails(checkAdr(swap(doc, link, shown)), /배경.*링크/);
+});
+
+test('checkAdr 배경: 기준선 링크는 한 줄에 적는다(줄을 넘는 글은 형식 오류다)', () => {
+  const doc = goodAdr();
+  const link = '[Actions 비용 문서](../harness/actions-cost.md)';
+  // 줄을 넘는 글이 링크인지는 그 사이의 줄이 블록을 가르는지에 달렸다. 가려 읽지 않고 받지 않는다
+  for (const shown of [
+    '[Actions 비용\n문서](../harness/actions-cost.md)',
+    '[Actions 비용 `actions-cost.md`\n문서](../harness/actions-cost.md)',
+    '[Actions 비용\n_ _ _\n문서](../harness/actions-cost.md)',
+    '[Actions 비용\n***\n문서](../harness/actions-cost.md)',
+    '[Actions 비용\n===\n문서](../harness/actions-cost.md)',
+    '[Actions 비용\n### 제목\n문서](../harness/actions-cost.md)',
+    '[Actions 비용\n\n문서](../harness/actions-cost.md)',
+    '[Actions 비용\n- 문서](../harness/actions-cost.md)',
+  ])
+    fails(checkAdr(swap(doc, link, shown)), /배경 형식\(\d+째 줄\).*기준선 링크.*한 줄/);
+  // 바른 링크가 따로 있어도 줄을 넘는 기준선 링크는 형식 오류다
+  fails(
+    checkAdr(swap(doc, link, `${link}와 [다른\n글](../harness/actions-cost.md)`)),
+    /배경 형식\(\d+째 줄\).*기준선 링크.*한 줄/,
+  );
+  // 기준선 문서가 아닌 링크의 글은 줄을 넘어도 이 검사가 보지 않는다
+  assert.deepEqual(checkAdr(swap(doc, link, `${link}와 [다른\n글](../other/x.md)`)), []);
 });
 
 test('checkAdr 후보표: 표가 하나이고 머리 줄과 구분 줄이 맞다', () => {
