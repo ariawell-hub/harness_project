@@ -5,7 +5,7 @@ review_cycle: quarterly
 ---
 # 하네스 엔지니어링 설계서
 
-> 버전 v0.7.81 · 상태: 초안 · 최종 갱신: 2026-11-23
+> 버전 v0.7.82 · 상태: 초안 · 최종 갱신: 2026-11-23
 
 ---
 
@@ -114,6 +114,7 @@ review_cycle: quarterly
   - v0.7.79 (2026-11-22): 판정 코드가 PR이 정하는 파일 이름을 git의 경로 인자로 넘길 때 글자 그대로 읽게 한다(`--literal-pathspecs`. Issue #218, TD-28 해결). `harness-guard`의 위험 플래그 추가 신호는 그 파일에 더해진 줄만 보고, `test-effect`는 그 이름의 테스트 파일·보조 파일만 읽고 덮어쓴다. 전에는 이름에 glob 글자(`[`, `*`)가 있으면 glob에 맞는 다른 파일이 섞였고 `:`으로 시작하는 이름은 특수 표기로 읽혔다. 판정의 규칙은 바꾸지 않았다. 남은 일은 TD-68
   - v0.7.80 (2026-11-22): runner가 열린 질문을 Issue에 올리지 못했을 때 올린 것으로 적지 않는다(4.5절, Issue #211). 질문은 댓글이 올라간 것을 확인한 뒤에만 올린 것으로 적고, 질문 댓글이 댓글 길이 상한을 넘거나 GitHub이 본문을 거부하면 계획 파일의 위치를 알리는 안내 댓글을 올린다. 전달이 끝나지 않은 질문은 계획을 멈춘 채 주기마다 다시 본다(이미 올라간 댓글과 먼저 달린 제작자 댓글을 댓글 번호로 가린다). 그동안 runner는 사람의 답을 기다린다고 멈추지 않고 환경 장애로 기다린다.
   - v0.7.81 (2026-11-23): 기록 job의 커밋 상태 쓰기가 GitHub API의 일시 오류(HTTP 5xx, 응답 없음)에 다시 보낸다(10.4절, Issue #220, TD-48 해결). 요청은 상태 하나에 4번까지이고 다시 시도가 더하는 시간은 60초까지다. 모두 실패하면 전처럼 job이 실패한다. 전에는 요청 하나가 실패하면 job이 거기서 끝나 실행을 다시 돌려야 했다. 다른 GitHub API 호출은 그대로다(TD-69)
+  - v0.7.82 (2026-11-23): 보호 경로를 바꾼 PR은 CHANGELOG 끝과 설계서 머리말·변경 이력 끝에 줄을 더하지 않고 PR마다 변경 조각 파일(`docs/harness/changes/<브랜치 이름의 / 뒤>.md`)에 적는다(7.2절, R9, 10.4절, Issue #222, TD-39). `harness-guard`는 CHANGELOG를 고쳤거나 그 PR 브랜치 이름의 조각에 base에 없던 CHANGELOG 항목을 더했으면 기록으로 센다. 설계서를 바꾼 PR에는 변경 이력에 base의 항목을 남긴 채 더 큰 버전을 더했거나 조각에 설계서 변경 이력 항목을 더했을 것을 요구한다. 조각의 자리·형식은 `doc-lint`가 `R8 변경 조각`으로 본다. 버전을 매겨 옮기는 일은 모으기 PR이 한다. 전에는 보호 경로 PR마다 같은 파일 끝에 줄을 더해 PR끼리 병합 충돌이 났다
 
 ### 0.1 전제 조건
 
@@ -404,7 +405,7 @@ review_cycle: quarterly
 | R6 | 포맷 통일 | B3 | 검출 | L3: `fmt --check`<br>L2: pre-commit에서 `fmt` 자동 적용 | 병합 불가 |
 | R7 | push·PR 직전 전체 검사 | B3 | 검출 | L3: 같은 검사 재실행(필수 체크). 로컬과 CI가 같은 조건으로 `test`를 건너뛴다(6절)<br>L1·L2: push·PR 직전 `check`. 같은 캐시 키의 결과는 재사용(6절) | 원인을 고친다. 무관한 실패는 5.2절 |
 | R8 | 문서 최신성 | B1, B6 | 검출 | L3: doc-lint(깨진 링크, 색인 누락, frontmatter 형식, 오래된 문서 표시, `AGENTS.md` 줄 수 상한. 7.1~7.2절)<br>정기: doc-gardening(12.2절) | 깨진 링크·색인 누락은 병합 불가. 오래된 문서는 경고 + 수정 PR |
-| R9 | 하네스 파일 변경 통제 | B3 | 검출(구축 단계) / 차단(운영 단계) | 구축: `harness-guard`(main의 정의로 실행) + 샌드박스·권한 완화 설정의 규칙 탐지 + 하네스 자체 테스트(12.4절) + 체크리스트·`CHANGELOG`<br>운영: CODEOWNERS로 제작자 승인 필수 | 병합 불가. 남는 위험은 10.4절 |
+| R9 | 하네스 파일 변경 통제 | B3 | 검출(구축 단계) / 차단(운영 단계) | 구축: `harness-guard`(main의 정의로 실행) + 샌드박스·권한 완화 설정의 규칙 탐지 + 하네스 자체 테스트(12.4절) + 체크리스트·변경 기록(`CHANGELOG` 또는 그 PR의 변경 조각)<br>운영: CODEOWNERS로 제작자 승인 필수 | 병합 불가. 남는 위험은 10.4절 |
 | R10 | 시크릿 커밋·push 금지 | B9 | 절차(push 전) + 검출(push 후) | `.gitignore`에 `.env`, `.env.*` 등록(`.env.example` 제외). 이 항목이 지워지면 `harness-guard`가 표시<br>L0(4단계부터)·L1: 에이전트의 `.env*` 읽기, `git add -f`, `--no-verify` 차단(보조 수단. 에이전트가 실행하는 테스트는 같은 값을 환경 변수로 읽을 수 있다)<br>L2: pre-commit·pre-push 시크릿 스캔(gitleaks 등)<br>L3: CI 시크릿 스캔(PR의 모든 커밋). 이 시점에는 이미 원격에 올라간 상태다 | push 전에는 로컬에서 차단. push 후 검출되면 병합 불가 + 유출로 보고 즉시 키 교체(14.2절) |
 | R11 | 아키텍처 경계 준수 | B7 | 검출 | L3: 프로파일별 구조 테스트·의존성 린트 | 병합 불가. 에러 메시지에 수정 지침 포함 |
 | R12 | 교차 검증 없이 병합 금지 | B4 | 차단 | L3: 위험도별 검증자의 커밋 상태(`review/*`)를 필수 체크로 등록. 이 상태는 기록 job만 쓸 수 있다(10.4절) | 병합 불가 |
@@ -518,6 +519,7 @@ docs/
 └── harness/                   # 하네스 자체 문서
     ├── design.md              # 이 설계서 (이관 예정, "왜")
     ├── workflow.md            # 에이전트용 작업 절차서 ("어떻게", 7.1절)
+    ├── changes/               # 변경 조각: PR마다 파일 하나. 모으기 PR이 CHANGELOG·변경 이력으로 옮기고 지운다
     └── CHANGELOG.md
 scripts/                       # 표준 명령, new-task, run(runner), cross-review, merge 등 공통 로직
 .github/                       # CI 워크플로, 필수 상태 체크 (10.3~10.4절)
@@ -975,7 +977,7 @@ pnpm test src/auth/login-guard.spec.ts
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
 | `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
 | `deps-guard` | lockfile 전체 변경 검사 | R17 |
-| `harness-guard` | 보호 경로 변경 시 체크리스트·`CHANGELOG`·하네스 자체 테스트(`gates` 워크플로의 `selftest` job 결과를 기록 job이 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 success가 아니다. 10.4절), PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한 탐지, 기존 자체 테스트 파일의 수정·삭제 표시, 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
+| `harness-guard` | 보호 경로 변경 시 체크리스트·변경 기록(`CHANGELOG` 또는 그 PR의 변경 조각. 설계서를 바꿨으면 설계서 기록도)·하네스 자체 테스트(`gates` 워크플로의 `selftest` job 결과를 기록 job이 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 success가 아니다. 10.4절), PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한 탐지, 기존 자체 테스트 파일의 수정·삭제 표시, 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
 | `revert-check` | revert PR 전용. diff가 대상 커밋을 정확히 되돌리는지 확인하고, 통과하면 `review/*`를 대신한다 | 아래 "병합 후 main CI가 실패하면" |
 
@@ -1108,7 +1110,7 @@ pnpm test src/auth/login-guard.spec.ts
   - 규범 문서(문서가 곧 프롬프트, 14.6절): `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `docs/core-beliefs.md`, `docs/SECURITY.md`, 계획 템플릿, 검증 체크리스트·프롬프트
 - **샌드박스·권한 완화 탐지**: `harness-guard`가 LLM 판단 없이 규칙으로 탐지한다. 대상은 Codex `sandbox_mode = "danger-full-access"`·`approval_policy` 완화, Claude Code `defaultMode: "bypassPermissions"`·`--dangerously-skip-permissions`·`enableAllProjectMcpServers`, 무인 권한 프로필(4.5절)보다 넓히는 `permissions.allow` 추가, 훅 삭제·비활성화, `.gitignore`의 `.env` 항목 삭제다. 탐지되면 PR에 표시한다. 표시된 PR은 `risk-gate`가 위험도를 "높음"으로 올려 제작자의 head 승인이 있어야 병합된다(제작자 결정 2026-11-14, Issue #53). 검사 약화 흔적(워크플로·job 삭제, `harness.config.json`의 표준 명령·보호 경로·위험도 표·`stage` 등 판정 관련 키 변경, 워크플로의 새 `write` 권한)과 정해 둔 environment 밖 참조도 같은 방식으로 처리한다. `CHANGELOG`·PR 본문 체크리스트 누락과 워크플로 캐시 사용은 작성자가 고칠 수 있으므로 `harness-guard` 실패다.
 - **구축 단계(이 리포는 2026-11-18까지)**: 하네스를 만드는 동안 매번 승인하지 않도록 **보호 경로도 자동 병합한다**(사용자 결정). 대신 아래로 보완한다.
-  - `harness-guard`를 main의 정의로 실행한다. 체크리스트, `CHANGELOG`, 필수 체크 이름·단계 삭제 같은 검사 약화 흔적, 위 완화 설정을 확인한다.
+  - `harness-guard`를 main의 정의로 실행한다. 체크리스트, 변경 기록(`CHANGELOG` 또는 그 PR의 변경 조각), 필수 체크 이름·단계 삭제 같은 검사 약화 흔적, 위 완화 설정을 확인한다.
   - 하네스 자체 테스트(12.4절)를 통과해야 한다. `gates` 워크플로의 `selftest` job이 main의 실행기·시나리오로 PR의 하네스를 시험하고, 기록 job이 결과를 `harness-guard`에 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 `harness-guard`는 success가 아니다.
     - 기존 실행기·시나리오 파일(`scripts/selftest/` 아래, base에 있던 파일)을 고치거나 지우는 PR은 위험도 높음이다(제작자 head 승인). 새 시나리오 파일 추가는 해당하지 않는다.
     - 한계: `selftest` job은 PR 코드를 실행하고 보고서도 그 job이 쓰므로, PR 코드가 결과를 조작할 수 있다. 실수로 생긴 회귀를 잡는 용도다. 의도적인 약화는 두 검증자와 제작자 승인이 맡는다.
