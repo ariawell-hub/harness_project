@@ -9,7 +9,7 @@
 //      그 밖의 작성자는 고르지 않고 `excluded`로 알린다(14.6절).
 //      만든 뒤 허용 계정이 아닌 계정이 제목·본문을 고쳤으면 그 뒤의 제작자 승인이 있어야 한다(TD-19)
 //   6. 없으면 idle (CI·사람 대기 수 포함)
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { planHashes } from '../ci/plan-hash.ts';
 import { stepCompletedAt } from '../commands/pr-state.ts';
@@ -33,6 +33,7 @@ import {
   repoInfo,
   revParse,
   showFile,
+  type RepoInfo,
 } from '../lib/git.ts';
 import {
   PLANS_DIR,
@@ -171,6 +172,80 @@ export function readConflictState(worktree: string): ConflictState {
 
 export function writeConflictState(worktree: string, s: ConflictState): void {
   writeFileSync(conflictFile(worktree), JSON.stringify(s, null, 2) + '\n');
+}
+
+/**
+ * 올린 질문 제목과 답 대기 여부. worktree 하네스 상태 폴더의 questions.json(answer.md 옆).
+ * - reported: 제작자에게 올린(댓글이 Issue에 있는 것을 확인한) 질문의 제목
+ * - waiting: 답을 기다린다
+ * - stage: 질문을 남긴 세션. plan(계획 작성, TD-18) | step(step 세션, TD-24). 답을 받은 뒤 이어 갈 곳이 다르다
+ * - unposted: 질문을 올리기로 했는데 전달이 끝나지 않았다(댓글이 올라간 것을 확인하지 못했거나 라벨을 붙이지 못했다. Issue #211)
+ * - base: 질문을 올리기로 한 때 Issue의 마지막 댓글의 번호(숫자로만 된 문자열. 댓글이 없었으면 '0').
+ *   아직 읽지 못했거나 그 댓글의 번호를 읽지 못했으면 없다. 번호가 이것보다 큰 댓글만 이번 질문 뒤의 댓글이다
+ */
+export interface QuestionState {
+  reported: string[];
+  waiting: boolean;
+  stage: 'plan' | 'step';
+  unposted: boolean;
+  base?: string;
+}
+
+const COMMENT_ID = /^\d+$/;
+
+function questionFile(info: RepoInfo): string {
+  return path.join(harnessStateDir(info, 'worktree'), 'questions.json');
+}
+
+/** 없거나 깨졌으면 빈 상태. unposted·base가 없는 옛 파일은 unposted: false, base 없음으로 읽는다 */
+export function readQuestionState(info: RepoInfo): QuestionState {
+  try {
+    const raw = JSON.parse(readFileSync(questionFile(info), 'utf8')) as Partial<
+      Record<keyof QuestionState, unknown>
+    >;
+    return {
+      reported: Array.isArray(raw.reported) ? raw.reported.map(String) : [],
+      waiting: raw.waiting === true,
+      stage: raw.stage === 'step' ? 'step' : 'plan',
+      unposted: raw.unposted === true,
+      ...(typeof raw.base === 'string' && COMMENT_ID.test(raw.base) ? { base: raw.base } : {}),
+    };
+  } catch {
+    return { reported: [], waiting: false, stage: 'plan', unposted: false };
+  }
+}
+
+/**
+ * 같은 폴더의 임시 파일에 다 쓴 뒤 이름을 바꿔 넣는다. 그 자리에서 덮어쓰면 쓰는 중에 runner가 끝났을 때 빈 파일이
+ * 남고, 빈 파일은 "올리지 못한 질문 없음"으로 읽혀 멈춘 계획의 질문이 다시 올려지지 않는다(Issue #211).
+ * 바꿔 넣으면 어느 순간에 끝나도 마지막으로 저장한 상태나 새 상태가 남는다
+ */
+export function writeQuestionState(info: RepoInfo, s: QuestionState): void {
+  const file = questionFile(info);
+  const next = `${file}.${process.pid}.tmp`;
+  writeFileSync(next, JSON.stringify(s, null, 2) + '\n');
+  renameSync(next, file);
+}
+
+/**
+ * 질문을 올리기로 한 때의 기준: 마지막 댓글의 번호. 댓글이 하나도 없으면 '0'.
+ * 마지막 댓글의 번호를 읽지 못했으면(빈 값, 숫자가 아님) undefined: 0이나 다른 댓글의 번호로 대신하지 않는다
+ */
+export function questionBase(comments: readonly Comment[]): string | undefined {
+  const last = comments.at(-1);
+  if (!last) return '0';
+  return COMMENT_ID.test(last.id) ? last.id : undefined;
+}
+
+/**
+ * 기준 뒤의 댓글: 번호가 `base`보다 큰 댓글(큰 정수로 견준다). 댓글 번호는 만들어진 순서대로 커지므로 기준 댓글이
+ * 목록에 없어도(지워졌다, 읽는 범위 밖으로 밀렸다), 같은 초에 달린 댓글이어도 같은 답이 나온다.
+ * 번호가 없는 댓글은 넣지 않는다. `base`가 없거나 숫자가 아니면 빈 목록이다(0으로 보지 않는다)
+ */
+export function commentsAfter(comments: readonly Comment[], base: string | undefined): Comment[] {
+  if (base === undefined || !COMMENT_ID.test(base)) return [];
+  const b = BigInt(base);
+  return comments.filter((c) => COMMENT_ID.test(c.id) && BigInt(c.id) > b);
 }
 
 export type Task =
@@ -353,12 +428,24 @@ export function readLocalPlans(env: NextEnv): LocalPlan[] {
   return out;
 }
 
-function latestOwnerAnswer(gh: GitHubPort, owner: string, issue: number): string | null {
+function latestOwnerAnswer(
+  gh: GitHubPort,
+  owner: string,
+  issue: number,
+  local: LocalPlan | null,
+): string | null {
   if (!owner) return null;
   const comments = gh.comments(issue);
   const last = comments[comments.length - 1];
   // 답변 인정 기준(9.1절): 제작자 계정의 댓글만. 마지막 댓글이 인정되는 제작자 댓글이어야 "답을 받음"
-  return last && ownerComment(last, owner) ? last.body : null;
+  if (!last || !ownerComment(last, owner)) return null;
+  // 전달이 끝나지 않은 질문이 있는 계획(Issue #211): 질문을 올리기로 한 뒤의 댓글만 답이다.
+  // 질문보다 먼저 있던 제작자 댓글이 (다른 이유로 붙은) 라벨 때문에 답으로 보이지 않게 한다
+  if (local) {
+    const qs = readQuestionState(repoInfo(local.worktree));
+    if (qs.unposted && !commentsAfter(comments, qs.base).includes(last)) return null;
+  }
+  return last.body;
 }
 
 function priorityOf(issue: Issue, labels: string[]): number {
@@ -574,8 +661,8 @@ function pickFrom(env: NextEnv, locals: LocalPlan[]): Omit<Pick, 'locals'> {
 
   // 1. 답을 받은 needs-human
   for (const issue of issues.filter((i) => i.labels.includes(label))) {
-    const answer = latestOwnerAnswer(gh, cfg.github.owner, issue.number);
     const local = mine.find((l) => l.issue === issue.number) ?? null;
+    const answer = latestOwnerAnswer(gh, cfg.github.owner, issue.number, local);
     if (answer && (local || !locals.some((l) => l.issue === issue.number))) {
       return {
         task: { kind: 'answered', issue: issue.number, answer, local },
