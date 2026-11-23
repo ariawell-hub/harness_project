@@ -8,6 +8,7 @@
 - `scripts/gates/doc-lint.ts`: `NO_FRONTMATTER`, `docLint`의 검사 차례, 문서 목록(`listMarkdown`), 설계서 버전 검사(`DESIGN_DOC`, `DESIGN_HEAD`, `DESIGN_ITEM`, `compareVersions`, `designVersionProblems`)
 - `scripts/test/doc-lint-design-version.test.ts`(옮긴 뒤에도 고치지 않고 통과해야 한다. 읽기만)
 - `scripts/test/harness-guard.test.ts`의 `repo`·`run` 도우미와 `runGates` 테스트, `scripts/test/helpers.ts`
+- `scripts/test/metrics-allow.ts`의 `GIT_READ_SHAPES`, `scripts/test/metrics-command.test.ts`의 자식 프로세스 테스트("허용 목록의 git 넷뿐이다"), `scripts/metrics/local.ts`의 `docLint` 호출(읽기만)
 - `docs/harness/workflow.md` 5절, `docs/harness/design.md`의 7.2절 트리·R9 행·`harness-guard` 행·10.4절의 `harness-guard` 설명 줄, `docs/harness/CHANGELOG.md`의 머리, `.github/pull_request_template.md`, `README.md`의 하네스 변경 이력 문장
 - 이 계획의 "목표와 수용 기준"과 "의사결정 로그"
 - 초안(참고만): `git show 5059e42:docs/exec-plans/active/20261123-change-fragments/draft-step0.patch`. 초안은 계획마다 파일 하나(`<계획 id>.md`)로 문구를 썼고 브랜치를 보지 않는다. 이 step의 규칙(아래)으로 고쳐 쓴다.
@@ -98,6 +99,9 @@ export function compareVersions(a: string, b: string): number;
   - `how`: `조각 파일의 자리·형식을 docs/harness/workflow.md 5절 "변경 조각"대로 맞춰라`
   - 목록을 읽지 못하면 지금의 문서 목록과 같이 읽기 오류다(`DocLintReadError`).
 - 설계서 버전 검사는 2의 파일을 쓴다. 다른 검사(깨진 링크 등)는 고치지 않는다.
+- 지표 명령(`metrics`)이 `docLint`를 부르므로, 그 테스트의 git 허용 목록에 이 읽기를 더한다(의사결정 로그 15).
+  - `scripts/test/metrics-allow.ts`의 `GIT_READ_SHAPES` 끝에 꼴 하나: 이름 `ls-files-changes`, 인자 `['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'docs/harness/changes']`. 머리 주석의 개수를 맞춘다.
+  - `scripts/test/metrics-command.test.ts`의 자식 프로세스 테스트: 제목의 "git 넷"을 "git 다섯"으로, 호출 차례를 "`repoInfo`의 둘 → 문서 목록 → 커밋 시각 읽기들 → 마지막에 `ls-files-changes` 하나"로, 허용 목록 이름 단언을 다섯으로 바꾼다. 다른 테스트는 고치지 않는다.
 
 ### 4. `scripts/gates/harness-guard.ts`와 `scripts/ci/gates.ts`
 
@@ -162,9 +166,10 @@ export function compareVersions(a: string, b: string): number;
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/changes.test.ts scripts/test/harness-guard.test.ts scripts/test/doc-lint-design-version.test.ts
+node --test scripts/test/changes.test.ts scripts/test/harness-guard.test.ts scripts/test/doc-lint-design-version.test.ts scripts/test/metrics-command.test.ts
 git rev-parse --verify --quiet origin/main^{commit}
-test "$(git diff --name-only origin/main...HEAD -- scripts .github harness.config.json | sort | tr '\n' ' ')" = ".github/pull_request_template.md scripts/ci/gates.ts scripts/gates/doc-lint.ts scripts/gates/harness-guard.ts scripts/lib/changes.ts scripts/lib/design-version.ts scripts/test/changes.test.ts scripts/test/harness-guard.test.ts "
+test "$(git diff --name-only origin/main...HEAD -- scripts .github harness.config.json | sort | tr '\n' ' ')" = ".github/pull_request_template.md scripts/ci/gates.ts scripts/gates/doc-lint.ts scripts/gates/harness-guard.ts scripts/lib/changes.ts scripts/lib/design-version.ts scripts/test/changes.test.ts scripts/test/harness-guard.test.ts scripts/test/metrics-allow.ts scripts/test/metrics-command.test.ts "
+grep -qF "'ls-files-changes'" scripts/test/metrics-allow.ts
 test -z "$(git diff origin/main...HEAD -- scripts/test/harness-guard.test.ts | grep '^-[^-]')"
 test "$(grep -c '^test(' scripts/test/changes.test.ts)" = 5
 test "$(grep -c '^test(' scripts/test/harness-guard.test.ts)" = "$(( $(git show origin/main:scripts/test/harness-guard.test.ts | grep -c '^test(') + 4 ))"
@@ -199,7 +204,7 @@ node scripts/harness.ts doc-lint
 - `docs/harness/changes/`에 파일을 두지 마라. 이 step의 기록도 조각으로 하지 마라. 이유: 이 PR은 main의 `harness-guard`(조각을 모르는 판)로 판정된다. CHANGELOG와 설계서 버전을 직접 고친다(의사결정 로그 3).
 - CHANGELOG를 고친 PR을 통과시키는 조건을 빼지 마라. 기록이 없을 때의 실패를 경고나 통과로 바꾸지 마라. 이유: 모으기 PR과 이 규칙 전에 쓴 계획이 CHANGELOG를 직접 고친다. 실패를 낮추면 검사 약화다.
 - `branch`가 없을 때 조각을 세지 마라. 다른 브랜치 이름의 조각을 세지 마라. 이유: 다른 PR의 조각에 더한 줄은 모으기 PR과 충돌한다(의사결정 로그 11). 모를 때는 세지 않는 쪽(fail-closed)이다.
-- 있던 테스트와 테스트 도우미를 고치거나 지우지 마라(`scripts/test/doc-lint-design-version.test.ts` 포함). 이유: 있던 판정과 `R8 설계서 버전`의 결과가 그대로라는 것을 있던 테스트가 지킨다. AC가 `scripts/test/harness-guard.test.ts`에서 지운 줄이 없는지 본다.
+- 있던 테스트와 테스트 도우미를 고치거나 지우지 마라(`scripts/test/doc-lint-design-version.test.ts` 포함). 예외는 3의 지표 명령 git 허용 목록(`scripts/test/metrics-allow.ts`)과 그 자식 프로세스 테스트 하나다(의사결정 로그 15). 이유: 있던 판정과 `R8 설계서 버전`의 결과가 그대로라는 것을 있던 테스트가 지킨다. AC가 `scripts/test/harness-guard.test.ts`에서 지운 줄이 없는지 본다.
 - 설계서 버전 검사의 규칙과 문제 글을 바꾸지 마라(옮기기만 한다). 이유: 수용 기준 7. step1의 모으기 결과도 이 검사로 본다.
 - `scripts/lib/`의 파일이 `scripts/gates/`를 가져오게 하지 마라. 이유: 하위 계층이 상위 계층에 기대게 된다(의사결정 로그 13).
 - `scripts/harness.ts`, `scripts/runner/`, `scripts/commands/`, `harness.config.json`, `scripts/ci/gates.ts`의 `harnessGuard` 호출 밖을 고치지 마라. 이유: 모으기 명령은 step1에서 만들고, runner 안내와 설정은 범위 밖이다(의사결정 로그 7).

@@ -67,6 +67,8 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - `scripts/test/changes.test.ts`
 - `scripts/test/changes-collect.test.ts`
 - `scripts/test/harness-guard.test.ts`
+- `scripts/test/metrics-allow.ts`
+- `scripts/test/metrics-command.test.ts`
 - `docs/harness/changes/`
 - `docs/harness/workflow.md`
 - `docs/harness/design.md`
@@ -90,6 +92,7 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - 2026-11-23 12:53 계획 검증 2회차(73ddca8): review/claude 승인, review/codex 수정 요청. F2~F6은 해결로 닫혔다. 남은 F1(경계 확인이 폴더가 비었는지 본 뒤였다), 새 F7(P0, git이 무시하는 조각은 되돌리기로 살릴 수 없다), 새 F8(P1, 마지막 이력 항목을 지워도 옛 방식 기록으로 셌다)을 받아들여 고쳤다(의사결정 로그 12·14, 수용 기준 4·6). 그동안 step0 구현을 로컬에서 준비했다(커밋하지 않았다).
 - 2026-11-23 13:01 계획 검증 3회차(7209df2): review/claude 승인, review/codex 수정 요청. F1·F7·F8은 해결로 닫혔다. 새 F9(P0, 기록 파일이 작업 트리 밖 파일과 하드 링크로 이어지면 바깥 파일을 덮어쓴다)와 F10(P1, 수용 기준 6이 `git status`만 허용해 step1의 `git ls-tree`와 어긋났다)을 받아들여 고쳤다(의사결정 로그 14, 수용 기준 6). 로컬 구현에는 F8 판정(`compareVersions`로 버전 비교)과 테스트 (e)(f)를 더했다.
 - 2026-11-23 13:10 계획 검증 4회차(3fe6c4c): review/claude·review/codex 모두 승인, `review-ledger` 차단 지적 없음(전체 10). step0 테스트만 커밋했다(2ba5b16). 이 커밋을 새로 클론해 구현 없이 돌리면 새 테스트 9건(`changes.test.ts` 5건, `harness-guard.test.ts` 4건)이 모두 실패하고 있던 16건은 통과했다(1건은 이 환경에서 건너뜀). 이어서 구현과 문서(절차서 5절 "변경 조각", 설계서 v0.7.82, CHANGELOG, PR 템플릿, README, 코드 구조 문서)를 더했다.
+- 2026-11-23 16:28 push 전 `check`의 `test`가 이 PC에서 두 번 1800초 시간 제한에 걸렸다(실패한 테스트 없음, Issue #230. 제작자가 프로그램을 정리한 뒤 세 번째를 돌렸다). 세 번째는 1520초에 끝났고 실패 셋이 나왔다. 둘은 Windows 전용 `EPERM`(`next.test.ts`, `scope.test.ts`)으로 main의 #231이 고쳤다. 하나는 이 step의 회귀다: `metrics-command.test.ts`가 지표 명령이 띄우는 git 명령을 허용 목록(`scripts/test/metrics-allow.ts`의 `GIT_READ_SHAPES`)으로 막는데, `doc-lint`에 더한 변경 조각 목록 읽기(`git ls-files … -- docs/harness/changes`)가 그 목록에 없다(지표 명령이 `docLint`를 부른다). 허용 목록과 호출 순서 테스트를 넓혀야 하고, 이 두 파일이 계획의 관련 파일과 step0 AC에 없어 계획을 고쳐 다시 검증받는다(의사결정 로그 15). step0을 `in_progress`로 되돌렸다. 코드는 올리지 않았으므로 되돌리는 커밋으로 PR의 변경을 계획만 남겨 검증받고, 승인 뒤 되돌림을 되돌린다(절차서 2절 "계획 검증").
 
 ## 의사결정 로그
 
@@ -107,6 +110,7 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 12. 결정: 설계서를 바꾼 PR에 설계서 기록을 요구하는 검사를 `harness-guard`에 더한다(수용 기준 4). 옛 방식 기록은 "base의 변경 이력 항목 버전이 head에 모두 있고, head의 마지막 버전이 base의 마지막 버전보다 크다"로 본다. 처음에는 "마지막 항목 줄이 base와 다르다"로 했으나, 마지막 항목을 지우고 머리말을 앞 항목에 맞추면 새 기록 없이 통과했다(Codex F8). 버전으로 보므로 옛 항목의 글을 고치는 것은 막지 않는다. / 이유: 조각에서 `## 설계서 변경 이력`은 없어도 되는 섹션이라, 검사가 없으면 설계서를 고치고도 이력이 빠지기 쉽다. `R8 설계서 버전`은 머리말과 마지막 항목만 견주므로 이 누락을 보지 못한다(Codex F4. 지금도 같은 틈이 있다). 모으기 PR은 마지막 항목을 바꾸므로 통과한다. / 버린 대안: 문서에 "검사 없음"으로 적고 TD로 남기기.
 13. 결정: 설계서 머리말·변경 이력을 읽는 코드를 `scripts/lib/design-version.ts`로 옮기고 `doc-lint`는 그것을 쓴다(`designVersionProblems`를 다시 내보내 있던 테스트의 가져오기를 그대로 둔다). / 이유: `lib/`의 모으기 계산과 `gates/harness-guard`가 같은 읽기 규칙을 써야 한다. `lib/`가 `gates/`를 가져오지 않는다(Codex F5). 옮기기만 하고 규칙은 바꾸지 않는다.
 14. 결정: 모으기 명령은 바꾸기 전에 (1) 조각 폴더와 그 위 폴더(`docs`, `docs/harness`)가 심볼릭 링크가 아닌 실제 폴더인지를 폴더 안을 읽기 전에 보고, 조각과 두 기록 파일이 심볼릭 링크가 아닌 일반 파일이고 하드 링크 수(`nlink`)가 1인지(`lstat`) 본다. (2) 조각과 두 기록 파일이 모두 HEAD에 커밋된 파일인지(`git ls-tree -r --name-only -z HEAD -- <셋>`) 본다. (3) 두 기록 파일과 조각 폴더에 커밋하지 않은 변경이 없는지(`git status --porcelain --untracked-files=all`) 본다. 쓰기·지우기 도중 실패하면 되돌리는 명령(`git restore --source=HEAD --staged --worktree -- <셋>`)을 출력한다. / 이유: 링크를 따라가면 작업 트리 밖 파일을 옮기고 지울 수 있다(Codex F1. 폴더가 비었는지 먼저 보면 빈 바깥 폴더로 가는 링크를 검사 없이 지나친다). 하드 링크도 같다: 기록 파일이 작업 트리 밖 파일과 하드 링크로 이어져 있으면 그 파일에 쓰는 것이 바깥 파일을 바꾼다(Codex F9). git이 만든 파일의 링크 수는 1이므로 1이 아니면 막는다. 기록 파일을 쓴 뒤 조각을 지우다 실패하고 다시 실행하면 같은 항목이 두 번 옮겨지고 설계서 버전이 한 번 더 매겨진다(Codex F6). (3)이 그 재실행을 막고, 되돌린 뒤에는 처음부터 다시 모은다. (3)은 git이 무시하는 파일을 보지 못하므로, 무시된 조각을 지우면 되돌리기로 살릴 수 없다. (2)가 그 경우를 막는다(Codex F7). / 버린 대안: 임시 파일과 이름 바꾸기로 쓰기를 원자적으로 하기(파일 셋 이상을 한꺼번에 원자적으로 바꿀 수 없어 중간 실패는 그대로 남는다), 이미 옮긴 항목을 글로 찾아 건너뛰기(같은 글의 항목을 구별하지 못한다).
+15. 결정: `doc-lint`의 변경 조각 목록 읽기(`git ls-files -z --cached --others --exclude-standard -- docs/harness/changes`)를 지표 명령의 git 허용 목록(`scripts/test/metrics-allow.ts`의 `GIT_READ_SHAPES`)에 더하고, `scripts/test/metrics-command.test.ts`의 자식 프로세스 테스트(허용 목록의 git 넷 → 다섯, 호출 차례)를 맞춘다. / 이유: 지표 명령은 "검토 필요" 경고 수를 세려고 `docLint`를 부르고, 그 테스트는 허용 목록 밖의 git 명령을 막는다. 허용 목록 머리 주석이 "읽기 명령을 더하면 여기에 꼴을 더하고 호출 단언도 함께 넓힌다"고 정한다. 더하는 것은 읽기 하나다. / 버린 대안: 파일 시스템으로 폴더를 읽기(git이 무시하는 파일, 예를 들어 macOS의 `.DS_Store`까지 조각 자리 오류로 잡는다), 폴더가 없으면 git을 부르지 않기(테스트 고정물에만 맞춘 것이라, 조각이 있는 실제 리포에서는 허용 목록 밖의 읽기가 그대로 돈다), 지표 명령이 부를 때 조각 검사를 끄는 옵션(`docLint`와 `scripts/metrics/local.ts`의 인자를 함께 바꿔야 한다).
 
 ## 발견 사항
 
@@ -126,5 +130,5 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 
 ## 다음 할 일
 
-- step0 PR #227: 완료 처리 → `origin/main` 병합 → `check` → push → 판정 통과 뒤 `pr-ready`로 제작자 head 승인 요청(위험도 높음).
+- step0 PR #227: 계획 재검증(의사결정 로그 15) → 승인 뒤 되돌림을 되돌리고 완료 처리 → `origin/main` 병합 → `check` → push → 판정 통과 뒤 `pr-ready`로 제작자 head 승인 요청(위험도 높음).
 - step0이 병합되면 `new-task --plan 20261123-change-fragments --step 1`로 step1(모으기 명령)을 시작한다.
