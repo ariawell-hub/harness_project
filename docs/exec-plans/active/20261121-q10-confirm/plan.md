@@ -141,6 +141,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`, 출처 확인 `node lab/q10-db/verify-artifacts.ts`(step1 AC. 출력을 진행 로그와 PR 본문에 옮긴다).
 - 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
 - 결과(2026-11-22, step0): AC의 명령 16줄이 모두 통과했다(다섯째 줄은 새 임시 폴더의 복제본에서 절차를 실제로 돌렸다). `node scripts/harness.ts check` 통과. 트리 비교는 진행 로그에 있다.
+- 결과(2026-11-23, step0 재작업 F15, 제작자의 Windows 11 PC): AC의 명령 16줄이 모두 통과했다. 다섯째 줄은 이 PC(Windows 네이티브, Git Bash)의 새 임시 복제본에서 절차를 돌렸고 `trial: lab/q10-db/results/win32-x64.json을 썼다`, `win32-x64: 통과`가 나왔다. 그 결과 파일은 복제본에만 있고 리포에 넣지 않았다(결과는 step1에서 워크플로의 산출물로만 더한다). step1에서 ADR의 한계("제작자의 PC는 재지 못했다")를 적을 때 참고한다.
 - step1의 결과는 step1을 진행하며 적는다.
 
 ## 다음 할 일
