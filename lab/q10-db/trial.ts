@@ -25,6 +25,7 @@ import {
   readRepoPackageManager,
   RESULTS_DIR,
 } from './check-results.ts';
+import { readPnpmVersion } from './pnpm-version.ts';
 import { parseTrialArgs } from './trial-args.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -87,14 +88,20 @@ const tail = (s: string): string => s.trimEnd().split('\n').slice(-15).join('\n'
  * pnpm을 띄운다. 인자는 이 파일의 상수뿐이다(바깥 입력을 넣지 않는다).
  * Windows에서는 pnpm이 .cmd라 셸을 거쳐야 실행된다.
  */
-function pnpm(cwd: string, args: string[], timeout: number): { status: number; out: string } {
+function pnpm(
+  cwd: string,
+  args: string[],
+  timeout: number,
+): { status: number; out: string; stdout: string; stderr: string } {
   const r = spawnSync('pnpm', args, {
     cwd,
     encoding: 'utf8',
     timeout,
     shell: process.platform === 'win32',
   });
-  return { status: r.status ?? -1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  const stdout = r.stdout ?? '';
+  const stderr = r.stderr ?? '';
+  return { status: r.status ?? -1, out: `${stdout}${stderr}`, stdout, stderr };
 }
 
 function readJson(file: string): Record<string, unknown> {
@@ -255,7 +262,8 @@ async function main(): Promise<void> {
   // 설치 정책을 그대로 적용한다. 정책에 걸리는 버전이면 아래 설치가 실패한다
   copyFileSync(path.join(REPO_ROOT, POLICY_FILE), path.join(project, POLICY_FILE));
   // 설치 전에: 쓰는 pnpm이 리포가 고정한 버전이고 정책을 실제로 적용하는지 확인한다
-  const pnpmVersion = pnpm(project, ['--version'], 60_000).out.trim().split('\n').pop() ?? '';
+  // 버전은 표준 출력에서만 읽는다(Corepack이 표준 오류에 다운로드 안내를 쓴다. Issue #233)
+  const pnpmVersion = readPnpmVersion(pnpm(project, ['--version'], 60_000));
   if (`pnpm@${pnpmVersion}` !== packageManager)
     fail(`쓰는 pnpm(${pnpmVersion})이 이 리포가 고정한 ${packageManager}와 다르다`);
   probePolicy(probe, packageManager);
