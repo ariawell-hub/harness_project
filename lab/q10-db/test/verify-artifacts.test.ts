@@ -142,6 +142,59 @@ test('readRows: 표가 없으면 빈 목록', () => {
   assert.deepEqual(readRows(''), []);
 });
 
+/** 실행 칸이 주소 꼴(https://github.com/<owner>/<repo>/actions/runs/<번호>, 앞뒤 공백 밖에 다른 글 없음)이 아닌 경우 */
+const BAD_URLS = [
+  `${URL(REPO, RUN)}typo`,
+  `${URL(REPO, RUN)}/attempts/1`,
+  `${URL(REPO, RUN)}?check_suite_focus=true`,
+  `${URL(REPO, RUN)}#summary`,
+  URL(REPO, RUN).replace('https://', 'http://'),
+  URL(REPO, RUN).replace('github.com', 'github.com.evil.example'),
+  `x${URL(REPO, RUN)}`,
+  `[${RUN}](${URL(REPO, RUN)})`,
+  `${URL(REPO, RUN)} ${URL(REPO, RUN + 1)}`,
+];
+
+test('실행 칸이 주소 꼴이 아니면(번호 뒤 글, 다른 경로·질의·조각, http, 다른 호스트, 링크 문법) 실행을 읽지 않고 문제로 낸다', () => {
+  for (const bad of BAD_URLS) {
+    const rows = readRows(readme([DARWIN_ROW, linuxRow(bad), winRow()]));
+    const linux = rows.find((r) => r.file === 'linux-x64.json');
+    assert.ok(linux, bad);
+    assert.equal(linux.run, null, `실행 번호를 읽었다: ${bad}`);
+    assert.equal(linux.repo, null, `리포를 읽었다: ${bad}`);
+    const input = good();
+    input.rows = rows;
+    assertProblem(input, /linux-x64\.json: 실행 칸이 실행 주소의 꼴이 아니다/);
+  }
+});
+
+test('실행 주소가 실행 칸이 아닌 칸에만 있으면 실행 주소가 없는 행이다', () => {
+  const row = `| \`results/linux-x64.json\` | ${URL(REPO, RUN)} | 2026-11-23 | |`;
+  const input = good();
+  input.rows = readRows(readme([DARWIN_ROW, row, winRow()]));
+  assertProblem(input, /linux-x64\.json: 행에 실행 주소가 없다/);
+});
+
+test('collect: 실행 칸이 주소 꼴이 아니면 그 번호의 실행을 조회하지 않는다', () => {
+  const input = good();
+  const { exec, calls } = fakeExec(input);
+  const got = collect({
+    readme: readme([
+      DARWIN_ROW,
+      linuxRow(`${URL(REPO, RUN)}typo`),
+      winRow(`${URL(REPO, RUN)}typo`),
+    ]),
+    resultFiles: input.resultFiles,
+    exec,
+  });
+  assert.deepEqual(
+    calls.filter((c) => c[1] === 'api' || c[1] === 'run'),
+    [],
+    '꼴이 틀린 주소의 번호로 조회했다',
+  );
+  assert.ok(provenanceProblems(got).some((p) => /실행 칸이 실행 주소의 꼴이 아니다/.test(p)));
+});
+
 test('모두 맞으면 문제가 0건이고, 행마다 요약 한 줄을 낸다', () => {
   const input = good();
   assert.deepEqual(provenanceProblems(input), []);

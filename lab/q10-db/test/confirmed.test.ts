@@ -46,22 +46,37 @@ const resultFiles = (): string[] =>
 const readResult = (f: string): Record<string, unknown> =>
   JSON.parse(readFileSync(path.join(RESULTS_DIR, f), 'utf8')) as Record<string, unknown>;
 
-/** README "잰 머신" 표에서 백틱으로 적은 결과 파일 이름이 든 행: 파일 이름(경로를 뺀 것) → 행 */
-function measuredRows(): Map<string, string> {
-  const rows = new Map<string, string>();
-  for (const line of section(read(LAB_README), '잰 머신').split('\n')) {
-    if (!line.startsWith('|')) continue;
+/** 실행 칸 전체가 이 꼴이어야 한다(번호 뒤에 글이 붙은 주소는 실행 주소가 아니다) */
+const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/(\d+)$/;
+
+const tableCells = (line: string): string[] =>
+  line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((c) => c.trim());
+
+/** README "잰 머신" 표에서 백틱으로 적은 결과 파일 이름이 든 행: 파일 이름(경로를 뺀 것) → 행과 실행 칸 */
+function measuredRows(): Map<string, { line: string; run: string }> {
+  const lines = section(read(LAB_README), '잰 머신')
+    .split('\n')
+    .filter((l) => l.startsWith('|'));
+  const runAt = lines.length ? tableCells(lines[0]).indexOf('실행') : -1;
+  const rows = new Map<string, { line: string; run: string }>();
+  for (const line of lines) {
     const m = /`(?:results\/)?([a-z0-9]+-[a-z0-9_]+\.json)`/.exec(line);
-    if (m) rows.set(m[1], line);
+    if (m) rows.set(m[1], { line, run: runAt < 0 ? '' : (tableCells(line)[runAt] ?? '') });
   }
   return rows;
 }
 
-/** 표의 행에 적힌 실행 번호(/actions/runs/<숫자>) 전부 */
+/** 표의 실행 칸에 적힌 실행 번호 전부 */
 function runNumbers(): string[] {
   const runs = new Set<string>();
-  for (const row of measuredRows().values())
-    for (const m of row.matchAll(/\/actions\/runs\/(\d+)/g)) runs.add(m[1]);
+  for (const { run } of measuredRows().values()) {
+    const m = RUN_URL.exec(run);
+    if (m) runs.add(m[1]);
+  }
   return [...runs];
 }
 
@@ -98,7 +113,7 @@ test('README "잰 머신" 표에 결과 파일마다 행이 있고, linux-*·win
     const row = rows.get(f);
     assert.ok(row, `잰 머신 표에 ${f}의 행이 없다`);
     if (f.startsWith('linux-') || f.startsWith('win32-'))
-      assert.match(row, /\/actions\/runs\/\d+/, `${f}의 행에 실행 주소가 없다`);
+      assert.match(row.run, RUN_URL, `${f}의 실행 칸이 실행 주소(/actions/runs/<숫자>)가 아니다`);
   }
 });
 
