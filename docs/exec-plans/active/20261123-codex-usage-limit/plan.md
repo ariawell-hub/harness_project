@@ -41,7 +41,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
    - `scan` 바로 뒤, 봉인(`seal`) 앞에 단계 `why`가 있고 조건은 `always() && steps.scan.outcome == 'failure'`, 명령은 `codex-unavailable --file "$RUNNER_TEMP/codex-unavailable.txt"`다. 비밀·환경 변수를 받지 않는다.
    - `judge` job의 출력에 `unavailable: ${{ steps.why.outputs.unavailable }}`가 있다.
    - `record` job의 `record-review` 단계가 `needs.judge.outputs.unavailable`을 환경 변수로 받아 `--unavailable`로 넘긴다.
-6. 자격증명 없이 잇는 확인(병합 전, 판정 F1): 고정된 한도 실행 기록(사용 한도 문구의 `turn.failed`)으로 `codex-scan`(종료 코드 1, 값 파일) → `codex-unavailable`(그 파일 → `GITHUB_OUTPUT`의 `unavailable=` 줄) → 그 줄의 값을 받은 `recordReview`(가짜 poster)가 한도 설명의 error를 쓰는 것까지 한 테스트에서 이어서 본다. GitHub이 실패한 job의 출력을 다음 job에 넘기는 것은 이 리포의 봉인·저장 경로가 이미 쓰는 동작이다: 실행 44542064356(2026-11-19)에서 `judge` job이 `scan` 단계에서 실패했고, `if: always()`인 `seal` 단계의 출력(`sealed`)을 받아 `store` job이 돌아 성공했다. `why` 단계는 같은 꼴이다(실패한 `scan` 단계의 출력에 기대지 않는다).
+6. 자격증명 없이 잇는 확인(병합 전, 판정 F1·F3): 새 테스트 `scripts/test/usage-limit-cli.test.ts`가 세 명령을 모두 실제 명령(자식 프로세스)으로 잇는다. 고정된 한도 실행 기록(사용 한도 문구의 `turn.failed`)으로 `codex-scan`(종료 코드 1, 값 파일) → `codex-unavailable`(그 파일 → `GITHUB_OUTPUT`의 `unavailable=` 줄) → 그 줄의 값을 `--unavailable`로 받은 `record-review`(빈 판정 파일, 로컬 가짜 GitHub API. `scripts/test/accept-cli.test.ts`와 같은 꼴)까지 돌리고, 가짜 API가 받은 `review/codex` 상태가 error이며 설명에 사용 한도와 풀리는 시각이 있는지 단언한다. 시각을 모르는 한도와 한도가 아닌 실패(설명이 지금 그대로)도 같은 길로 본다. GitHub이 실패한 job의 출력을 다음 job에 넘기는 것은 이 리포의 봉인·저장 경로가 이미 쓰는 동작이다: 실행 44542064356(2026-11-19)에서 `judge` job이 `scan` 단계에서 실패했고, `if: always()`인 `seal` 단계의 출력(`sealed`)을 받아 `store` job이 돌아 성공했다. `why` 단계는 같은 꼴이다(실패한 `scan` 단계의 출력에 기대지 않는다).
 7. 병합되는 head에는 워크플로 변경과 그것을 단언하는 구조 테스트가 함께 있다. step의 AC는 워크플로 변경이 없는 트리(push 1의 head)에 구조 테스트를 더하면 실패한다(새 단언). 진행 로그에 그 실패를 적는다.
 8. 문서: 설계서 10.1절 "검증자 장애"(사용 한도는 다시 돌리지 않고 풀리는 시각을 적는다)와 10.4절 판정 job 출력, `CHANGELOG`, 기술 부채 표(TD-50 해결, TD-56에 상태 설명으로 한도를 가를 수 있게 됐다는 것). Claude 검증자에서 같은 일이 어떻게 보이는지 조사한 결과를 발견 사항에 적고, 같은 방식으로 할지는 새 TD로 남긴다.
 
@@ -50,7 +50,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 범위:
 
 - `scripts/ci/codex-scan.ts`(한도 인식과 풀리는 시각 읽기), `scripts/harness.ts`(`codex-scan`의 `--unavailable-out`, 새 명령 `codex-unavailable`, `record-review`의 `--unavailable` 옵션), `scripts/ci/record.ts`(`recordReview`의 설명과 한도 설명 판별), `scripts/runner/run.ts`(`doReportStall`의 추천 글).
-- 테스트: `scripts/test/scan-output.test.ts`, `scripts/test/codex-scan.test.ts`, `scripts/test/record.test.ts`, `scripts/test/runner-pr.test.ts`, `scripts/test/ci.test.ts`.
+- 테스트: `scripts/test/scan-output.test.ts`, `scripts/test/codex-scan.test.ts`, `scripts/test/record.test.ts`, `scripts/test/runner-pr.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/usage-limit-cli.test.ts`(새 파일).
 - `.github/workflows/judge-codex.yml`: `scan` 명령의 인자 하나, 새 단계 `why` 하나, `judge` job 출력 한 줄, `record-review` 단계의 환경 변수 한 줄과 인자 하나. **제작자가 커밋한다.** 봇은 패치 파일로 준비한다(`lab/codex-usage-limit/`).
 - 문서와 기술 부채 표.
 
@@ -64,7 +64,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 ## 관련 파일·문서
 
 - `scripts/ci/codex-scan.ts`, `scripts/ci/record.ts`, `scripts/harness.ts`, `scripts/runner/run.ts`
-- `scripts/test/scan-output.test.ts`, `scripts/test/codex-scan.test.ts`, `scripts/test/record.test.ts`, `scripts/test/runner-pr.test.ts`, `scripts/test/ci.test.ts`
+- `scripts/test/scan-output.test.ts`, `scripts/test/codex-scan.test.ts`, `scripts/test/record.test.ts`, `scripts/test/runner-pr.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/usage-limit-cli.test.ts`
 - `.github/workflows/judge-codex.yml`(제작자 커밋)
 - `lab/codex-usage-limit/`(워크플로 패치와 적용 방법)
 - `docs/harness/design.md`, `docs/harness/CHANGELOG.md`, `docs/exec-plans/tech-debt-tracker.md`, `docs/SECURITY.md`
@@ -82,6 +82,8 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 2026-11-23 계획 검증 1라운드(head `6d44d3a`): claude 승인(지적 없음), codex 수정 요청(P1 2). 둘 다 받아들였다.
   - F1(P1): 종료 코드 1로 끝난 `scan` 단계의 출력이 기록 job까지 가는지 병합 전에 확인하지 않고 병합 뒤 첫 한도로 미뤘다. 넘어가지 않으면 AC가 모두 통과해도 설명이 지금 그대로다. → 실패한 단계의 출력에 기대지 않게 바꿨다: `codex-scan`은 한도 값을 파일에만 쓰고, 그 뒤의 `if: always() && steps.scan.outcome == 'failure'` 단계 `why`(새 명령 `codex-unavailable`)가 성공하며 job 출력을 쓴다. 실패한 job의 출력이 다음 job에 가는 것은 봉인·저장 경로가 이미 쓰는 동작이고 실행 44542064356에서 확인했다(`judge` 실패, `seal` 출력으로 `store` 성공). 고정된 한도 실행 기록으로 `codex-scan` → `codex-unavailable` → `recordReview`를 자격증명 없이 잇는 테스트를 수용 기준 6에 넣었다.
   - F2(P1): 시각을 모르는 한도에서 runner가 권할 행동이 정해지지 않았다. → 시각이 있는 한도, 시각을 모르는 한도, 한도가 아닌 경우의 추천 글을 수용 기준 4에 각각 적고 세 경우를 테스트로 단언하게 했다.
+- 2026-11-23 계획 검증 2라운드(head `86ca288`): codex 수정 요청(P1 1. F1·F2는 해소됐다고 적었다), claude 판정 없음(error. 판정 job이 허용 밖 도구 `Bash`를 불러 유출 검사가 막았다. 발견 사항). 받아들였다.
+  - F3(P1): 잇는 테스트가 마지막에 `recordReview` 함수에 값을 직접 넘겨, `record-review` 명령이 `--unavailable`을 받고도 함수에 넘기지 않으면 모든 단언이 통과한다. → 수용 기준 6을 세 명령 모두 실제 명령으로 잇고 가짜 GitHub API가 받은 상태를 단언하는 새 테스트 파일(`usage-limit-cli.test.ts`, `accept-cli.test.ts`와 같은 꼴)로 바꿨다.
 
 ## 의사결정 로그
 
@@ -93,6 +95,8 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 결정: `codex-unavailable`은 언제나 종료 코드 0이다. / 이유: 이 단계는 설명을 덧붙이는 일뿐이다. 실패해도 출력이 비어 기록 job은 지금 설명을 쓰고(fail-closed는 그대로), 봉인 단계는 `always()`라 영향이 없다. 실패로 끝내면 판정 job 화면에 실패한 단계가 둘로 보여 원인을 가린다.
 
 ## 발견 사항
+
+- Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: 구현 push에서 TD로 등록한다(제작자에게 보고했다)
 
 ## 열린 질문
 

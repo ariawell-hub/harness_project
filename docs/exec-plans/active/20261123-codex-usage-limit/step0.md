@@ -9,7 +9,7 @@
 - `scripts/ci/record.ts`의 `recordReview`, `scripts/ci/results.ts`의 `cleanDescription`
 - `scripts/runner/run.ts`의 `doReportStall`, `scripts/runner/pr-state.ts`의 `infra-error`
 - `.github/workflows/judge-codex.yml`의 `judge` job 출력과 `record` job의 `record-review` 단계
-- `scripts/test/scan-output.test.ts`, `scripts/test/codex-scan.test.ts`, `scripts/test/record.test.ts`, `scripts/test/runner-pr.test.ts`, `scripts/test/ci.test.ts`(judge-codex.yml 불변식)
+- `scripts/test/scan-output.test.ts`, `scripts/test/codex-scan.test.ts`, `scripts/test/record.test.ts`, `scripts/test/runner-pr.test.ts`, `scripts/test/ci.test.ts`(judge-codex.yml 불변식), `scripts/test/accept-cli.test.ts`(실제 `record-review`를 가짜 GitHub API로 돌리는 꼴)
 - 앞선 같은 꼴의 계획: `docs/exec-plans/completed/20261119-repro-on-demand/`
 - 설계서 10.1절 "검증자 장애", 10.4절
 
@@ -26,7 +26,7 @@
    - `codex-scan`이 옵션 `--unavailable-out <파일>`을 받는다. 실패로 끝날 때 결과에 `unavailable`이 있고 이 옵션이 있으면 그 파일에 값 한 줄을 쓴 뒤 지금처럼 종료 코드 1로 끝난다. `GITHUB_OUTPUT`에는 쓰지 않는다. 통과 경로와 다른 실패 경로는 바꾸지 않는다(파일을 만들지 않는다).
    - 새 명령 `codex-unavailable --file <파일>`: 파일이 있고 내용(끝의 줄바꿈 하나와 앞뒤 공백을 뗀 것)이 한 줄이며 `isUnavailableValue`(1번 형식 검사, `scripts/ci/codex-scan.ts`에서 내보낸다)를 통과하면 `GITHUB_OUTPUT`에 `unavailable=<값>` 한 줄을 덧붙이고 `codex-unavailable: <값>`을 로그에 남긴다. 그 밖에는 쓰지 않는다. 종료 코드는 언제나 0이다. `GITHUB_OUTPUT`이 없으면 쓰지 않는다. 도움말(`HELP`)과 옵션 표에 더한다.
    - `scripts/test/scan-output.test.ts`에 계획 수용 기준 1·2의 경우를 자식 프로세스로 더한다(자식에는 테스트가 만든 `GITHUB_OUTPUT`만 넘긴다. CI 러너의 것을 물려주지 않는다).
-   - 같은 파일에 계획 수용 기준 6의 잇는 테스트를 둔다: 고정된 한도 실행 기록 → `codex-scan`(종료 코드 1, 값 파일) → `codex-unavailable`(그 파일, `GITHUB_OUTPUT`) → 출력 줄의 값을 `recordReview`(가짜 poster)에 넘겨 한도 설명의 error가 나오는지 본다.
+   - 새 파일 `scripts/test/usage-limit-cli.test.ts`에 계획 수용 기준 6의 잇는 테스트를 둔다. 세 명령을 모두 자식 프로세스로 실행한다: 고정된 한도 실행 기록 → `codex-scan`(종료 코드 1, 값 파일) → `codex-unavailable`(그 파일, 테스트가 만든 `GITHUB_OUTPUT`) → 출력 줄의 값을 `--unavailable`로 넘긴 `record-review`(빈 판정 파일, `GITHUB_API_URL`은 테스트가 띄운 가짜 GitHub API. `scripts/test/accept-cli.test.ts`의 꼴을 따른다). 가짜 API가 받은 `review/codex` 상태의 `state`가 `error`이고 `description`에 사용 한도와 풀리는 시각이 있는지 단언한다. 시각을 모르는 한도(설명에 "풀리는 시각 모름")와 한도가 아닌 `turn.failed`(값 파일 없음, `unavailable` 줄 없음, 설명이 지금 그대로)도 같은 길로 본다. 함수를 직접 부르는 지름길을 쓰지 않는다(판정 F3).
 3. **기록 설명**: `scripts/ci/record.ts`
    - `RecordReviewOptions`에 `unavailable?: string`을 더한다. 판정이 없을 때(`raw`가 null이거나 빈 글)만 본다. 값이 `isUnavailableValue`를 통과하면 계획 수용 기준 3의 설명으로 error를 쓴다. 아니면 지금 설명 그대로다.
    - 한도 설명을 읽는 `usageLimitOf(description: string): { at: string | null } | null`을 내보낸다(4번이 쓴다). 이 함수가 만든 설명만 알아본다.
@@ -49,7 +49,7 @@
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/codex-scan.test.ts scripts/test/scan-output.test.ts scripts/test/record.test.ts scripts/test/runner-pr.test.ts scripts/test/ci.test.ts scripts/test/harness-guard.test.ts
+node --test scripts/test/codex-scan.test.ts scripts/test/scan-output.test.ts scripts/test/usage-limit-cli.test.ts scripts/test/record.test.ts scripts/test/runner-pr.test.ts scripts/test/ci.test.ts scripts/test/harness-guard.test.ts
 ```
 
 제작자의 워크플로 커밋과 push 2의 구조 테스트가 모두 든 트리에서 통과한다. 워크플로 커밋이 없으면 `scripts/test/ci.test.ts`가 실패한다.
