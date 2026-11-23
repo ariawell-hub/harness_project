@@ -2,7 +2,7 @@
 id: 20261123-windows-eperm
 issue: 228 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: draft # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: low # low | normal | high
 author: claude-code
@@ -56,4 +56,6 @@ claimed_at: 2026-11-23T12:58:22+09:00
 
 ## 검증 결과
 
-- 진행하며 적는다.
+- 이 Windows PC에서 `node --test scripts/test/next.test.ts scripts/test/scope.test.ts`: 82건 통과(전에는 2건 `EPERM` 실패).
+- 잘못을 넣은 확인 두 가지에서 고친 테스트가 실패했다(진행 로그).
+- `node scripts/harness.ts check`(이 Windows PC, head `c81f477`): 통과. `test` 1525.6초, `test-effect`는 두 파일을 예외로 받았다. 그 뒤 바뀐 것은 이 계획 파일(검증 결과)뿐이라 문서에 해당하는 검사(`fmt`·`lint`·`doc-lint`·`bypass-scan`·`secret-scan`)만 다시 돌렸다.
