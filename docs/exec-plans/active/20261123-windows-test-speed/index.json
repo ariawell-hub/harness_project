@@ -3,12 +3,12 @@
   "steps": [
     {
       "step": 0,
-      "name": "split",
+      "name": "fewer-spawns",
       "status": "pending"
     },
     {
       "step": 1,
-      "name": "fewer-spawns",
+      "name": "split",
       "status": "pending"
     }
   ]
