@@ -3,7 +3,7 @@
 // 내 PR 갱신 대상 판정(우선순위 2번, ADR-0006),
 // 고친 댓글·Issue의 신뢰 판정(편집 이력, TD-19·TD-26). 가짜 GitHub + 로컬 bare 원격. 실제 gh는 부르지 않는다.
 import assert from 'node:assert/strict';
-import { closeSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { linkSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { acceptHint } from '../commands/start.ts';
@@ -1277,15 +1277,13 @@ test('writeQuestionState: 상태 파일을 그 자리에서 덮어쓰지 않고 
   } as const;
   writeQuestionState(info, { ...first, reported: [...first.reported] });
   // 그 자리에서 덮어쓰면 쓰는 중에 runner가 끝났을 때 빈 파일이 남고, 빈 파일은 "올리지 못한 질문 없음"으로 읽힌다.
-  // 바꿔 넣으면 어느 순간에 끝나도 전의 내용이나 새 내용만 남는다. 먼저 열어 둔 파일(전의 내용)이 새로 쓴 뒤에도
-  // 그대로인 것으로 확인한다: 같은 파일을 덮어쓰지 않았다
-  const fd = openSync(f, 'r');
-  try {
-    writeQuestionState(info, { ...first, reported: ['a', 'b'], unposted: false });
-    assert.deepEqual(JSON.parse(readFileSync(fd, 'utf8')), first, '전의 파일은 그대로다');
-  } finally {
-    closeSync(fd);
-  }
+  // 바꿔 넣으면 어느 순간에 끝나도 전의 내용이나 새 내용만 남는다. 전의 파일에 걸어 둔 하드 링크(전의 내용)가 새로
+  // 쓴 뒤에도 그대로인 것으로 확인한다: 같은 파일을 덮어쓰지 않았다. 파일을 열어 두고 보면 Windows에서는 열린 파일
+  // 위로 이름을 바꿀 수 없어 확인할 수 없다(Issue #228). 하드 링크는 상태 폴더 밖에 둔다
+  const old = path.join(dir, 'questions.old.json');
+  linkSync(f, old);
+  writeQuestionState(info, { ...first, reported: ['a', 'b'], unposted: false });
+  assert.deepEqual(JSON.parse(readFileSync(old, 'utf8')), first, '전의 파일은 그대로다');
   assert.deepEqual(readQuestionState(info), {
     reported: ['a', 'b'],
     waiting: true,
