@@ -113,6 +113,9 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 계획 수정의 계획 검증 1회차(PR #232, head `499d46c`): Claude 승인(지적 없음), Codex 수정 요청(P1 둘). 둘 다 맞는 지적이라 step1의 작업 3·4를 고쳤다.
   - F1(P1, `step1.md:47`): ADR "알려진 한계"의 단언이 한 줄에 `CI`·`Windows PC`·`결과 파일`이 있는지만 봐서, PC의 결과를 확정 근거로 삼았다고 뒤바꿔 적어도 통과한다. → 넣을 두 문장(Windows의 확정 근거는 CI 러너의 산출물이다, 제작자 PC에서는 통과했으나 결과 파일이 없어 확정 근거로 쓰지 않는다)을 작업 4에 글자 그대로 정하고, 테스트가 각각 본다.
   - F2(P1, `step1.md:59`): ADR의 `## 결과` 절에 "Q10이 잠정 결정으로 바뀐다 … Q10(잠정, 실측 남음)"이 남아도 작업과 테스트가 잡지 못한다. → 작업 4에 그 줄을 확정에 맞게 고치는 것을 넣었다. 테스트는 ADR 문서 전체에 `잠정`이 없는 것과, "결과" 절의 `Q10`이 든 줄마다 `확정`이 있는 것을 본다.
+- 2026-11-23 계획 수정이 병합됐다(PR #232, `69ecad1`). Windows PC의 세션이 `new-task --plan 20261121-q10-confirm --step 1`로 브랜치 `chore/20261121-q10-confirm-s1`을 만들고, 제작자 지시대로 세션 인수인계 파일만 올린 채 멈췄다(`d45f142`).
+- 2026-11-23 step1 시작(넘겨받기): 이 Mac의 대화 세션이 그 인수인계를 이어받았다(제작자 대화 지시). owner는 `session` 그대로다(이 Mac 세션의 작업자 이름도 `session`이고, Windows PC의 세션은 멈췄다). worktree는 이 Mac에 새로 만들었다(`git worktree add ../harness_project.worktrees/chore/20261121-q10-confirm-s1 chore/20261121-q10-confirm-s1`. 인수인계에 적힌 경로 `harness__project.worktrees`는 Windows PC의 폴더 이름이다). `origin/main`(`85cac33`, #227 병합 뒤)을 병합했다. 인수인계 파일(`handoff.md`)을 지웠다. #227이 먼저 병합됐으므로 이 step의 CHANGELOG·설계서 기록은 변경 조각에 적는다(의사결정 로그).
+- 2026-11-23 워크플로 1회차: `gh workflow run q10-trial.yml --ref main`(봇 토큰으로 실행됐다). 실행 45177957783(https://github.com/ariawell-hub/harness_project/actions/runs/45177957783), 커밋 `85cac33`. 두 job(`ubuntu-latest`, `windows-latest`)이 모두 `trial` 단계에서 실패했다: `trial: 쓰는 pnpm(! Corepack is about to download https://registry.npmjs.org/pnpm/-/pnpm-10.34.5.tgz)이 이 리포가 고정한 pnpm@10.34.5와 다르다`. `trial.ts`가 `pnpm --version`의 표준 출력과 표준 오류를 이어 붙인 글의 마지막 줄을 버전으로 읽는데, 러너에서는 Corepack이 pnpm을 처음 받으며 표준 오류에 안내 줄을 쓴다. 도구가 아니라 스크립트의 문제라(작업 1) 결과 파일을 더하지 않고 별도 PR로 먼저 고친다: Issue #233, PR #234(계획 `20261123-corepack-version`). 이 Mac에서 빈 Corepack 캐시로 같은 실패를 재현했고, 고친 코드로는 절차가 통과했다(그 계획의 진행 로그).
 
 ## 의사결정 로그
 
