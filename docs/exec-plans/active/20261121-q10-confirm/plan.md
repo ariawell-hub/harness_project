@@ -2,7 +2,7 @@
 id: 20261121-q10-confirm
 issue: 180 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -139,6 +139,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 구현 판정 3회차(head `0349c51`): CI `check` 통과, Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨). F1·F2는 해소됐다고 했다. `pr-state`에 "오래 열린 지적" 줄은 없다. 새 지적은 앞 지적과 다른 자리(`verify-artifacts.ts:114·125`)다. 다만 세 라운드 모두 같은 함수(표 읽기)에서 지적이 나와, 지적된 곳만 덧대는 방식을 버리고 GFM 표 규칙 전체를 한 번에 구현하기로 했다(의사결정 로그 "결정(step1, F3)").
 - 2026-11-23T23:12:38+09:00 step1 재작업: 구현 판정 3회차(head 0349c51) Codex F3(P1, 재현됨): 첫 표만 읽기가 맨 앞 세로줄이 없는 GFM 행에서 표를 끊어 뒤의 CI 행을 놓친다. 지적된 곳만 고치지 않고 GFM 표 규칙(머리줄·구분 줄, 칸 수, 앞뒤 세로줄 생략, 빈 줄·다른 블록에서 끝)을 한 번에 구현한다
 - 2026-11-23 F3 처리: 맞는 지적이다. 2회차의 "첫 표만 읽기"가 `|`로 시작하지 않는 줄을 표의 끝으로 봤다. GFM 표 규칙을 표로 점검해 테스트를 먼저 더했다: 맨 앞 세로줄이 없는 행(F3), 앞뒤 세로줄을 모두 뺀 머리줄·구분 줄·행, 구분 줄이 없는 세로줄 문단은 표가 아니다, 머리줄과 구분 줄의 칸 수가 다르면 표가 아니다, 빈 줄과 다른 블록(제목, 인용, 코드 울타리 둘, 목록 둘, 가로줄)에서 표가 끝난다, 행의 칸이 적으면 빈 칸·많으면 버린다. 고치기 전 41건 가운데 3건 실패(`6df3b8c`. 나머지는 지금 동작이 맞아 지키는 테스트다). `readRows`가 머리줄 바로 뒤에 칸 수가 같은 구분 줄이 오는 곳에서 표를 시작하고, 빈 줄이나 다른 블록이 시작하는 줄에서 끝내게 고쳤다(`3da39de`). 41건·10건 통과. 실제 README의 macOS 행에서 맨 앞 `|`를 빼도 `verify-artifacts.ts`가 두 CI 행을 읽어 종료 코드 0, `confirmed.test.ts`도 통과하는 것을 확인하고 되돌렸다.
+
+- 2026-11-23T23:55:48+09:00 step1 재작업: 구현 판정 4회차(head 2c9dc09) Codex F4(P1, 재현됨): HTML 블록이 GFM 표를 끝내도 뒤의 줄을 결과 행으로 읽는다. 같은 함수에서 4라운드째라 제작자에게 물었고 엄격한 꼴만 받기로 정했다(2026-11-23 대화)
 
 ## 의사결정 로그
 
