@@ -2,7 +2,7 @@
 id: 20261123-windows-test-speed
 issue: 230 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -118,6 +118,7 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
   - 확인: 이 리포의 git(macOS 2.50.1)에서 커밋이 있는 리포의 루트와 하위 폴더에 `HEAD` 파일을 두고 돌리면 `git rev-parse --show-toplevel --absolute-git-dir --git-common-dir --abbrev-ref=loose HEAD`는 종료 코드 0, 네 줄이다. 같은 자리에서 `git log -1 HEAD`는 128(`ambiguous argument 'HEAD': both revision and filename`)이다. `rev-parse`는 리비전 인자에 대해 파일 이름과의 모호성을 따지지 않는다.
   - 처리: 그 경우를 단언하는 테스트를 `repo-info.test.ts`에 더했다(`82e348b`: git 하나, 값 같음, 같은 자리에서 `git log`가 모호성으로 실패함). 코드는 바꾸지 않고 그 테스트를 근거로 PR에 반박을 단다. 테스트는 CI(Linux)와 제작자의 Windows 측정에서도 돈다. 다른 git에서 실패하면 그때 `--`를 붙이는 계획 수정을 한다.
   - Windows 측정 요청(Issue #230)의 (나)를 이 push의 head로 바꾼다(테스트 파일이 바뀌어, 수용 기준 5의 "잰 커밋과 승인 요청 head의 차이는 계획 폴더뿐"을 지키려면 그래야 한다).
+- 2026-11-24T00:49:32+09:00 step0 재작업: 구현 판정 2회차 Codex F16: repo-info.test.ts가 git log의 영어 오류 문구를 단언해, git이 번역된 문구를 내는 머신에서 실패한다. 그 git 실행에 LC_ALL=C를 주고, core.worktree 확인은 경로 대신 폴더 이름으로 견준다(Windows 짧은 경로 이름 대비)
 
 ## 의사결정 로그
 
