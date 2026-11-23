@@ -1,0 +1,63 @@
+{
+  "platform": "win32",
+  "arch": "x64",
+  "node": "v22.20.0",
+  "pnpm": "10.34.5",
+  "packageManager": "pnpm@10.34.5",
+  "policy": {
+    "minimumReleaseAge": 20160,
+    "onlyBuiltDependencies": 0,
+    "enforced": true
+  },
+  "packages": {
+    "drizzle-orm": "0.45.4",
+    "@electric-sql/pglite": "0.5.15",
+    "drizzle-kit": "0.31.11"
+  },
+  "installScripts": ["esbuild"],
+  "pglite": {
+    "dependencies": 0,
+    "nativeFiles": 0,
+    "wasmFiles": 2,
+    "os": null,
+    "cpu": null
+  },
+  "generate": {
+    "exitCode": 0,
+    "sqlFiles": 1,
+    "createTable": true
+  },
+  "cases": [
+    {
+      "name": "folder-a",
+      "exitCode": 0,
+      "rows": 1
+    },
+    {
+      "name": "folder-b",
+      "exitCode": 0,
+      "rows": 1
+    },
+    {
+      "name": "folder-a-again",
+      "exitCode": 0,
+      "rows": 2
+    },
+    {
+      "name": "memory",
+      "exitCode": 0,
+      "rows": 1
+    },
+    {
+      "name": "concurrent-c",
+      "exitCode": 0,
+      "rows": 1
+    },
+    {
+      "name": "concurrent-d",
+      "exitCode": 0,
+      "rows": 1
+    }
+  ],
+  "server": "PostgreSQL 18.6 (PGlite 0.5.15) on wasm3"
+}
