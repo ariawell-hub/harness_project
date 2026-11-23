@@ -21,18 +21,18 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
 - 시간은 프로세스 수 × 회당 비용이다. 같은 테스트("반복 실패는 5회에 멈추고…")가 띄우는 동기 프로세스는 Windows 732개, macOS 743개로 거의 같고, 회당 비용이 다르다(git 한 번 Windows 55~94ms, macOS 약 9ms). 한 단계가 막히는 것이 아니다.
 - `test`는 파일을 동시에 8개 돌리고, 한 파일 안의 테스트는 차례로 돈다. macOS에서 파일 78개의 시간 합은 1417초라 8개로 나누면 177초인데, 실제는 249초다. 가장 긴 파일(`runner.test.ts` 203초)이 끝나기를 기다리기 때문이다. Windows도 같은 꼴이다(파일 하나 1257초).
 - `repoInfo`(`scripts/lib/git.ts`)는 부를 때마다 git을 둘 띄운다. 옛 `runner.test.ts` 37개가 1951번 불러 git을 약 3900번 띄웠다(그 파일의 동기 프로세스 9887개 가운데 39%). 그 가운데 926번은 상태 파일 경로(`pr-wait.json`, `conflict.json`, 질문 상태)만 구하려는 호출이라 브랜치도 필요 없다.
-- `check`의 캐시 키(`cacheKey`)는 부를 때마다 `pnpm --version`(macOS 회당 156ms)과 `gitleaks version`(Windows 회당 약 390ms)을 실행한다.
+- `check`의 캐시 키(`cacheKey`)는 부를 때마다 `pnpm --version`(macOS 회당 156ms)과 `gitleaks version`(Windows 회당 약 390ms)을 실행한다. 이 계획에서는 줄이지 않는다(의사결정 로그 10).
 
 그래서 두 가지를 한다. (1) 긴 테스트 파일을 나눠 동시 실행을 쓰게 한다(step0. 동작 코드는 그대로다). (2) 같은 프로세스에서 같은 것을 다시 읽으려고 띄우는 프로세스를 줄인다(step1). 테스트를 줄이거나 건너뛰거나 단언을 약화하지 않는다.
 
 수용 기준:
 
 1. 테스트는 그대로다: step0 뒤 `scripts/test/*.test.ts`의 최상위 `test(` 블록 전부가 base(`origin/main`과의 merge-base)의 블록과 글자 그대로 같다(파일 사이에서 옮기기만 한다. step0의 AC 둘째 줄이 확인한다). step1은 있던 테스트 블록을 고치지 않고 새 테스트만 더한다.
-2. step0 뒤 `runner.test.ts`·`runner-review.test.ts`·`runner-pr.test.ts`·`selftest.test.ts`의 테스트는 step0.md의 표대로 파일 10개에 나뉘어 있다. 나눈 파일 하나의 테스트 시간 합이 macOS에서 100초를 넘지 않는다(측정 3과 같은 방법. 표로 더하면 `selftest.test.ts`에 남는 "모든 시나리오를 통과한다" 하나가 86~88초로 가장 길고, 나머지는 75초 이하다).
-3. step1 뒤 같은 프로세스에서 같은 worktree 루트로 `repoInfo`를 다시 부르면 git을 하나(`symbolic-ref`)만 띄우고, 상태 파일 경로만 구하는 곳(`pr-wait.json`, `conflict.json`, `review.json`, 질문 상태 파일)은 git을 띄우지 않는다. 돌려주는 값은 지금과 같다. 자리가 바뀐 worktree(`.git`이 다른 git-dir을 가리키게 됨, 지워짐)는 새로 읽고, 루트가 아닌 폴더와 git 위치를 바꾸는 환경 변수가 있는 호출은 지금처럼 매번 git으로 읽는다.
-4. step1 뒤 `check`의 캐시 키가 쓰는 도구 버전(`pnpm --version`, `gitleaks version`)은 한 프로세스에서 `PATH`가 같으면 한 번만 실행한다. 키의 값은 지금과 같다.
-5. step1 뒤 옛 `runner.test.ts`의 테스트 37개(step0 뒤 `runner.test.ts`·`runner-questions.test.ts`·`runner-question-delivery.test.ts`)가 띄우는 동기 프로세스가 macOS 측정 2의 9887개보다 25% 이상 적다(측정 방법은 "검증 방법과 결과"의 추적 스크립트).
-6. Windows PC: 마지막 step의 승인 요청 전에 그 PR head로 잰 `node scripts/harness.ts test`가 1100초 이하다. 잰 값과 조건은 진행 로그와 PR 본문에 있다. 목표의 근거는 의사결정 로그 7이다.
+2. step0 뒤 `runner.test.ts`·`runner-review.test.ts`·`runner-pr.test.ts`·`selftest.test.ts`의 테스트는 step0.md의 표대로 파일 10개에 나뉘어 있다(step0 AC 셋째 줄이 파일마다 테스트 수를 본다). 표의 묶음은 macOS 측정 3의 테스트별 시간으로 정했다: 나뉜 파일 하나의 합이 `selftest.test.ts`(테스트 하나, 86~88초) 말고는 75초 이하다. 시간은 머신·부하에 따라 달라(Windows는 약 5배) step AC로 판정하지 않는다. 나눈 뒤 macOS에서 잰 값을 진행 로그에 적는다(의사결정 로그 11). 벽시계 시간의 판정은 수용 기준 6이다.
+3. step1 뒤 같은 프로세스에서 같은 worktree 루트로 `repoInfo`를 다시 부르면 git을 하나(`symbolic-ref`)만 띄우고, 상태 파일 경로만 구하는 곳(`pr-wait.json`, `conflict.json`, `review.json`, 질문 상태 파일)은 git을 띄우지 않는다. 담아 둔 자리는 꺼낼 때마다 파일로 확인한다: `.git`이 같은 git-dir을 가리키고, git이 리포로 보는 조건(git-dir의 `HEAD`, 공유 git-dir의 `objects`·`refs`, worktree의 `commondir`)이 그대로이고, 자리를 바꿀 수 있는 설정 파일(공유 git-dir의 `config`, worktree의 `config.worktree`)이 담을 때와 같아야 한다. 하나라도 아니면 지금처럼 git으로 다시 읽는다(망가졌으면 지금과 같은 `GitError`). `repoInfo`는 그 위에 `symbolic-ref`가 치명 오류(종료 코드 0·1이 아님)를 내면 git으로 다시 읽으므로, git이 리포를 찾지 못하는 경우는 모두 지금과 같은 예외다. 확인이 보지 않는 변경(전역 설정 등)에서 상태 파일 경로만 구하는 곳이 달라질 수 있는 몫은 의사결정 로그 9의 "남는 차이"에 적었다. 루트가 아닌 폴더와 git 위치를 바꾸는 환경 변수가 있는 호출은 지금처럼 매번 git으로 읽는다(의사결정 로그 9).
+4. `check`의 캐시 키와 그 계산(`cacheKey`, `toolVersions`)은 바꾸지 않는다. 도구 버전은 지금처럼 키를 만들 때마다 실행해 읽는다(설계서 6절 "하나라도 바뀌면 다시 실행한다". 의사결정 로그 10).
+5. step1 뒤 옛 `runner.test.ts`의 테스트 37개(step0 뒤 `runner.test.ts`·`runner-questions.test.ts`·`runner-question-delivery.test.ts`)가 띄우는 동기 프로세스(`spawnSync` 호출, 자식 node 프로세스의 것 포함)가 7900개 이하다. macOS 측정 2의 9887개보다 20% 적은 값이다. step1 AC 셋째 줄이 센다. 같은 방법으로 변경 전 코드를 두 번 재면 9887개·9908개였고, step1 규칙(의사결정 로그 9의 확인 (1)~(5)와 `symbolic-ref` 대체)대로 만든 시제품은 7369개(−25%)였다(진행 로그 2026-11-24 00:20).
+6. Windows PC: 마지막 step(step1) PR의 승인 요청(`pr-ready`) 전에 제작자의 Windows PC에서 그 PR의 코드로 잰 `node scripts/harness.ts test`가 1100초 이하이고, 잰 값·커밋·조건이 진행 로그와 PR 본문에 있다. 잰 커밋과 승인 요청 head의 차이는 계획 폴더뿐이어야 한다. 이 조건이 채워지지 않으면 승인을 요청하지 않는다(1100초를 넘으면 진행 로그에 적고 제작자에게 묻는다). 목표의 근거는 의사결정 로그 7, 재는 절차는 "검증 방법과 결과"다.
 7. Linux(CI)와 macOS에서 `check`가 통과한다. 테스트 수는 그대로다(수용 기준 1).
 8. `commands.test.timeoutSec`(이 리포의 `harness.config.json`과 `profiles/core/profile.json`, 둘 다 3600초)은 바꾸지 않는다(의사결정 로그 6. Issue #230의 "줄인 뒤 두 값을 어떻게 둘지 정한다"의 답이다).
 9. 각 step PR은 보호 경로(`scripts/**`, `docs/harness/**`)를 바꾸므로 변경 기록을 자기 변경 조각 파일(`docs/harness/changes/20261123-windows-test-speed-s<N>.md`)에 적는다(#227, `85cac33`의 방식. 절차서 5절 "변경 조각"). CHANGELOG와 설계서 변경 이력은 직접 고치지 않는다.
@@ -42,7 +42,7 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
 범위:
 
 - step0: 테스트 파일 나누기. `scripts/test/runner.test.ts`·`runner-review.test.ts`·`runner-pr.test.ts`·`selftest.test.ts`의 테스트를 옮기고, 파일 사이에서 함께 쓰는 준비 코드를 새 보조 모듈 셋(`scripts/test/runner-fixture.ts`, `runner-review-fixture.ts`, `runner-pr-fixture.ts`)으로 옮긴다. `docs/harness/architecture.md`의 `selftest.test.ts` 설명 한 문장을 맞춘다.
-- step1: 프로세스 줄이기. `scripts/lib/git.ts`(`repoDirs` 캐시, `repoInfo`, `harnessStateDir`), 상태 파일 경로를 구하는 `scripts/runner/next.ts`·`scripts/runner/review.ts`·`scripts/runner/run.ts`의 해당 줄, `scripts/commands/check.ts`의 도구 버전. 새 테스트 `scripts/test/repo-dirs.test.ts`, `scripts/test/check-tools.test.ts`. 기술 부채 표의 새 행 둘(발견 사항 1, 2).
+- step1: 프로세스 줄이기. `scripts/lib/git.ts`(`repoDirs` 캐시, `repoInfo`, `harnessStateDir`), 상태 파일 경로를 구하는 `scripts/runner/next.ts`·`scripts/runner/review.ts`·`scripts/runner/run.ts`의 해당 줄. 새 테스트 `scripts/test/repo-dirs.test.ts`. `docs/harness/architecture.md`의 `lib/git.ts` 줄. 기술 부채 표의 새 행 둘(발견 사항 1, 2·3).
 - 각 step의 변경 조각 파일.
 
 비범위:
@@ -50,8 +50,9 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
 - `test` 동시 실행 수(지금 `min(8, 코어 수 - 1)`)를 바꾸는 일. `commands`를 바꾸면 위험도 높음이고 CI(4코어)와 core 프로파일에도 걸린다. Windows에서 몇 개가 좋은지 재지 않았다(의사결정 로그 1, 발견 사항 2).
 - Windows의 `taskkill`(자식이 끝날 때마다 동기 실행, 회당 311ms)과 끝난 pid에 `taskkill`을 거는 위험. macOS에서 확인할 수 없고 몫이 작다(옛 `runner.test.ts`에서 약 3%. 의사결정 로그 5, 발견 사항 2).
 - runner 반복마다 하는 `fetch`(Windows 회당 약 450ms), 테스트 준비(`makeFixture`)의 파일 복사와 `git add`·`push`, 백신 검사 예외. Windows에서 재야 고를 수 있다(발견 사항 2).
-- Windows에서 `pnpm --version`이 실행되지 않아 캐시 키에 pnpm 버전이 빠지는 문제(발견 사항 1). step1은 지금 값을 그대로 둔다.
-- 측정 도구를 리포에 넣는 일. 추적 스크립트는 이 계획의 "검증 방법과 결과"에 둔다(의사결정 로그 8).
+- Windows에서 `pnpm --version`이 실행되지 않아 캐시 키에 pnpm 버전이 빠지는 문제(발견 사항 1).
+- `check` 캐시 키의 도구 버전을 덜 실행하는 일(의사결정 로그 10, 발견 사항 3).
+- 측정 도구를 리포에 넣는 일. 추적 스크립트는 이 계획의 "검증 방법과 결과"에, 프로세스 수를 세는 최소 코드는 step1 AC 한 줄에 둔다(의사결정 로그 8).
 - 테스트를 줄이거나 합치거나 시간 제한·`pollSec`을 바꾸는 일(검사 약화, R4).
 
 ## 관련 파일·문서
@@ -70,28 +71,33 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
 - `scripts/test/runner-review-fixture.ts`
 - `scripts/test/runner-pr-fixture.ts`
 - `scripts/test/repo-dirs.test.ts`
-- `scripts/test/check-tools.test.ts`
 - `scripts/lib/git.ts`
 - `scripts/runner/next.ts`
 - `scripts/runner/review.ts`
 - `scripts/runner/run.ts`
-- `scripts/commands/check.ts`
 - `docs/harness/architecture.md`
 - `docs/harness/changes/20261123-windows-test-speed-s0.md`
 - `docs/harness/changes/20261123-windows-test-speed-s1.md`
 - `docs/exec-plans/tech-debt-tracker.md`
-- 읽기만: `scripts/lib/exec.ts`, `scripts/test/helpers.ts`, `scripts/test/markdown-model.ts`, `scripts/selftest/run.ts`, `scripts/gates/test-effect.ts`, `scripts/lib/attempts.ts`, `scripts/lib/approval.ts`, `harness.config.json`, `profiles/core/profile.json`, `docs/harness/workflow.md`, `docs/harness/design.md`
+- 읽기만: `scripts/lib/exec.ts`, `scripts/commands/check.ts`, `scripts/test/helpers.ts`, `scripts/test/markdown-model.ts`, `scripts/selftest/run.ts`, `scripts/gates/test-effect.ts`, `scripts/lib/attempts.ts`, `scripts/lib/approval.ts`, `harness.config.json`, `profiles/core/profile.json`, `docs/harness/workflow.md`, `docs/harness/design.md`
 
 ## step 목록
 
 - step0 split: 긴 테스트 파일 넷을 파일 10개로 나눈다. 테스트 블록은 글자 그대로 옮긴다.
-- step1 fewer-spawns: `repoInfo`의 자리 정보를 같은 프로세스에서 다시 읽지 않고, 캐시 키의 도구 버전을 한 번만 실행한다.
+- step1 fewer-spawns: `repoInfo`의 자리 정보를 같은 프로세스에서 다시 읽지 않는다(꺼낼 때 파일로 확인). 상태 파일 경로는 git을 띄우지 않고 구한다.
 
 ## 진행 로그
 
 - 2026-11-23 19:40 선점(`claim/230`)하고 골격을 만들었다. runner 테스트 하나를 추적해 시간의 82%가 동기 git 호출(732회)임을 쟀다. 계획은 아직 쓰지 않았다. 측정 결과·후보·다음 차례는 같은 폴더의 `handoff.md`(계획 push 전에 지운다).
 - 2026-11-23 22:30 맥 세션이 이어받았다(Windows PC 세션의 인수인계 `handoff.md`, `06505e1`). 이 맥에 worktree를 만들고(`harness_project.worktrees/fix/20261123-windows-test-speed-s0`) `setup`을 했다. 인수인계의 PR #227은 10:53 UTC에 병합됐다(`85cac33`). 그래서 이 계획의 step PR은 변경 조각 파일에 기록한다(수용 기준 9). `origin/main`(`67bd225`)을 병합했다. 측정 대상 파일(`runner*.test.ts`, `selftest.test.ts`, `lib/git.ts`, `commands/check.ts`)은 측정한 `69ecad1`과 같다.
 - 2026-11-23 22:30 macOS에서 측정 1~4를 했다("검증 방법과 결과"). 후보 넷(인수인계의 "줄일 방법 후보") 가운데 파일 나누기와 `repoInfo`·도구 버전을 고르고, `taskkill`은 뺐다(의사결정 로그 1, 5). 계획과 step 둘을 썼다. `handoff.md`를 지웠다.
+- 2026-11-23 22:45 계획만 담은 커밋(`7d5aa9d`)을 올리고 초안 PR #236을 열었다. 계획 검증 1회차: Claude 승인, Codex 수정 요청(P1 4).
+  - F1: step0 AC의 `node -e` 두 줄이 작은따옴표 안의 줄 잇기(`\`) 때문에 셸에서 그대로 실행하면 구문 오류다(runner는 줄을 합쳐 실행하지만 셸에서 그대로 돌리면 깨진다). → 두 명령을 줄 잇기 없는 한 줄로 바꿨다. 그대로 옮기면 통과하고 단언을 바꾸면 실패하는 것을 확인했다("검증 방법과 결과"의 AC 확인).
+  - F2: 도구 버전을 `PATH`별로 담으면 같은 경로의 도구를 바꿨을 때 옛 통과 표시를 다시 쓴다. → 도구 버전 담기를 계획에서 뺐다(수용 기준 4, 의사결정 로그 10).
+  - F3: `.git`만 확인하면 `HEAD`가 지워진 리포에도 담아 둔 값을 돌려준다. → 꺼낼 때 git이 리포로 보는 조건(`HEAD`, `objects`, `refs`, `commondir`)도 확인하고, `repoInfo`는 `symbolic-ref`의 치명 오류에서 다시 읽는다(수용 기준 3, 의사결정 로그 9, step1 작업 1·4).
+  - F4: 성능 기준을 step AC가 판정하지 않는다. → step1 AC에 동기 프로세스 수 상한 판정을 넣었다(상한은 시제품으로 정했다. 다음 줄들). Windows 측정은 마지막 step 승인 요청의 전제로 못 박았다(수용 기준 5, 6). step0의 시간 상한은 머신마다 달라 AC로 두지 않고 묶음을 판정한다(수용 기준 2, 의사결정 로그 11).
+- 2026-11-23 23:40 수용 기준 5의 상한을 정하려고 step1 규칙(의사결정 로그 9의 확인 (1)~(4), 상태 파일 경로 넷을 `repoDirs`로)대로 만든 시제품을 이 worktree 밖의 사본에서 돌렸다(이 브랜치에는 올리지 않았다). 옛 `runner.test.ts` 37개 통과, 동기 프로세스 7121개(−28%). 같은 때 변경 전 코드를 다시 재 9908개(측정 2는 9887개, 차이 0.2%).
+- 2026-11-24 00:20 스스로 다시 읽다가 고쳤다(2회차 push 전). `rev-parse --show-toplevel`의 답은 리포 설정(`core.worktree`)에도 달려 있어 꺼낼 때의 확인에 설정 파일 (5)를 더했고, `repoInfo`의 `symbolic-ref` 치명 오류 대체를 시제품에 넣었다. 다시 재니 7369개(−25%)라, 상한 7415개는 여유가 0.6%뿐이다. 무관한 설정 쓰기(push의 upstream 등)에도 한 번씩 다시 읽기 때문이다. 정확성을 줄이지 않으려고 확인은 그대로 두고 수용 기준 5의 상한을 7900개(−20%)로 낮췄다. AC 셋째 줄의 기록 경로는 환경 변수 대신 세는 모듈 안에 절대 경로로 넣었다(Windows Git Bash는 환경 변수의 POSIX 경로를 바꾸지 않을 수 있다).
 
 ## 의사결정 로그
 
@@ -114,24 +120,27 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
    - 이유: 줄여서 얻는 것은 끝나지 않는 테스트를 조금 일찍 끊는 것뿐이다. 하네스를 적용한 리포의 Windows 머신(백신, 느린 디스크)에서 시간 제한에 걸리면 `check`가 통과하지 못해 일이 멈춘다(#228에서 겪었다). 시간 제한은 멈춘 실행을 끊는 장치이고, 느려짐은 수용 기준 6의 측정으로 본다. `commands`를 바꾸면 위험도 높음 PR이 하나 더 생긴다.
    - 버린 대안: 1800초로 되돌리기. 위 이유로 얻는 것이 작다.
 7. 결정(Windows 목표 1100초): 수용 기준 6의 목표는 1100초다.
-   - 이유: macOS에서 파일 합은 1417초, 같은 테스트의 배율은 4.3~5.6배(Issue #230 댓글)라 Windows 합은 약 7100초, ÷ 8은 약 890초다. step1이 runner 계열 파일(합의 약 절반)의 프로세스를 25~30% 줄이면 합이 1할쯤 준다. 동시 실행 때 디스크·백신이 겹치는 몫을 재지 않았으므로 추정(약 800~900초)에 2할 남짓 여유를 둔다. 지금(1516~1858초)보다 30% 이상 짧다.
+   - 이유: macOS에서 파일 합은 1417초, 같은 테스트의 배율은 4.3~5.6배(Issue #230 댓글)라 Windows 합은 약 7100초, ÷ 8은 약 890초다. step1이 runner 계열 파일(합의 약 절반)의 프로세스를 25% 안팎 줄이면 합이 1할쯤 준다. 동시 실행 때 디스크·백신이 겹치는 몫을 재지 않았으므로 추정(약 800~900초)에 2할 남짓 여유를 둔다. 지금(1516~1858초)보다 30% 이상 짧다.
    - 버린 대안: 목표 없이 "빨라진다"만 적기(Issue의 수용 기준이 "목표 값은 잰 뒤 정한다"이다).
-8. 결정: 추적 스크립트는 리포의 코드로 넣지 않고 이 계획의 "검증 방법과 결과"에 둔다. step1의 프로세스 수 단언은 테스트 안에서 `node:child_process`의 `spawnSync`를 감싸 센다.
-   - 이유: 측정은 계획의 근거이고 동작이 아니다. 코드로 넣으면 보호 경로의 새 도구가 되어 유지할 것이 는다. 테스트가 세는 방법은 제품 코드에 세는 장치를 두지 않는다.
+8. 결정: 추적 스크립트는 리포의 코드로 넣지 않고 이 계획의 "검증 방법과 결과"에 둔다. 수용 기준 5의 판정은 step1 AC 한 줄이 `spawnSync`만 세는 최소 코드를 임시 폴더에 써서 `NODE_OPTIONS`로 넣어 센다. step1 테스트의 프로세스 수 단언은 테스트 안에서 `node:child_process`의 `spawnSync`를 감싸 센다.
+   - 이유: 측정은 계획의 근거이고 동작이 아니다. 코드로 넣으면 보호 경로의 새 도구가 되어 유지할 것이 는다. 세는 방법은 제품 코드에 세는 장치를 두지 않는다. AC의 세는 코드는 추적 스크립트의 `sync` 줄과 같은 것(모든 node 프로세스의 `spawnSync` 호출)을 세므로 측정 2의 9887개와 견줄 수 있다.
    - 버린 대안: `scripts/lib/exec.ts`에 호출 수를 세는 변수를 두기. 테스트만을 위한 상태가 제품 코드에 남는다.
-9. 결정(step1 `repoDirs` 캐시 규칙): 키는 `path.resolve(cwd)`이고, cwd가 그 worktree의 루트(git이 준 `--show-toplevel`과 같은 경로. Windows는 대소문자를 가리지 않는다)일 때만 담는다. 다시 꺼낼 때 `<root>/.git`이 담아 둔 git-dir을 가리키는지 파일로만 확인하고(폴더면 그 경로, 파일이면 `gitdir:` 줄), 다르거나 읽지 못하면 버리고 git으로 다시 읽는다. `GIT_DIR`·`GIT_WORK_TREE`·`GIT_COMMON_DIR`·`GIT_CEILING_DIRECTORIES`·`GIT_DISCOVERY_ACROSS_FILESYSTEM` 가운데 하나라도 있으면 담지도 꺼내지도 않는다. 실패(리포 아님)는 담지 않는다. 브랜치는 담지 않는다(`repoInfo`가 매번 `symbolic-ref`로 읽는다).
-   - 이유: runner는 한 프로세스가 12시간까지 돌며 worktree를 지우고 만든다. 같은 경로에 다시 만든 worktree는 git-dir 이름이 달라질 수 있다(같은 이름의 관리 폴더가 남아 있으면 `name1`). `.git`을 보면 그 경우를 프로세스 없이 알아챈다. 루트가 아닌 폴더는 그 안에 나중에 `git init`한 리포가 생길 수 있어 담지 않는다. 대부분의 호출(상태 파일, runner)은 worktree 루트를 넘긴다.
-   - 버린 대안: 호출하는 쪽이 `RepoInfo`를 넘겨 쓰게 고치기(부르는 곳 60곳 남짓을 고쳐야 하고 runner의 반복마다 언제 다시 읽을지를 곳곳에서 정해야 한다). 기한(TTL)으로 버리기(기한 안의 변경을 놓친다).
-10. 결정(step1 도구 버전): `toolVersions`의 결과를 프로세스 안에서 `PATH` 값별로 담는다.
-    - 이유: `check` 명령은 실행마다 새 프로세스라 결과가 그대로다. 한 프로세스에서 `check`를 여러 번 부르는 runner·테스트만 달라진다. 테스트는 가짜 도구를 `PATH` 앞에 두므로 `PATH`가 바뀌면 다시 실행한다.
-    - 남는 위험: runner가 도는 동안 같은 `PATH`의 pnpm·gitleaks를 올리면 그 runner가 끝날 때까지 키에 옛 버전이 남는다. 그 사이 같은 트리의 로컬 `check` 통과 표시를 다시 쓸 수 있다(CI는 캐시를 쓰지 않는다). 받아들인다.
-    - 버린 대안: 실행 파일의 수정 시각을 키에 넣기(`PATH`에서 실행 파일을 찾는 코드가 Windows의 `PATHEXT`까지 다뤄야 한다).
+9. 결정(step1 `repoDirs` 캐시 규칙): 키는 `path.resolve(cwd)`이고, cwd가 그 worktree의 루트(git이 준 `--show-toplevel`과 같은 경로. Windows는 대소문자를 가리지 않는다)일 때만 담는다. 꺼낼 때마다 프로세스 없이 파일로 확인하고, 하나라도 아니거나 읽지 못하면 버리고 지금처럼 git으로 다시 읽는다: (1) `<root>/.git`이 폴더면 그 경로가, 일반 파일이면 `gitdir:` 줄이 담아 둔 git-dir을 가리킨다. (2) git-dir의 `HEAD`가 일반 파일이고 `ref: refs/…`나 객체 id(16진수 40자·64자) 한 줄이다. (3) git-dir이 공유 git-dir과 다르면(worktree) git-dir의 `commondir`이 담아 둔 공유 git-dir을 가리킨다. (4) 공유 git-dir에 `objects`·`refs` 폴더가 있다. (5) 공유 git-dir의 `config`와 git-dir의 `config.worktree`가 담을 때와 같다(있고 없음, 크기, 수정 시각). `GIT_DIR`·`GIT_WORK_TREE`·`GIT_COMMON_DIR`·`GIT_CEILING_DIRECTORIES`·`GIT_DISCOVERY_ACROSS_FILESYSTEM` 가운데 하나라도 있으면 담지도 꺼내지도 않는다. 실패(리포 아님)는 담지 않는다. 브랜치는 담지 않는다. `repoInfo`는 꺼낸 자리에 `symbolic-ref`로 브랜치를 읽고, 그 명령이 0·1이 아닌 종료 코드(리포를 찾지 못하는 치명 오류는 128)로 끝나면 담아 둔 자리를 버리고 지금의 순서(`rev-parse` → `symbolic-ref`)로 다시 읽는다.
+   - 이유: runner는 한 프로세스가 12시간까지 돌며 worktree를 지우고 만든다. 같은 경로에 다시 만든 worktree는 git-dir 이름이 달라질 수 있다(같은 이름의 관리 폴더가 이미 있으면 `name1`). (2)~(4)는 git이 폴더를 리포로 보는 조건(`is_git_directory`: `HEAD`, `objects`, `refs`, worktree의 `commondir`)을 따른 것이다. (5)는 `rev-parse --show-toplevel`의 답을 바꾸는 리포 설정(`core.worktree`, `core.bare`)을 보려는 것이다. 설정이 바뀌면(브랜치의 upstream 설정 등 무관한 변경 포함) 한 번 다시 읽을 뿐이다. 그래서 `HEAD`가 지워지는 것처럼 리포가 망가지면 지금처럼 `rev-parse`가 `GitError`를 던진다(Codex F3). `repoInfo`는 `symbolic-ref`가 리포를 한 번 더 확인하므로, 파일 확인이 놓친 망가짐도 git이 알아채면 지금과 같은 예외가 된다. 루트가 아닌 폴더는 그 안에 나중에 `git init`한 리포가 생길 수 있어 담지 않는다. 대부분의 호출(상태 파일, runner)은 worktree 루트를 넘긴다.
+   - 남는 차이: 상태 파일 경로만 구하는 `repoDirs`는 git을 띄우지 않으므로, 위 조건 밖의 변경(전역·시스템 설정, 소유자가 바뀌어 `safe.directory`에 걸림 등)이 프로세스 도중에 생기면 git-dir 경로를 그대로 돌려준다(`repoInfo`는 `symbolic-ref`가 같은 치명 오류를 내므로 다시 읽는다). 그 경로의 상태 파일을 읽고 쓰는 동작은 리포가 멀쩡할 때와 같고, 그다음 git을 부르는 곳이 지금처럼 실패한다.
+   - 버린 대안: 호출하는 쪽이 `RepoInfo`를 넘겨 쓰게 고치기(부르는 곳 60곳 남짓을 고쳐야 하고 runner의 반복마다 언제 다시 읽을지를 곳곳에서 정해야 한다). 기한(TTL)으로 버리기(기한 안의 변경을 놓친다). `.git`만 확인하기(1회차 계획. 리포가 망가져도 담아 둔 값을 돌려준다, Codex F3).
+10. 결정: `check` 캐시 키의 도구 버전(`toolVersions`)은 이 계획에서 줄이지 않는다.
+    - 이유: 설계서 6절은 "런타임·도구 버전 … 하나라도 바뀌면 다시 실행한다"를 보장한다. 프로세스 안에 담아 두면 runner가 도는 동안 같은 경로의 pnpm·gitleaks를 바꿨을 때 키에 옛 버전이 남아, 같은 트리의 로컬 통과 표시를 실제 검사 없이 다시 쓴다(Codex F2). pnpm은 corepack 심(shim)이면 실행 파일이 그대로인 채 버전이 바뀌어 파일 확인으로도 알 수 없다. 몫은 옛 `runner.test.ts`에서 macOS 5%(pnpm 46번), Windows 약 2%(gitleaks 67번)로 작고, 수용 기준 5는 `repoInfo`만으로 채운다(시제품 7369개).
+    - 버린 대안: `PATH` 값별로 담기(1회차 계획, 위 보장을 약화한다). `check` 한 번 안에서 시작할 때 읽은 버전을 끝의 키에 다시 쓰기(끝의 키를 다시 만드는 뜻이 바뀌고 줄어드는 몫이 절반이다). 실행 파일의 수정 시각을 키에 넣기(corepack 심을 알아채지 못한다).
+11. 결정: step0의 시간(나눈 파일 하나 75초 안팎)은 step AC로 판정하지 않는다.
+    - 이유: AC는 runner가 어느 머신에서든 그대로 실행한다. 같은 테스트가 Windows에서 4.3~5.6배 걸리고 동시 실행·부하에 따라 흔들려, 시간 상한은 묶음이 맞아도 머신에 따라 실패한다. 시간을 정하는 것은 묶음(어느 테스트가 어느 파일에 있는가)이고 묶음은 AC 셋째 줄이 판정한다. 벽시계 효과는 수용 기준 6(Windows PC 측정, 승인 요청의 전제)이 판정한다(Codex F4).
+    - 버린 대안: step0 AC에 macOS 기준 100초 상한 넣기(1회차 지적의 제안. 위 이유로 머신에 따라 결과가 갈린다).
 
 ## 발견 사항
 
 1. Windows에서 `toolVersions`(`scripts/commands/check.ts`)의 `pnpm --version`이 3ms에 끝난다. 셸 없이 띄우면 `pnpm.cmd`를 찾지 못해 실행되지 않는 것으로 보인다(libuv는 `.exe`·`.com`만 붙여 찾는다. Windows에서 확인하지는 않았다). 그러면 Windows의 캐시 키에 pnpm 버전이 빠져, pnpm을 올려도 같은 트리의 통과 표시를 다시 쓴다. 속도와 별개다. → 처리: step1에서 기술 부채 표에 새 행으로 올린다
 2. Windows에서만 큰 비용 가운데 이 계획이 다루지 않는 것: 자식이 끝날 때마다 도는 `taskkill`(회당 311ms)과 끝난 pid 재사용 위험, `fetch`·`push`(회당 약 450ms. 로컬 원격에도 하위 프로세스를 여럿 띄운다), 테스트 준비의 파일 복사(`scripts/` 192개)와 `git add -A`, 백신(이 PC는 AhnLab V3 Lite)의 실시간 검사, 20코어에서 동시 실행 상한 8. → 처리: step1에서 기술 부채 표에 새 행으로 올린다(Windows에서 각각의 몫을 잰 뒤 고를 일)
-3. macOS에서는 `pnpm --version`이 회당 156ms다(pnpm이 node로 뜬다). 옛 `runner-review.test.ts`에서 87번, 13.7초(그 파일의 11%)였다. → 처리: 해당 없음(step1의 도구 버전 담기가 줄인다)
+3. macOS에서는 `pnpm --version`이 회당 156ms다(pnpm이 node로 뜬다). 옛 `runner-review.test.ts`에서 87번, 13.7초(그 파일의 11%)였다. 줄이려면 설계서 6절의 "도구 버전이 바뀌면 다시 실행한다"를 지키면서 버전 변경을 알아채는 방법이 필요하다(의사결정 로그 10). → 처리: step1에서 발견 사항 2의 기술 부채 행에 함께 적는다
 
 ## 열린 질문
 
@@ -139,9 +148,24 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
 
 ## 검증 방법과 결과
 
-- step0: AC(나눈 파일 실행, 테스트 블록 비교, 파일별 블록 수) + `check`. 나눈 뒤 macOS에서 `test`를 한 번 돌려 파일별 시간(측정 3과 같은 방법)과 전체 시간을 진행 로그에 적는다.
-- step1: AC(새 테스트, 나눈 runner 파일 실행) + `check`. 추적 스크립트로 옛 `runner.test.ts`의 테스트 37개(step0 뒤 세 파일)의 동기 프로세스 수를 macOS에서 다시 재 진행 로그에 적는다(수용 기준 5).
-- Windows(수용 기준 6): 마지막 step의 승인 요청 전에 제작자의 Windows PC에서 그 PR head로 `node scripts/harness.ts test`를 한 번 잰다(다른 `check`가 돌지 않을 때, `time`으로). 그 PC의 대화 세션이 재거나, 할 수 없으면 승인 요청에 제작자 작업으로 넣는다. step0 PR에서도 잴 수 있으면 잰다(필수 아님).
+- step0: AC(나눈 파일 실행, 테스트 블록 비교, 파일별 테스트 수, 문서) + `check`. 나눈 뒤 macOS에서 `test`를 한 번 돌려 파일별 시간(측정 3과 같은 방법)과 전체 시간을 진행 로그에 적는다(판정이 아니라 기록. 의사결정 로그 11).
+- step1: AC(새 테스트, runner 계열 테스트 실행, 동기 프로세스 수 7900개 이하) + `check`. 센 값을 진행 로그에 적는다(수용 기준 5).
+- Windows(수용 기준 6, 승인 요청의 전제): step1 PR의 `complete-step`과 `origin/main` 병합까지 push한 뒤, 승인을 요청하기 전에 제작자의 Windows PC에서 그 커밋으로 잰다.
+  1. 그 PC에서 브랜치를 받아(`git fetch origin` 뒤 worktree에서 `git merge --ff-only origin/<브랜치>`) `node scripts/harness.ts setup`을 한다.
+  2. 다른 `check`·`test`가 돌지 않을 때 Git Bash에서 `time node scripts/harness.ts test > <임시 폴더>/test.log 2>&1`을 한 번 돌린다.
+  3. 잰 커밋, `real` 시간, 통과 여부, 조건(다른 무거운 프로세스, 백신 설정을 바꿨는지)을 진행 로그와 PR 본문에 적는다. 이 기록 커밋은 계획 폴더만 바꾼다.
+  - 그 PC의 대화 세션이 재거나, 이 맥 세션이 승인 요청과 따로 먼저 제작자 작업으로 측정을 요청해 결과(위 3의 값)를 받는다. 결과를 받기 전에는 승인을 요청하지 않는다. 1100초를 넘으면 승인을 요청하지 않고 진행 로그에 적어 제작자에게 묻는다(선택지: 발견 사항 2의 후보를 더하는 step 추가 / 목표 조정).
+  - step0 PR에서도 잴 수 있으면 잰다(필수 아님. 나누기만의 효과를 본다).
+
+### AC 확인 (2026-11-23, 1회차 지적 F1 대응)
+
+step0 AC의 블록 비교(둘째 줄)와 파일별 테스트 수(셋째 줄)는 줄 잇기 없는 한 줄이다. 셸에서 블록을 그대로 실행해도, runner가 줄을 뽑아 실행해도 같다. 확인한 것:
+
+- 바꾸지 않은 트리: 블록 비교가 통과한다(`최상위 test 블록 1272개가 base와 글자 그대로 같다`). 파일별 테스트 수는 나뉜 파일이 없어 실패한다.
+- 테스트 하나의 단언 한 글자를 바꾼 트리: 블록 비교가 종료 코드 1로 실패한다.
+- 옛 `runner.test.ts`를 표대로 세 파일과 보조 모듈로 나눈 트리(이 계획을 위해 만든 시험 분할): 블록 비교와 그 세 파일의 테스트 수가 통과한다.
+
+step1 AC 셋째 줄(동기 프로세스 수)은 파일 목록만 아직 나뉘지 않은 `runner.test.ts` 하나로 바꿔 같은 꼴로 돌렸다(F4 대응): 변경 전 코드는 9908개로 종료 코드 1, step1 규칙의 시제품(확인 (1)~(5)와 `symbolic-ref` 대체)은 7369개로 0이다. 이때 명령의 상한은 7415였다. 7900으로 바꾼 지금의 명령도 이 두 값에서 결과가 같다(9908 > 7900, 7369 ≤ 7900).
 
 ### 측정 (2026-11-23, macOS)
 

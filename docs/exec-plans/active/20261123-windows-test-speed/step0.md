@@ -57,25 +57,14 @@
 
 ### 5. 측정
 
-- 나눈 뒤 macOS에서 `test`를 측정 3과 같은 방법(동시 8개, 파일별 보고기)으로 한 번 돌려, 나눈 파일 10개의 시간과 전체 시간을 진행 로그에 적는다. 나눈 파일 하나라도 100초를 넘으면(수용 기준 2) 그 까닭을 진행 로그에 적고 제작자에게 알린다(표를 고치려면 계획 수정이다).
+- 나눈 뒤 macOS에서 `test`를 측정 3과 같은 방법(동시 8개, 파일별 보고기)으로 한 번 돌려, 나눈 파일 10개의 시간과 전체 시간을 진행 로그에 적는다. 판정이 아니라 기록이다(수용 기준 2, 의사결정 로그 11). 표의 예상(75초 안팎, `selftest.test.ts` 86~88초)과 크게 다르면 까닭을 진행 로그에 적는다.
 
 ## Acceptance Criteria
 
 ```bash
 node --test scripts/test/runner.test.ts scripts/test/runner-questions.test.ts scripts/test/runner-question-delivery.test.ts scripts/test/runner-review.test.ts scripts/test/runner-review-rebuttal.test.ts scripts/test/runner-review-round.test.ts scripts/test/runner-pr.test.ts scripts/test/runner-pr-update.test.ts scripts/test/selftest.test.ts scripts/test/selftest-cases.test.ts
-node -e 'const { execFileSync: x } = require("node:child_process"), fs = require("node:fs"); \
-  const g = (...a) => x("git", a, { encoding: "utf8", maxBuffer: 1 << 28 }); \
-  const base = g("merge-base", "HEAD", "origin/main").trim(); \
-  const blocks = (texts) => { const b = []; for (const t of texts) { const L = t.split("\n"); for (let i = 0; i < L.length; i++) { if (!L[i].startsWith("test(")) continue; let j = i; if (!/\);\s*$/.test(L[i])) while (j + 1 < L.length && !/^[})]/.test(L[++j])); b.push(L.slice(i, j + 1).join("\n")); i = j; } } return b.sort(); }; \
-  const before = blocks(g("ls-tree", "--name-only", base, "scripts/test/").split("\n").filter((f) => f.endsWith(".test.ts")).map((f) => g("show", `${base}:${f}`))); \
-  const after = blocks(fs.readdirSync("scripts/test").filter((f) => f.endsWith(".test.ts")).map((f) => fs.readFileSync(`scripts/test/${f}`, "utf8"))); \
-  if (JSON.stringify(before) !== JSON.stringify(after)) { console.error(`최상위 test 블록이 base와 다르다: base ${before.length}개, 지금 ${after.length}개`); process.exit(1); } \
-  console.log(`최상위 test 블록 ${after.length}개가 base와 글자 그대로 같다`);'
-node -e 'const fs = require("node:fs"); \
-  const want = { "runner": 9, "runner-questions": 15, "runner-question-delivery": 13, "runner-review": 7, "runner-review-rebuttal": 12, "runner-review-round": 8, "runner-pr": 7, "runner-pr-update": 5, "selftest": 1, "selftest-cases": 12 }; \
-  let bad = 0; \
-  for (const [f, n] of Object.entries(want)) { const got = fs.readFileSync(`scripts/test/${f}.test.ts`, "utf8").split("\n").filter((l) => l.startsWith("test(")).length; if (got < n) { console.error(`${f}.test.ts: 최상위 test ${got}개(${n}개 이상이어야 한다)`); bad = 1; } } \
-  process.exit(bad);'
+node -e 'const { execFileSync: x } = require("node:child_process"), fs = require("node:fs"); const g = (...a) => x("git", a, { encoding: "utf8", maxBuffer: 1 << 28 }); const base = g("merge-base", "HEAD", "origin/main").trim(); const blocks = (texts) => { const b = []; for (const t of texts) { const L = t.split("\n"); for (let i = 0; i < L.length; i++) { if (!L[i].startsWith("test(")) continue; let j = i; if (!/\);\s*$/.test(L[i])) while (j + 1 < L.length && !/^[})]/.test(L[++j])); b.push(L.slice(i, j + 1).join("\n")); i = j; } } return b.sort(); }; const before = blocks(g("ls-tree", "--name-only", base, "scripts/test/").split("\n").filter((f) => f.endsWith(".test.ts")).map((f) => g("show", `${base}:${f}`))); const after = blocks(fs.readdirSync("scripts/test").filter((f) => f.endsWith(".test.ts")).map((f) => fs.readFileSync(`scripts/test/${f}`, "utf8"))); if (JSON.stringify(before) !== JSON.stringify(after)) { console.error(`최상위 test 블록이 base와 다르다: base ${before.length}개, 지금 ${after.length}개`); process.exit(1); } console.log(`최상위 test 블록 ${after.length}개가 base와 글자 그대로 같다`);'
+node -e 'const fs = require("node:fs"); const want = { "runner": 9, "runner-questions": 15, "runner-question-delivery": 13, "runner-review": 7, "runner-review-rebuttal": 12, "runner-review-round": 8, "runner-pr": 7, "runner-pr-update": 5, "selftest": 1, "selftest-cases": 12 }; let bad = 0; for (const [f, n] of Object.entries(want)) { const file = `scripts/test/${f}.test.ts`; const got = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter((l) => l.startsWith("test(")).length : 0; if (got < n) { console.error(`${file}: 최상위 test ${got}개(${n}개 이상이어야 한다)`); bad = 1; } } process.exit(bad);'
 grep -qF '`scripts/test/selftest.test.ts`가 `check`에서 이 리포를, `scripts/test/selftest-cases.test.ts`가 약화된 사본과 실행기를 시험한다.' docs/harness/architecture.md
 ! grep -qF '`scripts/test/selftest.test.ts`가 `check`에서 이 리포와 약화된 사본을 시험한다.' docs/harness/architecture.md
 test -f docs/harness/changes/20261123-windows-test-speed-s0.md
