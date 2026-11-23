@@ -2,7 +2,7 @@
 id: 20261121-q10-confirm
 issue: 180 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -136,6 +136,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 구현 판정 2회차(head `ea973ca`): CI `check` 통과, Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨). F1은 고쳐졌다고 했다. `pr-state`에 "오래 열린 지적" 줄은 없다. 새 지적은 F1과 다른 자리(`verify-artifacts.ts:106`)라 수렴하지 않은 라운드가 아니다(절차서 6절: 새 차단 지적 1 = 해소 1, 같은 자리 아님, `check` 통과).
 - 2026-11-23T22:50:48+09:00 step1 재작업: 구현 판정 2회차(head ea973ca) Codex F2(P1, 재현됨): 표 파서가 이스케이프된 세로줄(\|)을 칸 구분자로 처리해 실행 칸을 밀어낸다. GFM대로 칸을 나누고 두 검사가 같은 파서를 쓰게 고친다
 - 2026-11-23 F2 처리: 맞는 지적이다(GFM은 `\|`를 칸 안의 글자로 본다). 같은 부류로 표가 끝난 뒤의 다른 표(머리줄이 같으면 그 행까지 읽었다)와 줄 끝의 `\|`도 함께 막는다. 칸 나누기를 동작 그대로 `tableCells`로 내보내고 테스트를 먼저 더했다(앞 칸의 `\|`와 다른 칸의 주소, 실행 칸 안의 `\|`, 첫 표만 읽기, `tableCells`의 경우들): 고치기 전 36건 가운데 3건 실패(`a7884f9`). `tableCells`가 이스케이프되지 않은 `|`에서만 나누고 `\|`를 `|`로 두게, `readRows`가 절의 첫 표(처음 `|`로 시작하는 줄부터 이어진 줄들)만 읽게 고쳤다. `confirmed.test.ts`는 제안대로 자체 파서를 지우고 `verify-artifacts.ts`의 `readRows`를 쓴다(`6e84bd1`). 36건·10건 통과. 실제 README의 머신 칸에 `\|`를 넣어도 `confirmed.test.ts`와 `verify-artifacts.ts`가 모두 통과하는 것(실행 칸의 주소를 읽는다)을 확인하고 되돌렸다.
+
+- 2026-11-23T23:12:38+09:00 step1 재작업: 구현 판정 3회차(head 0349c51) Codex F3(P1, 재현됨): 첫 표만 읽기가 맨 앞 세로줄이 없는 GFM 행에서 표를 끊어 뒤의 CI 행을 놓친다. 지적된 곳만 고치지 않고 GFM 표 규칙(머리줄·구분 줄, 칸 수, 앞뒤 세로줄 생략, 빈 줄·다른 블록에서 끝)을 한 번에 구현한다
 
 ## 의사결정 로그
 
