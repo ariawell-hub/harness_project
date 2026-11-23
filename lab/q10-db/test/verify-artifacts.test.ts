@@ -15,6 +15,7 @@ import {
   type ProvenanceInput,
   provenanceProblems,
   readRows,
+  readTable,
   summaryLines,
   tableCells,
   WORKFLOW_PATH,
@@ -67,6 +68,7 @@ function good(): ProvenanceInput {
   return {
     repo: REPO,
     rows: readRows(readme([DARWIN_ROW, linuxRow(), winRow()])),
+    tableProblems: [],
     resultFiles: {
       'darwin-arm64.json': pretty(DARWIN),
       'linux-x64.json': pretty(LINUX),
@@ -204,92 +206,143 @@ test('실행 칸 안의 이스케이프된 세로줄은 주소의 꼴이 아니�
   assertProblem(input, /linux-x64\.json: 실행 칸이 실행 주소의 꼴이 아니다/);
 });
 
-test('잰 머신 절의 첫 표만 읽는다(표가 끝난 뒤의 다른 표는 머리줄이 같아도 읽지 않는다)', () => {
-  const doc = readme([DARWIN_ROW, linuxRow(), winRow()]).replace(
-    '\n\n## 확정 조건',
-    [
-      '',
-      '',
-      '다른 표:',
-      '',
-      '| 결과 파일 | 머신 | 날짜 | 실행 |',
-      '| --- | --- | --- | --- |',
-      `| \`results/linux-arm64.json\` | 다른 것 | 2026-11-23 | ${URL(REPO, 999)} |`,
-      '',
-      '## 확정 조건',
-    ].join('\n'),
-  );
-  assert.deepEqual(
-    readRows(doc).map((r) => r.file),
-    ['darwin-arm64.json', 'linux-x64.json', 'win32-x64.json'],
-  );
-});
-
 /** 잰 머신 절을 lines로 만든다(표의 꼴을 시험하는 경우마다 다르게) */
-const measured = (lines: string[]): string =>
-  ['# Q10', '', '## 잰 머신', '', ...lines, '', '## 확정 조건', ''].join('\n');
-const files = (doc: string) => readRows(doc).map((r) => `${r.file}:${r.run ?? '-'}`);
-const LINUX_CELLS = `\`results/linux-x64.json\` | GitHub Actions | 2026-11-23 | ${URL(REPO, RUN)}`;
-const WIN_CELLS = `\`results/win32-x64.json\` | GitHub Actions | 2026-11-23 | ${URL(REPO, RUN)}`;
-const DARWIN_CELLS = '`results/darwin-arm64.json` | macOS | 2026-11-20 | ';
+const measured = (lines: string[], before: string[] = []): string =>
+  ['# Q10', '', ...before, '## 잰 머신', '', ...lines, '', '## 확정 조건', ''].join('\n');
+const LINUX_LINE = `| \`results/linux-x64.json\` | GitHub Actions | 2026-11-23 | ${URL(REPO, RUN)} |`;
+const WIN_LINE = `| \`results/win32-x64.json\` | GitHub Actions | 2026-11-23 | ${URL(REPO, RUN)} |`;
 const HEAD = '| 결과 파일 | 머신 | 날짜 | 실행 |';
 const DELIM = '| --- | --- | --- | --- |';
+const OK_TABLE = [HEAD, DELIM, LINUX_LINE, WIN_LINE];
+/** 이 경우 받아들이는 꼴이 아니어서 행을 하나도 읽지 않고, pattern에 맞는 꼴 문제를 낸다 */
+function assertRejected(doc: string, pattern: RegExp, label = ''): void {
+  const t = readTable(doc);
+  assert.deepEqual(t.rows, [], `행을 읽었다 ${label}`);
+  assert.ok(
+    t.problems.length > 0 &&
+      t.problems.every((p) => p.startsWith('잰 머신 표의 꼴이 이 검사가 받는 꼴이 아니다')),
+    `꼴 문제가 아니다 ${label}: ${JSON.stringify(t.problems)}`,
+  );
+  assert.ok(
+    t.problems.some((p) => pattern.test(p)),
+    `${pattern}에 맞는 문제가 없다 ${label}: ${JSON.stringify(t.problems)}`,
+  );
+}
 
-test('GFM 표: 맨 앞 세로줄이 없는 행도 같은 표의 행이다(뒤의 행을 놓치지 않는다)', () => {
-  const doc = measured([HEAD, DELIM, DARWIN_CELLS, `| ${LINUX_CELLS} |`, `| ${WIN_CELLS} |`]);
-  assert.deepEqual(files(doc), [
-    'darwin-arm64.json:-',
-    `linux-x64.json:${RUN}`,
-    `win32-x64.json:${RUN}`,
-  ]);
-  const input = good();
-  input.rows = readRows(doc);
-  assert.deepEqual(provenanceProblems(input), []);
+test('엄격한 꼴: 포매터가 쓰는 꼴(표 하나, 모든 줄이 맨 앞에서 |로 시작·끝, 머리줄+구분 줄, 같은 칸 수, 앞뒤 빈 줄)은 받는다', () => {
+  const t = readTable(measured([...OK_TABLE, '', '문단은 둘 수 있다.']));
+  assert.deepEqual(t.problems, []);
+  assert.deepEqual(
+    t.rows.map((r) => `${r.file}:${r.run}`),
+    [`linux-x64.json:${RUN}`, `win32-x64.json:${RUN}`],
+  );
+  // 이 리포의 README처럼 절의 앞뒤에 코드 울타리가 있어도 된다(짝이 맞으면)
+  const fenced = measured(OK_TABLE, ['```bash', 'node x.ts', '```', '']);
+  assert.deepEqual(readTable(fenced).problems, []);
 });
 
-test('GFM 표: 앞뒤 세로줄을 모두 뺀 머리줄·구분 줄·행도 읽는다', () => {
-  const doc = measured([
-    '결과 파일 | 머신 | 날짜 | 실행',
-    ':--- | --- | :---: | ---:',
-    `${LINUX_CELLS}`,
-    `| ${WIN_CELLS}`,
-  ]);
-  assert.deepEqual(files(doc), [`linux-x64.json:${RUN}`, `win32-x64.json:${RUN}`]);
+test('엄격한 꼴: 맨 앞 세로줄이 없는 줄(F3)이나 들여 쓴 표 줄은 받지 않는다(포매터로 정리하라)', () => {
+  assertRejected(
+    measured([HEAD, DELIM, LINUX_LINE.slice(2), WIN_LINE]),
+    /맨 앞에서 \|로 시작하지 않는다|빈 줄/,
+  );
+  assertRejected(measured([HEAD, DELIM, `  ${LINUX_LINE}`, WIN_LINE]), /맨 앞에서 \|로 시작/);
+  assertRejected(
+    measured(['결과 파일 | 머신 | 날짜 | 실행', '--- | --- | --- | ---', LINUX_LINE]),
+    /./,
+  );
 });
 
-test('GFM 표: 표는 머리줄 바로 뒤에 칸 수가 같은 구분 줄이 있어야 시작한다', () => {
-  // 구분 줄이 없는 세로줄 글(문단)은 표가 아니다. 그 뒤의 진짜 표를 읽는다
-  const para = `참고 | \`results/linux-arm64.json\` | 머신 | ${URL(REPO, 999)}`;
-  assert.deepEqual(files(measured([para, '', HEAD, DELIM, `| ${LINUX_CELLS} |`])), [
-    `linux-x64.json:${RUN}`,
-  ]);
-  // 머리줄과 구분 줄의 칸 수가 다르면 표가 아니다
-  assert.deepEqual(files(measured([HEAD, '| --- | --- | --- |', `| ${LINUX_CELLS} |`])), []);
+test('엄격한 꼴: 맨 뒤가 이스케이프되지 않은 |로 끝나지 않는 표 줄은 받지 않는다', () => {
+  assertRejected(measured([HEAD, DELIM, LINUX_LINE.slice(0, -2), WIN_LINE]), /\|로 끝나지 않는다/);
+  assertRejected(
+    measured([HEAD, DELIM, `${LINUX_LINE.slice(0, -1)}\\|`, WIN_LINE]),
+    /\|로 끝나지 않는다/,
+  );
 });
 
-test('GFM 표: 빈 줄이나 다른 블록(제목, 인용, 코드 울타리, 목록, 가로줄)이 나오면 표가 끝난다', () => {
-  const after = `| \`results/linux-arm64.json\` | 뒤 | 2026-11-23 | ${URL(REPO, 999)} |`;
-  for (const stop of ['', '### 다음', '> 인용', '```', '~~~', '- 목록', '1. 목록', '***']) {
-    const doc = measured([HEAD, DELIM, `| ${LINUX_CELLS} |`, stop, after]);
-    assert.deepEqual(files(doc), [`linux-x64.json:${RUN}`], `끝내는 줄: ${JSON.stringify(stop)}`);
+test('엄격한 꼴: 둘째 줄이 구분 줄이 아니거나 칸 수가 다르면 받지 않는다', () => {
+  assertRejected(measured([HEAD, LINUX_LINE, WIN_LINE]), /둘째 줄이 구분 줄이 아니다/);
+  assertRejected(measured([HEAD, '| --- | --- | --- |', LINUX_LINE]), /칸 수/);
+  assertRejected(
+    measured([HEAD, DELIM, '| `results/linux-x64.json` | GitHub Actions |', WIN_LINE]),
+    /칸 수/,
+  );
+  assertRejected(measured([HEAD, DELIM, `${LINUX_LINE} 남는 칸 |`, WIN_LINE]), /칸 수/);
+});
+
+test('엄격한 꼴: 머리줄에 "결과 파일"·"실행" 칸이 하나씩 있어야 한다', () => {
+  assertRejected(measured(['| 결과 파일 | 머신 | 날짜 | 주소 |', DELIM, LINUX_LINE]), /"실행" 칸/);
+  assertRejected(measured(['| 결과 파일 | 실행 | 날짜 | 실행 |', DELIM, LINUX_LINE]), /"실행" 칸/);
+});
+
+test('엄격한 꼴: 표 바로 앞뒤에 빈 줄이 없거나 표가 둘 이상이면 받지 않는다(HTML 블록 뒤의 행 모양 줄, F4)', () => {
+  // F4: 표 바로 뒤의 HTML 블록과 그 안의 행 모양 줄
+  assertRejected(
+    measured([...OK_TABLE, '<div>', LINUX_LINE.replace('linux-x64', 'linux-arm64')]),
+    /HTML|빈 줄/,
+  );
+  assertRejected(measured([...OK_TABLE, '다음 문단']), /표 바로 뒤에는 빈 줄을 둔다/);
+  assertRejected(measured(['앞 문단', ...OK_TABLE]), /표 바로 앞에 빈 줄이 없다/);
+  assertRejected(measured([...OK_TABLE, '', '다른 표:', '', ...OK_TABLE]), /표가 둘 이상/);
+  assertRejected(measured([...OK_TABLE, '', `    ${LINUX_LINE}`]), /표 밖에 \|로 시작하는 줄/);
+});
+
+test('엄격한 꼴: 잰 머신 절에 HTML·코드 울타리가 있으면 받지 않는다', () => {
+  for (const line of ['<div>', '  <details>', '```', '~~~ text', '<!-- 주석 -->']) {
+    assertRejected(measured([line, '', ...OK_TABLE]), /HTML|코드 울타리/, JSON.stringify(line));
   }
 });
 
-test('GFM 표: 행의 칸이 머리줄보다 적으면 빈 칸, 많으면 남는 칸을 버린다', () => {
-  const doc = measured([
+test('엄격한 꼴: README 어디에도 빈 줄에서 끝나지 않는 HTML 블록(<!-- <pre <script <style <textarea <? <!)을 두지 않는다', () => {
+  // 그런 블록은 닫는 표시까지 이어져 뒤의 제목과 표를 글로 만든다(GitHub에 표가 보이지 않는다)
+  for (const open of [
+    '<!--',
+    '<pre>',
+    '<script>',
+    '<STYLE>',
+    '<textarea>',
+    '<?php',
+    '<!DOCTYPE html>',
+  ]) {
+    assertRejected(measured(OK_TABLE, [open, '']), /HTML 블록/, open);
+  }
+});
+
+test('엄격한 꼴: 코드 울타리 밖의 "## 잰 머신" 제목이 정확히 하나여야 한다', () => {
+  assertRejected(`${measured(OK_TABLE)}\n## 잰 머신\n\n${OK_TABLE.join('\n')}\n`, /둘 이상/);
+  // 닫히지 않은 코드 울타리 안의 제목은 제목이 아니다
+  assertRejected(measured(OK_TABLE, ['```', '']), /코드 울타리|잰 머신 절이 없다/);
+  // 짝이 맞는 코드 울타리 안의 "## 잰 머신"은 세지 않는다(그 안의 가짜 표도 읽지 않는다)
+  const inFence = measured(OK_TABLE, [
+    '```markdown',
+    '## 잰 머신',
+    '',
     HEAD,
     DELIM,
-    '| `results/linux-x64.json` | GitHub Actions |',
-    `| ${WIN_CELLS} | 남는 칸 | ${URL(REPO, 999)} |`,
+    LINUX_LINE.replace(URL(REPO, RUN), URL(REPO, 999)),
+    '```',
+    '',
   ]);
-  const rows = readRows(doc);
+  assert.deepEqual(readTable(inFence).problems, []);
   assert.deepEqual(
-    rows.map(({ file, runCell, run }) => ({ file, runCell, run })),
-    [
-      { file: 'linux-x64.json', runCell: '', run: null },
-      { file: 'win32-x64.json', runCell: URL(REPO, RUN), run: RUN },
-    ],
+    readRows(inFence).map((r) => r.run),
+    [RUN, RUN],
   );
+});
+
+test('엄격한 꼴: 꼴 문제가 있으면 provenanceProblems는 그 문제만 내고, collect는 실행을 조회하지 않는다', () => {
+  const doc = measured([HEAD, DELIM, LINUX_LINE.slice(2), WIN_LINE]);
+  const input = good();
+  const { exec, calls } = fakeExec(input);
+  const got = collect({ readme: doc, resultFiles: input.resultFiles, exec });
+  assert.deepEqual(
+    calls.filter((c) => c[1] === 'api' || c[1] === 'run'),
+    [],
+  );
+  const problems = provenanceProblems(got);
+  assert.ok(problems.length > 0);
+  assert.ok(problems.every((p) => p.startsWith('잰 머신 표의 꼴이 이 검사가 받는 꼴이 아니다')));
 });
 
 test('실행 주소가 실행 칸이 아닌 칸에만 있으면 실행 주소가 없는 행이다', () => {

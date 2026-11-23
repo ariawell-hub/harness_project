@@ -15,7 +15,7 @@ import {
   readRepoPackageManager,
   RESULTS_DIR,
 } from '../check-results.ts';
-import { readRows, type Row } from '../verify-artifacts.ts';
+import { readRows, readTable, type Row } from '../verify-artifacts.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /** 리포의 글 파일. 줄 끝은 LF로 맞춘다(Windows에서 CRLF로 받아도 같은 판정) */
@@ -90,6 +90,8 @@ test('linux-*와 win32-* 결과가 하나 이상씩 있고, packages·pnpm이 da
 });
 
 test('README "잰 머신" 표에 결과 파일마다 행이 있고, linux-*·win32-* 행에는 실행 주소가 있다', () => {
+  // 출처 확인이 받는 꼴(포매터가 쓰는 꼴)이어야 한다. 아니면 행을 하나도 읽지 않는다
+  assert.deepEqual(readTable(read(LAB_README)).problems, []);
   const rows = measuredRows();
   for (const f of resultFiles()) {
     const row = rows.get(f);
