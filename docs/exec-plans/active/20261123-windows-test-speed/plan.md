@@ -2,7 +2,7 @@
 id: 20261123-windows-test-speed
 issue: 230 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: normal # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -111,6 +111,7 @@ claimed_at: 2026-11-23T18:42:46+09:00 # new-task가 채운다
   - F13: 지표 테스트 변경 검사(바뀐 줄마다 정해진 낱말을 담는지)는 낱말이 든 줄에 `.skip`을 붙이거나 단언을 지워도 통과한다. → AC 일곱째 줄을 두 줄(일곱째·여덟째)로 바꿨다. base의 두 파일에 정해진 바꿔치기만 적용한 결과와 지금 파일을 바이트까지 견준다(바꿔치기는 step0 구현의 diff에서 앞뒤 한 줄씩을 붙여 뽑았다). `.skip`을 붙인 트리와 단언 한 줄을 지운 트리에서 실패하는 것을 확인했다.
 - 2026-11-24 04:20 step0 구현 트리(커밋하지 않음)로 로컬 `check`를 돌려 통과했다(`test` 229.7초). test-effect는 `repo-info.test.ts`와 `metrics-command.test.ts` 둘 다 `effective(base에서 단언 실패, 종료 코드 1)`다.
 - 2026-11-24 05:00 7회차(`6a4c6e6`)에서 계획 검증을 통과했다(G1 해시 `c4744a18c516`, 승인 claude·codex, 차단 지적 없음, 미룸 1: F9). step0 구현을 커밋했다(`a543273`). AC 8줄을 runner가 뽑는 그대로 돌려 모두 통과했다: 새 테스트와 지표 테스트 37개, runner 계열 169개, 동기 프로세스 7957개(상한 8400), 문서 둘, 테스트 보존 셋(지표 밖 파일 바이트 같음, 허용 목록 바꿔치기 4개, 지표 테스트 바꿔치기 8개). 기술 부채는 TD-70·TD-71이다(main의 마지막은 TD-69).
+- 2026-11-24T00:30:49+09:00 step0 재작업: 구현 판정 1회차 Codex F14(작업 트리에 HEAD라는 파일이 있으면 rev-parse가 모호해 실패해 git을 셋 띄운다)는 이 리포의 git(macOS 2.50.1)에서 재현되지 않는다. git rev-parse는 리비전과 파일 이름의 모호성을 따지지 않는다(git log HEAD는 같은 조건에서 128로 실패한다). 그 경우를 단언하는 테스트를 repo-info.test.ts에 더하고 반박한다. CI(Linux)와 제작자의 Windows 측정에서도 그 테스트가 돈다
 
 ## 의사결정 로그
 
