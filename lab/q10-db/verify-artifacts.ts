@@ -111,27 +111,57 @@ export function tableCells(line: string): string[] {
     .map((c) => c.trim().replace(/\\\|/g, '|'));
 }
 
-const isTableLine = (l: string): boolean => l.trim().startsWith('|');
+/** 구분 줄의 칸: 하이픈 하나 이상, 앞뒤에 콜론을 둘 수 있다 */
+const DELIMITER_CELL = /^:?-+:?$/;
+
+/** 구분 줄(GFM): 세로줄이 있고, 모든 칸이 구분 칸이다 */
+function isDelimiterRow(line: string): boolean {
+  return /(?<!\\)\|/.test(line) && tableCells(line).every((c) => DELIMITER_CELL.test(c));
+}
 
 /**
- * README "잰 머신" 표의 행을 읽는다. 절의 첫 표(처음 `|`로 시작하는 줄부터 이어진 줄들)만 본다.
- * 그 머리줄에서 "결과 파일"·"실행" 칸을 찾고, 결과 파일 칸에 이름을 백틱으로 적은 행만 낸다.
+ * 표의 행을 끝내는 줄(GFM: 빈 줄, 또는 다른 블록의 시작).
+ * 제목(#), 인용(>), 코드 울타리(``` ~~~), 목록(- * + 1. 1)), 가로줄(--- *** ___)
+ */
+const TABLE_END = [
+  /^\s*$/,
+  /^ {0,3}#{1,6}(?:[ \t]|$)/,
+  /^ {0,3}>/,
+  /^ {0,3}(?:`{3,}|~{3,})/,
+  /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/,
+  /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,
+];
+
+/**
+ * README "잰 머신" 절의 첫 표에서 행을 읽는다. 표는 GFM 규칙대로 찾는다:
+ * 비어 있지 않은 머리줄 바로 뒤에 칸 수가 같은 구분 줄이 오면 표가 시작하고, 그 뒤 줄들이 행이다.
+ * 빈 줄이나 다른 블록이 시작하는 줄에서 표가 끝난다. 앞뒤 세로줄은 생략할 수 있다(행마다).
+ * 행의 칸이 머리줄보다 적으면 빈 칸, 많으면 남는 칸은 버린다.
+ * 머리줄에서 "결과 파일"·"실행" 칸을 찾고, 결과 파일 칸에 이름을 백틱으로 적은 행만 낸다.
  * 실행 칸 전체가 주소 꼴일 때만 리포와 번호를 읽는다
  */
 export function readRows(readme: string): Row[] {
   const lines = sectionLines(readme, '잰 머신');
-  const start = lines.findIndex(isTableLine);
-  if (start < 0) return [];
-  const after = lines.slice(start).findIndex((l) => !isTableLine(l));
-  const table = lines.slice(start, after < 0 ? undefined : start + after);
-  const head = tableCells(table[0]);
+  const at = lines.findIndex(
+    (l, i) =>
+      i + 1 < lines.length &&
+      !TABLE_END.some((re) => re.test(l)) &&
+      isDelimiterRow(lines[i + 1]) &&
+      tableCells(l).length === tableCells(lines[i + 1]).length,
+  );
+  if (at < 0) return [];
+  const head = tableCells(lines[at]);
+  const body: string[] = [];
+  for (const l of lines.slice(at + 2)) {
+    if (TABLE_END.some((re) => re.test(l))) break;
+    body.push(l);
+  }
   const fileAt = head.indexOf(FILE_COLUMN);
   const runAt = head.indexOf(RUN_COLUMN);
   if (fileAt < 0) return [];
   const rows: Row[] = [];
-  for (const line of table.slice(1)) {
-    const c = tableCells(line);
-    if (c.every((x) => /^:?-+:?$/.test(x))) continue; // 구분 줄
+  for (const line of body) {
+    const c = tableCells(line).slice(0, head.length);
     const f = FILE_RE.exec(c[fileAt] ?? '');
     if (!f) continue;
     const runCell = runAt < 0 ? '' : (c[runAt] ?? '');
