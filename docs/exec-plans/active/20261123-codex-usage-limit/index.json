@@ -1,0 +1,10 @@
+{
+  "plan": "20261123-codex-usage-limit",
+  "steps": [
+    {
+      "step": 0,
+      "name": "usage-limit",
+      "status": "pending"
+    }
+  ]
+}
