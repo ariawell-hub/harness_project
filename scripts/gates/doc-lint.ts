@@ -1,11 +1,16 @@
 // doc-lint (R8, 7.1~7.2절): 깨진 링크, 색인 누락, frontmatter 형식, AGENTS.md 줄 수 상한, 오래된 문서 표시,
 // 설계서 머리말과 변경 이력의 어긋남.
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { CHANGES_DIR, parseFragment } from '../lib/changes.ts';
 import type { HarnessConfig } from '../lib/config.ts';
+import { DESIGN_DOC, designVersionProblems } from '../lib/design-version.ts';
 import { gitTry } from '../lib/git.ts';
 import { parseDoc } from '../lib/plan.ts';
 import { formatProblem, matchesAny, type Problem } from '../lib/util.ts';
+
+// 설계서 버전 검사는 scripts/lib/design-version.ts로 옮겼다. 이 모듈에서 가져오던 코드를 위해 다시 내보낸다
+export { designVersionProblems };
 
 const DOC = 'docs/harness/design.md 7.2절, R8';
 const STATUSES = ['draft', 'active', 'stable', 'deprecated'];
@@ -16,6 +21,8 @@ const NO_FRONTMATTER = [
   'docs/generated/**',
   'docs/references/**',
   'docs/**/TEMPLATE*.md',
+  // 변경 조각(TD-39)은 형식을 따로 본다(아래 6)
+  `${CHANGES_DIR}/**`,
 ];
 
 export interface DocLintResult {
@@ -41,6 +48,35 @@ function listMarkdown(root: string): string[] {
     .split('\0')
     .filter(Boolean)
     .filter((f) => existsSync(path.join(root, f)));
+}
+
+/**
+ * 변경 조각 폴더 아래의 모든 파일(확장자·하위 폴더를 가리지 않는다. 자리 밖 파일도 잡으려고 문서 목록과 따로 읽는다).
+ * 작업 트리에 있는지는 링크를 따라가지 않고 본다: 대상이 없는 심볼릭 링크도 목록에 남아 문제로 잡힌다
+ */
+function listChangesDir(root: string): string[] {
+  const r = gitTry(
+    ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', CHANGES_DIR],
+    root,
+  );
+  if (!r.ok) throw new DocLintReadError('변경 조각 목록을 읽지 못했다(git ls-files 실패)');
+  return r.stdout
+    .split('\0')
+    .filter(Boolean)
+    .filter((f) => fragmentEntry(path.join(root, f)) !== null);
+}
+
+/**
+ * 링크를 따라가지 않고 본 조각 자리의 종류. 없으면 null이다. 상위 경로를 풀 수 없는 것(순환 링크의 `ELOOP` 등)은
+ * 예외로 검사를 멈추지 않고 일반 파일이 아닌 것으로 본다(Codex F14)
+ */
+function fragmentEntry(abs: string): 'file' | 'other' | null {
+  try {
+    const s = lstatSync(abs, { throwIfNoEntry: false });
+    return s === undefined ? null : s.isFile() ? 'file' : 'other';
+  } catch {
+    return 'other';
+  }
 }
 
 /** 코드 블록과 인라인 코드를 지운 본문 */
@@ -73,103 +109,6 @@ function lastCommitTime(root: string, paths: string[]): number {
   return text ? Number(text) : 0;
 }
 
-/** 설계서의 경로. 문서 목록에 있을 때만 머리말과 변경 이력을 견준다 */
-const DESIGN_DOC = 'docs/harness/design.md';
-const VERSION = String.raw`\d+(?:\.\d+)*`;
-const DATE = String.raw`\d{4}-\d{2}-\d{2}`;
-/**
- * `> 버전 v<버전> · <임의의 글자> 최종 갱신: <날짜>`. `최종 갱신:` 바로 앞은 공백이다(가운데 글이 없으면 ` · ` 뒤에 바로 온다).
- * 줄은 이미 LF로 나눴으므로 가운데의 `.`은 모든 글자다(`s`)
- */
-const DESIGN_HEAD = new RegExp(`^> 버전 v(${VERSION}) ·(?: .*)? 최종 갱신: (${DATE})\\s*$`, 's');
-/** 변경 이력의 항목: 공백 둘, 붙임표, `v<버전> (<날짜>): ` */
-const DESIGN_ITEM = new RegExp(`^  - v(${VERSION}) \\((${DATE})\\): `);
-
-/** 버전을 마디마다 수로 견준다. 앞 마디가 모두 같으면 마디가 더 많은 쪽이 크다 */
-function compareVersions(a: string, b: string): number {
-  const x = a.split('.').map(BigInt);
-  const y = b.split('.').map(BigInt);
-  for (let i = 0; i < Math.min(x.length, y.length); i++) {
-    if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
-  }
-  return x.length - y.length;
-}
-
-/** 설계서 본문에서 머리말의 버전·최종 갱신과 변경 이력이 맞는지 본다. 문제가 없으면 빈 배열 */
-export function designVersionProblems(text: string): Problem[] {
-  const problem = (what: string): Problem => ({
-    rule: 'R8 설계서 버전',
-    what,
-    how: '머리말의 버전·최종 갱신을 변경 이력의 마지막 항목과 맞춰라. main을 병합하다 버전이 겹쳤으면 이 PR의 항목을 다음 번호로 올려라',
-    doc: DOC,
-  });
-  const lines = text.split('\n').map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
-
-  // 읽지 못하면 비교하지 않는다. 형식이 바뀌어 검사가 조용히 꺼지는 일을 막는다
-  const unreadable: Problem[] = [];
-  const headLine = lines.find((l) => l.startsWith('> 버전 v'));
-  const head = headLine === undefined ? null : DESIGN_HEAD.exec(headLine);
-  if (headLine === undefined) {
-    unreadable.push(problem('설계서에 머리말 줄(`> 버전 v…`)이 없다'));
-  } else if (!head) {
-    unreadable.push(
-      problem('설계서 머리말 줄의 형식이 틀리다(`> 버전 v<버전> · … 최종 갱신: <YYYY-MM-DD>`)'),
-    );
-  }
-
-  const items: { line: number; version: string; date: string }[] = [];
-  const start = lines.findIndex((l) => l.startsWith('- **변경 이력**'));
-  if (start < 0) {
-    unreadable.push(problem('설계서에 변경 이력 목록(`- **변경 이력**`)이 없다'));
-  } else {
-    let count = 0;
-    for (let i = start + 1; i < lines.length; i++) {
-      const l = lines[i];
-      if (l.trim() === '') continue; // 빈 줄은 목록을 끝내지 않는다
-      if (!l.startsWith('  ')) break; // 다음 최상위 항목이나 본문
-      if (!l.startsWith('  - ')) continue; // 더 깊이 들여쓴 줄은 앞 항목에 딸린 줄이다
-      count++;
-      const m = DESIGN_ITEM.exec(l);
-      if (m) items.push({ line: i + 1, version: m[1], date: m[2] });
-      else {
-        unreadable.push(
-          problem(
-            `설계서 ${i + 1}번째 줄의 변경 이력 항목 형식이 틀리다(\`- v<버전> (<YYYY-MM-DD>): 내용\`)`,
-          ),
-        );
-      }
-    }
-    if (count === 0) unreadable.push(problem('설계서의 변경 이력에 항목이 없다'));
-  }
-  if (unreadable.length || !head) return unreadable;
-
-  const out: Problem[] = [];
-  const last = items[items.length - 1];
-  if (compareVersions(head[1], last.version) !== 0) {
-    out.push(
-      problem(
-        `설계서 머리말의 버전 v${head[1]}가 변경 이력의 마지막 항목 v${last.version}와 다르다`,
-      ),
-    );
-  }
-  if (head[2] !== last.date) {
-    out.push(
-      problem(
-        `설계서 머리말의 최종 갱신 ${head[2]}이 변경 이력의 마지막 항목 날짜 ${last.date}와 다르다`,
-      ),
-    );
-  }
-  for (let i = 1; i < items.length; i++) {
-    if (compareVersions(items[i].version, items[i - 1].version) > 0) continue;
-    out.push(
-      problem(
-        `설계서 ${items[i].line}번째 줄의 v${items[i].version}가 바로 앞 항목 v${items[i - 1].version}보다 크지 않다`,
-      ),
-    );
-  }
-  return out;
-}
-
 /**
  * 문서 검사. `git` 읽기(문서 목록, 커밋 시각)가 실패하면 빈 결과로 넘기지 않고 `DocLintReadError`를 던진다.
  * 게이트(`check`, `doc-lint` 명령)는 `docLintGate`를 쓴다
@@ -184,6 +123,8 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
   // 1) 깨진 상대 링크
   const linked = new Map<string, Set<string>>(); // 대상 → 링크한 파일들
   for (const file of files) {
+    // 변경 조각은 링크를 받지 않고 6)에서 따로 본다. 여기서 읽으면 깨진 링크 글이 6) 전에 검사를 멈출 수 있다(Codex F12)
+    if (file.startsWith(`${CHANGES_DIR}/`)) continue;
     const text = readFileSync(path.join(root, file), 'utf8');
     for (const href of extractLinks(text)) {
       if (isExternal(href)) continue;
@@ -307,6 +248,23 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
     for (const p of designVersionProblems(readFileSync(path.join(root, DESIGN_DOC), 'utf8'))) {
       errors.push(p);
     }
+  }
+
+  // 6) 변경 조각(TD-39): 자리·이름·형식. 모으기가 읽을 수 있어야 한다
+  const fragmentProblem = (f: string, what: string): Problem => ({
+    rule: 'R8 변경 조각',
+    what: `${f}: ${what}`,
+    how: '조각 파일의 자리·형식을 docs/harness/workflow.md 5절 "변경 조각"대로 맞춰라',
+    doc: DOC,
+  });
+  for (const f of listChangesDir(root).filter((x) => !matchesAny(x, exclude))) {
+    // 링크를 따라가 다른 파일의 글을 조각으로 읽지 않는다(Codex F13. harness-guard도 일반 파일만 기록으로 센다)
+    if (fragmentEntry(path.join(root, f)) !== 'file') {
+      errors.push(fragmentProblem(f, '조각은 일반 파일이어야 한다(심볼릭 링크는 받지 않는다)'));
+      continue;
+    }
+    const r = parseFragment(f, readFileSync(path.join(root, f), 'utf8'));
+    if (!r.ok) for (const what of r.problems) errors.push(fragmentProblem(f, what));
   }
   return { errors, warnings };
 }
