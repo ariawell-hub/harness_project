@@ -105,6 +105,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 작업을 넘겨받았다: 맥 세션(`mac-session-2`)이 인수인계를 남기고 끝났고, Windows PC의 대화 세션이 제작자 승인(2026-11-23 대화)을 받아 넘겨받았다(owner → `session`, 아래 의사결정 로그). worktree는 이 PC에 새로 만들었다. 넘겨받기 전에 owner를 확인하지 않고 git 명령으로 병합 커밋·인수인계 파일 삭제·step0 재작업을 먼저 만들었다. README를 고치려다 L1 훅(R3)이 막아 알았고, 그때까지 push하지 않았다.
 - 2026-11-23 `origin/main`(`e9f7ad6`, #214·#221 병합 뒤)을 다시 병합했다(CHANGELOG의 같은 자리가 충돌했다: main의 줄 먼저, 이 PR의 줄 뒤). 이 PR의 파일은 바꾸지 않았다. 세션 인수인계 파일(`handoff.md`)을 지웠다.
 - 2026-11-23 F15 처리: `lab/q10-db/README.md`의 문장을 고쳤다. 테스트가 이 폴더에서 읽는 두 파일과, 그 파일들이 `testInertPaths`·보호 경로와 어떤 관계인지 적었다. 맥 세션이 F15를 확인하다가 `profile-web-db.test.ts`가 `results/darwin-arm64.json`도 읽는 것을 찾아 Issue #225로 등록했다(고치는 PR은 #226). step0 금지사항(`harness.config.json`을 고치지 않는다) 때문에 이 PR에서 고치지 않는다. 문서만 바뀌어 테스트는 더하지 않았다.
+- 2026-11-23 구현 판정 5회차(head `226ad6b`): CI `check` 통과, Claude 승인(지적 없음), Codex 수정 요청(P1 하나). `pr-state`에 "오래 열린 지적" 줄은 없다. F16(P1, `plan.md:145`): 제작자의 Windows PC에서 절차가 통과했다는 기록과, step1이 ADR·TD-14에 "제작자의 Windows PC에서는 아직 재지 않았다"고 쓰게 하는 지시(`step1.md`의 작업 3·4, 계획의 수용 기준 4·비범위)가 충돌한다. 맞는 지적이다. 이 PR에서는 `plan.md:145`의 문장을 고쳤다(그 실행은 결과 파일이 없어 확정 근거가 아니라고 적고, 지시처럼 읽히던 "ADR의 한계를 적을 때 참고한다"를 지웠다). step1의 지시는 이 PR에서 고칠 수 없어 병합 뒤 계획 수정 PR로 고친다(의사결정 로그).
 
 ## 의사결정 로그
 
@@ -122,6 +123,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 결정(제작자, 2026-11-23 대화): 이 계획을 Windows PC의 대화 세션이 넘겨받는다(owner `mac-session-2` → `session`). / 이유: 맥 세션이 인수인계 문서를 남기고 끝났다. L1 훅(R3)이 owner가 다른 worktree의 수정을 막아 제작자에게 물었다. / 대가: 맥에서는 이 브랜치를 고치지 않는다(두 곳에서 고치면 어긋난다).
 - 결정: 결과 파일(`results/darwin-arm64.json`)의 건너뛰기 문제는 이 PR에서 고치지 않고 Issue #225(PR #226)로 따로 고친다. / 이유: F14 때 제작자가 정한 방법(별도 PR로 먼저 고친다)과 같다. step0의 금지사항이 `harness.config.json` 수정을 막는다.
 - 결정(제작자, 2026-11-23 대화): 이 head는 로컬 `check`가 통과하지 않은 채 push한다(이번만 예외). / 이유: Windows PC의 `check`에서 `test` 두 건(`next.test.ts`의 `writeQuestionState` rename, `scope.test.ts`의 symlink)이 `EPERM`으로 실패했다. main 체크아웃(`e9f7ad6`)에서 그 두 테스트만 돌려도 똑같이 실패해 이 PR의 변경과 관계없다. 나머지(`fmt`·`lint`·`test-effect`·`doc-lint`·`bypass-scan`·`secret-scan`, 테스트 1274건)는 통과했다. 병합 조건인 CI의 `check`(Linux 러너)는 그대로 필수다. 두 실패는 Issue #228로 등록했다. / 버린 대안: Windows 실패부터 별도 PR로 고친 뒤 push(규칙 그대로지만 #188이 그 PR의 판정·승인만큼 늦어진다).
+- 결정(F16): step1의 ADR·TD-14 문구 지시는 이 PR에서 고치지 않는다. #188이 병합된 뒤, step1을 시작하기 전에 계획만 담은 별도 PR(브랜치 `docs/20261121-q10-confirm-s0`, 절차서 4.1절 "실행 중인 step의 계획 수정")로 고쳐 계획 검증을 받는다. / 이유: 고칠 곳(`step1.md`의 작업·AC, 계획의 수용 기준 4·비범위)은 계획 검증(G1) 해시에 묶여 있다. 이 PR은 계획이 아직 main에 없는 첫 PR이라, 여기서 고치려면 PR을 계획만 남긴 상태로 되돌려 다시 검증받아야 한다. 그런데 이 PR에는 제작자가 올린 워크플로 파일이 있고, 봇은 그 파일을 지우는 커밋을 올릴 수 없다(절차서 4.1절, 발견 사항 둘째 줄과 같은 사정). / 고칠 내용: ADR "알려진 한계"와 TD-14의 `lab/q10-db` 항목은 둘을 따로 적는다. (1) 확정 근거: Linux·Windows는 CI 러너의 산출물이고 `verify-artifacts.ts`로 출처를 확인했다. (2) 제작자의 Windows PC: 2026-11-23에 절차가 통과했으나 결과 파일을 남기지 않아 확정 근거로 쓰지 않는다. TD-14에 PC 재실측을 남긴다면 그 목적(출처를 남기는 실측)을 적고, 목적이 없으면 그 항목을 닫는다. `confirmed.test.ts`의 기준도 이 문구에 맞춘다. / 버린 대안: step1 PR에서 지시와 다르게 쓰기(실행 PR은 자기 step의 작업·AC를 바꿀 수 없고 판정이 지시와 다르다고 본다), PC 실행 기록을 지우기(일어난 일을 가린다).
 
 ## 발견 사항
 
@@ -142,12 +144,12 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`, 출처 확인 `node lab/q10-db/verify-artifacts.ts`(step1 AC. 출력을 진행 로그와 PR 본문에 옮긴다).
 - 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
 - 결과(2026-11-22, step0): AC의 명령 16줄이 모두 통과했다(다섯째 줄은 새 임시 폴더의 복제본에서 절차를 실제로 돌렸다). `node scripts/harness.ts check` 통과. 트리 비교는 진행 로그에 있다.
-- 결과(2026-11-23, step0 재작업 F15, 제작자의 Windows 11 PC): AC의 명령 16줄이 모두 통과했다. 다섯째 줄은 이 PC(Windows 네이티브, Git Bash)의 새 임시 복제본에서 절차를 돌렸고 `trial: lab/q10-db/results/win32-x64.json을 썼다`, `win32-x64: 통과`가 나왔다. 그 결과 파일은 복제본에만 있고 리포에 넣지 않았다(결과는 step1에서 워크플로의 산출물로만 더한다). step1에서 ADR의 한계("제작자의 PC는 재지 못했다")를 적을 때 참고한다. `node scripts/harness.ts check`는 `test`의 두 건이 Windows에서만 실패했다(main에서도 같다. Issue #228, 의사결정 로그). 나머지는 통과했다.
+- 결과(2026-11-23, step0 재작업 F15, 제작자의 Windows 11 PC): AC의 명령 16줄이 모두 통과했다. 다섯째 줄은 이 PC(Windows 네이티브, Git Bash)의 새 임시 복제본에서 절차를 돌렸고 `trial: lab/q10-db/results/win32-x64.json을 썼다`, `win32-x64: 통과`가 나왔다. 그 결과 파일은 복제본에만 있고 리포에 넣지 않았다(결과는 step1에서 워크플로의 산출물로만 더한다). 이 실행은 확정 근거가 아니다: 결과 파일을 남기지 않았고 출처를 확인할 수 없다. 확정 조건의 Windows 결과는 step1에서 CI 러너의 산출물로 더하고 `verify-artifacts.ts`로 출처를 확인한다. 그래서 "제작자의 Windows PC에서 절차가 통과했다(결과 파일 없음)"와 "확정 근거는 CI 산출물이다"를 따로 적어야 한다. step1의 문서 지시는 그에 맞춰 고친다(F16, 의사결정 로그). `node scripts/harness.ts check`는 `test`의 두 건이 Windows에서만 실패했다(main에서도 같다. Issue #228, 의사결정 로그). 나머지는 통과했다.
 - step1의 결과는 step1을 진행하며 적는다.
 
 ## 다음 할 일
 
-1. 계획만 담은 초안 PR로 계획 검증(G1)을 받는다.
-2. 승인 뒤 `run.ts`와 테스트, README, 워크플로 패치, CHANGELOG 줄을 올려 구현 판정을 받는다(구조 테스트와 완료 처리는 아직 올리지 않는다).
-3. 판정이 끝나면 Issue #180에 제작자 작업(워크플로 커밋)을 요청한다. 커밋이 오면 트리를 비교하고 구조 테스트와 완료 처리를 올린다.
-4. step0이 병합되면 `new-task --plan 20261121-q10-confirm --step 1`로 step1을 잇는다.
+1. (끝남) 계획 검증(G1), 구현 판정, 제작자의 워크플로 커밋, 구조 테스트와 완료 처리.
+2. 이 PR(#188)의 판정이 끝나면 승인을 요청한다(`pr-ready`, Issue #180에 제작자 멘션).
+3. #188이 병합되면 계획 수정 PR(`docs/20261121-q10-confirm-s0`)로 step1의 ADR·TD-14 문구 지시를 고친다(F16, 의사결정 로그). 계획 검증을 받아 병합한다.
+4. 그 뒤 `new-task --plan 20261121-q10-confirm --step 1`로 step1을 잇는다.
