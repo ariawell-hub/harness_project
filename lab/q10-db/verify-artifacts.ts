@@ -75,6 +75,8 @@ export interface ProvenanceInput {
   repo: string;
   /** README "잰 머신" 표의 행 */
   rows: Row[];
+  /** README "잰 머신" 표가 받는 꼴이 아닌 점(readTable). 하나라도 있으면 rows는 비어 있다 */
+  tableProblems: string[];
   /** results/의 결과 파일 이름 → 커밋된 글 */
   resultFiles: Record<string, string>;
   /** 실행 번호 → 모은 자료 */
@@ -87,20 +89,9 @@ const show = (v: unknown): string =>
   typeof v === 'string' ? v : (JSON.stringify(v) ?? 'undefined');
 const targetOf = (file: string) => TARGETS.find((t) => file.startsWith(t.prefix));
 
-/** `## <제목>`부터 다음 `## ` 앞까지의 줄. 줄 끝(CRLF)은 뺀다 */
-function sectionLines(doc: string, heading: string): string[] {
-  const lines = doc.split(/\r?\n/);
-  const start = lines.findIndex((l) => l === `## ${heading}`);
-  if (start < 0) return [];
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => l.startsWith('## '));
-  return end < 0 ? rest : rest.slice(0, end);
-}
-
 /**
  * 표의 한 줄을 칸으로 나눈다(GFM 표의 규칙). 앞뒤의 `|`를 떼고, 이스케이프되지 않은 `|`에서만 나눈다.
- * 이스케이프된 세로줄(`\|`)은 칸 안의 글자 `|`가 된다. 칸마다 앞뒤 공백을 뺀다.
- * confirmed.test.ts도 이 함수로 같은 표를 읽는다
+ * 이스케이프된 세로줄(`\|`)은 칸 안의 글자 `|`가 된다. 칸마다 앞뒤 공백을 뺀다
  */
 export function tableCells(line: string): string[] {
   return line
@@ -111,64 +102,124 @@ export function tableCells(line: string): string[] {
     .map((c) => c.trim().replace(/\\\|/g, '|'));
 }
 
+const HEADING = '## 잰 머신';
+const PROBLEM = '잰 머신 표의 꼴이 이 검사가 받는 꼴이 아니다';
+const HINT =
+  'README를 포매터로 정리하고(node scripts/harness.ts fmt) 잰 머신 절에는 표 하나와 문단만 둔다';
 /** 구분 줄의 칸: 하이픈 하나 이상, 앞뒤에 콜론을 둘 수 있다 */
 const DELIMITER_CELL = /^:?-+:?$/;
+/** 코드 울타리를 여는 줄(들여쓰기 3칸까지, ``` 또는 ~~~ 셋 이상) */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+/** 빈 줄에서 끝나지 않는 HTML 블록(CommonMark 1~5형): 닫는 표시까지 뒤의 제목·표를 글로 만든다 */
+const LONG_HTML_RE =
+  /^ {0,3}<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:pre|script|style|textarea)(?:[\s>]|$))/i;
 
-/** 구분 줄(GFM): 세로줄이 있고, 모든 칸이 구분 칸이다 */
-function isDelimiterRow(line: string): boolean {
-  return /(?<!\\)\|/.test(line) && tableCells(line).every((c) => DELIMITER_CELL.test(c));
+/** 각 줄이 코드 울타리 안인가(여는 줄·닫는 줄 포함). 끝까지 닫히지 않았으면 unclosed가 참이다 */
+function fenceMap(lines: string[]): { inside: boolean[]; unclosed: boolean } {
+  const inside: boolean[] = [];
+  let open: string | null = null;
+  for (const l of lines) {
+    if (open === null) {
+      const m = FENCE_RE.exec(l);
+      if (m) open = m[1];
+      inside.push(open !== null);
+    } else {
+      inside.push(true);
+      const close = new RegExp(`^ {0,3}${open[0] === '`' ? '`' : '~'}{${open.length},}[ \\t]*$`);
+      if (close.test(l)) open = null;
+    }
+  }
+  return { inside, unclosed: open !== null };
 }
 
 /**
- * 표의 행을 끝내는 줄(GFM: 빈 줄, 또는 다른 블록의 시작).
- * 제목(#), 인용(>), 코드 울타리(``` ~~~), 목록(- * + 1. 1)), 가로줄(--- *** ___)
+ * README "잰 머신" 표를 읽는다. **엄격한 꼴만 받는다**(제작자 결정 2026-11-23, 계획 20261121-q10-confirm F4):
+ * 포매터가 쓰는 꼴이 아니면 행을 하나도 내지 않고 꼴 문제를 낸다. GitHub이 보여 주는 표와 이 검사가 읽는 표가
+ * 어긋날 여지를 남기지 않기 위해서다(GFM의 모든 꼴을 흉내 내지 않는다).
+ *
+ * - README: 코드 울타리 밖의 `## 잰 머신` 제목이 정확히 하나. 닫히지 않은 코드 울타리와,
+ *   빈 줄에서 끝나지 않는 HTML 블록(`<!--` `<?` `<!X` `<![CDATA[` `<pre` `<script` `<style` `<textarea`)이 없다.
+ * - 절(그 제목부터 다음 `## ` 앞까지): HTML 줄(`<`로 시작)과 코드 울타리가 없다. 표는 하나다:
+ *   `|`로 시작하는 첫 줄부터 다음 빈 줄까지. 그 앞은 빈 줄(또는 제목 바로 뒤), 그 밖에는 `|`로 시작하는 줄이 없다.
+ * - 표: 모든 줄이 맨 앞(공백 없이)에서 `|`로 시작하고 이스케이프되지 않은 `|`로 끝난다. 둘째 줄이 구분 줄이고
+ *   모든 줄의 칸 수가 같다. 머리줄에 "결과 파일"·"실행" 칸이 하나씩 있다.
+ *
+ * 행은 결과 파일 칸에 이름을 백틱으로 적은 것만 낸다. 실행 칸 전체가 주소 꼴일 때만 리포와 번호를 읽는다.
  */
-const TABLE_END = [
-  /^\s*$/,
-  /^ {0,3}#{1,6}(?:[ \t]|$)/,
-  /^ {0,3}>/,
-  /^ {0,3}(?:`{3,}|~{3,})/,
-  /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/,
-  /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,
-];
-
-/**
- * README "잰 머신" 절의 첫 표에서 행을 읽는다. 표는 GFM 규칙대로 찾는다:
- * 비어 있지 않은 머리줄 바로 뒤에 칸 수가 같은 구분 줄이 오면 표가 시작하고, 그 뒤 줄들이 행이다.
- * 빈 줄이나 다른 블록이 시작하는 줄에서 표가 끝난다. 앞뒤 세로줄은 생략할 수 있다(행마다).
- * 행의 칸이 머리줄보다 적으면 빈 칸, 많으면 남는 칸은 버린다.
- * 머리줄에서 "결과 파일"·"실행" 칸을 찾고, 결과 파일 칸에 이름을 백틱으로 적은 행만 낸다.
- * 실행 칸 전체가 주소 꼴일 때만 리포와 번호를 읽는다
- */
-export function readRows(readme: string): Row[] {
-  const lines = sectionLines(readme, '잰 머신');
-  const at = lines.findIndex(
-    (l, i) =>
-      i + 1 < lines.length &&
-      !TABLE_END.some((re) => re.test(l)) &&
-      isDelimiterRow(lines[i + 1]) &&
-      tableCells(l).length === tableCells(lines[i + 1]).length,
-  );
-  if (at < 0) return [];
-  const head = tableCells(lines[at]);
-  const body: string[] = [];
-  for (const l of lines.slice(at + 2)) {
-    if (TABLE_END.some((re) => re.test(l))) break;
-    body.push(l);
+export function readTable(readme: string): { rows: Row[]; problems: string[] } {
+  const lines = readme.split(/\r?\n/);
+  const bad: string[] = [];
+  const fail = (why: string) => bad.push(`${PROBLEM}: ${why}(${HINT})`);
+  const at = (i: number) => `README ${i + 1}번째 줄`;
+  const { inside, unclosed } = fenceMap(lines);
+  if (unclosed) fail('닫히지 않은 코드 울타리가 있다');
+  lines.forEach((l, i) => {
+    if (!inside[i] && LONG_HTML_RE.test(l))
+      fail(`${at(i)}: 빈 줄에서 끝나지 않는 HTML 블록이 있다`);
+  });
+  const heads = lines.flatMap((l, i) => (!inside[i] && l === HEADING ? [i] : []));
+  if (heads.length !== 1) {
+    fail(heads.length ? `"${HEADING}" 제목이 둘 이상이다` : '잰 머신 절이 없다');
+    return { rows: [], problems: bad };
   }
+  const start = heads[0] + 1;
+  const rest = lines.slice(start).findIndex((l) => l.startsWith('## '));
+  const end = rest < 0 ? lines.length : start + rest; // 절: [start, end)
+  for (let i = start; i < end; i++) {
+    if (/^\s*</.test(lines[i])) fail(`${at(i)}: 잰 머신 절에 HTML 줄이 있다`);
+    if (FENCE_RE.test(lines[i])) fail(`${at(i)}: 잰 머신 절에 코드 울타리가 있다`);
+  }
+  const isPipeLine = (i: number) => lines[i].trimStart().startsWith('|');
+  let t0 = -1;
+  for (let i = start; i < end; i++)
+    if (isPipeLine(i)) {
+      t0 = i;
+      break;
+    }
+  if (t0 < 0) {
+    fail('잰 머신 절에 표가 없다');
+    return { rows: [], problems: bad };
+  }
+  let t1 = t0; // 표: [t0, t1)
+  while (t1 < end && lines[t1].trim() !== '') t1++;
+  if (t0 > start && lines[t0 - 1].trim() !== '') fail(`${at(t0)}: 표 바로 앞에 빈 줄이 없다`);
+  for (let i = t1; i < end; i++)
+    if (isPipeLine(i)) fail(`${at(i)}: 표가 둘 이상이거나 표 밖에 |로 시작하는 줄이 있다`);
+  const table = lines.slice(t0, t1);
+  table.forEach((l, k) => {
+    if (!l.startsWith('|'))
+      fail(`${at(t0 + k)}: 표의 줄이 맨 앞에서 |로 시작하지 않는다(표 바로 뒤에는 빈 줄을 둔다)`);
+    else if (!/(?<!\\)\|$/.test(l.trimEnd()))
+      fail(`${at(t0 + k)}: 표의 줄이 이스케이프되지 않은 |로 끝나지 않는다`);
+  });
+  const head = tableCells(table[0]);
+  if (table.length < 2 || !tableCells(table[1]).every((c) => DELIMITER_CELL.test(c)))
+    fail(`${at(t0 + 1)}: 표의 둘째 줄이 구분 줄이 아니다`);
+  table.forEach((l, k) => {
+    const n = tableCells(l).length;
+    if (n !== head.length) fail(`${at(t0 + k)}: 칸 수(${n})가 머리줄(${head.length})과 다르다`);
+  });
   const fileAt = head.indexOf(FILE_COLUMN);
   const runAt = head.indexOf(RUN_COLUMN);
-  if (fileAt < 0) return [];
+  for (const name of [FILE_COLUMN, RUN_COLUMN])
+    if (head.filter((c) => c === name).length !== 1) fail(`머리줄에 "${name}" 칸이 하나가 아니다`);
+  if (bad.length) return { rows: [], problems: bad };
+
   const rows: Row[] = [];
-  for (const line of body) {
-    const c = tableCells(line).slice(0, head.length);
-    const f = FILE_RE.exec(c[fileAt] ?? '');
+  for (const line of table.slice(2)) {
+    const c = tableCells(line);
+    const f = FILE_RE.exec(c[fileAt]);
     if (!f) continue;
-    const runCell = runAt < 0 ? '' : (c[runAt] ?? '');
+    const runCell = c[runAt];
     const u = RUN_URL_RE.exec(runCell);
     rows.push({ file: f[1], runCell, repo: u ? u[1] : null, run: u ? Number(u[2]) : null });
   }
-  return rows;
+  return { rows, problems: [] };
+}
+
+/** readTable의 행만(꼴이 틀리면 빈 목록) */
+export function readRows(readme: string): Row[] {
+  return readTable(readme).rows;
 }
 
 /** 글을 JSON으로 읽는다. 읽지 못하면 undefined(JSON에는 undefined가 없다) */
@@ -255,6 +306,8 @@ function fileProblems(row: Row, run: number, input: ProvenanceInput): string[] {
 
 /** 모은 자료에서 문제의 목록을 낸다. 빈 배열이면 출처가 확인된 것이다 */
 export function provenanceProblems(input: ProvenanceInput): string[] {
+  // 표가 받는 꼴이 아니면 그 문제만 낸다(행을 읽지 않았으므로 행·실행의 문제는 뜻이 없다)
+  if (input.tableProblems.length) return [...input.tableProblems];
   const out: string[] = [];
   const targets = input.rows.filter((r) => targetOf(r.file));
   for (const t of TARGETS)
@@ -370,7 +423,7 @@ export function collect(opts: {
     '-q',
     '.nameWithOwner',
   ]).trim();
-  const rows = readRows(opts.readme);
+  const { rows, problems: tableProblems } = readTable(opts.readme);
   const runs: Record<number, RunData> = {};
   for (const row of rows) {
     if (!targetOf(row.file) || row.run === null || row.repo === null) continue;
@@ -397,7 +450,7 @@ export function collect(opts: {
     }
     runs[n] = { run: info, jobs, ancestor, artifacts };
   }
-  return { repo, rows, resultFiles: opts.resultFiles, runs };
+  return { repo, rows, tableProblems, resultFiles: opts.resultFiles, runs };
 }
 
 /** results/의 결과 파일(.json) 이름 → 글 */
