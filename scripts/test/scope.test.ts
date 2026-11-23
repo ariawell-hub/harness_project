@@ -112,6 +112,89 @@ test('scopePaths: HTML 주석과 코드 블록 안의 글자는 넣지 않는다
   assert.deepEqual(scopePaths('```x``` `a.ts`\n- `b.ts`').includes('b.ts'), true);
 });
 
+test('scopePaths: 주석과 코드 블록은 먼저 열린 쪽으로 가린다(주석 안의 펜스 줄은 블록을 열지 않는다)', () => {
+  // 주석 안의 닫히지 않은 펜스 줄: 주석 뒤의 경로가 뽑힌다(Issue #202)
+  for (const fence of ['~~~', '```', '~~~~md'])
+    assert.deepEqual(
+      scopePaths(`- \`a.ts\`\n<!--\n${fence}\n-->\n- \`b.ts\``),
+      ['a.ts', 'b.ts'],
+      fence,
+    );
+  // 주석 안의 경로는 펜스 줄이 함께 있어도 빠진다
+  assert.deepEqual(scopePaths('<!--\n~~~\n- `x.ts`\n-->\n- `b.ts`'), ['b.ts']);
+  // 주석 안에 열고 닫은 펜스, 한 줄 주석: 전과 같다
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n~~~\n`x.ts`\n~~~\n-->\n- `b.ts`'), ['a.ts', 'b.ts']);
+  assert.deepEqual(scopePaths('- `a.ts`\n<!-- ~~~ -->\n- `b.ts`'), ['a.ts', 'b.ts']);
+  // 펜스가 먼저 열렸으면 그 안의 `<!--`는 주석을 열지 않는다: 펜스가 닫힌 뒤의 경로가 뽑힌다
+  assert.deepEqual(scopePaths('```\n<!--\n`in.ts`\n```\n- `b.ts`\n-->\n- `c.ts`'), [
+    'b.ts',
+    'c.ts',
+  ]);
+  // 주석이 닫힌 줄의 나머지 글은 읽힌다
+  assert.deepEqual(scopePaths('<!--\n~~~\n--> `after.ts`\n- `b.ts`'), ['after.ts', 'b.ts']);
+  assert.deepEqual(scopePaths('- `a.ts` <!-- 설명\n`x.ts` --> `b.ts`'), ['a.ts', 'b.ts']);
+  // 닫히지 않은 `<!--`는 주석이 아니다
+  assert.deepEqual(scopePaths('- `a.ts` <!-- 닫지 않았다\n- `b.ts`'), ['a.ts', 'b.ts']);
+  // 주석은 `## ` 줄을 넘지 못한다(계획 해시의 섹션 추출과 같다): 여는 표식과 닫는 표식 사이에 `## ` 줄이 있으면
+  // 그 여는 표식은 닫히지 않은 것이고, 절은 그 줄에서 끝난다. 다음 절의 닫는 표식 뒤에 적은 경로는 뽑히지 않는다
+  assert.deepEqual(
+    scopePaths('- `a.ts` <!-- 닫지 않았다\n- `b.ts`\n## 진행 로그\n- `log.ts`\n-->\n- `late.ts`'),
+    ['a.ts', 'b.ts'],
+  );
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n## 주석 안의 제목\n-->\n- `late.ts`'), ['a.ts']);
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n## 제목 -->\n- `late.ts`'), ['a.ts']);
+  // 닫힌 주석 뒤의 `## ` 줄에서 끝난다. 그 뒤에 닫는 표식이 더 있어도 같다
+  assert.deepEqual(scopePaths('- `a.ts`\n<!-- x -->\n## 다음 절\n- `late.ts`\n-->'), ['a.ts']);
+  // 주석 안의 코드 블록 속 `## ` 줄은 절의 경계가 아니다: 주석은 닫는 표식까지이고 그 안의 경로는 빠진다(판정 2회차 F2·F3)
+  for (const fence of ['~~~', '```'])
+    assert.deepEqual(
+      scopePaths(`- \`a.ts\`\n<!--\n${fence}\n## 예시\n${fence}\n- \`x.ts\`\n-->\n- \`b.ts\``),
+      ['a.ts', 'b.ts'],
+      fence,
+    );
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n```md\n## 예시\n```\n`x.ts`\n--> `after.ts`'), [
+    'a.ts',
+    'after.ts',
+  ]);
+  // 주석 안의 코드 블록이 닫힌 뒤의 `## ` 줄은 경계다: 그 여는 표식은 닫히지 않은 것이고 절은 그 줄에서 끝난다
+  assert.deepEqual(
+    scopePaths('- `a.ts`\n<!--\n~~~\n## 예시\n~~~\n## 진행 로그\n- `log.ts`\n-->\n- `late.ts`'),
+    ['a.ts'],
+  );
+  // 주석 안의 닫히지 않은 코드 블록 속 `## ` 줄: 계획 해시의 섹션 추출도 그 줄을 제목으로 보지 않는다. 주석이 닫힌 뒤를 읽는다
+  assert.deepEqual(scopePaths('- `a.ts`\n<!--\n~~~\n## 예시\n- `x.ts`\n-->\n- `b.ts`'), [
+    'a.ts',
+    'b.ts',
+  ]);
+  // 긴 입력: 여는 표식마다 뒤의 `## ` 줄과 닫는 표식을 다시 찾지 않는다
+  {
+    const many = Array.from({ length: 20_000 }, (_, i) => `- \`g${i}.ts\` <!-- 닫지 않았다`);
+    const started = Date.now();
+    assert.equal(
+      scopePaths([...many, '## 다음 절', '-->', '- `late.ts`'].join('\n')).length,
+      20_000,
+    );
+    assert.ok(Date.now() - started < 5_000, `걸린 시간 ${Date.now() - started}ms`);
+  }
+  {
+    // 코드 블록을 여닫는 줄 사이사이에 닫히지 않은 여는 표식이 있고 `## ` 줄과 닫는 표식이 맨 끝에 있다
+    const many = Array.from({ length: 20_000 }, (_, i) =>
+      i % 3 === 0 ? `- \`h${i}.ts\` <!-- 닫지 않았다` : '~~~',
+    );
+    const started = Date.now();
+    scopePaths([...many, '## 다음 절', '-->'].join('\n'));
+    assert.ok(Date.now() - started < 5_000, `걸린 시간 ${Date.now() - started}ms`);
+  }
+});
+
+test('scopePaths: 닫히지 않은 주석 표식이 많은 긴 글도 시간 안에 읽는다', () => {
+  const lines = Array.from({ length: 20_000 }, (_, i) => `- \`f${i}.ts\` <!-- 닫지 않았다`);
+  const started = Date.now();
+  const paths = scopePaths(lines.join('\n'));
+  assert.equal(paths.length, 20_000);
+  assert.ok(Date.now() - started < 5_000, `걸린 시간 ${Date.now() - started}ms`);
+});
+
 test('scopePaths: 읽기만으로 시작하는 항목과 그에 딸린 줄은 넣지 않는다', () => {
   const text = [
     '- `a.ts`',

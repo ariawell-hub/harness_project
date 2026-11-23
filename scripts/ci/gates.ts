@@ -2,6 +2,7 @@
 // main(base/)의 이 스크립트가 PR head 체크아웃(pr/)을 데이터로만 읽는다. PR 코드를 실행하지 않고 비밀이 없다.
 // 설정(cfg)은 반드시 main 쪽에서 읽는다. PR이 판정 기준을 함께 바꿀 수 있기 때문이다.
 import type { HarnessConfig } from '../lib/config.ts';
+import { literalSpan } from '../lib/literal.ts';
 import { formatProblem, matchesAny, WARN_PREFIX } from '../lib/util.ts';
 import { depsGuard, httpRegistry, type Registry } from '../gates/deps-guard.ts';
 import { harnessGuard } from '../gates/harness-guard.ts';
@@ -244,14 +245,10 @@ export function isWarning(g: GateResult): boolean {
 /**
  * 표의 칸에 넣는 글자를 코드 스팬으로 적는다. 설명에는 PR이 정하는 글자(파일 이름)가 들어간다:
  * 코드 스팬 안의 글자는 굵게·링크·HTML·멘션으로 읽히지 않고 그대로 보인다.
- * 구분 백틱은 글자 안의 가장 긴 백틱 줄보다 하나 길게 하고, 표의 칸을 가르는 `|`만 역슬래시로 막는다
+ * 코드 스팬은 `literalSpan`이 만들고, 여기서는 표의 칸을 가르는 `|`만 역슬래시로 막는다
  */
 export function cellCode(s: string): string {
-  const t = s.replace(/[\r\n\u2028\u2029]+/g, ' ');
-  if (!t.trim()) return '';
-  const longest = Math.max(0, ...(t.match(/`+/g) ?? []).map((x) => x.length));
-  const fence = '`'.repeat(longest + 1);
-  return `${fence} ${t.replace(/\|/g, '\\|')} ${fence}`;
+  return literalSpan(s).replace(/\|/g, '\\|');
 }
 
 /** 판정 job의 $GITHUB_STEP_SUMMARY용 Markdown */

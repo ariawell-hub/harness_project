@@ -1,0 +1,11 @@
+{
+  "plan": "20261122-runner-question-post",
+  "steps": [
+    {
+      "step": 0,
+      "name": "question-post",
+      "status": "completed",
+      "completed_at": "2026-11-22T23:32:10+09:00"
+    }
+  ]
+}

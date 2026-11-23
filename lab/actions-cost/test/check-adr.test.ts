@@ -552,6 +552,57 @@ test('checkAdr 후보표: 확인 상태에는 출처와 날짜, 또는 확인하
   assert.deepEqual(check('확인 못 함: 개인 계정에서 쓸 수 있는지 공개 문서에 없다'), []);
 });
 
+test('checkAdr 후보표: 확인 상태의 날짜는 출처 주소 밖에서만 찾는다(Issue #210)', () => {
+  const check = (v: string) => checkAdr(goodAdr({ rows: rowsWith('B1', { 5: v }) }));
+  const NO_DAY = /후보표 B1 행.*확인 상태.*날짜/;
+  // 주소 안의 날짜는 확인일이 아니다
+  for (const v of [
+    '확인함(https://example.com/blog/2026-11-01/pricing)',
+    '확인함(https://example.com/2026-11-01)',
+    '확인함(https://example.com/a?d=2026-11-01)',
+    '확인함(https://example.com/a, http://example.com/2026-11-01/b)',
+    // `이름://` 없이 적은 주소의 경로, 글 제목 안의 날짜, 뒤에 숫자가 붙은 것
+    '확인함(https://example.com/a, example.com/2026-11-01/b)',
+    '확인함(https://example.com/a, 2026-11-01-coming-soon)',
+    '확인함(https://example.com/a, 2026-11-223)',
+    // 판정 1회차 F1: `이름://` 없이 적은 주소에서 날짜 앞에 다른 글자가 붙은 꼴. 날짜는 조각의 처음에 와야 한다
+    '확인함(https://example.com/a, example.com/releases/date=2026-11-22)',
+    '확인함(https://example.com/a, example.com/a?d=2026-11-22)',
+    '확인함(https://example.com/a, example.com/a#2026-11-22)',
+    '확인함(https://example.com/a, example.com:2026-11-22)',
+    '확인함(https://example.com/a, a@2026-11-22)',
+    '확인함(https://example.com/a, a+2026-11-22)',
+    '확인함(https://example.com/a, 확인일:2026-11-22)',
+    // 날짜 뒤에 주소가 이어지는 꼴
+    '확인함(https://example.com/a, 2026-11-22.example.com/b)',
+    '확인함(https://example.com/a, 2026-11-22?x)',
+    // 판정 2회차 F2: 주소의 질의 안에서 쉼표로 둘러싸인 날짜. 쉼표는 주소 안에도 올 수 있어 구분자가 아니다.
+    // 확인일은 공백으로 띄어 적은 낱말이어야 한다(낱말이 날짜이거나 날짜 뒤에 쉼표 하나)
+    '확인함(https://example.com/a?dates=2026-11-01,2026-11-22,2026-12-01&format=csv)',
+    '확인함(https://example.com/a?d=x,2026-11-22)',
+    '확인함(https://example.com/a,2026-11-22)',
+    '확인함(https://example.com/a, x,2026-11-22)',
+    '확인함(https://example.com/a, 2026-11-22,x)',
+    '확인함(https://example.com/a, 2026-11-22,,)',
+    '확인함(https://example.com/a, 2026-11-22에 확인)',
+    '확인함(https://example.com/a, 확인2026-11-22)',
+  ])
+    fails(check(v), NO_DAY);
+  // 주소 밖에 확인일이 있으면 통과한다. 주소 안의 날짜는 실재하지 않아도 된다
+  for (const v of [
+    '확인함(https://example.com/blog/2026-11-01/pricing, 2026-11-22)',
+    '확인함(https://example.com/blog/2026-02-30/pricing, 2026-11-22)',
+    '확인함(2026-11-22, https://example.com/a)',
+    '확인함(https://example.com/a, 확인 2026-11-22)',
+    '확인함(https://example.com/a, 2026-11-22 확인)',
+    '확인함(https://example.com/a?dates=2026-11-01,2026-12-01, 2026-11-22)',
+    '확인함(https://example.com/a, 2026-11-21, 2026-11-22)',
+  ])
+    assert.deepEqual(check(v), [], v);
+  // 주소 밖의 날짜가 실재하지 않으면 실패한다(그대로)
+  fails(check('확인함(https://example.com/blog/2026-11-01/pricing, 2026-02-30)'), NO_DAY);
+});
+
 test('checkAdr 묶음: 둘 이상이고 이름이 겹치지 않는다', () => {
   fails(checkAdr(goodAdr({ bundles: [GA] })), /묶음.*둘 이상/);
   fails(checkAdr(goodAdr({ bundles: [] })), /묶음.*둘 이상/);

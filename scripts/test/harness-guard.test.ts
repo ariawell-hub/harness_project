@@ -504,3 +504,50 @@ test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승�
   });
   assert.equal(get(yes, 'risk-gate').state, 'success');
 });
+
+// ---------- 파일 이름을 글자 그대로 읽는다 (TD-28, Issue #218) ----------
+
+/** base에 파일을 둔 뒤 PR이 파일을 바꾼 것으로 판정한다. 돌려주는 값은 위험 플래그 추가 신호의 글 */
+function flagSignals(baseFiles: Record<string, string>, prFiles: Record<string, string>): string[] {
+  const r = repo();
+  for (const [f, c] of Object.entries(baseFiles)) write(r.root, f, c);
+  const base = commitAll(r.root, 'base files');
+  for (const [f, c] of Object.entries(prFiles)) write(r.root, f, c);
+  write(r.root, LOG, '# 이력\n- 변경\n');
+  commitAll(r.root, 'change');
+  return harnessGuard({ ...r, base, prBody: BODY })
+    .signals.map((x) => x.reason)
+    .filter((x) => x.startsWith('위험 플래그 추가'));
+}
+// 이 파일 자신이 "새로 들어간 위험 플래그"로 잡히지 않게 나눠 적는다
+const FLAG = '--dangerously-' + 'skip-permissions';
+
+test('위험 플래그: 이름에 glob 글자가 든 파일은 그 파일에 더해진 줄만 본다(판정 코드가 파일 이름을 글자 그대로 읽는다)', () => {
+  const base = { 'scripts/a[1].ts': 'export {}\n', 'scripts/a1.ts': 'export {}\n' };
+  // 다른 파일(scripts/a1.ts)에 더한 플래그를 scripts/a[1].ts의 것으로 세지 않는다
+  assert.deepEqual(
+    flagSignals(base, {
+      'scripts/a1.ts': `export const a = '${FLAG}'\n`,
+      'scripts/a[1].ts': 'export const b = 1\n',
+    }),
+    [`위험 플래그 추가: scripts/a1.ts — ${FLAG}`],
+  );
+  // 그 파일 자신에 더한 플래그는 놓치지 않는다
+  assert.deepEqual(flagSignals(base, { 'scripts/a[1].ts': `export const b = '${FLAG}'\n` }), [
+    `위험 플래그 추가: scripts/a[1].ts — ${FLAG}`,
+  ]);
+});
+
+test('위험 플래그: 이름이 *인 파일이 보지 않기로 한 .md의 줄을 끌어오지 않는다', (t) => {
+  if (process.platform === 'win32') return t.skip('파일 이름에 *를 쓸 수 없는 환경');
+  assert.deepEqual(
+    flagSignals(
+      { 'docs/harness/n*': '메모\n', 'docs/harness/notes.md': '# 메모\n' },
+      {
+        'docs/harness/notes.md': `# 메모\n\n\`${FLAG}\`를 쓰지 않는다.\n`,
+        'docs/harness/n*': '메모\n한 줄 더\n',
+      },
+    ),
+    [],
+  );
+});

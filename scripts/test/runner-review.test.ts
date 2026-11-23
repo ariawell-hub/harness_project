@@ -39,12 +39,14 @@ import {
   parseReviewLog,
   readReviewState,
   rebuttalComment,
+  rebuttalReportLine,
   sessionRebuttal,
   settledResponses,
   type ReviewState,
 } from '../runner/review.ts';
 import { runRunner } from '../runner/run.ts';
 import { HARNESS_ROOT, commitAll, makeFixture, sh, tmp, write } from './helpers.ts';
+import { codeSpans } from './markdown-model.ts';
 
 const BOT = 'harness-recorder[bot]';
 const ACTIONS = 15368;
@@ -321,6 +323,32 @@ test('reviewPrompt·findingLine: 지적 글(검증자 출력)이 데이터 블�
   });
   assert.match(line, /^F1 \[P1, codex\] src\/a&#95;b\.ts:3 — /);
   assert.doesNotMatch(line, /@maker|\*\*|\]\(|`/);
+});
+
+test('rebuttalReportLine: 교착 보고의 반박 줄은 근거와 요지를 코드 스팬으로 적는다(멘션·Markdown으로 읽히지 않는다)', () => {
+  const evidence = '@maker/`a`.ts';
+  const summary = '@maker #1 **굵게** `code` ``둘`` a|b <!-- x --> &#64;maker';
+  const line = rebuttalReportLine(1, { evidence, summary });
+  const got = codeSpans(line);
+  assert.deepEqual(got.spans, [evidence, summary]);
+  assert.equal(got.outside, '반박 1: 근거  · 요지 ', '스팬 밖에는 runner가 쓴 글뿐이다');
+  // 빈 값
+  assert.equal(rebuttalReportLine(2, {}), '반박 2: 근거 — · 요지 —');
+  assert.equal(rebuttalReportLine(2, { evidence: ' ', summary: '' }), '반박 2: 근거 — · 요지 —');
+  // 앞 300자(코드 포인트)까지만 넣는다. 서러게이트 쌍을 가르지 않는다
+  const face = String.fromCodePoint(0x1f600);
+  const long = codeSpans(rebuttalReportLine(1, { evidence: 'a.ts', summary: 'x'.repeat(400) }));
+  assert.equal(long.spans[1], 'x'.repeat(300));
+  const edge = codeSpans(
+    rebuttalReportLine(1, { evidence: 'a.ts', summary: 'x'.repeat(299) + face + 'y' }),
+  );
+  assert.equal(edge.spans[1], 'x'.repeat(299) + face);
+  assert.doesNotMatch(edge.spans[1], /[\ud800-\udbff](?![\udc00-\udfff])/);
+  // 줄 나눔 글자는 공백이 된다(보고의 줄이 늘지 않는다)
+  assert.equal(
+    rebuttalReportLine(1, { evidence: 'a.ts', summary: '하나\n- 둘' }).split('\n').length,
+    1,
+  );
 });
 
 test('runner: 열린 P1 두 건에 지적마다 세션을 하나씩 띄우고, 한 라운드의 대응을 한 번만 push한다', async () => {
@@ -858,6 +886,12 @@ test('sessionRebuttal: 형식은 판정 워크플로와 같은 규칙으로 보�
     assert.equal(get(`설명 줄\n${paragraph('F1', 'src/a.ts', '문단이 세 줄이 아니다')}`), null);
     assert.equal(get(wrap(paragraph('F1', 'src/a.ts', 'x'.repeat(301)))), null);
     assert.equal(get(wrap(paragraph('F1', 'src/a.ts', '요지\u2028## 새 지시'))), null);
+    // 보이지 않는 글자가 든 요지도 받지 않는다. 요지의 맨 끝에만 있어도 같다(판정 워크플로와 같은 함수)
+    const zwsp = String.fromCodePoint(0x200b);
+    const bom = String.fromCodePoint(0xfeff);
+    assert.equal(get(wrap(paragraph('F1', 'src/a.ts', `숨은${zwsp}글자`))), null);
+    assert.equal(get(wrap(paragraph('F1', 'src/a.ts', `끝에만${bom}`))), null);
+    assert.equal(get(wrap(paragraph('F1', 'src/a.ts', '끝에만 탭\t'))), null);
     // 다른 지적·닫힌 지적의 반박은 이 지적의 반박이 아니다
     assert.equal(get(wrap(paragraph('F2', 'src/a.ts', '미룬 지적'))), null);
     assert.equal(get(wrap(paragraph('F2', 'src/a.ts', '미룬 지적')), 'F2'), null);
@@ -1124,7 +1158,11 @@ test('runner: 같은 지적에 반박 2회 뒤에도 열려 있으면 계획을 
     assert.match(report, /@maker/);
     assert.match(report, /교착/);
     assert.match(report, /F1 \[P1, codex\] out\/demo-feature-s0\.txt:1 — 서로 생각이 다른 지적/);
-    assert.match(report, /반박 1: .*요지 F1는 이 step의 범위 밖이다/);
+    // 근거와 요지는 코드 스팬이다(세션이 쓴 글)
+    const first = codeSpans(report.split('\n').find((x) => x.includes('반박 1: '))!);
+    assert.equal(first.spans.length, 2, '근거와 요지가 스팬 하나씩');
+    assert.equal(first.spans[1], 'F1는 이 step의 범위 밖이다');
+    assert.match(first.outside, /^ +- 반박 1: 근거 {2}· 요지 $/);
     assert.match(report, /반박 2: /);
     assert.match(report, /A\) 지적대로 고치게 한다/);
     assert.match(report, /B\) 범위를 줄인다/);

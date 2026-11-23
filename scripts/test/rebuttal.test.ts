@@ -9,6 +9,7 @@ import {
   parseRebuttalData,
   parseRebuttals,
   rebuttalData,
+  validSummary,
   writeRebuttalInput,
   type RawComment,
 } from '../ci/rebuttal.ts';
@@ -118,6 +119,91 @@ test('요지: 300자를 넘거나 제어 문자가 있으면 버린다', () => {
   assert.equal(parse([by(block('F1', SHA, '요지\u001b[31m색'))]).length, 0);
   // CRLF 줄 끝은 받는다
   assert.equal(parse([by(block('F1', SHA, '요지').replace(/\n/g, '\r\n'))]).length, 1);
+});
+
+const cp = (...n: number[]) => String.fromCodePoint(...n);
+/** 요지에 받지 않는 글자(이름, 글자). 보이지 않는 글자는 코드 포인트로 적는다 */
+const DENIED: [string, string][] = [
+  ['탭', '\t'],
+  ['NEL U+0085', cp(0x85)],
+  ['폭 없는 공백 U+200B', cp(0x200b)],
+  ['폭 없는 이음 문자 U+200D', cp(0x200d)],
+  ['방향 바꿈 문자 U+202E', cp(0x202e)],
+  ['U+FEFF', cp(0xfeff)],
+  ['부드러운 하이픈 U+00AD', cp(0xad)],
+  ['줄 구분자 U+2028', cp(0x2028)],
+  ['단락 구분자 U+2029', cp(0x2029)],
+  ['변형 선택자 U+FE0F', cp(0xfe0f)],
+  ['태그 문자 U+E0041', cp(0xe0041)],
+  ['변형 선택자 보충 U+E0100', cp(0xe0100)],
+  ['한글 채움 문자 U+3164', cp(0x3164)],
+  ['사용자 정의 영역 U+E000', cp(0xe000)],
+  ['짝 없는 서러게이트', String.fromCharCode(0xd800)],
+];
+/** 받는 요지 */
+const ALLOWED = [
+  '테스트가 이미 그 경우를 본다 (a.test.ts:12) — 100%, "인용" [대괄호] `백틱`',
+  'plain ASCII summary: a/b_c?d=e&f#g',
+  `짝이 맞는 이모지 ${cp(0x1f600)}`,
+  `결합 문자 e${cp(0x301)}`,
+  `줄 바꿈 없는 공백${cp(0xa0)}과 전각 공백${cp(0x3000)}끝`,
+];
+
+test('validSummary: 줄을 나누거나 보이지 않는 글자가 하나라도 있으면 받지 않는다', () => {
+  for (const [name, ch] of DENIED) {
+    assert.equal(validSummary(`요지${ch}가운데`), false, `${name}: 가운데`);
+    assert.equal(validSummary(`${ch}요지`), false, `${name}: 맨 앞`);
+    assert.equal(validSummary(`요지${ch}`), false, `${name}: 맨 끝`);
+  }
+  for (const s of ALLOWED) assert.equal(validSummary(s), true, s);
+  assert.equal(validSummary(''), false);
+  assert.equal(validSummary('가'.repeat(SUMMARY_MAX)), true);
+  assert.equal(validSummary('가'.repeat(SUMMARY_MAX + 1)), false);
+});
+
+test('parseRebuttals: 받지 않는 글자가 요지의 가운데·맨 앞·맨 끝 어디에 있어도 그 문단만 버린다', () => {
+  const ok = block('F2', SHA, '멀쩡한 요지');
+  for (const [name, ch] of DENIED) {
+    for (const [where, summary] of [
+      ['가운데', `요지${ch}가운데`],
+      ['맨 앞', `${ch}요지`],
+      ['맨 끝', `요지${ch}`],
+    ]) {
+      const got = parse([by(`${block('F1', SHA, summary)}\n\n${ok}`)]);
+      assert.deepEqual(
+        got.map((r) => r.id),
+        ['F2'],
+        `${name}: ${where}`,
+      );
+    }
+  }
+  for (const s of ALLOWED) assert.equal(parse([by(block('F1', SHA, s))])[0]?.summary, s, s);
+});
+
+test('parseRebuttals: 앞뒤의 보통 공백과 줄 바꿈 없는 공백은 지금처럼 떼고 받는다', () => {
+  const nbsp = cp(0xa0);
+  assert.equal(parse([by(block('F1', SHA, '  요지  '))])[0]?.summary, '요지');
+  assert.equal(parse([by(block('F1', SHA, `${nbsp}요지${nbsp}`))])[0]?.summary, '요지');
+  // 길이는 뗀 글로 센다
+  const long = '가'.repeat(SUMMARY_MAX);
+  assert.equal(parse([by(block('F1', SHA, `  ${long}  `))])[0]?.summary, long);
+});
+
+test('parseRebuttalData: 받지 않는 글자가 든 요지는 job 사이로 넘긴 값에서도 받지 않는다', () => {
+  const l = ledger();
+  const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+  for (const [name, ch] of DENIED) {
+    for (const summary of [`요지${ch}가운데`, `${ch}요지`, `요지${ch}`])
+      assert.equal(
+        parseRebuttalData(enc([{ id: 'F1', evidence: SHA, summary }]), l, 'o/r'),
+        null,
+        `${name}: ${JSON.stringify(summary)}`,
+      );
+  }
+  for (const summary of ALLOWED)
+    assert.deepEqual(parseRebuttalData(enc([{ id: 'F1', evidence: SHA, summary }]), l, 'o/r'), [
+      { id: 'F1', evidence: SHA, summary },
+    ]);
 });
 
 test('근거: 외부 링크, 다른 리포, 절대 경로, 상위 경로, 공백은 버린다', () => {
