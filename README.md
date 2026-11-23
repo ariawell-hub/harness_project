@@ -47,4 +47,4 @@ runner는 할 일이 없거나 사람의 답만 기다릴 때 멈춘다. 계획�
 
 ## 이 템플릿 자체를 고칠 때
 
-이 리포도 같은 규칙을 따른다. Issue → `new-task` → 계획 → PR. 하네스 파일은 보호 경로이므로 변경 조각(`docs/harness/changes/`)에 한 줄을 남긴다. 모으기 PR이 그 줄을 [변경 이력](docs/harness/CHANGELOG.md)으로 옮긴다. 테스트: `node scripts/harness.ts test`.
+이 리포도 같은 규칙을 따른다. Issue → `new-task` → 계획 → PR. 하네스 파일은 보호 경로이므로 [변경 이력](docs/harness/CHANGELOG.md)에 한 줄을 남긴다. 테스트: `node scripts/harness.ts test`.

@@ -1074,7 +1074,7 @@ test('쓰기 시도 감지는 fs와 node:fs 어느 표기로 가져온 쓰기도
 
 // ── 자식 프로세스 ──
 
-test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 목록의 git 다섯뿐이다', () => {
+test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 목록의 git 넷뿐이다', () => {
   const { work } = repo();
   const guard = guardCp(() => 'run');
   let r: Result;
@@ -1084,7 +1084,7 @@ test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 
     guard.restore();
   }
   assert.equal(r.code, 0, r.err);
-  // repoInfo의 둘이 먼저 오고, 그 뒤는 docLint의 문서 목록과 커밋 시각 읽기, 마지막에 변경 조각 목록 읽기 하나다
+  // repoInfo의 둘이 먼저 오고, 그 뒤는 docLint의 문서 목록과 커밋 시각 읽기뿐이다
   assert.deepEqual(guard.seen.slice(0, 2).map(show), REPO_INFO_GIT);
   for (const c of guard.seen) {
     assert.equal(c.cmd, 'git', show(c));
@@ -1092,14 +1092,10 @@ test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 
   }
   const names = guard.seen.map((c) => matchShape(GIT_READ_SHAPES, c.args)?.name);
   assert.deepEqual(names.slice(0, 3), ['rev-parse', 'symbolic-ref', 'ls-files']);
-  assert.equal(names.at(-1), 'ls-files-changes', names.join(', '));
-  assert.ok(
-    names.slice(3, -1).every((n) => n === 'log'),
-    names.join(', '),
-  );
+  assert.ok(names.slice(3).every((n) => n === 'log'));
   assert.deepEqual(
     GIT_READ_SHAPES.map((x) => x.name),
-    ['rev-parse', 'symbolic-ref', 'ls-files', 'log', 'ls-files-changes'],
+    ['rev-parse', 'symbolic-ref', 'ls-files', 'log'],
   );
 });
 

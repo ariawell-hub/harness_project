@@ -135,9 +135,8 @@ export function ghReadShapes(defaultBranch: string): Shape[] {
 const REPO_PATH = /^(?![-/:])[^\0]+$/;
 
 /**
- * `repoInfo`(scripts/lib/git.ts)가 실행하는 둘과 `docLint`(scripts/gates/doc-lint.ts)가 실행하는 셋
- * (문서 목록과 커밋 시각은 step2, 변경 조각 목록은 계획 20261123-change-fragments step0).
- * 다섯 다 읽기만 한다. `log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 맞는다
+ * `repoInfo`(scripts/lib/git.ts)가 실행하는 둘과 `docLint`(scripts/gates/doc-lint.ts)가 실행하는 둘(step2).
+ * 넷 다 읽기만 한다. `log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 맞는다
  */
 export const GIT_READ_SHAPES: Shape[] = [
   {
@@ -150,18 +149,6 @@ export const GIT_READ_SHAPES: Shape[] = [
     args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'],
   },
   { name: 'log', args: ['log', '-1', '--format=%ct', '--'], rest: REPO_PATH },
-  {
-    name: 'ls-files-changes',
-    args: [
-      'ls-files',
-      '-z',
-      '--cached',
-      '--others',
-      '--exclude-standard',
-      '--',
-      'docs/harness/changes',
-    ],
-  },
 ];
 
 export function fits(shape: Shape, args: readonly string[]): boolean {
