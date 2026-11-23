@@ -52,4 +52,4 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 
 <!-- 인수인계: 세션이 끊겨도 이어 갈 수 있게 -->
 
-- 같은 폴더의 `handoff.md` 1절 "TD-39"를 읽고 계획을 쓴다. 첫 push 전에 `handoff.md`와 `draft-step0.patch`를 지운다.
+- 같은 폴더의 `handoff.md` 1절 "TD-39"를 읽고 계획을 쓴다. 초안 PR을 만들기 전에 `handoff.md`와 `draft-step0.patch`를 지운다(브랜치는 이미 원격에 있다).
