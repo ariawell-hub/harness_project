@@ -98,7 +98,7 @@ function sectionLines(doc: string, heading: string): string[] {
 }
 
 /** 표의 한 줄을 칸으로 나눈다(앞뒤의 `|`를 떼고, 칸마다 앞뒤 공백을 뺀다) */
-function cells(line: string): string[] {
+export function tableCells(line: string): string[] {
   return line
     .trim()
     .replace(/^\|/, '')
@@ -114,13 +114,13 @@ function cells(line: string): string[] {
 export function readRows(readme: string): Row[] {
   const table = sectionLines(readme, '잰 머신').filter((l) => l.trim().startsWith('|'));
   if (!table.length) return [];
-  const head = cells(table[0]);
+  const head = tableCells(table[0]);
   const fileAt = head.indexOf(FILE_COLUMN);
   const runAt = head.indexOf(RUN_COLUMN);
   if (fileAt < 0) return [];
   const rows: Row[] = [];
   for (const line of table.slice(1)) {
-    const c = cells(line);
+    const c = tableCells(line);
     if (c.every((x) => /^:?-+:?$/.test(x))) continue; // 구분 줄
     const f = FILE_RE.exec(c[fileAt] ?? '');
     if (!f) continue;

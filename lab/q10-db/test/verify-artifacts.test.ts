@@ -16,6 +16,7 @@ import {
   provenanceProblems,
   readRows,
   summaryLines,
+  tableCells,
   WORKFLOW_PATH,
 } from '../verify-artifacts.ts';
 
@@ -166,6 +167,62 @@ test('실행 칸이 주소 꼴이 아니면(번호 뒤 글, 다른 경로·질�
     input.rows = rows;
     assertProblem(input, /linux-x64\.json: 실행 칸이 실행 주소의 꼴이 아니다/);
   }
+});
+
+test('tableCells: 이스케이프된 세로줄(\\|)은 칸을 나누지 않고 칸 안의 글자가 된다(GFM)', () => {
+  assert.deepEqual(tableCells('| a | b \\| c | d |'), ['a', 'b | c', 'd']);
+  assert.deepEqual(tableCells('  | a | b |  '), ['a', 'b']);
+  assert.deepEqual(tableCells('| a | b \\|'), ['a', 'b |'], '줄 끝의 \\|는 닫는 세로줄이 아니다');
+  assert.deepEqual(tableCells('| a |  |'), ['a', '']);
+});
+
+test('앞 칸에 이스케이프된 세로줄이 있어도 실행 칸의 주소만 읽는다', () => {
+  const other = URL(REPO, 999);
+  const rows = readRows(
+    readme([
+      DARWIN_ROW,
+      `| \`results/linux-x64.json\` | Runner \\| Linux | 2026-11-23 | ${URL(REPO, RUN)} |`,
+      `| \`results/win32-x64.json\` | Runner \\| Windows | ${other} | ${URL(REPO, RUN)} |`,
+    ]),
+  );
+  assert.deepEqual(
+    rows.map(({ file, run }) => ({ file, run })),
+    [
+      { file: 'darwin-arm64.json', run: null },
+      { file: 'linux-x64.json', run: RUN },
+      { file: 'win32-x64.json', run: RUN },
+    ],
+  );
+  const input = good();
+  input.rows = rows;
+  assert.deepEqual(provenanceProblems(input), []);
+});
+
+test('실행 칸 안의 이스케이프된 세로줄은 주소의 꼴이 아니다', () => {
+  const input = good();
+  input.rows = readRows(readme([DARWIN_ROW, linuxRow(`${URL(REPO, RUN)} \\| x`), winRow()]));
+  assertProblem(input, /linux-x64\.json: 실행 칸이 실행 주소의 꼴이 아니다/);
+});
+
+test('잰 머신 절의 첫 표만 읽는다(표가 끝난 뒤의 다른 표는 머리줄이 같아도 읽지 않는다)', () => {
+  const doc = readme([DARWIN_ROW, linuxRow(), winRow()]).replace(
+    '\n\n## 확정 조건',
+    [
+      '',
+      '',
+      '다른 표:',
+      '',
+      '| 결과 파일 | 머신 | 날짜 | 실행 |',
+      '| --- | --- | --- | --- |',
+      `| \`results/linux-arm64.json\` | 다른 것 | 2026-11-23 | ${URL(REPO, 999)} |`,
+      '',
+      '## 확정 조건',
+    ].join('\n'),
+  );
+  assert.deepEqual(
+    readRows(doc).map((r) => r.file),
+    ['darwin-arm64.json', 'linux-x64.json', 'win32-x64.json'],
+  );
 });
 
 test('실행 주소가 실행 칸이 아닌 칸에만 있으면 실행 주소가 없는 행이다', () => {
