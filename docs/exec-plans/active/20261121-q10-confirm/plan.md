@@ -2,7 +2,7 @@
 id: 20261121-q10-confirm
 issue: 180 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -133,6 +133,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 step1 PR #235(초안, head `1954b1e`)를 올렸다. 구현 판정 1회차: CI `check` 통과, Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨). `pr-state`에 "오래 열린 지적" 줄은 없다.
 - 2026-11-23T22:29:25+09:00 step1 재작업: 구현 판정 1회차(head 1954b1e) Codex F1(P1, 재현됨): verify-artifacts.ts가 실행 주소의 번호 뒤 경계를 보지 않아 틀린 주소(…/runs/101typo)를 실행 101로 읽는다. 실행 칸 전체를 주소 꼴로 검사하게 고친다
 - 2026-11-23 F1 처리: 맞는 지적이다. 정규식 `…/actions/runs/(\d+)`가 행 어디서든 번호만 떼어 읽어, 적힌 주소와 다른 실행을 확인하고도 0으로 끝날 수 있었다. 테스트를 먼저 더했다(꼴이 틀린 실행 칸 9가지: 번호 뒤 글, `/attempts/1`, 질의, 조각, `http`, 다른 호스트, 앞에 붙은 글, 링크 문법, 주소 둘. 실행 칸이 아닌 칸에만 있는 주소. 꼴이 틀리면 조회하지 않는다): 고치기 전 32건 가운데 3건 실패(`388b346`). `readRows`가 표의 머리줄로 "결과 파일"·"실행" 칸을 찾고, 실행 칸 전체가 `https://github.com/<owner>/<repo>/actions/runs/<번호>` 하나일 때만 읽게 고쳤다(`3b108bb`, 32건 통과). 비어 있으면 "실행 주소가 없다", 꼴이 틀리면 "실행 칸이 실행 주소의 꼴이 아니다"를 낸다. `confirmed.test.ts`의 실행 주소 확인도 같은 꼴(실행 칸 전체)로 맞췄다(README에 `…/runs/45180055726typo`를 넣으면 실패하는 것을 확인하고 되돌렸다). 실제 자료의 음성 확인에 (4) linux 행의 주소를 `…/runs/45180055726typo`로 바꾸는 경우를 더했다: 종료 코드 1, `linux-x64.json: 실행 칸이 실행 주소의 꼴이 아니다(…)`. (1)~(3)도 다시 돌려 앞과 같았다.
+
+- 2026-11-23T22:50:48+09:00 step1 재작업: 구현 판정 2회차(head ea973ca) Codex F2(P1, 재현됨): 표 파서가 이스케이프된 세로줄(\|)을 칸 구분자로 처리해 실행 칸을 밀어낸다. GFM대로 칸을 나누고 두 검사가 같은 파서를 쓰게 고친다
 
 ## 의사결정 로그
 
