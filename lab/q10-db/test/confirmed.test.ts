@@ -15,6 +15,7 @@ import {
   readRepoPackageManager,
   RESULTS_DIR,
 } from '../check-results.ts';
+import { readRows, type Row } from '../verify-artifacts.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /** 리포의 글 파일. 줄 끝은 LF로 맞춘다(Windows에서 CRLF로 받아도 같은 판정) */
@@ -46,37 +47,18 @@ const resultFiles = (): string[] =>
 const readResult = (f: string): Record<string, unknown> =>
   JSON.parse(readFileSync(path.join(RESULTS_DIR, f), 'utf8')) as Record<string, unknown>;
 
-/** 실행 칸 전체가 이 꼴이어야 한다(번호 뒤에 글이 붙은 주소는 실행 주소가 아니다) */
-const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/(\d+)$/;
-
-const tableCells = (line: string): string[] =>
-  line
-    .trim()
-    .replace(/^\||\|$/g, '')
-    .split('|')
-    .map((c) => c.trim());
-
-/** README "잰 머신" 표에서 백틱으로 적은 결과 파일 이름이 든 행: 파일 이름(경로를 뺀 것) → 행과 실행 칸 */
-function measuredRows(): Map<string, { line: string; run: string }> {
-  const lines = section(read(LAB_README), '잰 머신')
-    .split('\n')
-    .filter((l) => l.startsWith('|'));
-  const runAt = lines.length ? tableCells(lines[0]).indexOf('실행') : -1;
-  const rows = new Map<string, { line: string; run: string }>();
-  for (const line of lines) {
-    const m = /`(?:results\/)?([a-z0-9]+-[a-z0-9_]+\.json)`/.exec(line);
-    if (m) rows.set(m[1], { line, run: runAt < 0 ? '' : (tableCells(line)[runAt] ?? '') });
-  }
-  return rows;
+/**
+ * README "잰 머신" 표의 행: 파일 이름(경로를 뺀 것) → 행. 표는 출처 확인(verify-artifacts.ts)과 같은 파서로 읽는다
+ * (칸 나누기는 GFM대로 이스케이프된 세로줄을 칸 안의 글자로 두고, 실행 칸 전체가 주소 꼴일 때만 번호를 읽는다)
+ */
+function measuredRows(): Map<string, Row> {
+  return new Map(readRows(read(LAB_README)).map((r) => [r.file, r]));
 }
 
 /** 표의 실행 칸에 적힌 실행 번호 전부 */
 function runNumbers(): string[] {
   const runs = new Set<string>();
-  for (const { run } of measuredRows().values()) {
-    const m = RUN_URL.exec(run);
-    if (m) runs.add(m[1]);
-  }
+  for (const { run } of measuredRows().values()) if (run !== null) runs.add(String(run));
   return [...runs];
 }
 
@@ -113,7 +95,10 @@ test('README "잰 머신" 표에 결과 파일마다 행이 있고, linux-*·win
     const row = rows.get(f);
     assert.ok(row, `잰 머신 표에 ${f}의 행이 없다`);
     if (f.startsWith('linux-') || f.startsWith('win32-'))
-      assert.match(row.run, RUN_URL, `${f}의 실행 칸이 실행 주소(/actions/runs/<숫자>)가 아니다`);
+      assert.ok(
+        row.run !== null,
+        `${f}의 실행 칸이 실행 주소(https://github.com/<owner>/<repo>/actions/runs/<숫자>)가 아니다: ${row.runCell}`,
+      );
   }
 });
 

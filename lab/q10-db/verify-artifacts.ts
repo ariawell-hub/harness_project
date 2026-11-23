@@ -97,23 +97,33 @@ function sectionLines(doc: string, heading: string): string[] {
   return end < 0 ? rest : rest.slice(0, end);
 }
 
-/** 표의 한 줄을 칸으로 나눈다(앞뒤의 `|`를 떼고, 칸마다 앞뒤 공백을 뺀다) */
+/**
+ * 표의 한 줄을 칸으로 나눈다(GFM 표의 규칙). 앞뒤의 `|`를 떼고, 이스케이프되지 않은 `|`에서만 나눈다.
+ * 이스케이프된 세로줄(`\|`)은 칸 안의 글자 `|`가 된다. 칸마다 앞뒤 공백을 뺀다.
+ * confirmed.test.ts도 이 함수로 같은 표를 읽는다
+ */
 export function tableCells(line: string): string[] {
   return line
     .trim()
     .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((c) => c.trim());
+    .replace(/(?<!\\)\|$/, '')
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, '|'));
 }
 
+const isTableLine = (l: string): boolean => l.trim().startsWith('|');
+
 /**
- * README "잰 머신" 표의 행을 읽는다. 첫 표의 머리줄에서 "결과 파일"·"실행" 칸을 찾고,
- * 결과 파일 칸에 이름을 백틱으로 적은 행만 낸다. 실행 칸 전체가 주소 꼴일 때만 리포와 번호를 읽는다
+ * README "잰 머신" 표의 행을 읽는다. 절의 첫 표(처음 `|`로 시작하는 줄부터 이어진 줄들)만 본다.
+ * 그 머리줄에서 "결과 파일"·"실행" 칸을 찾고, 결과 파일 칸에 이름을 백틱으로 적은 행만 낸다.
+ * 실행 칸 전체가 주소 꼴일 때만 리포와 번호를 읽는다
  */
 export function readRows(readme: string): Row[] {
-  const table = sectionLines(readme, '잰 머신').filter((l) => l.trim().startsWith('|'));
-  if (!table.length) return [];
+  const lines = sectionLines(readme, '잰 머신');
+  const start = lines.findIndex(isTableLine);
+  if (start < 0) return [];
+  const after = lines.slice(start).findIndex((l) => !isTableLine(l));
+  const table = lines.slice(start, after < 0 ? undefined : start + after);
   const head = tableCells(table[0]);
   const fileAt = head.indexOf(FILE_COLUMN);
   const runAt = head.indexOf(RUN_COLUMN);
