@@ -116,6 +116,20 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 계획 수정이 병합됐다(PR #232, `69ecad1`). Windows PC의 세션이 `new-task --plan 20261121-q10-confirm --step 1`로 브랜치 `chore/20261121-q10-confirm-s1`을 만들고, 제작자 지시대로 세션 인수인계 파일만 올린 채 멈췄다(`d45f142`).
 - 2026-11-23 step1 시작(넘겨받기): 이 Mac의 대화 세션이 그 인수인계를 이어받았다(제작자 대화 지시). owner는 `session` 그대로다(이 Mac 세션의 작업자 이름도 `session`이고, Windows PC의 세션은 멈췄다). worktree는 이 Mac에 새로 만들었다(`git worktree add ../harness_project.worktrees/chore/20261121-q10-confirm-s1 chore/20261121-q10-confirm-s1`. 인수인계에 적힌 경로 `harness__project.worktrees`는 Windows PC의 폴더 이름이다). `origin/main`(`85cac33`, #227 병합 뒤)을 병합했다. 인수인계 파일(`handoff.md`)을 지웠다. #227이 먼저 병합됐으므로 이 step의 CHANGELOG·설계서 기록은 변경 조각에 적는다(의사결정 로그).
 - 2026-11-23 워크플로 1회차: `gh workflow run q10-trial.yml --ref main`(봇 토큰으로 실행됐다). 실행 45177957783(https://github.com/ariawell-hub/harness_project/actions/runs/45177957783), 커밋 `85cac33`. 두 job(`ubuntu-latest`, `windows-latest`)이 모두 `trial` 단계에서 실패했다: `trial: 쓰는 pnpm(! Corepack is about to download https://registry.npmjs.org/pnpm/-/pnpm-10.34.5.tgz)이 이 리포가 고정한 pnpm@10.34.5와 다르다`. `trial.ts`가 `pnpm --version`의 표준 출력과 표준 오류를 이어 붙인 글의 마지막 줄을 버전으로 읽는데, 러너에서는 Corepack이 pnpm을 처음 받으며 표준 오류에 안내 줄을 쓴다. 도구가 아니라 스크립트의 문제라(작업 1) 결과 파일을 더하지 않고 별도 PR로 먼저 고친다: Issue #233, PR #234(계획 `20261123-corepack-version`). 이 Mac에서 빈 Corepack 캐시로 같은 실패를 재현했고, 고친 코드로는 절차가 통과했다(그 계획의 진행 로그).
+- 2026-11-23 테스트를 먼저 썼다(작업 2·3). 결과 파일과 문서를 고치기 전에 돌렸다:
+  - `node --test lab/q10-db/test/confirmed.test.ts`: 10건 가운데 9건 실패(확정 조건, linux·win32 결과, ADR 상태 줄, ADR 본문, ADR 목록, 설계서, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`). 통과한 1건은 "잰 머신 표에 결과 파일마다 행"이다(그때는 결과 파일이 `darwin-arm64.json`뿐이고 그 행이 있다).
+  - `node --test lab/q10-db/test/verify-artifacts.test.ts`: `verify-artifacts.ts`가 없어 실패(`ERR_MODULE_NOT_FOUND`). 테스트만 커밋했다(`18255cf`). 구현(`3535b83`) 뒤 27건 통과. 구현하며 테스트 한 곳을 고쳤다: 호출 기록에는 명령 이름(`gh`)도 들어 있어 `gh api` 호출의 길이 기대값이 2가 아니라 3이다(단언의 뜻은 그대로: 경로 밖의 인자가 없다).
+- 2026-11-23 #234가 병합됐다(`67bd225`). `origin/main`을 병합했다.
+- 2026-11-23 워크플로 2회차: `gh workflow run q10-trial.yml --ref main`. 실행 45180055726(https://github.com/ariawell-hub/harness_project/actions/runs/45180055726), 커밋 `67bd225`. 두 job(`trial (ubuntu-latest)`, `trial (windows-latest)`)이 모두 성공했다. `gh run download 45180055726 --dir <새 임시 폴더>`로 받아 `q10-result-ubuntu-latest/linux-x64.json`과 `q10-result-windows-latest/win32-x64.json`만 `lab/q10-db/results/`에 복사하고 `node scripts/harness.ts fmt`로 포맷했다(손으로 고치지 않았다. `darwin-arm64.json`은 그대로). `node lab/q10-db/check-results.ts linux-x64`, `win32-x64`: 통과. `node lab/q10-db/check-results.ts --confirm`: `--confirm: 확정 조건이 채워졌다(darwin, win32, linux)`, 종료 코드 0. 두 결과 모두 Node v22.20.0, pnpm 10.34.5, 패키지 버전은 `darwin-arm64.json`과 같다.
+- 2026-11-23 출처 확인(`node lab/q10-db/verify-artifacts.ts`, 종료 코드 0):
+
+  ```text
+  results/linux-x64.json · 실행 45180055726 · 커밋 67bd22575419 · 산출물 q10-result-ubuntu-latest · 같다
+  results/win32-x64.json · 실행 45180055726 · 커밋 67bd22575419 · 산출물 q10-result-windows-latest · 같다
+  ```
+
+- 2026-11-23 음성 확인(실제 GitHub 자료, 이 작업 트리의 새 임시 복제본에서): (1) `linux-x64.json`의 행 수 하나를 2 → 3으로 바꾸면 종료 코드 1, `linux-x64.json: 커밋한 파일과 산출물의 값이 다르다`. (2) README의 실행 주소를 실패한 1회차(45177957783)로 바꾸면 종료 코드 1, 문제 5건(두 산출물을 받지 못했다, 실행이 성공하지 않았다, 두 job이 성공하지 않았다). (3) 되돌리면 종료 코드 0. 처음 이 확인을 돌렸을 때는 세 경우가 모두 출력 없이 종료 코드 0이었다: 복제본의 경로(`/var/folders/…`)가 macOS에서 링크라 `process.argv[1]`과 `import.meta.url`(실제 경로 `/private/var/…`)이 달라, 직접 실행 판정이 거짓이 되어 아무것도 하지 않았다. 링크를 거친 경로로 실행하는 테스트를 먼저 더해 실패를 확인하고(29건 가운데 1건 실패), 두 경로를 `realpathSync.native`로 풀어 견주게 고쳤다(`9b6e4d4`, 29건 통과). 그 뒤 위 세 경우를 다시 돌렸다(발견 사항).
+- 2026-11-23 문서(작업 4): `lab/q10-db/README.md`("잰 머신" 표에 "실행" 칸과 두 행, 확정 상태 문단, "확정 조건" 절, 경로 표, CI 절차 5번), ADR-0007(상태 채택, 결정·실측·확정 조건·알려진 한계·결과), `docs/decisions/index.md`(채택), 설계서 18절 Q10 행·19절 "현재 위치"·14.3절의 "잠정" 한 낱말, TD-14 행의 `lab/q10-db` 항목, `profiles/web/README.md` DB 절 첫 문단, 변경 조각 `docs/harness/changes/20261121-q10-confirm-s1.md`. `confirmed.test.ts` 10건 통과.
 
 ## 의사결정 로그
 
@@ -137,11 +151,19 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 결정(제작자, 2026-11-23 대화): F16 대응 커밋을 올리기 전에 Issue #228(Windows 전용 테스트 실패)부터 고친다. 앞의 "이번만 예외"는 head `226ad6b` 한 번뿐이고, 이후 push에는 적용하지 않는다. #228이 병합되면 이 브랜치에 `origin/main`을 병합하고, 로컬 `check`가 통과한 뒤 push한다.
 - 결정(F16 보강, 구현 판정 6회차 뒤): step1이 고치기 전의 문구 지시대로 실행되지 않게 계획 해시에 들지 않는 두 곳을 고친다. (1) `step1.md`의 "읽어야 할 파일" 맨 앞에 "먼저 읽는다(F16)" 항목을 둔다: 문구 지시는 계획 수정 PR이 고치고, 그 PR이 병합되기 전에는 이 step을 시작하지 않으며, ADR·TD-14에 제작자 PC를 "아직 재지 않았다"고 쓰지 않는다. (2) 계획의 status를 `blocked`로 둔다: runner는 `blocked` 계획을 고르지 않고(`scripts/runner/next.ts`), `start`는 이 계획을 대기로 보인다. 계획 수정 PR이 지시를 고치면서 status를 `active`로 되돌린다. / 이유: 판정 6회차에서 Codex가 "후속 PR에서 고치겠다는 기록은 현재 지시를 바꾸지 않는다"고 했다. 묶인 섹션(작업·AC)은 이 PR에서 고칠 수 없으므로(위 "결정(F16)"), 실행 전에 읽는 자리와 실행을 고르는 상태로 막는다. 계획 해시는 그대로다(`49fa50ae8ba1`). / 대가: #188이 병합된 뒤 계획 수정 PR이 병합될 때까지 `start`가 #180을 대기로 보인다.
 - 결정(F16 계획 수정, 2026-11-23): TD-14의 `lab/q10-db` 항목은 남기지 않고 닫는다(step1이 그 행에서 뺀다). 위 "Windows 네이티브의 결과는 CI의 `windows-latest` 러너에서 얻는다"의 "PC에서의 재실측을 TD-14에 남긴다"를 바꾼다. ADR-0007과 `lab/q10-db/README.md`, 설계서 Q10 행도 그 항목(TD-14)을 가리키지 않는다. / 이유: 그 재실측의 목적은 러너가 재지 못하는 PC의 차이(경로, 사용자 이름, 보안 프로그램)를 보는 것이었고, 2026-11-23에 제작자의 PC에서 절차가 통과해 채워졌다. 다시 돌려 결과 파일을 남겨도 `verify-artifacts.ts`처럼 출처를 확인할 수단이 없어 확정 근거가 늘지 않는다. 다시 잴 일(패키지 버전·pnpm 고정 버전·설치 정책을 바꿀 때)은 워크플로 `q10-trial`이 맡는다. / 버린 대안: TD-14에 "출처를 남기는 PC 재실측"으로 남기기(확정 근거를 늘리지 않는 일을 남긴다).
+- 결정(step1): CHANGELOG 한 줄과 설계서 머리말·0절 이력 대신 변경 조각(`docs/harness/changes/20261121-q10-confirm-s1.md`)에 적는다. / 이유: step1.md 작업 4는 #227(TD-39) 전에 썼다. #227이 먼저 병합돼 절차서 5절이 "설계서를 고친 PR은 머리말·이력을 고치지 않고 조각의 `## 설계서 변경 이력`에 적는다"로 바뀌었다. 조각의 두 섹션이 같은 내용(CHANGELOG 한 줄: 검사를 약화하지 않는다는 것, 설계서 이력 한 줄)을 담고, 버전과 날짜는 모으기 PR이 붙인다. 버전 번호를 쓰지 않으므로 #217과 번호가 겹치지 않는다. 인수인계(2절 6번)도 #227이 먼저 병합되면 조각에 적기로 했다. / 버린 대안: 옛 방식(CHANGELOG 직접, 설계서 v0.7.83): 절차서가 "이 규칙 전에 쓴 계획"으로 받아 주지만, 같은 자리를 고치는 다른 PR과 충돌하고 번호를 다툰다.
+- 결정(step1): 14.3절은 "잠정" 한 낱말만 지웠다: `(ADR-0007, 잠정)` → `(ADR-0007, )`. / 이유: AC 여덟째 줄이 두 쪽에서 "잠정"을 지운 14.3절이 글자 그대로 같기를 요구한다. 그 낱말만 지우는 것 말고는(쉼표까지 지우거나 "확정"으로 바꾸기) AC를 통과하지 못하고, 실행 PR은 자기 step의 AC를 바꿀 수 없다(절차서 4.1절). 낱말을 남기면 14.3절이 ADR-0007을 잠정이라 해 18절과 어긋난다. 남은 `, `는 발견 사항에 적는다. / 버린 대안: `(ADR-0007)`로 다듬기(AC 실패), 계획 수정 PR로 AC를 고치기(쉼표 하나를 위해 계획 검증과 제작자 승인을 한 번 더 받는다), 그대로 두기(문서가 어긋난다).
+- 결정(step1): `lab/q10-db/README.md`의 "잰 머신" 표에 "실행" 칸을 더해 실행 주소를 적는다(macOS 행은 비운다). / 이유: 작업 4가 두 행에 실행 주소를 적으라 하고, `verify-artifacts.ts`와 `confirmed.test.ts`가 행에서 주소를 읽는다. 칸을 따로 두면 머신 이름과 섞이지 않는다.
+- 결정(step1): `verify-artifacts.ts`의 직접 실행 판정은 두 경로를 실제 경로(`realpathSync.native`)로 풀어 견준다. / 이유: 링크를 거친 경로로 실행하면 아무것도 하지 않고 0으로 끝나, AC 마지막 줄이 확인 없이 통과할 수 있었다(진행 로그의 음성 확인). `.native`는 Windows에서 드라이브 문자·대소문자까지 실제 이름으로 푼다. 실행 경로를 풀 수 없으면 실행하지 않는다(불러온 경우와 같다). / 버린 대안: 판정 없이 언제나 실행하기(테스트가 불러오면 GitHub을 읽는다). 같은 꼴의 다른 파일(`check-results.ts` 등)은 이 step에서 고치지 않는다(AC 일곱째 줄, 발견 사항).
 
 ## 발견 사항
 
 - 이 리포에는 워크플로의 실행 산출물을 올리는 액션을 쓰는 곳이 없었다. 새 액션(`actions/upload-artifact`)을 커밋 SHA로 고정해 쓴다. → 처리: 해당 없음(step0의 워크플로와 구조 테스트에 반영한다)
 - 계획 검증을 받는 계획인데 계획 검증 없이 코드를 브랜치에 올리고 제작자 작업을 요청했다(봇의 절차 실수). 워크플로 파일이 든 브랜치는 봇이 계획만 남긴 상태로 되돌릴 수 없어 새 브랜치로 다시 시작했고, 제작자의 워크플로 커밋이 한 번 더 필요해졌다. `new-task`나 `start`가 "중·대 규모 계획은 계획만 담은 초안 PR부터"를 알려 주지만, PR을 열지 않고 push만 한 브랜치는 어떤 검사도 보지 않는다. → 처리: 해당 없음(제작자에게 보고한다)
+- (step1) CI 러너에서 `trial.ts`가 Corepack의 다운로드 안내(표준 오류)를 pnpm 버전으로 읽어 두 job이 실패했다. Mac·Windows PC에서는 pnpm이 이미 받아져 있어(또는 Corepack을 거치지 않아) 드러나지 않았다. → 처리: #233
+- (step1) 직접 실행 판정 `path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`은 링크를 거친 경로(macOS의 `/var`·`/tmp`, 링크한 리포 폴더, Windows의 정션)로 실행하면 거짓이 되어, 스크립트가 아무것도 하지 않고 종료 코드 0으로 끝난다. `verify-artifacts.ts`는 이 step에서 고쳤다. 같은 꼴이 `lab/`의 다른 스크립트(`q10-db/check-results.ts`·`run.ts`, `pilot-prep`, `actions-cost`, `q20`, `ops-transition`)와 `scripts/hooks/guard.ts`·`scripts/hooks/session.ts`·`scripts/verify/web.ts`에 있다. 특히 `guard.ts`(L1 훅)는 링크를 거친 경로로 불리면 아무것도 막지 않는다: 같은 force push 입력이 직접 경로로는 종료 코드 2(R14 차단), 링크를 거친 경로(`<임시 폴더>/link/scripts/hooks/guard.ts`)로는 출력 없이 종료 코드 0이었다(이 Mac, 읽기만 하는 확인). 훅은 `node "$CLAUDE_PROJECT_DIR/scripts/hooks/guard.ts"`로 불리므로, 리포를 링크를 거친 경로로 열면 L1 훅이 꺼진 것과 같다. → 처리: 해당 없음(이 step의 범위 밖이고 `check-results.ts`·`trial.ts`는 AC 일곱째 줄이 고치지 못하게 한다. 제작자에게 보고하고 Issue 등록을 제안한다)
+- (step1) 14.3절의 `(ADR-0007, )`: AC 여덟째 줄 때문에 "잠정"만 지워 쉼표와 빈칸이 남았다(의사결정 로그). → 처리: 해당 없음(다음에 설계서를 고치는 PR에서 `(ADR-0007)`로 다듬도록 제작자에게 제안한다)
+- (step1) 작업자 이름: Windows PC와 이 Mac의 대화 세션이 모두 기본 이름 `session`이다(`HARNESS_WORKER`를 정하지 않았다). 절차서 1절은 머신마다 고유한 이름을 정하라고 한다. 같은 이름이면 L1 훅(R3)이 서로의 worktree를 자기 것으로 본다. 이번에는 Windows PC의 세션이 멈춘 뒤 넘겨받았고, 같은 머신에서 다른 대화 세션도 `session`으로 돌고 있어 그 세션의 worktree는 건드리지 않았다. → 처리: 해당 없음(제작자에게 알린다. 머신마다 `HARNESS_WORKER`를 정하면 owner를 바꾸는 넘겨받기에 제작자 승인이 필요해진다)
 
 ## 열린 질문
 
@@ -158,10 +180,10 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계·결과, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
 - 결과(2026-11-22, step0): AC의 명령 16줄이 모두 통과했다(다섯째 줄은 새 임시 폴더의 복제본에서 절차를 실제로 돌렸다). `node scripts/harness.ts check` 통과. 트리 비교는 진행 로그에 있다.
 - 결과(2026-11-23, step0 재작업 F15, 제작자의 Windows 11 PC): AC의 명령 16줄이 모두 통과했다. 다섯째 줄은 이 PC(Windows 네이티브, Git Bash)의 새 임시 복제본에서 절차를 돌렸고 `trial: lab/q10-db/results/win32-x64.json을 썼다`, `win32-x64: 통과`가 나왔다. 그 결과 파일은 복제본에만 있고 리포에 넣지 않았다(결과는 step1에서 워크플로의 산출물로만 더한다). 이 실행은 확정 근거가 아니다: 결과 파일을 남기지 않았고 출처를 확인할 수 없다. 확정 조건의 Windows 결과는 step1에서 CI 러너의 산출물로 더하고 `verify-artifacts.ts`로 출처를 확인한다. 그래서 "제작자의 Windows PC에서 절차가 통과했다(결과 파일 없음)"와 "확정 근거는 CI 산출물이다"를 따로 적어야 한다. step1의 문서 지시는 그에 맞춰 고친다(F16, 의사결정 로그). `node scripts/harness.ts check`는 `test`의 두 건이 Windows에서만 실패했다(main에서도 같다. Issue #228, 의사결정 로그). 나머지는 통과했다.
-- step1의 결과는 step1을 진행하며 적는다.
+- 결과(2026-11-23, step1, 이 Mac): 워크플로 실행 45180055726의 두 job 성공, 결과 파일 둘을 더했다. AC의 명령 14줄이 모두 통과했다: `check-results.ts --confirm` 종료 코드 0, `confirmed.test.ts` 10건, `check-results.test.ts`, `run.test.ts`, `profile-web-db.test.ts`, `q10-trial-workflow.test.ts`, 바꾸지 않을 파일(일곱째 줄), 14.3절(여덟째 줄), TD-14 한 행(아홉째 줄), `lint`, `doc-lint`, `fmt --check`, `verify-artifacts.test.ts` 29건, `verify-artifacts.ts` 종료 코드 0(출력은 진행 로그). 음성 확인 세 경우(진행 로그). `node scripts/harness.ts check` 통과.
 
 ## 다음 할 일
 
 1. (끝남) step0: 계획 검증(G1), 구현 판정, 제작자의 워크플로 커밋, 구조 테스트와 완료 처리, #188 병합(`c2cb9ff`).
-2. 계획 수정 PR(`docs/20261121-q10-confirm-s0`): 계획 검증(G1)을 받고, 계획의 risk가 high라 제작자 head 승인을 받아 병합한다.
-3. 그 뒤 `new-task --plan 20261121-q10-confirm --step 1`로 step1을 잇는다.
+2. (끝남) 계획 수정 PR #232(`69ecad1`).
+3. step1 PR(`Closes #180`): 두 검증자의 판정을 받고, 계획의 risk가 high라 제작자 head 승인을 받아 병합한다. 병합되면 이 계획이 끝난다.
