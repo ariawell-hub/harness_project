@@ -1,6 +1,7 @@
 // 변경 조각(TD-39, Issue #222): 조각 파일의 자리·형식, doc-lint의 검사, 두 PR의 조각이 병합에서 충돌하지 않는 것을 본다.
 // 계획 20261123-change-fragments step0.
 import assert from 'node:assert/strict';
+import { symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { docLint } from '../gates/doc-lint.ts';
@@ -128,6 +129,29 @@ test('doc-lint: 조각 파일은 frontmatter·색인을 요구하지 않고 형�
   assert.deepEqual(lint(root), [
     `R8 변경 조각 ${FILE}: \`## CHANGELOG\` 섹션에 항목이 하나 이상 있어야 한다`,
   ]);
+  // 풀 수 없는 링크 글(`%ZZ`)도 일반 링크 검사에서 예외로 멈추지 않고 조각 형식 문제로 잡힌다(Codex F12)
+  write(root, FILE, FRAG('\n## CHANGELOG\n\n- 한 줄\n- [설명](%ZZ)를 고쳤다\n'));
+  assert.deepEqual(lint(root), [
+    `R8 변경 조각 ${FILE}: 6번째 줄: 항목에 Markdown 링크를 넣지 마라(모으면 자리가 바뀌어 깨진다)`,
+  ]);
+  // 조각 자리의 심볼릭 링크는 따라가지 않고 문제로 잡는다(Codex F13). 링크 대상은 형식에 맞는 리포 밖 파일이다.
+  // 링크를 만들 수 없는 환경(권한이 없는 Windows)이면 이 경우만 건너뛴다
+  const outside = path.join(tmp(), 'outside.md');
+  writeFileSync(outside, OK);
+  unlinkSync(path.join(root, FILE));
+  let linked = true;
+  try {
+    symlinkSync(outside, path.join(root, FILE));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e;
+    linked = false;
+  }
+  if (linked) {
+    assert.deepEqual(lint(root), [
+      `R8 변경 조각 ${FILE}: 조각은 일반 파일이어야 한다(심볼릭 링크는 받지 않는다)`,
+    ]);
+    unlinkSync(path.join(root, FILE));
+  }
   // 폴더 안의 다른 이름·확장자·하위 폴더도 잡는다(Markdown이 아니어도)
   write(root, FILE, OK);
   const strays = [

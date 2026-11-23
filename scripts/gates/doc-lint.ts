@@ -1,6 +1,6 @@
 // doc-lint (R8, 7.1~7.2절): 깨진 링크, 색인 누락, frontmatter 형식, AGENTS.md 줄 수 상한, 오래된 문서 표시,
 // 설계서 머리말과 변경 이력의 어긋남.
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { CHANGES_DIR, parseFragment } from '../lib/changes.ts';
 import type { HarnessConfig } from '../lib/config.ts';
@@ -50,7 +50,10 @@ function listMarkdown(root: string): string[] {
     .filter((f) => existsSync(path.join(root, f)));
 }
 
-/** 변경 조각 폴더 아래의 모든 파일(확장자·하위 폴더를 가리지 않는다. 자리 밖 파일도 잡으려고 문서 목록과 따로 읽는다) */
+/**
+ * 변경 조각 폴더 아래의 모든 파일(확장자·하위 폴더를 가리지 않는다. 자리 밖 파일도 잡으려고 문서 목록과 따로 읽는다).
+ * 작업 트리에 있는지는 링크를 따라가지 않고 본다: 대상이 없는 심볼릭 링크도 목록에 남아 문제로 잡힌다
+ */
 function listChangesDir(root: string): string[] {
   const r = gitTry(
     ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', CHANGES_DIR],
@@ -60,7 +63,7 @@ function listChangesDir(root: string): string[] {
   return r.stdout
     .split('\0')
     .filter(Boolean)
-    .filter((f) => existsSync(path.join(root, f)));
+    .filter((f) => lstatSync(path.join(root, f), { throwIfNoEntry: false }) !== undefined);
 }
 
 /** 코드 블록과 인라인 코드를 지운 본문 */
@@ -107,6 +110,8 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
   // 1) 깨진 상대 링크
   const linked = new Map<string, Set<string>>(); // 대상 → 링크한 파일들
   for (const file of files) {
+    // 변경 조각은 링크를 받지 않고 6)에서 따로 본다. 여기서 읽으면 깨진 링크 글이 6) 전에 검사를 멈출 수 있다(Codex F12)
+    if (file.startsWith(`${CHANGES_DIR}/`)) continue;
     const text = readFileSync(path.join(root, file), 'utf8');
     for (const href of extractLinks(text)) {
       if (isExternal(href)) continue;
@@ -233,16 +238,20 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
   }
 
   // 6) 변경 조각(TD-39): 자리·이름·형식. 모으기가 읽을 수 있어야 한다
+  const fragmentProblem = (f: string, what: string): Problem => ({
+    rule: 'R8 변경 조각',
+    what: `${f}: ${what}`,
+    how: '조각 파일의 자리·형식을 docs/harness/workflow.md 5절 "변경 조각"대로 맞춰라',
+    doc: DOC,
+  });
   for (const f of listChangesDir(root).filter((x) => !matchesAny(x, exclude))) {
+    // 링크를 따라가 다른 파일의 글을 조각으로 읽지 않는다(Codex F13. harness-guard도 일반 파일만 기록으로 센다)
+    if (!lstatSync(path.join(root, f)).isFile()) {
+      errors.push(fragmentProblem(f, '조각은 일반 파일이어야 한다(심볼릭 링크는 받지 않는다)'));
+      continue;
+    }
     const r = parseFragment(f, readFileSync(path.join(root, f), 'utf8'));
-    if (!r.ok)
-      for (const what of r.problems)
-        errors.push({
-          rule: 'R8 변경 조각',
-          what: `${f}: ${what}`,
-          how: '조각 파일의 자리·형식을 docs/harness/workflow.md 5절 "변경 조각"대로 맞춰라',
-          doc: DOC,
-        });
+    if (!r.ok) for (const what of r.problems) errors.push(fragmentProblem(f, what));
   }
   return { errors, warnings };
 }

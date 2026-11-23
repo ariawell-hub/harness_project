@@ -182,6 +182,28 @@ test('변경 조각: 형식이 틀리거나 자리 밖이거나 다른 브랜치
     assert.match(g.result.description, /CHANGELOG/, what);
     assert.match(g.result.description, /변경 조각/, what);
   }
+  // 이 PR의 조각 자리가 형식에 맞는 리포 안 다른 파일로 가는 심볼릭 링크다(Codex F13). 링크 객체(모드 120000)를
+  // 색인에 바로 넣어 커밋한다(Windows는 권한이 없으면 링크를 만들 수 없다). 작업 트리의 그 자리에는 링크를 따라간
+  // 것과 같은 글을 둔다: 링크를 따라 읽는 판정이면 이것을 기록으로 센다
+  const r = repo();
+  write(r.root, 'scripts/x.ts', 'export const x = 1\n');
+  write(r.root, 'notes/frag.md', fragment(['바꿈']));
+  sh('git', ['add', '-A'], r.root);
+  const blob = runSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: r.root,
+    input: '../../../notes/frag.md',
+  });
+  sh(
+    'git',
+    ['update-index', '--add', '--cacheinfo', `120000,${blob.stdout.trim()},${OWN}`],
+    r.root,
+  );
+  sh('git', ['commit', '-q', '-m', 'change'], r.root);
+  assert.match(sh('git', ['ls-tree', 'HEAD', '--', OWN], r.root), /^120000 blob /);
+  write(r.root, OWN, fragment(['바꿈']));
+  const linked = harnessGuard({ ...r, prBody: BODY, branch: BRANCH });
+  assert.equal(linked.result.state, 'failure', '심볼릭 링크 조각');
+  assert.match(linked.result.description, /변경 조각/);
 });
 
 test('변경 조각: base에 있던 이 PR의 조각은 새 CHANGELOG 항목을 더했을 때만 기록이다', () => {

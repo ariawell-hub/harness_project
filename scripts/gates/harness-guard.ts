@@ -221,12 +221,18 @@ export function harnessGuard(o: {
   // 변경 기록(TD-39): CHANGELOG·설계서 변경 이력을 직접 고쳤거나, 이 PR 브랜치 이름의 변경 조각에 base에 없던 항목을
   // 형식에 맞게 더했다. 다른 브랜치의 조각은 세지 않는다(모으기 PR과 충돌한다). 브랜치를 모르면 조각을 세지 않는다
   const own = o.branch ? fragmentPathFor(o.branch) : null;
+  // 기록은 커밋(바뀐 파일과 같이 HEAD와 base)의 일반 파일(모드 100644·100755)로만 읽는다. 심볼릭 링크를 따라가면
+  // 리포의 다른 파일 글을 기록으로 센다(Codex F13). 링크·폴더·없는 파일은 null이다
+  const recordFile = (rev: string, f: string): string | null => {
+    const t = gitTry([LITERAL_PATHSPECS, 'ls-tree', '-z', rev, '--', f], o.root);
+    return t.ok && /^100(?:644|755) blob /.test(t.stdout) ? showFile(o.root, rev, f) : null;
+  };
   const added = (section: 'changelog' | 'design'): boolean => {
     if (!own || !changed.includes(own)) return false;
-    const h = head(own);
+    const h = recordFile('HEAD', own);
     const now = h === null ? null : parseFragment(own, h);
     if (!now?.ok) return false;
-    const b = base(own);
+    const b = recordFile(o.base, own);
     const was = b === null ? null : parseFragment(own, b);
     const before = new Set(was?.ok ? was.value[section] : []);
     return now.value[section].some((x) => !before.has(x));
@@ -242,8 +248,8 @@ export function harnessGuard(o: {
     return r?.ok ? r.value.items.map((x) => x.version) : null;
   };
   if (author && changed.includes(DESIGN_DOC)) {
-    const now = versions(head(DESIGN_DOC));
-    const was = versions(base(DESIGN_DOC));
+    const now = versions(recordFile('HEAD', DESIGN_DOC));
+    const was = versions(recordFile(o.base, DESIGN_DOC));
     const historyAdded =
       now !== null &&
       was !== null &&
