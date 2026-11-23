@@ -32,7 +32,7 @@
 - 리포가 아닌 폴더에서는 지금과 같은 `GitError`를 던진다(메시지가 `git rev-parse --show-toplevel --absolute-git-dir --git-common-dir 실패`로 시작한다).
 - 설정이 바뀌면 바로 보인다: 메인 체크아웃에서 `git config core.worktree <다른 폴더>`를 하면 다음 `repoInfo(root)`가 그때 git이 준 값(또는 예외)과 같다.
 
-있던 테스트는 고치지 않고 통과한다(AC 둘째 줄).
+있던 테스트는 고치지 않고 통과한다. AC 둘째 줄이 돌리고, 여섯째 줄이 `repo-info.test.ts` 밖의 최상위 테스트 블록이 base와 글자 그대로 같은지 본다(4회차 지적 F12).
 
 ### 3. 문서와 기록
 
@@ -45,7 +45,7 @@
 - 기술 부채 표(`docs/exec-plans/tech-debt-tracker.md`)에 새 행 둘을 더한다. 번호는 push할 때 main의 다음 번호다. (1) 발견 사항 1(Windows에서 캐시 키에 pnpm 버전이 빠진다. 고칠 것: 셸 래퍼를 실행하는 방법으로 버전을 읽고 Windows 테스트를 붙인다). (2) 발견 사항 2·3·4(Windows에서만 큰 테스트 비용 다섯과 각각 먼저 잴 것, 캐시 키의 도구 버전 실행 비용과 설계서 6절의 보장을 지키며 줄이는 방법, macOS에서 동시 실행의 이득이 경합에 막힌 측정).
 - 변경 조각 `docs/harness/changes/20261123-windows-test-speed-s0.md`를 만든다(절차서 5절 "변경 조각" 형식). `## CHANGELOG` 항목 하나(`repoInfo`가 git을 둘에서 하나로 줄여 띄운다). `## 설계서 변경 이력`은 두지 않는다(설계서를 고치지 않는다).
 - AC 셋째 줄이 출력한 동기 프로세스 수를 진행 로그에 적는다(수용 기준 3).
-- step1을 하지 않기로 정해져 이 step이 마지막이면, 승인 요청 전에 "검증 방법과 결과"의 Windows PC 최종 측정을 받는다(수용 기준 7). 아직 정해지지 않았으면 그 측정 없이 승인을 요청해도 된다(최종 측정은 마지막 step에서 한다).
+- 이 PR의 승인 요청 전에 "검증 방법과 결과"의 Windows A/B(수용 기준 5)가 진행 로그에 있어야 한다. 그것으로 step1을 할지가 정해진다. step1을 하지 않기로 정해지면 이 step이 마지막이므로 Windows PC 최종 측정(수용 기준 7)도 승인 요청 전에 받는다. step1을 하기로 정해지면 최종 측정은 step1에서 한다(4회차 지적 F10).
 
 ## Acceptance Criteria
 
@@ -55,6 +55,7 @@ node --test scripts/test/runner.test.ts scripts/test/runner-review.test.ts scrip
 d=$(mktemp -d) && node -e 'const [mod, log] = process.argv.slice(1); require("node:fs").writeFileSync(mod, ["import cp from \"node:child_process\";", "import { syncBuiltinESMExports } from \"node:module\";", "import { appendFileSync } from \"node:fs\";", `const LOG = ${JSON.stringify(require("node:path").resolve(log))};`, "const orig = cp.spawnSync;", "cp.spawnSync = function (...a) { appendFileSync(LOG, \"s\\n\"); return orig.apply(this, a); };", "syncBuiltinESMExports();", ""].join("\n"));' "$d/count.mjs" "$d/spawn.log" && NODE_OPTIONS="--import=$(node -p 'require("node:url").pathToFileURL(process.argv[1]).href' "$d/count.mjs")" node --test scripts/test/runner.test.ts > "$d/test.log" 2>&1 && node -e 'const n = require("node:fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).length; console.log(`runner.test.ts 37개의 동기 프로세스 ${n}개(상한 8400)`); process.exit(n > 0 && n <= 8400 ? 0 : 1);' "$d/spawn.log"
 grep -qF '`repoInfo`는 git 한 번(`rev-parse … --abbrev-ref=loose HEAD`)으로 읽고 담아 두지 않는다' docs/harness/architecture.md
 test -f docs/harness/changes/20261123-windows-test-speed-s0.md
+node -e 'const { execFileSync: x } = require("node:child_process"), fs = require("node:fs"); const g = (...a) => x("git", a, { encoding: "utf8", maxBuffer: 1 << 28 }); const base = g("merge-base", "HEAD", "origin/main").trim(); const blocks = (texts) => { const b = []; for (const t of texts) { const L = t.split("\n"); for (let i = 0; i < L.length; i++) { if (!L[i].startsWith("test(")) continue; let j = i; if (!/\);\s*$/.test(L[i])) while (j + 1 < L.length && !/^[})]/.test(L[++j])); b.push(L.slice(i, j + 1).join("\n")); i = j; } } return b.sort(); }; const before = blocks(g("ls-tree", "--name-only", base, "scripts/test/").split("\n").filter((f) => f.endsWith(".test.ts")).map((f) => g("show", `${base}:${f}`))); const after = blocks(fs.readdirSync("scripts/test").filter((f) => f.endsWith(".test.ts") && f !== "repo-info.test.ts").map((f) => fs.readFileSync(`scripts/test/${f}`, "utf8"))); if (JSON.stringify(before) !== JSON.stringify(after)) { console.error(`최상위 test 블록이 base와 다르다: base ${before.length}개, 지금 ${after.length}개`); process.exit(1); } console.log(`repo-info.test.ts 밖의 최상위 test 블록 ${after.length}개가 base와 글자 그대로 같다`);'
 ```
 
 ## 금지사항
@@ -67,3 +68,4 @@ test -f docs/harness/changes/20261123-windows-test-speed-s0.md
 - 있던 테스트 블록을 고치거나 지우지 마라. 테스트 파일을 나누지 마라(나누기는 step1이고 시작 조건이 있다). 이유: 수용 기준 1, 5.
 - `harness.config.json`과 `profiles/core/profile.json`을 고치지 마라. 이유: 의사결정 로그 6.
 - 설계서와 CHANGELOG를 직접 고치지 마라. 이유: 수용 기준 10.
+- Windows A/B(수용 기준 5) 결과 없이 승인을 요청하지 마라. step1을 하지 않기로 정해졌으면 최종 측정(수용 기준 7) 없이도 요청하지 마라. 이유: 그 결과가 이 step이 마지막인지를 정하고, 마지막 step은 Windows 측정으로만 효과를 판정한다(F10).
