@@ -35,16 +35,25 @@ export const TARGETS = [
 ] as const;
 export const artifactName = (runner: string): string => `q10-result-${runner}`;
 
+/**
+ * 실행 칸이 받는 꼴: 칸 전체(앞뒤 공백 밖)가 이 주소 하나다. 번호 뒤에 글·경로·질의·조각이 붙거나,
+ * http·다른 호스트·링크 문법이면 받지 않는다(번호만 떼어 읽으면 적힌 주소와 다른 실행을 확인하게 된다)
+ */
 const RUN_URL_RE =
-  /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/actions\/runs\/(\d+)/;
+  /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/actions\/runs\/(\d+)$/;
 const FILE_RE = /`(?:results\/)?([a-z0-9]+-[a-z0-9_]+\.json)`/;
+/** 표의 머리줄에서 찾는 칸의 이름 */
+const FILE_COLUMN = '결과 파일';
+const RUN_COLUMN = '실행';
 
 export interface Row {
   /** 결과 파일 이름(경로를 뺀 것, 예: linux-x64.json) */
   file: string;
-  /** 실행 주소의 리포(owner/name). 주소가 없으면 null */
+  /** 실행 칸의 글(앞뒤 공백을 뺀 것). 실행 칸이 없으면 빈 글 */
+  runCell: string;
+  /** 실행 주소의 리포(owner/name). 실행 칸이 주소 꼴이 아니면 null */
   repo: string | null;
-  /** 실행 번호. 주소가 없으면 null */
+  /** 실행 번호. 실행 칸이 주소 꼴이 아니면 null */
   run: number | null;
 }
 
@@ -88,15 +97,36 @@ function sectionLines(doc: string, heading: string): string[] {
   return end < 0 ? rest : rest.slice(0, end);
 }
 
-/** README "잰 머신" 표에서 결과 파일 이름을 백틱으로 적은 행을 읽는다 */
+/** 표의 한 줄을 칸으로 나눈다(앞뒤의 `|`를 떼고, 칸마다 앞뒤 공백을 뺀다) */
+function cells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim());
+}
+
+/**
+ * README "잰 머신" 표의 행을 읽는다. 첫 표의 머리줄에서 "결과 파일"·"실행" 칸을 찾고,
+ * 결과 파일 칸에 이름을 백틱으로 적은 행만 낸다. 실행 칸 전체가 주소 꼴일 때만 리포와 번호를 읽는다
+ */
 export function readRows(readme: string): Row[] {
+  const table = sectionLines(readme, '잰 머신').filter((l) => l.trim().startsWith('|'));
+  if (!table.length) return [];
+  const head = cells(table[0]);
+  const fileAt = head.indexOf(FILE_COLUMN);
+  const runAt = head.indexOf(RUN_COLUMN);
+  if (fileAt < 0) return [];
   const rows: Row[] = [];
-  for (const line of sectionLines(readme, '잰 머신')) {
-    if (!line.startsWith('|')) continue;
-    const f = FILE_RE.exec(line);
+  for (const line of table.slice(1)) {
+    const c = cells(line);
+    if (c.every((x) => /^:?-+:?$/.test(x))) continue; // 구분 줄
+    const f = FILE_RE.exec(c[fileAt] ?? '');
     if (!f) continue;
-    const u = RUN_URL_RE.exec(line);
-    rows.push({ file: f[1], repo: u ? u[1] : null, run: u ? Number(u[2]) : null });
+    const runCell = runAt < 0 ? '' : (c[runAt] ?? '');
+    const u = RUN_URL_RE.exec(runCell);
+    rows.push({ file: f[1], runCell, repo: u ? u[1] : null, run: u ? Number(u[2]) : null });
   }
   return rows;
 }
@@ -197,7 +227,11 @@ export function provenanceProblems(input: ProvenanceInput): string[] {
   const runs = new Set<number>();
   for (const row of targets) {
     if (row.run === null || row.repo === null) {
-      out.push(`${row.file}: 행에 실행 주소가 없다`);
+      out.push(
+        row.runCell === ''
+          ? `${row.file}: 행에 실행 주소가 없다(실행 칸이 비었다)`
+          : `${row.file}: 실행 칸이 실행 주소의 꼴이 아니다(https://github.com/<owner>/<repo>/actions/runs/<번호> 하나만 받는다): ${row.runCell}`,
+      );
       continue;
     }
     if (row.repo.toLowerCase() !== input.repo.toLowerCase()) {
