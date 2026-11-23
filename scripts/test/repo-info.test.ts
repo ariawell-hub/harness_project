@@ -115,7 +115,8 @@ test('repoInfo: 커밋이 없는 브랜치, 하위 폴더, 바뀐 설정도 예�
   mkdirSync(other);
   sh('git', ['config', 'core.worktree', other], root);
   assert.deepEqual(repoInfo(root), expected(root));
-  assert.equal(path.resolve(repoInfo(root).root), path.resolve(other));
+  // 경로 표기(Windows의 짧은 이름 등)에 기대지 않으려고 폴더 이름으로 견준다
+  assert.equal(path.basename(repoInfo(root).root), path.basename(other));
 });
 
 test('repoInfo: 작업 트리에 HEAD라는 파일이 있어도 git을 하나만 띄우고 값은 예전과 같다', () => {
@@ -134,6 +135,8 @@ test('repoInfo: 작업 트리에 HEAD라는 파일이 있어도 git을 하나만
   const log = cp.spawnSync('git', ['log', '-1', '--format=%h', 'HEAD'], {
     cwd: root,
     encoding: 'utf8',
+    // 오류 문구를 견주므로 번역하지 않은 문구로 받는다(구현 판정 F16)
+    env: { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' },
   });
   assert.notEqual(log.status, 0, log.stdout);
   assert.match(log.stderr, /ambiguous argument 'HEAD'/);
