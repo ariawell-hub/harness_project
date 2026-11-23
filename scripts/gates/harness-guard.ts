@@ -1,13 +1,16 @@
 // harness-guard (10.3·10.4절, R9). 보호 경로를 바꾼 PR을 LLM 없이 규칙으로 검사한다.
-// 실패(작성자가 고칠 것): CHANGELOG 누락, PR 본문의 보호 경로 체크리스트 누락, 워크플로 캐시 사용,
+// 실패(작성자가 고칠 것): 변경 기록(CHANGELOG 또는 그 PR의 변경 조각) 누락, 설계서를 바꾼 PR의 설계서 기록 누락,
+//   PR 본문의 보호 경로 체크리스트 누락, 워크플로 캐시 사용,
 //   PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한.
 // 신호(제작자 결정 2026-11-14): 검사 약화·샌드박스·권한 완화·정해 둔 environment 밖 참조·기존 자체 테스트 파일 변경은 표시만 하고
 //   risk-gate가 위험도를 높음으로 올려 제작자 head 승인을 요구한다.
 // 기준선은 base 커밋의 파일과 main 설정(cfg)이다. PR 트리의 설정을 기준으로 쓰지 않는다.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { CHANGES_DIR, fragmentPathFor, parseFragment } from '../lib/changes.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import { CONFIG_FILE } from '../lib/config.ts';
+import { compareVersions, DESIGN_DOC, readDesignVersion } from '../lib/design-version.ts';
 import { LITERAL_PATHSPECS, gitTry, showFile } from '../lib/git.ts';
 import { matchesAny } from '../lib/util.ts';
 import { changedFiles, type RiskSignal } from './risk-gate.ts';
@@ -193,6 +196,8 @@ export function harnessGuard(o: {
    * 신호(위험도 높음)와 워크플로 검사는 그대로 낸다
    */
   skipAuthorChecks?: boolean;
+  /** PR 브랜치 이름. 이 이름의 변경 조각만 기록으로 센다(TD-39). 없으면 조각을 세지 않는다 */
+  branch?: string;
 }): HarnessGuardResult {
   const changed = changedFiles(o.root, o.base).map((f) => f.path);
   const prot = changed.filter((f) => matchesAny(f, o.cfg.protectedPaths));
@@ -213,10 +218,42 @@ export function harnessGuard(o: {
 
   // ---- 실패: 작성자가 고칠 것 ----
   const author = !o.skipAuthorChecks;
-  if (author && !changed.includes(CHANGELOG))
+  // 변경 기록(TD-39): CHANGELOG·설계서 변경 이력을 직접 고쳤거나, 이 PR 브랜치 이름의 변경 조각에 base에 없던 항목을
+  // 형식에 맞게 더했다. 다른 브랜치의 조각은 세지 않는다(모으기 PR과 충돌한다). 브랜치를 모르면 조각을 세지 않는다
+  const own = o.branch ? fragmentPathFor(o.branch) : null;
+  const added = (section: 'changelog' | 'design'): boolean => {
+    if (!own || !changed.includes(own)) return false;
+    const h = head(own);
+    const now = h === null ? null : parseFragment(own, h);
+    if (!now?.ok) return false;
+    const b = base(own);
+    const was = b === null ? null : parseFragment(own, b);
+    const before = new Set(was?.ok ? was.value[section] : []);
+    return now.value[section].some((x) => !before.has(x));
+  };
+  if (author && !changed.includes(CHANGELOG) && !added('changelog'))
     failures.push(
-      `보호 경로를 바꿨는데 ${CHANGELOG}가 그대로다\n  고치는 법: "다음 버전" 아래에 한 줄을 남겨라\n  근거: ${DOC}`,
+      `보호 경로를 바꿨는데 ${CHANGELOG}도 이 PR의 변경 조각(${CHANGES_DIR}/)도 그대로다\n  고치는 법: 이 PR의 변경 조각(${CHANGES_DIR}/<브랜치 이름의 / 뒤>.md)의 "## CHANGELOG" 아래에 한 줄을 더하라. 다른 브랜치 이름의 조각과 형식이 틀린 조각은 세지 않는다(doc-lint R8 변경 조각)\n  근거: ${DOC}`,
     );
+  // 설계서를 바꿨으면 설계서 기록: 변경 이력에 base의 항목 버전을 모두 남긴 채 더 큰 버전을 더했거나(옛 방식, 모으기 PR)
+  // 이 PR의 조각에 설계서 항목을 더했다. 마지막 항목을 지우거나 글만 고친 것은 기록이 아니다
+  const versions = (text: string | null): string[] | null => {
+    const r = text === null ? null : readDesignVersion(text);
+    return r?.ok ? r.value.items.map((x) => x.version) : null;
+  };
+  if (author && changed.includes(DESIGN_DOC)) {
+    const now = versions(head(DESIGN_DOC));
+    const was = versions(base(DESIGN_DOC));
+    const historyAdded =
+      now !== null &&
+      was !== null &&
+      was.every((v) => now.includes(v)) &&
+      compareVersions(now[now.length - 1], was[was.length - 1]) > 0;
+    if (!historyAdded && !added('design'))
+      failures.push(
+        `설계서(${DESIGN_DOC})를 바꿨는데 변경 이력에도 이 PR의 변경 조각에도 설계서 기록이 없다\n  고치는 법: 이 PR의 변경 조각에 "## 설계서 변경 이력" 한 줄을 더하라(모으기 PR이 버전을 매긴다)\n  근거: ${DOC}`,
+      );
+  }
   let bodyUnknown = false;
   if (author && o.prBody === null) bodyUnknown = true;
   else if (author && !/^\s*[-*] \[[xX]\] 보호 경로 변경:/m.test(o.prBody ?? ''))

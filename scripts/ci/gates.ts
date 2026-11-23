@@ -177,6 +177,7 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
             cfg: o.cfg,
             prBody: o.prBody ?? null,
             skipAuthorChecks: revert?.verified === true,
+            branch: o.branch,
           });
           signals.push(...r.signals);
           return r.result;

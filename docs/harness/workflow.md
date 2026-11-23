@@ -172,7 +172,28 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
   - 넣을 값의 형식: 예) "`auth.json` 파일 내용 전체. `{`로 시작한다. 로그인 URL이 아니다."
   - 확인 방법: 등록 뒤 봇이 무엇으로 확인하는지(이름 조회, `required-checks` 등). 봇은 시크릿 값을 볼 수 없다.
   - 절차 문서 링크([SECURITY.md](../SECURITY.md) 등).
-- **보호 경로를 바꾼 PR**(`harness-guard`): `docs/harness/CHANGELOG.md`에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조, 기존 자체 테스트 파일 `scripts/selftest/`의 수정·삭제)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
+- **보호 경로를 바꾼 PR**(`harness-guard`): 이 PR의 변경 조각(아래 "변경 조각")에 한 줄을 남기고, PR 본문의 `- [ ] 보호 경로 변경: …`을 `[x]`로 체크한다. 워크플로에 Actions 캐시를 쓰지 않는다. 검사 약화·권한 완화(워크플로·job 삭제, `harness.config.json`의 판정 관련 키, `.claude/`·`.codex/` 권한·훅, 새 `write` 권한, 정해 둔 environment 밖 참조, 기존 자체 테스트 파일 `scripts/selftest/`의 수정·삭제)가 탐지되면 위험도 높음이 되어 제작자 head 승인이 필요하다.
+  - **변경 조각**: `docs/harness/CHANGELOG.md`와 설계서의 머리말·변경 이력을 직접 고치지 않고, PR마다 파일 하나에 적는다. PR마다 새 파일이라 다른 PR과 충돌하지 않는다.
+    - 자리와 이름: `docs/harness/changes/<계획 id>-s<N>.md`(소규모 계획은 `docs/harness/changes/<계획 id>.md`). PR 브랜치 이름의 `/` 뒤와 같다. `harness-guard`는 이 이름의 조각에 base에 없던 항목이 있을 때만 기록으로 센다. 다른 PR의 조각은 고치지 않는다.
+    - 형식:
+
+      ```markdown
+      # 변경 조각: <계획 id>-s<N>
+
+      ## CHANGELOG
+
+      - <바뀐 것 한 줄>
+
+      ## 설계서 변경 이력
+
+      - <설계서에서 바뀐 것 한 줄>
+      ```
+
+    - 설계서를 고쳤으면 `## 설계서 변경 이력`에 한 줄을 적는다. 없으면 `harness-guard`가 막는다. 설계서를 고치지 않았으면 이 섹션을 두지 않는다.
+    - 항목은 `- `로 시작하는 한 줄이다. 버전(`v0.7.1`)과 Markdown 링크를 넣지 않는다. 버전과 날짜는 모으기 PR이 붙이고, 링크는 옮기면 깨진다.
+    - 형식은 `doc-lint`가 `R8 변경 조각`으로 본다. 형식이 틀린 조각은 `harness-guard`가 기록으로 세지 않는다.
+    - 버전과 날짜를 붙여 CHANGELOG·설계서 변경 이력으로 옮기고 조각을 지우는 일은 모으기 PR이 한다. 모으기 PR은 제작자가 지시할 때 연다.
+    - CHANGELOG(설계서는 변경 이력)를 직접 고친 PR도 통과한다(모으기 PR, 이 규칙 전에 쓴 계획).
   - **자체 테스트**: 보호 경로를 바꾼 PR에서는 `gates` 워크플로의 `selftest` job이 main의 시나리오로 PR의 하네스를 시험하고, 결과가 `harness-guard`에 합쳐진다. 설명이 `자체 테스트 실패: <id 목록>`이면 `selftest` job 로그에서 그 시나리오의 `✗` 줄을 보고 하네스를 고친다. 로컬에서는 `node scripts/harness.ts self-test --only <id>`로 다시 본다. `자체 테스트 결과가 없다`(`error`)는 job이 보고서를 남기지 못한 것이다(시간 초과, 실행기 오류). job 로그를 본다.
   - 시나리오가 요구하는 동작을 바꾸려면 시나리오를 먼저 고친다. `selftest` job은 PR의 시나리오가 아니라 main의 시나리오를 쓰므로, 동작과 시나리오를 한 PR에서 함께 바꾸면 통과하지 못한다. 먼저 시나리오가 옛 동작과 새 동작을 모두 받도록 고치는 PR(위험도 높음)을 병합하고, 다음 PR에서 동작을 바꾼다.
 - **교차 검증**(`review/claude`, `review/codex`): `check`가 통과하면 판정 워크플로(`judge-claude`, `judge-codex`)가 main의 정의로 돈다. 위험도 낮음은 작성 도구와 다른 검증자 1명, 보통·높음은 둘 다 판정하고, 돌지 않은 쪽은 "해당 없음(통과)"으로 기록된다. 승인이고 P0·P1 지적이 없어야 success다.
@@ -205,7 +226,7 @@ git -C <worktree> push origin <브랜치>
   git -C <worktree> push origin <브랜치>
   ```
 - 충돌 표식이 남으면 `check`가 막는다. `bypass-scan` 단계가 작업 트리에서 `<<<<<<<`나 `>>>>>>>`로 시작하는 줄을 찾아 `R7 충돌 표식`으로 알린다. `=======`만 있는 줄은 세지 않는다.
-- 설계서(`docs/harness/design.md`)를 고친 PR은 병합 뒤에 머리말의 버전·최종 갱신을 변경 이력의 마지막 항목과 맞춘다. main이 같은 버전을 먼저 썼으면 이 PR의 항목을 다음 번호로 올린다. 어긋나면 `doc-lint`가 `R8 설계서 버전`으로 막는다.
+- 설계서(`docs/harness/design.md`)를 고친 PR은 머리말의 버전·최종 갱신과 변경 이력을 고치지 않고 변경 조각의 `## 설계서 변경 이력`에 한 줄을 적는다. 머리말과 변경 이력은 모으기 PR이 고친다. 머리말과 마지막 항목이 어긋나면 `doc-lint`가 `R8 설계서 버전`으로 막는다. 변경 이력을 직접 고친 옛 방식 PR이 main과 번호가 겹치면, 병합 뒤에 이 PR의 항목을 다음 번호로 올리고 머리말을 맞춘다.
 - 완료 커밋 뒤에 충돌 해결로 코드가 바뀌면 4절대로 그 step을 `in_progress`로 되돌리고 진행 로그에 남긴다.
 - 충돌을 풀 수 없거나 push가 막히면 우회하지 말고 7절 형식으로 Issue에 `needs-human` 라벨과 질문을 남긴다. 댓글만 남기면 `start`의 ①에 나오지 않는다.
 - runner는 충돌을 만나면 제작자 답을 기다리지 않고 충돌을 남긴 병합과 충돌 해결 세션을 띄운다. 해결 세션은 충돌 파일만 고치고 git 명령은 쓰지 않는다. 스테이징·커밋·push와 판정(충돌 표시, AC, `check`)은 runner가 하고, 실패하면 병합을 취소한다. 5회 실패하면 계획 파일을 바꾸지 않고 Issue에 `needs-human`과 중단 보고를 남긴다. 제작자가 그 Issue에 답하면 runner가 답을 넣어 다시 푼다. 사람이 직접 병합해 push했다면 그 뒤 답을 달면 된다.
