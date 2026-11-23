@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runSync } from './exec.ts';
 import {
+  GitHubError,
   newestFirst,
   type Change,
   type Comment,
@@ -26,9 +27,11 @@ import {
 
 /**
  * 상태 파일의 댓글. `changes`가 없으면 만든 것 하나뿐이다(고친 적 없음).
- * `incomplete`는 이력을 다 읽지 못한 경우를 흉내 낸다
+ * `incomplete`는 이력을 다 읽지 못한 경우를 흉내 낸다.
+ * `id`(댓글 번호)가 없는 옛 상태 파일의 댓글은 번호를 읽지 못한 것(빈 문자열)으로 돌려준다
  */
-export interface FakeComment extends Omit<Comment, 'history'> {
+export interface FakeComment extends Omit<Comment, 'history' | 'id'> {
+  id?: string;
   changes?: Change[];
   incomplete?: boolean;
 }
@@ -48,6 +51,7 @@ function fromFakeIssue({ comments: _c, changes: _h, incomplete: _i, ...i }: Fake
 function fromFakeComment({ changes, incomplete, ...c }: FakeComment): Comment {
   return {
     ...c,
+    id: c.id ?? '',
     history: { changes: changes ?? [{ by: c.author, at: c.createdAt }], complete: !incomplete },
   };
 }
@@ -57,6 +61,15 @@ function stamp(s: FakeState): string {
   const t = Math.max(Date.now(), (s.clock ?? 0) + 1);
   s.clock = t;
   return new Date(t).toISOString();
+}
+
+/** 다음 댓글 번호: 지금까지 준 번호와 상태에 있는 모든 댓글의 번호보다 크다(만들어진 순서대로 커진다) */
+function nextCommentId(s: FakeState): string {
+  let max = s.commentSeq ?? 0;
+  for (const i of s.issues)
+    for (const c of i.comments) if (c.id && /^\d+$/.test(c.id)) max = Math.max(max, Number(c.id));
+  s.commentSeq = max + 1;
+  return String(s.commentSeq);
 }
 
 /** 상태 파일의 PR. `headSha`는 저장하지 않고 읽을 때 원격 브랜치 끝으로 채운다 */
@@ -75,6 +88,22 @@ export interface FakeState {
   next: number;
   /** 마지막으로 준 시각(ms). stamp()가 쓴다 */
   clock?: number;
+  /** 마지막으로 준 댓글 번호. nextCommentId()가 쓴다 */
+  commentSeq?: number;
+  /**
+   * `comment`(봇 계정의 댓글 게시)의 실패 흉내(선택). 불릴 때마다 앞에서 하나를 꺼낸다.
+   * - reject: 댓글을 남기지 않고 메시지에 `(HTTP 422)`가 든 GitHubError를 던진다(본문을 거부했다)
+   * - lost: 댓글을 남긴 뒤 `(HTTP 422)`가 없는 GitHubError를 던진다(저장된 뒤 응답을 잃었다)
+   * - down: 댓글을 남기지 않고 `(HTTP 422)`가 없는 GitHubError를 던진다
+   * 제작자·다른 계정의 댓글을 흉내 내는 `ownerComment`·`commentAs`는 이 장치를 타지 않는다
+   */
+  commentFaults?: ('reject' | 'lost' | 'down')[];
+  /** 본문의 길이가 이 값을 넘으면 `comment`가 reject처럼 던진다(선택) */
+  commentMax?: number;
+  /** 0보다 크면 `addLabel`이 GitHubError를 던지고 1을 줄인다(선택) */
+  labelFaults?: number;
+  /** `comment`가 받은 호출의 수(성공·실패를 합친다) */
+  commentCalls?: number;
   issues: FakeIssue[];
   prs: FakePR[];
   /** branchInfo가 돌려줄 필수 체크(선택) */
@@ -151,6 +180,7 @@ function git(args: string[], cwd: string): string {
 
 /** 상태를 읽고-고치고-쓰는 메서드. 작업자 프로세스 여러 개가 같은 상태 파일을 쓰므로 잠금 안에서 돈다 */
 const MUTATORS = [
+  'comment',
   'commentAs',
   'editIssueAs',
   'editCommentAs',
@@ -298,7 +328,23 @@ export class FakeGitHub implements GitHubPort {
     return this.issue(this.load(), n).comments.map(fromFakeComment);
   }
   comment(n: number, body: string): void {
-    this.commentAs(n, this.load().me, body);
+    const s = this.load();
+    s.commentCalls = (s.commentCalls ?? 0) + 1;
+    const fault = s.commentFaults?.shift();
+    const rejected =
+      fault === 'reject' || (s.commentMax !== undefined && body.length > s.commentMax);
+    if (!rejected && fault !== 'down')
+      this.issue(s, n).comments.push({
+        id: nextCommentId(s),
+        author: s.me,
+        body,
+        createdAt: stamp(s),
+      });
+    this.save(s);
+    if (rejected)
+      throw new GitHubError(`[fake-gh] #${n} 댓글 게시 실패: Validation Failed (HTTP 422)`);
+    if (fault)
+      throw new GitHubError(`[fake-gh] #${n} 댓글 게시 실패: 응답을 받지 못했다 (HTTP 502)`);
   }
   prComments(n: number): { id: number; author: string; body: string }[] {
     const s = this.load();
@@ -313,7 +359,7 @@ export class FakeGitHub implements GitHubPort {
   /** 테스트용: 임의 계정(외주 개발자, 대소문자가 다른 제작자 등)의 댓글 */
   commentAs(n: number, author: string, body: string): void {
     const s = this.load();
-    this.issue(s, n).comments.push({ author, body, createdAt: stamp(s) });
+    this.issue(s, n).comments.push({ id: nextCommentId(s), author, body, createdAt: stamp(s) });
     this.save(s);
   }
   /** 테스트용: `by` 계정이 Issue 제목·본문을 고친다(변경 이력에 남는다) */
@@ -338,6 +384,11 @@ export class FakeGitHub implements GitHubPort {
   }
   addLabel(n: number, label: string): void {
     const s = this.load();
+    if ((s.labelFaults ?? 0) > 0) {
+      s.labelFaults = (s.labelFaults ?? 0) - 1;
+      this.save(s);
+      throw new GitHubError(`[fake-gh] #${n} 라벨 추가 실패 (HTTP 502)`);
+    }
     const i = this.issue(s, n);
     if (!i.labels.includes(label)) i.labels.push(label);
     const pr = s.prs.find((p) => p.number === n);

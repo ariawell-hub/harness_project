@@ -165,6 +165,7 @@ const SHA_B = 'b'.repeat(40);
 function comment(author: string, body: string, editors: string[] = []): Comment {
   const at = '2026-11-16T00:00:00Z';
   return {
+    id: '1',
     author,
     body,
     createdAt: at,

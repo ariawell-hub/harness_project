@@ -3,13 +3,15 @@
 // 내 PR 갱신 대상 판정(우선순위 2번, ADR-0006),
 // 고친 댓글·Issue의 신뢰 판정(편집 이력, TD-19·TD-26). 가짜 GitHub + 로컬 bare 원격. 실제 gh는 부르지 않는다.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { acceptHint } from '../commands/start.ts';
 import { completeStep, newTask } from '../commands/task.ts';
 import { ConfigError, loadConfig, type HarnessConfig } from '../lib/config.ts';
 import {
+  GitHubError,
+  commentId,
   getGitHub,
   toContentHistory,
   toIssue,
@@ -19,19 +21,25 @@ import {
   type Issue,
   type IssueHistory,
 } from '../lib/github.ts';
+import { repoInfo } from '../lib/git.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
 import {
   BOT_ISSUE_ACCEPT,
+  commentsAfter,
   filterTrustedIssues,
   issueTrust,
   ownerAccepted,
   ownerComment,
   ownerCommentRejection,
   pickNext,
+  questionBase,
   readConflictState,
   readLocalPlans,
+  readQuestionState,
   sameLogin,
   writeConflictState,
+  writeQuestionState,
+  type QuestionState,
   type Pick,
 } from '../runner/next.ts';
 import { revertMarker } from '../lib/revert-marker.ts';
@@ -104,6 +112,7 @@ const issue = (number: number, author: string, labels: string[] = []): Issue => 
 
 /** `author`가 `at`에 쓴 댓글. `edits`는 그 뒤 고친 기록 */
 const said = (author: string, body: string, at = T1, edits: Change[] = []): Comment => ({
+  id: '1',
   author,
   body,
   createdAt: at,
@@ -1212,4 +1221,294 @@ test('readLocalPlans: 병합된 PR의 step이 main에서 끝나 있으면 worktr
     assert.notEqual(local.stepStatus, 'completed');
     assert.equal(local.pr?.state, 'merged');
   });
+});
+
+// ---- 올리지 못한 질문(Issue #211): 기준 뒤의 댓글, 질문 상태, 답변 인정 ----
+
+/** 번호가 `id`인 제작자 댓글 */
+const numbered = (id: string): Comment => ({ ...said('maker', `댓글 ${id}`), id });
+
+test('commentsAfter: 번호가 기준보다 큰 댓글만 내고, 자릿수가 다른 번호를 수로 견준다', () => {
+  const big = '12345678901234567890';
+  const bigger = '12345678901234567891';
+  const list = [numbered('9'), numbered('10'), numbered(''), numbered(big), numbered(bigger)];
+  const ids = (base: string | undefined) => commentsAfter(list, base).map((c) => c.id);
+  assert.deepEqual(ids('0'), ['9', '10', big, bigger], '0이면 번호가 있는 모든 댓글');
+  assert.deepEqual(ids('9'), ['10', big, bigger], '9 < 10 (글자 순서가 아니다)');
+  assert.deepEqual(ids('11'), [big, bigger], '목록에 기준과 같은 번호가 없어도 된다');
+  assert.deepEqual(ids(big), [bigger], '20자리 번호');
+  assert.deepEqual(ids(bigger), []);
+  assert.deepEqual(commentsAfter([], '0'), []);
+});
+
+test('commentsAfter: 기준이 없거나 숫자가 아니면 빈 목록이다(0으로 보지 않는다)', () => {
+  const list = [numbered('1'), numbered('2')];
+  for (const bad of [undefined, '', 'abc', '1.5', '-1', ' 1', '1 '])
+    assert.deepEqual(commentsAfter(list, bad), [], JSON.stringify(bad));
+});
+
+test('questionBase: 마지막 댓글의 번호가 기준이다. 댓글이 없으면 0이고, 번호를 읽지 못하면 기준이 없다', () => {
+  assert.equal(questionBase([]), '0');
+  assert.equal(
+    questionBase([numbered('9'), numbered('7')]),
+    '7',
+    '가장 큰 번호가 아니라 마지막 댓글',
+  );
+  assert.equal(
+    questionBase([numbered('9'), numbered('')]),
+    undefined,
+    '0이나 앞 댓글의 번호로 대신하지 않는다',
+  );
+  assert.equal(questionBase([numbered('abc')]), undefined);
+});
+
+test('writeQuestionState: 상태 파일을 그 자리에서 덮어쓰지 않고 다 쓴 새 파일로 바꿔 넣는다 (Issue #211, 판정 지적 F10)', () => {
+  const dir = tmp('harness-question-atomic-');
+  sh('git', ['init', '-q'], dir);
+  const info = repoInfo(dir);
+  const stateDir = path.join(dir, '.git', 'harness');
+  const f = path.join(stateDir, 'questions.json');
+  const first = {
+    reported: ['a'],
+    waiting: true,
+    stage: 'plan',
+    unposted: true,
+    base: '3',
+  } as const;
+  writeQuestionState(info, { ...first, reported: [...first.reported] });
+  // 그 자리에서 덮어쓰면 쓰는 중에 runner가 끝났을 때 빈 파일이 남고, 빈 파일은 "올리지 못한 질문 없음"으로 읽힌다.
+  // 바꿔 넣으면 어느 순간에 끝나도 전의 내용이나 새 내용만 남는다. 먼저 열어 둔 파일(전의 내용)이 새로 쓴 뒤에도
+  // 그대로인 것으로 확인한다: 같은 파일을 덮어쓰지 않았다
+  const fd = openSync(f, 'r');
+  try {
+    writeQuestionState(info, { ...first, reported: ['a', 'b'], unposted: false });
+    assert.deepEqual(JSON.parse(readFileSync(fd, 'utf8')), first, '전의 파일은 그대로다');
+  } finally {
+    closeSync(fd);
+  }
+  assert.deepEqual(readQuestionState(info), {
+    reported: ['a', 'b'],
+    waiting: true,
+    stage: 'plan',
+    unposted: false,
+    base: '3',
+  });
+  assert.deepEqual(
+    readdirSync(stateDir).filter((n) => n.startsWith('questions')),
+    ['questions.json'],
+    '임시 파일이 남지 않는다',
+  );
+});
+
+test('readQuestionState: unposted·base가 없는 옛 파일을 그대로 읽고, 숫자가 아닌 base는 없는 것으로 읽는다', () => {
+  const dir = tmp('harness-question-state-');
+  sh('git', ['init', '-q'], dir);
+  const info = repoInfo(dir);
+  assert.deepEqual(readQuestionState(info), {
+    reported: [],
+    waiting: false,
+    stage: 'plan',
+    unposted: false,
+  });
+  const f = path.join(dir, '.git', 'harness', 'questions.json');
+  writeQuestionState(info, {
+    reported: ['a'],
+    waiting: true,
+    stage: 'step',
+    unposted: true,
+    base: '12',
+  });
+  assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), {
+    reported: ['a'],
+    waiting: true,
+    stage: 'step',
+    unposted: true,
+    base: '12',
+  });
+  assert.deepEqual(readQuestionState(info), {
+    reported: ['a'],
+    waiting: true,
+    stage: 'step',
+    unposted: true,
+    base: '12',
+  });
+  // 옛 형식: 두 필드가 없다
+  writeFileSync(f, JSON.stringify({ reported: ['a'], waiting: true, stage: 'plan' }));
+  assert.deepEqual(readQuestionState(info), {
+    reported: ['a'],
+    waiting: true,
+    stage: 'plan',
+    unposted: false,
+  });
+  for (const base of ['', 'abc', 12, null, { author: 'maker', createdAt: T1 }, '없음']) {
+    writeFileSync(
+      f,
+      JSON.stringify({ reported: [], waiting: true, stage: 'plan', unposted: true, base }),
+    );
+    const s = readQuestionState(info);
+    assert.equal(s.base, undefined, JSON.stringify(base));
+    assert.ok(!('base' in s), '값이 없다');
+    assert.equal(s.unposted, true);
+  }
+  writeFileSync(
+    f,
+    JSON.stringify({ reported: [], waiting: true, stage: 'plan', unposted: true, base: '0' }),
+  );
+  assert.equal(readQuestionState(info).base, '0');
+});
+
+/**
+ * needs-human이 붙은 Issue에 멈춘(blocked) 내 계획이 있고, 제작자 댓글 둘(번호 1, 2)이 달려 있다.
+ * 질문 상태를 `qs`로 두고 pickNext 결과를 돌려준다(`qs`가 null이면 상태 파일이 없다)
+ */
+async function pickWithQuestion(qs: Partial<QuestionState> | null): Promise<Pick> {
+  const fx = makeFixture({ github: GITHUB });
+  const prev = process.env.HARNESS_FAKE_GH;
+  try {
+    const state = path.join(fx.dir, 'gh.json');
+    initFakeState(state, { remote: fx.remote, owner: 'maker' });
+    process.env.HARNESS_FAKE_GH = state;
+    const n = addFakeIssue(state, 'Demo', '데모', ['needs-human']);
+    const t = await newTask(fx.root, {
+      issue: n,
+      slug: 'demo',
+      size: 'medium',
+      owner: 'runner-1',
+      github: false,
+      date: '20261112',
+    });
+    const f = path.join(t.worktree, t.planFile);
+    writeFileSync(f, readFileSync(f, 'utf8').replace(/^status: \w+/m, 'status: blocked'));
+    const gh = new FakeGitHub(state);
+    gh.ownerComment(n, '먼저 있던 댓글');
+    gh.ownerComment(n, '마지막 댓글');
+    assert.deepEqual(
+      gh.comments(n).map((c) => c.id),
+      ['1', '2'],
+      '가짜는 만들어진 순서대로 커지는 번호를 준다',
+    );
+    if (qs)
+      writeQuestionState(repoInfo(t.worktree), {
+        reported: [],
+        waiting: true,
+        stage: 'plan',
+        unposted: false,
+        ...qs,
+      });
+    return pickNext({
+      main: fx.root,
+      cfg: loadConfig(fx.root),
+      gh: getGitHub(fx.root),
+      worker: 'runner-1',
+    });
+  } finally {
+    if (prev === undefined) delete process.env.HARNESS_FAKE_GH;
+    else process.env.HARNESS_FAKE_GH = prev;
+    fx.cleanup();
+  }
+}
+
+test('pickNext: 올리지 못한 질문이 있는 계획은 기준 뒤의 제작자 댓글만 답으로 받는다 (Issue #211)', async () => {
+  // 마지막 댓글(번호 2)이 기준과 같다: 질문보다 먼저 있던 댓글이다
+  const same = await pickWithQuestion({ unposted: true, base: '2' });
+  assert.equal(same.task.kind, 'idle');
+  assert.equal(same.waiting.human, 1, '사람 대기로 센다');
+  // 기준(번호 1) 뒤의 제작자 댓글이 마지막이다
+  const after = await pickWithQuestion({ unposted: true, base: '1' });
+  assert.equal(after.task.kind, 'answered');
+  assert.equal(after.task.kind === 'answered' && after.task.answer, '마지막 댓글');
+  // 기준 댓글이 목록에 없어도(번호 0: 댓글이 없던 때) 번호로 가린다
+  assert.equal((await pickWithQuestion({ unposted: true, base: '0' })).task.kind, 'answered');
+  // 기준을 아직 잡지 못했다
+  assert.equal((await pickWithQuestion({ unposted: true })).task.kind, 'idle');
+});
+
+test('pickNext: 올리지 못한 질문이 없으면 지금처럼 마지막 제작자 댓글을 답으로 받는다', async () => {
+  assert.equal((await pickWithQuestion(null)).task.kind, 'answered');
+  assert.equal((await pickWithQuestion({ unposted: false })).task.kind, 'answered');
+  // 전달이 끝난 질문에 남은 기준은 보지 않는다
+  assert.equal((await pickWithQuestion({ unposted: false, base: '2' })).task.kind, 'answered');
+});
+
+test('commentId: fullDatabaseId를 숫자로만 된 문자열로 바꾸고, 그 밖의 값은 빈 문자열이다', () => {
+  assert.equal(
+    commentId('12345678901234567890'),
+    '12345678901234567890',
+    '큰 번호를 수로 바꾸지 않는다',
+  );
+  assert.equal(commentId(123), '123');
+  for (const bad of [undefined, null, '', 'abc', '12a', '-1', 1.5, {}])
+    assert.equal(commentId(bad), '');
+});
+
+test('가짜 GitHub: 댓글 게시·라벨 실패 장치와 댓글 번호 (Issue #211)', () => {
+  const dir = tmp('harness-fake-gh-');
+  const state = path.join(dir, 'gh.json');
+  initFakeState(state, { remote: path.join(dir, 'remote.git'), owner: 'maker' });
+  const n = addFakeIssue(state, 'Demo', '데모');
+  const read = () => JSON.parse(readFileSync(state, 'utf8')) as FakeState;
+  const patch = (fn: (s: FakeState) => void) => {
+    const s = read();
+    fn(s);
+    writeFileSync(state, JSON.stringify(s));
+  };
+  const gh = new FakeGitHub(state);
+  const rejected = (e: unknown) => e instanceof GitHubError && e.message.includes('(HTTP 422)');
+  const uncertain = (e: unknown) => e instanceof GitHubError && !e.message.includes('(HTTP 422)');
+  patch((s) => {
+    s.commentFaults = ['reject', 'lost', 'down'];
+  });
+  assert.throws(() => gh.comment(n, 'a'), rejected);
+  assert.equal(gh.comments(n).length, 0, 'reject는 댓글을 남기지 않는다');
+  assert.throws(() => gh.comment(n, 'b'), uncertain);
+  assert.deepEqual(
+    gh.comments(n).map((c) => c.body),
+    ['b'],
+    'lost는 댓글을 남긴 뒤 던진다',
+  );
+  assert.throws(() => gh.comment(n, 'c'), uncertain);
+  assert.equal(gh.comments(n).length, 1, 'down은 댓글을 남기지 않는다');
+  gh.comment(n, 'd'); // 장치가 비면 지금처럼 올린다
+  gh.ownerComment(n, 'e'); // 제작자 댓글은 장치를 타지 않는다
+  assert.deepEqual(
+    gh.comments(n).map((c) => [c.id, c.author, c.body]),
+    [
+      ['1', 'harness-bot', 'b'],
+      ['2', 'harness-bot', 'd'],
+      ['3', 'maker', 'e'],
+    ],
+    '번호는 만들어진 순서대로 커진다',
+  );
+  assert.equal(read().commentCalls, 4, 'comment의 호출만 센다(성공·실패를 합친다)');
+
+  patch((s) => {
+    s.commentMax = 3;
+  });
+  gh.comment(n, 'abc');
+  assert.throws(() => gh.comment(n, 'abcd'), rejected, '상한을 넘는 본문은 거부한다');
+  assert.equal(gh.comments(n).at(-1)!.body, 'abc');
+
+  patch((s) => {
+    s.labelFaults = 1;
+  });
+  assert.throws(() => gh.addLabel(n, 'needs-human'), uncertain);
+  assert.ok(!gh.getIssue(n).labels.includes('needs-human'));
+  gh.addLabel(n, 'needs-human');
+  assert.ok(gh.getIssue(n).labels.includes('needs-human'));
+
+  // 번호가 없는 옛 상태의 댓글은 번호를 읽지 못한 것으로 돌려주고, 새 댓글의 번호는 있는 번호보다 크다
+  patch((s) => {
+    s.issues[0].comments.push(
+      { author: 'x', body: 'old', createdAt: T1 },
+      { id: '40', author: 'x', body: 'm', createdAt: T1 },
+    );
+  });
+  gh.ownerComment(n, 'f');
+  assert.deepEqual(
+    gh
+      .comments(n)
+      .map((c) => c.id)
+      .slice(-3),
+    ['', '40', '41'],
+  );
 });

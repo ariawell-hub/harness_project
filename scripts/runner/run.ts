@@ -15,7 +15,7 @@ import { clearApprovalMarker, readApprovalMarker, writeApprovalMarker } from '..
 import { RESET_KEY, judge, readAttempts, recordAttempt, keyFailures } from '../lib/attempts.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { runShell, tail } from '../lib/exec.ts';
-import { getGitHub, type GitHubPort, type PullRequest } from '../lib/github.ts';
+import { GitHubError, getGitHub, type GitHubPort, type PullRequest } from '../lib/github.ts';
 import {
   changedFiles,
   defaultBase,
@@ -24,6 +24,7 @@ import {
   gitTry,
   harnessStateDir,
   isClean,
+  listWorktrees,
   remoteBranchDiverged,
   repoInfo,
   revParse,
@@ -63,17 +64,24 @@ import {
   BOT_ISSUE_ACCEPT,
   allowedAccounts,
   clearPrWait,
+  commentsAfter,
   inPlanReview,
   issueTrust,
+  ownerComment,
   planReviewHash,
   pickNext,
+  questionBase,
   readConflictState,
   readLocalPlans,
   readPrWait,
+  readQuestionState,
+  sameLogin,
   writeConflictState,
   writePrWait,
+  writeQuestionState,
   type LocalPlan,
   type Pick,
+  type QuestionState,
 } from './next.ts';
 import { divergence } from './divergence.ts';
 import { readPrLedger } from './ledger-read.ts';
@@ -292,36 +300,7 @@ ${attempts.map((a) => `  - ${a.ts} [${a.key}] ${(a.detail ?? '').split('\n').fil
 
 // ---------- 열린 질문 (TD-18) ----------
 
-/**
- * 올린 질문 제목과 답 대기 여부. worktree 하네스 상태 폴더의 questions.json(answer.md 옆).
- * stage는 질문을 남긴 세션: plan(계획 작성, TD-18) | step(step 세션, TD-24). 답을 받은 뒤 이어 갈 곳이 다르다
- */
-interface QuestionState {
-  reported: string[];
-  waiting: boolean;
-  stage: 'plan' | 'step';
-}
-
-function questionFile(info: RepoInfo): string {
-  return path.join(harnessStateDir(info, 'worktree'), 'questions.json');
-}
-
-function readQuestionState(info: RepoInfo): QuestionState {
-  try {
-    const raw = JSON.parse(readFileSync(questionFile(info), 'utf8')) as Partial<QuestionState>;
-    return {
-      reported: Array.isArray(raw.reported) ? raw.reported.map(String) : [],
-      waiting: raw.waiting === true,
-      stage: raw.stage === 'step' ? 'step' : 'plan',
-    };
-  } catch {
-    return { reported: [], waiting: false, stage: 'plan' };
-  }
-}
-
-function writeQuestionState(info: RepoInfo, s: QuestionState): void {
-  writeFileSync(questionFile(info), JSON.stringify(s, null, 2) + '\n');
-}
+// 질문 상태(`QuestionState`, questions.json)는 next.ts에 있다: 할 일 고르기가 읽는다
 
 /**
  * 질문 댓글의 본문(9.1절). runner가 쓰는 부분(제작자 멘션, 첫 문장, 두 항목) 뒤에 질문 블록들의 글을 코드 블록 하나로 붙인다.
@@ -352,7 +331,170 @@ export function questionComment(o: {
 ${literalBlock(o.questions.map((q) => q.text).join('\n\n'))}`;
 }
 
-/** 계획을 멈추고(blocked, push) Issue에 needs-human + 제작자 멘션으로 질문을 올린다(9.1절) */
+type QuestionArgs = Parameters<typeof questionComment>[0];
+
+/**
+ * 안내 댓글의 본문(Issue #211). 질문 댓글을 올릴 수 없을 때(길이 상한을 넘는다, GitHub이 본문을 거부했다) 대신 올린다.
+ * 세션이 쓴 글(질문의 제목과 본문)을 넣지 않는다: 질문이 있는 곳(계획 파일, 브랜치)과 답하는 법만 알린다
+ */
+export function questionNotice(o: QuestionArgs): string {
+  const mention = o.owner ? `@${o.owner} ` : '';
+  const who = o.stage === 'step' ? `step ${o.step ?? 0} 세션` : '계획 작성 세션';
+  const resume =
+    o.stage === 'step'
+      ? `runner가 답을 넣어 step ${o.step ?? 0}을 이어 간다`
+      : 'runner가 답을 넣어 계획을 다시 작성하고 이어 간다';
+  return `${mention}runner의 ${who}이 질문 ${o.questions.length}건을 남겼다. 답을 받을 때까지 계획 \`${o.planId}\`를 멈춘다.
+
+질문의 글을 댓글로 올리지 못했다(댓글 길이 상한을 넘거나 GitHub이 본문을 받지 않았다). 아래 계획 파일에서 읽는다.
+
+- 질문이 있는 곳: \`${o.planFile}\`의 "열린 질문" 절 (브랜치 \`${o.branch}\`)
+- 답하는 법: 이 Issue에 제작자 계정으로 댓글을 단다. ${resume}.`;
+}
+
+/** GitHub 댓글 길이 상한(글자 수). 넘는 본문은 보내지 않는다 */
+const COMMENT_MAX = 65_536;
+
+/**
+ * 댓글 게시 실패가 "거부"인가: GitHub이 본문을 받지 않았다(HTTP 422). 댓글이 만들어지지 않은 것이 확실하다.
+ * 그 밖의 실패(시간 초과, 네트워크, 5xx, 권한, 한도)는 "불확실"이다: 댓글이 만들어졌는지 알 수 없다
+ */
+function commentRejected(e: unknown): boolean {
+  return e instanceof GitHubError && e.message.includes('(HTTP 422)');
+}
+
+/** 댓글 본문을 견줄 때의 꼴: 줄 끝의 공백과 끝의 빈 줄, \r\n을 맞춘다 */
+function normalBody(s: string): string {
+  return s
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/[ \t]+$/, ''))
+    .join('\n')
+    .replace(/\n+$/, '');
+}
+
+const firstLine = (e: unknown) => (e instanceof Error ? e.message : String(e)).split('\n')[0];
+
+/**
+ * 전달의 결과(Issue #211).
+ * - posted: 이번 질문의 댓글이 Issue에 있는 것을 확인했다(방금 올렸거나 이미 올라가 있었다)
+ * - labeled: needs-human 라벨을 붙였다
+ * - answered: 제작자의 댓글이 먼저 달려 올리지 않았다
+ */
+interface Delivery {
+  posted: boolean;
+  labeled: boolean;
+  answered: boolean;
+}
+
+/**
+ * 질문을 Issue에 전달한다(Issue #211). 예외를 던지지 않고 그때까지의 사실을 돌려준다.
+ * 차례: (1) 멈춘 계획을 커밋·push → (2) 댓글을 읽어 기준을 잡고, 이미 올라간 댓글이나 먼저 달린 제작자 댓글을 본다
+ * → (3) 질문 댓글 → (4) 안내 댓글(길이 상한을 넘거나 거부됐을 때, push된 뒤에만) → (5) 라벨.
+ * posted가 참이 되는 자리에서 라벨을 붙이기 전에 곧바로 reported에 적는다: 라벨을 붙이지 못하거나 그 사이에
+ * runner가 끝나도 그 질문은 다시 올라가지 않는다. 불확실한 실패 뒤에는 이 호출에서 더 올리지 않는다
+ */
+function deliverQuestions(
+  ctx: Ctx,
+  l: LocalPlan,
+  o: { body: string; notice: string; titles: string[] },
+): Delivery {
+  const info = repoInfo(l.worktree);
+  const d: Delivery = { posted: false, labeled: false, answered: false };
+  /** 이유를 경고와 이벤트에 남긴다(질문의 글은 넣지 않는다) */
+  const hold = (reason: string): Delivery => {
+    warn(`질문 전달을 미룬다(#${l.issue}): ${reason}`);
+    event(ctx, 'questions-hold', { plan: l.id, issue: l.issue, reason });
+    return d;
+  };
+  // 1. 멈춘 계획을 커밋하고 push한다. 계획 파일에 blocked가 적혔는데 커밋되기 전에 끝난 실행의 변경이 여기서 커밋된다
+  let pushed = false;
+  try {
+    setPlanStatus(l.worktree, 'blocked');
+    const push = gitTry(['push', '--quiet', '-u', ctx.cfg.github.remote, l.branch], l.worktree);
+    pushed = push.ok;
+    if (!push.ok) warn(`계획 브랜치 push 실패: ${tail(push.stderr, 3)}`);
+  } catch (e) {
+    warn(`멈춘 계획을 커밋하지 못했다: ${firstLine(e)}`);
+  }
+  // 2. 댓글을 읽고 기준을 잡는다
+  let comments;
+  let me: string;
+  try {
+    comments = ctx.gh.comments(l.issue);
+    me = ctx.gh.me();
+  } catch (e) {
+    return hold(`댓글을 읽지 못했다: ${firstLine(e)}`);
+  }
+  let qs = readQuestionState(info);
+  if (qs.base === undefined) {
+    const base = questionBase(comments);
+    // 기준 없이는 앞선 질문의 댓글·앞선 제작자 댓글과 가를 수 없다: 올리지도, 있는 댓글을 믿지도 않는다
+    if (base === undefined) return hold('마지막 댓글의 번호를 읽지 못해 기준을 잡지 못했다');
+    qs = { ...qs, base };
+    writeQuestionState(info, qs);
+  }
+  const posted = (): void => {
+    d.posted = true;
+    const cur = readQuestionState(info);
+    const added = o.titles.filter((x) => !cur.reported.includes(x));
+    writeQuestionState(info, { ...cur, reported: [...cur.reported, ...new Set(added)] });
+  };
+  const after = commentsAfter(comments, qs.base);
+  const wanted = [normalBody(o.body), normalBody(o.notice)];
+  const last = comments.at(-1);
+  if (after.some((c) => sameLogin(c.author, me) && wanted.includes(normalBody(c.body)))) {
+    // (가) 이미 올라간 댓글(응답을 잃은 게시). 그 뒤에 제작자의 댓글이 달려 있어도 같다
+    posted();
+  } else if (last && after.includes(last) && ownerComment(last, ctx.cfg.github.owner)) {
+    // (나) 먼저 달린 제작자 댓글: 올리지 않는다. 다음 할 일 고르기가 그 댓글을 답으로 받는다
+    d.answered = true;
+  } else {
+    // 3. 질문 댓글. 상한을 넘는 본문은 보내지 않는다
+    let notice = o.body.length > COMMENT_MAX;
+    if (!notice) {
+      try {
+        ctx.gh.comment(l.issue, o.body);
+        posted();
+      } catch (e) {
+        if (!commentRejected(e))
+          return hold(`질문 댓글을 올리지 못했다(올라갔는지 알 수 없다): ${firstLine(e)}`);
+        warn(`GitHub이 질문 댓글의 본문을 받지 않았다(#${l.issue}): ${firstLine(e)}`);
+        notice = true;
+      }
+    }
+    // 4. 안내 댓글: 제작자가 그 브랜치에서 질문을 읽어야 하므로 push된 뒤에만 올린다
+    if (notice) {
+      if (!pushed) return hold('멈춘 계획을 push하지 못해 안내 댓글을 올리지 않는다');
+      try {
+        ctx.gh.comment(l.issue, o.notice);
+        posted();
+      } catch (e) {
+        return hold(`안내 댓글을 올리지 못했다: ${firstLine(e)}`);
+      }
+    }
+  }
+  // 5. 라벨은 여기서만 붙인다: 댓글을 올리지 못한 채 라벨만 남으면 그 전의 제작자 댓글이 답으로 보일 수 있다
+  try {
+    ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
+    d.labeled = true;
+  } catch (e) {
+    hold(`라벨을 붙이지 못했다: ${firstLine(e)}`);
+  }
+  return d;
+}
+
+/** 전달의 결과를 질문 상태에 적는다: 댓글과 라벨이 모두 끝나야 unposted를 지운다. 전달이 끝났는지를 돌려준다 */
+function settleDelivery(info: RepoInfo, d: Delivery): boolean {
+  const done = d.posted && d.labeled;
+  writeQuestionState(info, { ...readQuestionState(info), unposted: !done });
+  return done;
+}
+
+/**
+ * 질문을 제작자에게 올린다(9.1절, Issue #211). 질문 상태를 먼저 적고(계획을 멈추기 전이다: 이 뒤 어디에서 runner가
+ * 끝나도 다음 실행이 이어 간다) 계획을 멈춘 뒤 전달한다. 전달이 끝나지 않으면 주기마다 다시 본다(retryQuestions)
+ */
 async function askQuestions(
   ctx: Ctx,
   l: LocalPlan,
@@ -362,8 +504,8 @@ async function askQuestions(
   stage: 'plan' | 'step' = 'plan',
 ): Promise<void> {
   const info = repoInfo(l.worktree);
-  // 댓글의 글을 먼저 만든다. 여기서 실패하면 계획을 멈추거나 질문을 올린 것으로 적지 않는다
-  const body = questionComment({
+  // 댓글의 글을 먼저 만든다. 여기서 실패하면 계획을 멈추거나 질문 상태를 적지 않는다
+  const args: QuestionArgs = {
     owner: ctx.cfg.github.owner,
     stage,
     step: l.step,
@@ -371,30 +513,149 @@ async function askQuestions(
     planFile: ref.file,
     branch: l.branch,
     questions: fresh,
+  };
+  const body = questionComment(args);
+  const notice = questionNotice(args);
+  // 기준: 지금 Issue의 마지막 댓글. 읽지 못하면 전달할 때 다시 읽어 잡는다
+  let base: string | undefined;
+  try {
+    base = questionBase(ctx.gh.comments(l.issue));
+  } catch (e) {
+    warn(`#${l.issue}의 댓글을 읽지 못했다(기준은 전달할 때 잡는다): ${firstLine(e)}`);
+  }
+  writeQuestionState(info, {
+    reported: prev.reported,
+    waiting: true,
+    stage,
+    unposted: true,
+    ...(base !== undefined ? { base } : {}),
   });
   setPlanStatus(
     l.worktree,
     'blocked',
     `열린 질문 ${fresh.length}건: 제작자 답변 대기(#${l.issue})`,
   );
-  const push = gitTry(['push', '--quiet', '-u', ctx.cfg.github.remote, l.branch], l.worktree);
-  if (!push.ok) warn(`계획 브랜치 push 실패(질문은 올린다): ${tail(push.stderr, 3)}`);
-  writeQuestionState(info, {
-    reported: [...prev.reported, ...fresh.map((q) => q.title)],
-    waiting: true,
-    stage,
-  });
-  try {
-    ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
-    ctx.gh.comment(l.issue, body);
-  } catch (e) {
-    warn(`GitHub 알림 실패: ${(e as Error).message}`);
-  }
+  const done = settleDelivery(
+    info,
+    deliverQuestions(ctx, l, { body, notice, titles: fresh.map((q) => q.title) }),
+  );
   event(ctx, 'questions', {
     plan: l.id,
     stage,
     reason: `열린 질문 ${fresh.length}건: ${fresh.map((q) => q.title).join(' / ')}`,
   });
+  if (!done)
+    event(ctx, 'questions-unposted', {
+      plan: l.id,
+      stage,
+      reason: `질문 ${fresh.length}건의 전달이 끝나지 않았다: 주기마다 다시 본다`,
+    });
+}
+
+/** 답을 받았다: 대기와 전달 표시를 지운다. reported는 그대로 둔다(전달을 확인하지 못한 질문의 제목은 거기에 없다) */
+function answeredState(qs: QuestionState): QuestionState {
+  const { base: _base, ...rest } = qs;
+  return { ...rest, waiting: false, unposted: false };
+}
+
+/** 한 계획의 전달이 끝나지 않은 질문을 다시 본다. 조건은 디스크의 계획 파일과 질문 상태 파일에서 읽는다 */
+function retryPlanQuestions(ctx: Ctx, l: LocalPlan, info: RepoInfo): void {
+  const qs = readQuestionState(info);
+  const ref = findPlan(l.worktree, l.id) ?? l.ref;
+  const doc = parseDoc(readFileSync(path.join(l.worktree, ref.file), 'utf8'));
+  if (doc.frontmatter?.status !== 'blocked') {
+    // 질문 상태를 적은 뒤 계획을 멈추기 전에 끝난 실행의 흔적이다. 계획이 멈추지 않았으므로 세션이 다시 돌고,
+    // 질문이 남아 있으면 askQuestions가 처음부터 다시 한다
+    writeQuestionState(info, answeredState(qs));
+    event(ctx, 'questions-reset', {
+      plan: l.id,
+      reason: '계획이 멈추지 않았다: 질문은 세션 뒤에 처음부터 다시 올린다',
+    });
+    return;
+  }
+  if (!qs.waiting) return; // 답을 받아 이어 가는 중이다
+  const fresh = openQuestions(doc.body).filter((q) => !qs.reported.includes(q.title));
+  let done = false;
+  if (!fresh.length) {
+    // 댓글은 올라갔고 라벨만 남았다
+    try {
+      ctx.gh.addLabel(l.issue, ctx.cfg.github.needsHumanLabel);
+      writeQuestionState(info, { ...readQuestionState(info), unposted: false });
+      done = true;
+    } catch (e) {
+      warn(`라벨을 붙이지 못했다(#${l.issue}): ${firstLine(e)}`);
+    }
+  } else {
+    const args: QuestionArgs = {
+      owner: ctx.cfg.github.owner,
+      stage: qs.stage,
+      step: l.step,
+      planId: l.id,
+      planFile: ref.file,
+      branch: l.branch,
+      questions: fresh,
+    };
+    done = settleDelivery(
+      info,
+      deliverQuestions(ctx, l, {
+        body: questionComment(args),
+        notice: questionNotice(args),
+        titles: fresh.map((q) => q.title),
+      }),
+    );
+  }
+  if (done)
+    event(ctx, 'questions-posted', {
+      plan: l.id,
+      stage: qs.stage,
+      reason: `질문의 전달이 끝났다(#${l.issue})`,
+    });
+}
+
+/**
+ * 전달이 끝나지 않은 질문을 다시 본다(Issue #211). 주기마다 할 일을 고르기 전에 부른다: 올린 뒤에 고르면
+ * 그 사이에 달린 제작자 댓글이 봇 댓글에 가려 답으로 받아지지 않는다.
+ * 돌려주는 값은 이 호출 뒤에도 unposted인 채 blocked로 남은 이 작업자의 계획 수다. 예외를 던지지 않는다
+ */
+function retryQuestions(ctx: Ctx): number {
+  const unposted = (worktree: string): boolean => {
+    try {
+      return readQuestionState(repoInfo(worktree)).unposted;
+    } catch {
+      return false;
+    }
+  };
+  let pending = 0;
+  try {
+    // 상태 파일만 먼저 본다(GitHub을 부르지 않는다). 대부분의 주기는 여기서 끝난다
+    pending = listWorktrees(ctx.main.mainRoot).filter((w) => unposted(w.path)).length;
+    if (!pending) return 0;
+    const locals = readLocalPlans({
+      main: ctx.main.mainRoot,
+      cfg: ctx.cfg,
+      gh: ctx.gh,
+      worker: ctx.o.worker,
+    });
+    let left = 0;
+    for (const l of locals) {
+      if (!sameWorker(ctx, l) || !unposted(l.worktree)) continue;
+      try {
+        const info = repoInfo(l.worktree);
+        retryPlanQuestions(ctx, l, info);
+        const ref = findPlan(l.worktree, l.id) ?? l.ref;
+        const status = parseDoc(readFileSync(path.join(l.worktree, ref.file), 'utf8')).frontmatter
+          ?.status;
+        if (readQuestionState(info).unposted && status === 'blocked') left++;
+      } catch (e) {
+        warn(`계획 ${l.id}의 질문을 다시 보지 못했다: ${firstLine(e)}`);
+        left++;
+      }
+    }
+    return left;
+  } catch (e) {
+    warn(`전달이 끝나지 않은 질문을 다시 보지 못했다: ${firstLine(e)}`);
+    return pending;
+  }
 }
 
 // ---------- 계획 작성 세션 ----------
@@ -919,7 +1180,7 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
     const qs = readQuestionState(info);
     if (qs.waiting && qs.stage === 'step') {
       // step 세션의 질문(TD-24): 답을 넣어 그 step을 이어 간다
-      writeQuestionState(info, { ...qs, waiting: false });
+      writeQuestionState(info, answeredState(qs));
       setPlanStatus(t.local.worktree, 'active', `제작자 답변 받음(#${t.issue}): step을 이어 간다`);
       setStepStatus(t.local.worktree, 'in_progress');
       event(ctx, 'answered', { issue: t.issue, resumeStep: true });
@@ -927,7 +1188,7 @@ async function doAnswered(ctx: Ctx, t: Extract<Pick['task'], { kind: 'answered' 
     }
     if (qs.waiting) {
       // 계획 작성 단계의 질문(TD-18): 답을 넣어 계획을 다시 작성한다. step 상태는 그대로 둔다
-      writeQuestionState(info, { ...qs, waiting: false });
+      writeQuestionState(info, answeredState(qs));
       setPlanStatus(t.local.worktree, 'draft', `제작자 답변 받음(#${t.issue}): 계획에 반영한다`);
       event(ctx, 'answered', { issue: t.issue, replan: true });
       return;
@@ -2020,6 +2281,26 @@ const STOP_NOTICE: Partial<Record<StopReason, string>> = {
   error: '오류가 연속으로 나서 멈췄다(runner 로그 runner.jsonl의 error 이벤트에 내용이 있다)',
 };
 
+/**
+ * 전달이 끝나지 않은 질문에 제작자의 답이 이미 달려 있는가(Issue #211): 그 Issue의 마지막 댓글이 기준 뒤의 제작자
+ * 댓글이다(`deliverQuestions`가 질문을 올리지 않고 답으로 넘기는 조건과 같다). 라벨을 붙이지 못해 아직 받지 못한 답이다
+ */
+function answerPending(
+  ctx: Ctx,
+  l: LocalPlan,
+  comments: ReturnType<GitHubPort['comments']>,
+): boolean {
+  const last = comments.at(-1);
+  if (!last) return false;
+  const qs = readQuestionState(repoInfo(l.worktree));
+  return (
+    qs.unposted &&
+    qs.waiting &&
+    commentsAfter(comments, qs.base).includes(last) &&
+    ownerComment(last, ctx.cfg.github.owner)
+  );
+}
+
 /** 정지 알림 댓글 끝의 표식. 같은 작업자·같은 이유의 알림이 마지막 댓글이면 다시 달지 않는다 */
 export function stopMarker(worker: string, reason: string): string {
   return `<!-- harness-runner-stop:${worker.replace(/[^A-Za-z0-9_.-]/g, '_')}:${reason} -->`;
@@ -2030,6 +2311,8 @@ export function stopMarker(worker: string, reason: string): string {
  * 제작자 멘션 댓글(작업자, 이유, 남은 일, 다시 시작하는 명령)을 남긴다.
  * `needs-human`은 붙이지 않고 계획도 멈추지 않는다: 정지는 runner를 다시 시작하면 풀린다. 라벨과 `blocked`는
  * 제작자 답을 기다린다는 뜻이라 다시 시작한 runner가 그 계획을 건너뛴다.
+ * 전달이 끝나지 않은 질문에 제작자가 이미 답한 Issue에는 달지 않는다(`answerPending`): 답은 마지막 댓글일 때만
+ * 받으므로, 그 뒤에 알림을 달면 다음 실행이 그 답을 받지 못하고 질문을 다시 올린다.
  * 알림 실패는 경고만 남긴다(종료를 막지 않는다)
  */
 function notifyStop(ctx: Ctx, stop: StopReason): void {
@@ -2055,8 +2338,14 @@ function notifyStop(ctx: Ctx, stop: StopReason): void {
     const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
     for (const issue of [...new Set(left.map((l) => l.issue))]) {
       try {
-        const last = ctx.gh.comments(issue).at(-1);
+        const comments = ctx.gh.comments(issue);
+        const last = comments.at(-1);
         if (last && last.author === me && last.body.includes(marker)) continue;
+        if (left.some((l) => l.issue === issue && answerPending(ctx, l, comments))) {
+          warn(`#${issue}: 받지 못한 제작자 답이 있어 정지 알림을 달지 않는다`);
+          event(ctx, 'stop-notice-skipped', { issue, reason: stop });
+          continue;
+        }
         const plans = left
           .filter((l) => l.issue === issue)
           .map(
@@ -2150,6 +2439,8 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
         continue;
       }
       syncMain(ctx);
+      // 전달이 끝나지 않은 질문을 할 일을 고르기 전에 다시 본다(Issue #211)
+      const unposted = retryQuestions(ctx);
       const pick = pickNext({ main: main.mainRoot, cfg, gh, worker: o.worker });
       event(ctx, 'pick', { kind: pick.task.kind, reason: pick.reason });
       trackPrs(ctx, pick.locals);
@@ -2241,6 +2532,15 @@ export async function runRunner(o: RunnerOptions): Promise<StopReason> {
             if (removed.length) {
               event(ctx, 'cleanup', { removed: removed.length });
               continue;
+            }
+            if (unposted > 0) {
+              // 올리지 못한 질문이 남았다: 제작자는 아직 모른다. 사람의 답을 기다린다고 멈추지도, CI를 기다리며
+              // 돌지도 않고 환경 장애로 기다린다(기다린 시간이 상한을 넘으면 usage-limit으로 멈추고 알린다)
+              event(ctx, 'wait-questions', {
+                reason: `전달이 끝나지 않은 질문이 있는 계획 ${unposted}건`,
+              });
+              outcome = 'env';
+              break;
             }
             if (pick.waiting.ci > 0 && !o.noWait) {
               event(ctx, 'wait-ci', { reason: pick.reason });
