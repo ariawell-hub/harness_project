@@ -121,6 +121,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 결정(구현 판정 3회차 F14 뒤, 제작자 2026-11-22 대화): F14는 이 PR에서 고치지 않고 별도 PR(#216)로 먼저 고친 뒤 이 PR이 main을 병합해 해소를 판정받는다. / 이유: 원인이 `check`의 설정(보호 경로)이라 이 step의 범위 밖이고, 이 PR은 제작자가 올린 워크플로 커밋을 담고 있어 변경을 더 얹지 않는 편이 낫다. 제작자 승인은 그 PR과 이 PR, 두 번이다.
 - 결정(제작자, 2026-11-23 대화): 이 계획을 Windows PC의 대화 세션이 넘겨받는다(owner `mac-session-2` → `session`). / 이유: 맥 세션이 인수인계 문서를 남기고 끝났다. L1 훅(R3)이 owner가 다른 worktree의 수정을 막아 제작자에게 물었다. / 대가: 맥에서는 이 브랜치를 고치지 않는다(두 곳에서 고치면 어긋난다).
 - 결정: 결과 파일(`results/darwin-arm64.json`)의 건너뛰기 문제는 이 PR에서 고치지 않고 Issue #225(PR #226)로 따로 고친다. / 이유: F14 때 제작자가 정한 방법(별도 PR로 먼저 고친다)과 같다. step0의 금지사항이 `harness.config.json` 수정을 막는다.
+- 결정(제작자, 2026-11-23 대화): 이 head는 로컬 `check`가 통과하지 않은 채 push한다(이번만 예외). / 이유: Windows PC의 `check`에서 `test` 두 건(`next.test.ts`의 `writeQuestionState` rename, `scope.test.ts`의 symlink)이 `EPERM`으로 실패했다. main 체크아웃(`e9f7ad6`)에서 그 두 테스트만 돌려도 똑같이 실패해 이 PR의 변경과 관계없다. 나머지(`fmt`·`lint`·`test-effect`·`doc-lint`·`bypass-scan`·`secret-scan`, 테스트 1274건)는 통과했다. 병합 조건인 CI의 `check`(Linux 러너)는 그대로 필수다. 두 실패는 Issue #228로 등록했다. / 버린 대안: Windows 실패부터 별도 PR로 고친 뒤 push(규칙 그대로지만 #188이 그 PR의 판정·승인만큼 늦어진다).
 
 ## 발견 사항
 
@@ -141,7 +142,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 수용 기준 3: `node lab/q10-db/check-results.ts <이름>` 둘과 `--confirm`, 출처 확인 `node lab/q10-db/verify-artifacts.ts`(step1 AC. 출력을 진행 로그와 PR 본문에 옮긴다).
 - 수용 기준 4: 문서를 설정·결과 파일과 견주는 테스트(`lab/q10-db/test/confirmed.test.ts`: ADR의 상태·확정 조건·알려진 한계, ADR 목록, 설계서 18·19절, TD-14 행, 웹 프로파일 README, `lab/q10-db/README.md`)와 `doc-lint`(step1 AC).
 - 결과(2026-11-22, step0): AC의 명령 16줄이 모두 통과했다(다섯째 줄은 새 임시 폴더의 복제본에서 절차를 실제로 돌렸다). `node scripts/harness.ts check` 통과. 트리 비교는 진행 로그에 있다.
-- 결과(2026-11-23, step0 재작업 F15, 제작자의 Windows 11 PC): AC의 명령 16줄이 모두 통과했다. 다섯째 줄은 이 PC(Windows 네이티브, Git Bash)의 새 임시 복제본에서 절차를 돌렸고 `trial: lab/q10-db/results/win32-x64.json을 썼다`, `win32-x64: 통과`가 나왔다. 그 결과 파일은 복제본에만 있고 리포에 넣지 않았다(결과는 step1에서 워크플로의 산출물로만 더한다). step1에서 ADR의 한계("제작자의 PC는 재지 못했다")를 적을 때 참고한다.
+- 결과(2026-11-23, step0 재작업 F15, 제작자의 Windows 11 PC): AC의 명령 16줄이 모두 통과했다. 다섯째 줄은 이 PC(Windows 네이티브, Git Bash)의 새 임시 복제본에서 절차를 돌렸고 `trial: lab/q10-db/results/win32-x64.json을 썼다`, `win32-x64: 통과`가 나왔다. 그 결과 파일은 복제본에만 있고 리포에 넣지 않았다(결과는 step1에서 워크플로의 산출물로만 더한다). step1에서 ADR의 한계("제작자의 PC는 재지 못했다")를 적을 때 참고한다. `node scripts/harness.ts check`는 `test`의 두 건이 Windows에서만 실패했다(main에서도 같다. Issue #228, 의사결정 로그). 나머지는 통과했다.
 - step1의 결과는 step1을 진행하며 적는다.
 
 ## 다음 할 일
