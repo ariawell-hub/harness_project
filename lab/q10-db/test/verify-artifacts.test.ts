@@ -225,6 +225,73 @@ test('잰 머신 절의 첫 표만 읽는다(표가 끝난 뒤의 다른 표는 
   );
 });
 
+/** 잰 머신 절을 lines로 만든다(표의 꼴을 시험하는 경우마다 다르게) */
+const measured = (lines: string[]): string =>
+  ['# Q10', '', '## 잰 머신', '', ...lines, '', '## 확정 조건', ''].join('\n');
+const files = (doc: string) => readRows(doc).map((r) => `${r.file}:${r.run ?? '-'}`);
+const LINUX_CELLS = `\`results/linux-x64.json\` | GitHub Actions | 2026-11-23 | ${URL(REPO, RUN)}`;
+const WIN_CELLS = `\`results/win32-x64.json\` | GitHub Actions | 2026-11-23 | ${URL(REPO, RUN)}`;
+const DARWIN_CELLS = '`results/darwin-arm64.json` | macOS | 2026-11-20 | ';
+const HEAD = '| 결과 파일 | 머신 | 날짜 | 실행 |';
+const DELIM = '| --- | --- | --- | --- |';
+
+test('GFM 표: 맨 앞 세로줄이 없는 행도 같은 표의 행이다(뒤의 행을 놓치지 않는다)', () => {
+  const doc = measured([HEAD, DELIM, DARWIN_CELLS, `| ${LINUX_CELLS} |`, `| ${WIN_CELLS} |`]);
+  assert.deepEqual(files(doc), [
+    'darwin-arm64.json:-',
+    `linux-x64.json:${RUN}`,
+    `win32-x64.json:${RUN}`,
+  ]);
+  const input = good();
+  input.rows = readRows(doc);
+  assert.deepEqual(provenanceProblems(input), []);
+});
+
+test('GFM 표: 앞뒤 세로줄을 모두 뺀 머리줄·구분 줄·행도 읽는다', () => {
+  const doc = measured([
+    '결과 파일 | 머신 | 날짜 | 실행',
+    ':--- | --- | :---: | ---:',
+    `${LINUX_CELLS}`,
+    `| ${WIN_CELLS}`,
+  ]);
+  assert.deepEqual(files(doc), [`linux-x64.json:${RUN}`, `win32-x64.json:${RUN}`]);
+});
+
+test('GFM 표: 표는 머리줄 바로 뒤에 칸 수가 같은 구분 줄이 있어야 시작한다', () => {
+  // 구분 줄이 없는 세로줄 글(문단)은 표가 아니다. 그 뒤의 진짜 표를 읽는다
+  const para = `참고 | \`results/linux-arm64.json\` | 머신 | ${URL(REPO, 999)}`;
+  assert.deepEqual(files(measured([para, '', HEAD, DELIM, `| ${LINUX_CELLS} |`])), [
+    `linux-x64.json:${RUN}`,
+  ]);
+  // 머리줄과 구분 줄의 칸 수가 다르면 표가 아니다
+  assert.deepEqual(files(measured([HEAD, '| --- | --- | --- |', `| ${LINUX_CELLS} |`])), []);
+});
+
+test('GFM 표: 빈 줄이나 다른 블록(제목, 인용, 코드 울타리, 목록, 가로줄)이 나오면 표가 끝난다', () => {
+  const after = `| \`results/linux-arm64.json\` | 뒤 | 2026-11-23 | ${URL(REPO, 999)} |`;
+  for (const stop of ['', '### 다음', '> 인용', '```', '~~~', '- 목록', '1. 목록', '***']) {
+    const doc = measured([HEAD, DELIM, `| ${LINUX_CELLS} |`, stop, after]);
+    assert.deepEqual(files(doc), [`linux-x64.json:${RUN}`], `끝내는 줄: ${JSON.stringify(stop)}`);
+  }
+});
+
+test('GFM 표: 행의 칸이 머리줄보다 적으면 빈 칸, 많으면 남는 칸을 버린다', () => {
+  const doc = measured([
+    HEAD,
+    DELIM,
+    '| `results/linux-x64.json` | GitHub Actions |',
+    `| ${WIN_CELLS} | 남는 칸 | ${URL(REPO, 999)} |`,
+  ]);
+  const rows = readRows(doc);
+  assert.deepEqual(
+    rows.map(({ file, runCell, run }) => ({ file, runCell, run })),
+    [
+      { file: 'linux-x64.json', runCell: '', run: null },
+      { file: 'win32-x64.json', runCell: URL(REPO, RUN), run: RUN },
+    ],
+  );
+});
+
 test('실행 주소가 실행 칸이 아닌 칸에만 있으면 실행 주소가 없는 행이다', () => {
   const row = `| \`results/linux-x64.json\` | ${URL(REPO, RUN)} | 2026-11-23 | |`;
   const input = good();
