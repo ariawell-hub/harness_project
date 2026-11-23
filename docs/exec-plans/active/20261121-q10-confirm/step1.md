@@ -2,9 +2,8 @@
 
 ## 읽어야 할 파일
 
-- **먼저 읽는다(F16)**: 이 step의 ADR·TD-14 문구 지시(작업 3의 "알려진 한계"·TD-14 기준, 작업 4의 ADR·TD-14 문구)는 PR #188 구현 판정의 지적 F16에 따라 계획 수정 PR(브랜치 `docs/20261121-q10-confirm-s0`, 계획 검증을 받는다)이 고친다. 그 PR이 병합되기 전에는 이 step을 시작하지 않는다(그때까지 계획의 status는 `blocked`다). 제작자의 Windows PC에서는 2026-11-23에 절차가 통과했으나 결과 파일을 남기지 않았다(`plan.md`의 "검증 방법과 결과"). ADR·TD-14에 그 PC를 "아직 재지 않았다"고 쓰지 않는다. 고칠 내용은 `plan.md` 의사결정 로그의 "결정(F16)"이다.
 - `ARCHITECTURE.md`, `docs/harness/architecture.md`
-- 이 계획의 `plan.md`("목표와 수용 기준" 3·4·5, 의사결정 로그, step0의 진행 로그)
+- 이 계획의 `plan.md`("목표와 수용 기준" 3·4·5, 의사결정 로그, step0의 진행 로그, "검증 방법과 결과"의 2026-11-23 줄: 제작자의 Windows PC에서 절차가 통과했고 결과 파일은 남기지 않았다)
 - 앞 step에서 만든·바꾼 파일: `lab/q10-db/run.ts`, `lab/q10-db/README.md`("CI 러너에서 돌리기"), `.github/workflows/q10-trial.yml`, `scripts/test/q10-trial-workflow.test.ts`
 - `lab/q10-db/check-results.ts`(`--confirm`, `REQUIRED_PLATFORMS`), `lab/q10-db/results/darwin-arm64.json`
 - `docs/decisions/ADR-0007-db-postgres-drizzle.md`("확정 조건", "되돌리는 조건"), `docs/harness/design.md` 18절 Q10 행·19절 "현재 위치"·14.3절, `docs/exec-plans/tech-debt-tracker.md`의 TD-14 행, `profiles/web/README.md`의 "DB" 절, `scripts/test/profile-web-db.test.ts`(README를 결과 파일과 견주는 테스트)
@@ -45,22 +44,22 @@
 - `lab/q10-db/README.md`의 "잰 머신" 표에 결과 파일마다 행이 있다(파일 이름이 백틱으로 적힌 행). `linux-*`·`win32-*` 행에는 실행 주소(`/actions/runs/<숫자>`)가 있다.
 - `docs/decisions/ADR-0007-db-postgres-drizzle.md`의 "상태" 줄이 `- 상태: 채택`으로 시작하고 `잠정`이 그 줄에 없다.
 - 문서들이 같은 확정 상태를 말한다(한 곳만 고치고 다른 곳에 잠정 상태가 남으면 실패한다):
-  - ADR-0007: 문서에 "이 결정은 잠정이다"가 없다. "확정 조건" 절(`## 확정 조건`부터 다음 `## ` 앞까지)에 `lab/q10-db/results/`의 결과 파일 이름이 모두 적혀 있고, README의 "잰 머신" 표에 있는 실행 번호가 모두 적혀 있다(어디서 쟀는지). "알려진 한계" 절에 `TD-14`와 `Windows PC`가 함께 든 줄이 있다(Windows는 CI 러너에서 쟀고 PC에서는 아직이라는 한계).
+  - ADR-0007: 문서에 "이 결정은 잠정이다"와 "아직 재지 않았다"와 `TD-14`가 없다. "확정 조건" 절(`## 확정 조건`부터 다음 `## ` 앞까지)에 `lab/q10-db/results/`의 결과 파일 이름이 모두 적혀 있고, README의 "잰 머신" 표에 있는 실행 번호가 모두 적혀 있다(어디서 쟀는지). "알려진 한계" 절에 `CI`와 `Windows PC`와 `결과 파일`이 함께 든 줄이 있다(Windows의 확정 근거는 CI 러너의 산출물이고, 제작자의 Windows PC에서는 절차가 통과했으나 결과 파일이 없어 확정 근거가 아니라는 한계).
   - `docs/decisions/index.md`: ADR-0007의 행에 `채택`이 있고 `잠정`이 없다.
-  - 설계서: `| Q10 `으로 시작하는 행(18절)에 `확정`과 `ADR-0007`이 있고 `잠정`이 없다. `- **현재 위치`로 시작하는 줄(19절)에 `잠정`과 "실측이 남았다"가 없고, 그 줄이 `Q10`을 말하면 `확정`이 함께 있다. (0절의 버전 이력은 지난 일의 기록이라 보지 않는다.)
-  - 기술 부채 표: `| TD-14 `로 시작하는 행에 `lab/q10-db`, `CI`, `Windows PC`, "확정 조건은 채워졌다"가 있고 옛 문구 "결과 파일을 더하기"가 없다.
+  - 설계서: `| Q10 `으로 시작하는 행(18절)에 `확정`과 `ADR-0007`이 있고 `잠정`과 `TD-14`가 없다. `- **현재 위치`로 시작하는 줄(19절)에 `잠정`과 "실측이 남았다"가 없고, 그 줄이 `Q10`을 말하면 `확정`이 함께 있다. (0절의 버전 이력은 지난 일의 기록이라 보지 않는다.)
+  - 기술 부채 표: `| TD-14 `로 시작하는 행이 있고, 그 행에 `lab/q10-db`와 `ADR-0007`이 없다(그 항목이 끝났다).
   - `profiles/web/README.md`: ADR-0007의 링크가 든 문단("DB" 절 첫 문단)에 `확정`이 있고 `잠정`과 "macOS에서만 쟀다"가 없다.
-  - `lab/q10-db/README.md`: "아직 재지 않았다"와 "ADR-0007은 잠정이다"가 없다.
+  - `lab/q10-db/README.md`: "아직 재지 않았다"와 "ADR-0007은 잠정이다"와 `TD-14`가 없다.
 
 `scripts/test/profile-web-db.test.ts`의 "확인한 버전" 테스트는 그대로 통과해야 한다(README의 버전은 바뀌지 않는다).
 
 ### 4. 문서
 
-- `lab/q10-db/README.md`: "잰 머신" 표에 두 행(결과 파일, 머신 — "GitHub Actions `ubuntu-latest`"·"GitHub Actions `windows-latest`", 날짜, 실행 주소). "Windows 네이티브와 Linux에서는 아직 재지 않았다" 줄을 고친다. "확정 조건" 절의 "지금은 macOS 결과뿐이라 1이다"를 지금 상태(0)로 고친다.
-- `docs/decisions/ADR-0007-db-postgres-drizzle.md`: 상태를 채택으로 바꾸고 날짜를 적는다. "확정 조건" 절에 조건이 채워졌다는 것과 세 환경을 어디서 쟀는지(macOS는 Mac, Linux와 Windows는 CI 러너)를 결과 파일의 이름 셋과 CI 실행의 주소로 적는다. "알려진 한계"에 한 항목을 더한다: Windows는 CI의 러너에서 쟀고 제작자의 Windows PC에서는 아직 재지 않았다(TD-14). "되돌리는 조건"은 그대로 둔다. 문서 첫머리의 "이 결정은 잠정이다" 문장들을 확정에 맞게 고친다. `docs/decisions/index.md`에 상태를 적는 칸이 있으면 맞춘다.
-- `docs/harness/design.md`: 18절의 Q10 행을 확정 결정으로(ADR-0007을 가리킨다), 19절 "현재 위치"의 "착수 전에 정할 것"에서 Q10을 빼거나 확정으로 고친다(Q13은 그대로 둔다). 14.3절은 "잠정"이라는 말이 있으면 그 말만 고치고 규칙·표는 한 글자도 바꾸지 않는다. 0절 버전 이력과 문서 머리의 버전(번호는 push할 때 main의 다음 번호).
+- `lab/q10-db/README.md`: "잰 머신" 표에 두 행(결과 파일, 머신 — "GitHub Actions `ubuntu-latest`"·"GitHub Actions `windows-latest`", 날짜, 실행 주소). "Windows 네이티브와 Linux에서는 아직 재지 않았다" 줄을 고친다. "확정 조건" 절의 "지금은 macOS 결과뿐이라 1이다"를 지금 상태(0)로 고친다. 그 절의 "Windows는 그 머신에서 처음 작업할 때 위 절차를 돌려 결과 파일을 더한다(기술 부채 표의 TD-14)"는 Windows 결과가 CI 러너의 산출물이라는 것으로 고친다(TD-14를 가리키지 않는다). 그 뒤의 "검사가 통과하지 않으면 ADR-0007의 '되돌리는 조건'을 따른다"는 남긴다.
+- `docs/decisions/ADR-0007-db-postgres-drizzle.md`: 상태를 채택으로 바꾸고 날짜를 적는다. "확정 조건" 절에 조건이 채워졌다는 것과 세 환경을 어디서 쟀는지(macOS는 Mac, Linux와 Windows는 CI 러너)를 결과 파일의 이름 셋과 CI 실행의 주소로 적는다. 그 절에서 앞으로 할 일로 적힌 줄(Windows는 그 PC에서 처음 작업하는 세션이 돌린다(TD-14), Linux는 제작자가 돌리거나 수단을 정한다, 그 전까지 Q10이 남는다)은 지금 상태에 맞게 고친다. "알려진 한계"에 한 항목을 더한다: Windows 네이티브의 확정 근거는 CI의 `windows-latest` 러너의 산출물이다(`verify-artifacts.ts`로 출처를 확인했다). 러너는 제작자의 PC와 경로·사용자 이름·보안 프로그램이 다르다. 제작자의 Windows PC에서도 2026-11-23에 절차가 통과했으나(계획 `20261121-q10-confirm`의 "검증 방법과 결과") 결과 파일을 남기지 않아 확정 근거로 쓰지 않는다. "되돌리는 조건"은 그대로 둔다. 문서 첫머리의 "이 결정은 잠정이다" 문장들을 확정에 맞게 고친다. `docs/decisions/index.md`에 상태를 적는 칸이 있으면 맞춘다.
+- `docs/harness/design.md`: 18절의 Q10 행을 확정 결정으로(ADR-0007을 가리킨다. TD-14는 가리키지 않는다), 19절 "현재 위치"의 "착수 전에 정할 것"에서 Q10을 빼거나 확정으로 고친다(Q13은 그대로 둔다). 14.3절은 "잠정"이라는 말이 있으면 그 말만 고치고 규칙·표는 한 글자도 바꾸지 않는다. 0절 버전 이력과 문서 머리의 버전(번호는 push할 때 main의 다음 번호).
 - `docs/harness/CHANGELOG.md`의 "다음 버전 (미배포)" 절에 한 줄(검사를 약화하지 않는다는 것).
-- `docs/exec-plans/tech-debt-tracker.md`의 TD-14 행: `lab/q10-db` 항목을 "CI의 Windows 러너에서 쟀다. 제작자의 Windows PC에서 한 번 더 돌린다(확정 조건은 채워졌다)"는 뜻으로 고친다. 그 행의 다른 항목과 다른 행은 고치지 않는다.
+- `docs/exec-plans/tech-debt-tracker.md`의 TD-14 행: `lab/q10-db` 항목을 뺀다(", `lab/q10-db/`의 실물 확인(PGlite·`drizzle-kit`)을 Windows에서 다시 돌려 결과 파일을 더하기(Linux 결과와 함께 ADR-0007의 확정 조건)"를 지운다). 확정 조건은 CI 러너의 산출물로 채워졌고, 제작자의 Windows PC에서도 절차가 통과했다(ADR-0007의 "알려진 한계", 계획의 의사결정 로그 "결정(F16 계획 수정)"). 그 행의 다른 항목과 다른 행은 고치지 않는다.
 - `profiles/web/README.md`의 "DB" 절 첫 문단: "**잠정**이다(macOS에서만 쟀다 …)"를 확정에 맞게 고친다(세 환경에서 쟀다, `lab/q10-db`). 계획 `20261120-q10-db-decision`이 고정한 문장들과 명령 표, 버전은 바꾸지 않는다(`scripts/test/profile-web-db.test.ts`가 본다).
 
 ## Acceptance Criteria
