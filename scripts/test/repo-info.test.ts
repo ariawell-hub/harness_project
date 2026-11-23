@@ -118,6 +118,27 @@ test('repoInfo: 커밋이 없는 브랜치, 하위 폴더, 바뀐 설정도 예�
   assert.equal(path.resolve(repoInfo(root).root), path.resolve(other));
 });
 
+test('repoInfo: 작업 트리에 HEAD라는 파일이 있어도 git을 하나만 띄우고 값은 예전과 같다', () => {
+  // git rev-parse는 인자 HEAD가 리비전이자 파일 이름이어도 모호하다고 실패하지 않는다(구현 판정 F14의 반박 근거)
+  const root = repo();
+  writeFileSync(path.join(root, 'HEAD'), 'not a ref\n');
+  const sub = path.join(root, 'sub');
+  mkdirSync(sub);
+  writeFileSync(path.join(sub, 'HEAD'), 'not a ref\n');
+  for (const cwd of [root, sub]) {
+    const { value, calls } = spawned(() => repoInfo(cwd));
+    assert.equal(calls.length, 1, `${cwd}: ${JSON.stringify(calls)}`);
+    assert.deepEqual(value, expected(cwd));
+  }
+  // 이 테스트가 모호한 경우를 만든 것을 확인한다: 모호성을 따지는 명령(git log)은 같은 자리에서 실패한다
+  const log = cp.spawnSync('git', ['log', '-1', '--format=%h', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(log.status, 0, log.stdout);
+  assert.match(log.stderr, /ambiguous argument 'HEAD'/);
+});
+
 test('repoInfo: 리포가 아닌 폴더에서는 예전과 같은 GitError를 던진다', () => {
   const dir = tmp('harness-repo-info-none-');
   assert.throws(
