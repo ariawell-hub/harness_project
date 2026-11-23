@@ -1,6 +1,6 @@
 // scope(R18, 14.6절): PR이 바꾼 파일을 계획의 "관련 파일·문서"와 견준다(Issue #186 step1, TD-6).
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { cellCode, gatesOutput, isWarning, runGates, summaryMarkdown } from '../ci/gates.ts';
@@ -24,6 +24,7 @@ import {
   scopePaths,
 } from '../gates/scope.ts';
 import { loadConfig } from '../lib/config.ts';
+import { runSync } from '../lib/exec.ts';
 import { DETAIL_LINE_MAX, DETAILS_CUT, WARN_PREFIX } from '../lib/util.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
@@ -638,9 +639,17 @@ test('scopeCheck: 계획은 HEAD 커밋에 추적된 일반 파일로만 읽는�
     const base = commitAll(root, 'init');
     sh('git', ['checkout', '-q', '-b', c.branch], root);
     write(root, 'src/a.ts', 'x\n');
-    mkdirSync(path.dirname(path.join(root, c.link)), { recursive: true });
-    symlinkSync(c.target, path.join(root, c.link));
-    const head = commitAll(root, 'change');
+    sh('git', ['add', 'src/a.ts'], root);
+    // 링크는 작업 트리에 만들지 않고 링크 객체(모드 120000, 내용은 가리키는 경로)를 색인에 바로 넣는다. 판정은 HEAD
+    // 커밋의 트리만 읽는다. Windows는 권한이 없으면 링크를 만들 수 없다(Issue #228)
+    const blob = runSync('git', ['hash-object', '-w', '--stdin'], { cwd: root, input: c.target });
+    sh(
+      'git',
+      ['update-index', '--add', '--cacheinfo', `120000,${blob.stdout.trim()},${c.link}`],
+      root,
+    );
+    sh('git', ['commit', '-q', '-m', 'change'], root);
+    const head = sh('git', ['rev-parse', 'HEAD'], root);
     assert.match(sh('git', ['ls-tree', 'HEAD', '--', c.link], root), /^120000 blob /, c.name);
     assert.throws(
       () => scopeCheck({ root, base, branch: c.branch }),
