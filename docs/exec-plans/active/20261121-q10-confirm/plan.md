@@ -2,7 +2,7 @@
 id: 20261121-q10-confirm
 issue: 180 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -130,6 +130,8 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 
 - 2026-11-23 음성 확인(실제 GitHub 자료, 이 작업 트리의 새 임시 복제본에서): (1) `linux-x64.json`의 행 수 하나를 2 → 3으로 바꾸면 종료 코드 1, `linux-x64.json: 커밋한 파일과 산출물의 값이 다르다`. (2) README의 실행 주소를 실패한 1회차(45177957783)로 바꾸면 종료 코드 1, 문제 5건(두 산출물을 받지 못했다, 실행이 성공하지 않았다, 두 job이 성공하지 않았다). (3) 되돌리면 종료 코드 0. 처음 이 확인을 돌렸을 때는 세 경우가 모두 출력 없이 종료 코드 0이었다: 복제본의 경로(`/var/folders/…`)가 macOS에서 링크라 `process.argv[1]`과 `import.meta.url`(실제 경로 `/private/var/…`)이 달라, 직접 실행 판정이 거짓이 되어 아무것도 하지 않았다. 링크를 거친 경로로 실행하는 테스트를 먼저 더해 실패를 확인하고(29건 가운데 1건 실패), 두 경로를 `realpathSync.native`로 풀어 견주게 고쳤다(`9b6e4d4`, 29건 통과). 그 뒤 위 세 경우를 다시 돌렸다(발견 사항).
 - 2026-11-23 문서(작업 4): `lab/q10-db/README.md`("잰 머신" 표에 "실행" 칸과 두 행, 확정 상태 문단, "확정 조건" 절, 경로 표, CI 절차 5번), ADR-0007(상태 채택, 결정·실측·확정 조건·알려진 한계·결과), `docs/decisions/index.md`(채택), 설계서 18절 Q10 행·19절 "현재 위치"·14.3절의 "잠정" 한 낱말, TD-14 행의 `lab/q10-db` 항목, `profiles/web/README.md` DB 절 첫 문단, 변경 조각 `docs/harness/changes/20261121-q10-confirm-s1.md`. `confirmed.test.ts` 10건 통과.
+
+- 2026-11-23T22:29:25+09:00 step1 재작업: 구현 판정 1회차(head 1954b1e) Codex F1(P1, 재현됨): verify-artifacts.ts가 실행 주소의 번호 뒤 경계를 보지 않아 틀린 주소(…/runs/101typo)를 실행 101로 읽는다. 실행 칸 전체를 주소 꼴로 검사하게 고친다
 
 ## 의사결정 로그
 

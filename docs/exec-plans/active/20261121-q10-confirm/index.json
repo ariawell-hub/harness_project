@@ -10,8 +10,7 @@
     {
       "step": 1,
       "name": "confirm",
-      "status": "completed",
-      "completed_at": "2026-11-23T22:17:12+09:00"
+      "status": "in_progress"
     }
   ]
 }
