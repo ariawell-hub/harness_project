@@ -1,7 +1,7 @@
 // 변경 조각(TD-39, Issue #222): 조각 파일의 자리·형식, doc-lint의 검사, 두 PR의 조각이 병합에서 충돌하지 않는 것을 본다.
 // 계획 20261123-change-fragments step0.
 import assert from 'node:assert/strict';
-import { symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { docLint } from '../gates/doc-lint.ts';
@@ -165,6 +165,25 @@ test('doc-lint: 조각 파일은 frontmatter·색인을 요구하지 않고 형�
     assert.ok(
       errors.some((e) => e.startsWith(`R8 변경 조각 ${f}: 조각 파일의 자리·이름`)),
       `${f}\n${errors.join('\n')}`,
+    );
+  // 색인에 남은 조각의 상위 폴더가 작업 트리에서 자기 자신으로 가는 링크(순환)여도 예외로 멈추지 않고 문제로 잡는다
+  // (Codex F14). 링크를 만들 수 없는 환경이면 건너뛴다
+  const looped = strays[2]!;
+  sh('git', ['add', '--', looped], root);
+  unlinkSync(path.join(root, looped));
+  rmdirSync(path.join(root, path.dirname(looped)));
+  let loopLinked = true;
+  try {
+    symlinkSync('sub', path.join(root, path.dirname(looped)), 'dir');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e;
+    loopLinked = false;
+  }
+  if (loopLinked)
+    assert.ok(
+      lint(root).includes(
+        `R8 변경 조각 ${looped}: 조각은 일반 파일이어야 한다(심볼릭 링크는 받지 않는다)`,
+      ),
     );
 });
 

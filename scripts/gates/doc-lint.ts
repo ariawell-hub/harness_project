@@ -63,7 +63,20 @@ function listChangesDir(root: string): string[] {
   return r.stdout
     .split('\0')
     .filter(Boolean)
-    .filter((f) => lstatSync(path.join(root, f), { throwIfNoEntry: false }) !== undefined);
+    .filter((f) => fragmentEntry(path.join(root, f)) !== null);
+}
+
+/**
+ * 링크를 따라가지 않고 본 조각 자리의 종류. 없으면 null이다. 상위 경로를 풀 수 없는 것(순환 링크의 `ELOOP` 등)은
+ * 예외로 검사를 멈추지 않고 일반 파일이 아닌 것으로 본다(Codex F14)
+ */
+function fragmentEntry(abs: string): 'file' | 'other' | null {
+  try {
+    const s = lstatSync(abs, { throwIfNoEntry: false });
+    return s === undefined ? null : s.isFile() ? 'file' : 'other';
+  } catch {
+    return 'other';
+  }
 }
 
 /** 코드 블록과 인라인 코드를 지운 본문 */
@@ -246,7 +259,7 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
   });
   for (const f of listChangesDir(root).filter((x) => !matchesAny(x, exclude))) {
     // 링크를 따라가 다른 파일의 글을 조각으로 읽지 않는다(Codex F13. harness-guard도 일반 파일만 기록으로 센다)
-    if (!lstatSync(path.join(root, f)).isFile()) {
+    if (fragmentEntry(path.join(root, f)) !== 'file') {
       errors.push(fragmentProblem(f, '조각은 일반 파일이어야 한다(심볼릭 링크는 받지 않는다)'));
       continue;
     }
