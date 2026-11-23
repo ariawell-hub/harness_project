@@ -2,9 +2,12 @@
 // 네트워크를 쓰지 않는다(gh·git은 가짜 exec로 바꾼다).
 //   node --test lab/q10-db/test/verify-artifacts.test.ts
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   artifactName,
   collect,
@@ -374,4 +377,28 @@ test('collect: gh를 실행하지 못하면 예외를 낸다(명령은 종료 �
     () => collect({ readme: readme([linuxRow(), winRow()]), resultFiles: {}, exec }),
     /gh.*ENOENT/,
   );
+});
+
+const LAB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** 받지 않는 인자로 실행한다: gh·git을 부르기 전에 사용법을 내고 종료 코드 2로 끝나야 한다 */
+function runWithBadArg(script: string): { status: number | null; stderr: string } {
+  const r = spawnSync(process.execPath, [script, '--bogus'], { encoding: 'utf8' });
+  return { status: r.status, stderr: r.stderr };
+}
+
+test('직접 실행하면 돈다: 받지 않는 인자에 사용법과 종료 코드 2', () => {
+  const r = runWithBadArg(path.join(LAB, 'verify-artifacts.ts'));
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /사용법: node lab\/q10-db\/verify-artifacts\.ts/);
+});
+
+test('링크를 거친 경로로 실행해도 돈다(아무것도 하지 않고 0으로 끝나지 않는다)', () => {
+  // macOS의 임시 폴더(/var → /private/var)처럼 실행 경로가 실제 경로와 다른 경우.
+  // Windows에서는 권한 없이 만들 수 있는 정션을 쓴다(macOS·Linux에서는 형식 인자를 무시하고 심볼릭 링크다)
+  const link = path.join(mkdtempSync(path.join(os.tmpdir(), 'q10-verify-link-')), 'lab');
+  symlinkSync(LAB, link, 'junction');
+  const r = runWithBadArg(path.join(link, 'verify-artifacts.ts'));
+  assert.equal(r.status, 2, `종료 코드가 2가 아니다(표준 오류: ${r.stderr})`);
+  assert.match(r.stderr, /사용법/);
 });

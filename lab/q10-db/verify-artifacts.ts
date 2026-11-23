@@ -9,7 +9,14 @@
 // 문제가 있으면 표준 오류에 내고 종료 코드 1이다. gh나 git을 실행하지 못해도 1이다.
 // gh·git은 셸을 거치지 않고 띄운다(macOS·Linux·Windows 네이티브에서 같다).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -354,5 +361,20 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  process.exitCode = main(process.argv.slice(2));
+/**
+ * 이 파일을 직접 실행했는가. 두 경로를 실제 경로로 풀어 견준다: 링크를 거친 경로(macOS의 /var → /private/var,
+ * Windows의 정션)로 실행하면 실행 경로와 import.meta.url이 달라, 그대로 견주면 아무것도 하지 않고 0으로 끝난다
+ */
+function isMain(): boolean {
+  const arg = process.argv[1];
+  if (!arg) return false;
+  try {
+    return (
+      realpathSync.native(path.resolve(arg)) === realpathSync.native(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) process.exitCode = main(process.argv.slice(2));
