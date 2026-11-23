@@ -2,6 +2,7 @@
 
 ## 읽어야 할 파일
 
+- **먼저 읽는다(F16)**: 이 step의 ADR·TD-14 문구 지시(작업 3의 "알려진 한계"·TD-14 기준, 작업 4의 ADR·TD-14 문구)는 PR #188 구현 판정의 지적 F16에 따라 계획 수정 PR(브랜치 `docs/20261121-q10-confirm-s0`, 계획 검증을 받는다)이 고친다. 그 PR이 병합되기 전에는 이 step을 시작하지 않는다(그때까지 계획의 status는 `blocked`다). 제작자의 Windows PC에서는 2026-11-23에 절차가 통과했으나 결과 파일을 남기지 않았다(`plan.md`의 "검증 방법과 결과"). ADR·TD-14에 그 PC를 "아직 재지 않았다"고 쓰지 않는다. 고칠 내용은 `plan.md` 의사결정 로그의 "결정(F16)"이다.
 - `ARCHITECTURE.md`, `docs/harness/architecture.md`
 - 이 계획의 `plan.md`("목표와 수용 기준" 3·4·5, 의사결정 로그, step0의 진행 로그)
 - 앞 step에서 만든·바꾼 파일: `lab/q10-db/run.ts`, `lab/q10-db/README.md`("CI 러너에서 돌리기"), `.github/workflows/q10-trial.yml`, `scripts/test/q10-trial-workflow.test.ts`

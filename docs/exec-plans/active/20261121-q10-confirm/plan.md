@@ -2,7 +2,7 @@
 id: 20261121-q10-confirm
 issue: 180 # GitHub Issue 번호
 type: chore # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: blocked # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -107,6 +107,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 2026-11-23 F15 처리: `lab/q10-db/README.md`의 문장을 고쳤다. 테스트가 이 폴더에서 읽는 두 파일과, 그 파일들이 `testInertPaths`·보호 경로와 어떤 관계인지 적었다. 맥 세션이 F15를 확인하다가 `profile-web-db.test.ts`가 `results/darwin-arm64.json`도 읽는 것을 찾아 Issue #225로 등록했다(고치는 PR은 #226). step0 금지사항(`harness.config.json`을 고치지 않는다) 때문에 이 PR에서 고치지 않는다. 문서만 바뀌어 테스트는 더하지 않았다.
 - 2026-11-23 구현 판정 5회차(head `226ad6b`): CI `check` 통과, Claude 승인(지적 없음), Codex 수정 요청(P1 하나). `pr-state`에 "오래 열린 지적" 줄은 없다. F16(P1, `plan.md:145`): 제작자의 Windows PC에서 절차가 통과했다는 기록과, step1이 ADR·TD-14에 "제작자의 Windows PC에서는 아직 재지 않았다"고 쓰게 하는 지시(`step1.md`의 작업 3·4, 계획의 수용 기준 4·비범위)가 충돌한다. 맞는 지적이다. 이 PR에서는 `plan.md:145`의 문장을 고쳤다(그 실행은 결과 파일이 없어 확정 근거가 아니라고 적고, 지시처럼 읽히던 "ADR의 한계를 적을 때 참고한다"를 지웠다). step1의 지시는 이 PR에서 고칠 수 없어 병합 뒤 계획 수정 PR로 고친다(의사결정 로그).
 - 2026-11-23 제작자 결정대로 Issue #228(Windows 전용 테스트 실패)을 먼저 고쳤다(PR #231, 병합 `54631b7`. 테스트 2건의 확인 방법, `commands.test.timeoutSec` 1800 → 3600초). `origin/main`(`54631b7`)을 병합했다(CHANGELOG의 같은 자리가 충돌했다: main의 줄 먼저, 이 PR의 줄 뒤). 이 PR의 파일은 바꾸지 않았다.
+- 2026-11-23 구현 판정 6회차(head `4365802`, 이 PC의 `check` 통과 뒤 올렸다. F16 반박 1회를 함께 냈다): CI `check` 통과, Claude 승인(지적 없음), Codex 수정 요청(새 지적 없음, F16이 열려 있다). Codex의 이유: "후속 PR에서 고치겠다는 기록은 현재 지시를 바꾸지 않는다." `pr-state`에 "오래 열린 지적" 줄은 없다. 기록만이 아니라 step1이 고치기 전의 지시대로 실행되지 않게 막는 장치를 더했다(의사결정 로그 "결정(F16 보강)"). 반박 2회째를 낸다. 그래도 열려 있으면 교착이라 제작자에게 묻는다.
 
 ## 의사결정 로그
 
@@ -126,6 +127,7 @@ Q10(DB·ORM)의 판단 기준은 "여러 PC와 다양한 개발 환경에 영향
 - 결정(제작자, 2026-11-23 대화): 이 head는 로컬 `check`가 통과하지 않은 채 push한다(이번만 예외). / 이유: Windows PC의 `check`에서 `test` 두 건(`next.test.ts`의 `writeQuestionState` rename, `scope.test.ts`의 symlink)이 `EPERM`으로 실패했다. main 체크아웃(`e9f7ad6`)에서 그 두 테스트만 돌려도 똑같이 실패해 이 PR의 변경과 관계없다. 나머지(`fmt`·`lint`·`test-effect`·`doc-lint`·`bypass-scan`·`secret-scan`, 테스트 1274건)는 통과했다. 병합 조건인 CI의 `check`(Linux 러너)는 그대로 필수다. 두 실패는 Issue #228로 등록했다. / 버린 대안: Windows 실패부터 별도 PR로 고친 뒤 push(규칙 그대로지만 #188이 그 PR의 판정·승인만큼 늦어진다).
 - 결정(F16): step1의 ADR·TD-14 문구 지시는 이 PR에서 고치지 않는다. #188이 병합된 뒤, step1을 시작하기 전에 계획만 담은 별도 PR(브랜치 `docs/20261121-q10-confirm-s0`, 절차서 4.1절 "실행 중인 step의 계획 수정")로 고쳐 계획 검증을 받는다. / 이유: 고칠 곳(`step1.md`의 작업·AC, 계획의 수용 기준 4·비범위)은 계획 검증(G1) 해시에 묶여 있다. 이 PR은 계획이 아직 main에 없는 첫 PR이라, 여기서 고치려면 PR을 계획만 남긴 상태로 되돌려 다시 검증받아야 한다. 그런데 이 PR에는 제작자가 올린 워크플로 파일이 있고, 봇은 그 파일을 지우는 커밋을 올릴 수 없다(절차서 4.1절, 발견 사항 둘째 줄과 같은 사정). / 고칠 내용: ADR "알려진 한계"와 TD-14의 `lab/q10-db` 항목은 둘을 따로 적는다. (1) 확정 근거: Linux·Windows는 CI 러너의 산출물이고 `verify-artifacts.ts`로 출처를 확인했다. (2) 제작자의 Windows PC: 2026-11-23에 절차가 통과했으나 결과 파일을 남기지 않아 확정 근거로 쓰지 않는다. TD-14에 PC 재실측을 남긴다면 그 목적(출처를 남기는 실측)을 적고, 목적이 없으면 그 항목을 닫는다. `confirmed.test.ts`의 기준도 이 문구에 맞춘다. / 버린 대안: step1 PR에서 지시와 다르게 쓰기(실행 PR은 자기 step의 작업·AC를 바꿀 수 없고 판정이 지시와 다르다고 본다), PC 실행 기록을 지우기(일어난 일을 가린다).
 - 결정(제작자, 2026-11-23 대화): F16 대응 커밋을 올리기 전에 Issue #228(Windows 전용 테스트 실패)부터 고친다. 앞의 "이번만 예외"는 head `226ad6b` 한 번뿐이고, 이후 push에는 적용하지 않는다. #228이 병합되면 이 브랜치에 `origin/main`을 병합하고, 로컬 `check`가 통과한 뒤 push한다.
+- 결정(F16 보강, 구현 판정 6회차 뒤): step1이 고치기 전의 문구 지시대로 실행되지 않게 계획 해시에 들지 않는 두 곳을 고친다. (1) `step1.md`의 "읽어야 할 파일" 맨 앞에 "먼저 읽는다(F16)" 항목을 둔다: 문구 지시는 계획 수정 PR이 고치고, 그 PR이 병합되기 전에는 이 step을 시작하지 않으며, ADR·TD-14에 제작자 PC를 "아직 재지 않았다"고 쓰지 않는다. (2) 계획의 status를 `blocked`로 둔다: runner는 `blocked` 계획을 고르지 않고(`scripts/runner/next.ts`), `start`는 이 계획을 대기로 보인다. 계획 수정 PR이 지시를 고치면서 status를 `active`로 되돌린다. / 이유: 판정 6회차에서 Codex가 "후속 PR에서 고치겠다는 기록은 현재 지시를 바꾸지 않는다"고 했다. 묶인 섹션(작업·AC)은 이 PR에서 고칠 수 없으므로(위 "결정(F16)"), 실행 전에 읽는 자리와 실행을 고르는 상태로 막는다. 계획 해시는 그대로다(`49fa50ae8ba1`). / 대가: #188이 병합된 뒤 계획 수정 PR이 병합될 때까지 `start`가 #180을 대기로 보인다.
 
 ## 발견 사항
 
