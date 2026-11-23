@@ -81,6 +81,9 @@ export function readDesignVersion(
 
 /** 지금의 `R8 설계서 버전` 검사 그대로 */
 export function designVersionProblems(text: string): Problem[];
+
+/** 버전(`v`를 뺀 글) 비교: 음수·0·양수. 옮기기만 하고 내보낸다(4의 설계서 기록이 쓴다) */
+export function compareVersions(a: string, b: string): number;
 ```
 
 - `scripts/gates/doc-lint.ts`는 이 파일을 가져다 쓰고 `designVersionProblems`를 다시 내보낸다(`scripts/test/doc-lint-design-version.test.ts`의 가져오기가 그대로 동작한다).
@@ -105,7 +108,7 @@ export function designVersionProblems(text: string): Problem[];
   - 첫 줄(결과 설명이 된다): `보호 경로를 바꿨는데 docs/harness/CHANGELOG.md도 이 PR의 변경 조각(docs/harness/changes/)도 그대로다`
   - 고치는 법: `이 PR의 변경 조각(docs/harness/changes/<브랜치 이름의 / 뒤>.md)의 "## CHANGELOG" 아래에 한 줄을 더하라. 다른 브랜치 이름의 조각과 형식이 틀린 조각은 세지 않는다(doc-lint R8 변경 조각)`
 - 설계서 기록(새 검사): 바뀐 파일에 `docs/harness/design.md`가 있으면, 다음 둘 가운데 하나가 있어야 한다.
-  1. 옛 방식: head와 base에서 `readDesignVersion`이 모두 통과하고, head의 변경 이력 마지막 항목 줄(글 전체)이 base의 것과 다르다.
+  1. 옛 방식: head와 base에서 `readDesignVersion`이 모두 통과하고, base의 변경 이력 항목 버전이 head의 변경 이력에 모두 있으며, head의 마지막 항목 버전이 base의 마지막 항목 버전보다 크다(`compareVersions`). 마지막 항목을 지우거나 글만 고친 것은 기록이 아니다(Codex F8).
   2. 이 PR의 조각에 설계서 변경 이력 새 항목이 있다.
   - 없을 때의 실패 문구 첫 줄: `설계서(docs/harness/design.md)를 바꿨는데 변경 이력에도 이 PR의 변경 조각에도 설계서 기록이 없다`. 고치는 법: `이 PR의 변경 조각에 "## 설계서 변경 이력" 한 줄을 더하라(모으기 PR이 버전을 매긴다)`.
 - 두 검사 모두 `skipAuthorChecks`면 하지 않는다. 체크리스트 줄, 워크플로 검사, 위험도 신호는 고치지 않는다.
@@ -128,7 +131,7 @@ export function designVersionProblems(text: string): Problem[];
 6. 보호 경로(`scripts/x.ts`)를 바꾸고 CHANGELOG는 그대로 둔 채 이 PR의 조각(형식에 맞음)만 더하면, `branch`를 준 `harnessGuard`가 `success`이고 신호가 없다. 같은 변경을 `runGates`(`branch` 포함)로 판정해도 `harness-guard`가 `success`다.
 7. 기록으로 세지 않는 경우는 각각 `failure`이고 설명에 `CHANGELOG`와 `변경 조각`이 있다(CHANGELOG는 그대로): (a) CHANGELOG 항목이 없는 조각, (b) 형식이 틀린 조각(버전으로 시작하는 항목), (c) 자리 밖 파일 `docs/harness/changes/notes.md`·`docs/harness/changes/sub/20261114-demo-s0.md`(글은 형식에 맞다), (d) 다른 브랜치 이름의 조각 `docs/harness/changes/20261114-other-s0.md`(형식에 맞음), (e) 이 PR의 조각이지만 `branch`를 주지 않음.
 8. base에 이 PR의 조각이 있을 때(보호 경로도 함께 바꾼다): 그 조각에 설계서 항목만 더하면 `failure`, 그 조각을 지우기만 하면 `failure`, 새 CHANGELOG 항목을 더하면 `success`다.
-9. 설계서 기록(CHANGELOG는 이 PR의 조각에 있다): base에 머리말과 변경 이력이 맞는 짧은 설계서를 둔다. (a) 설계서 본문만 바꾸면 `failure`이고 설명에 `설계서`가 있다. (b) 본문을 바꾸고 변경 이력에 새 항목을 더하고 머리말을 맞추면(옛 방식) `success`. (c) 본문을 바꾸고 이 PR의 조각에 설계서 변경 이력 항목을 더하면 `success`. (d) 본문을 바꾸고 다른 브랜치 이름의 조각에만 설계서 항목이 있으면 `failure`.
+9. 설계서 기록(CHANGELOG는 이 PR의 조각에 있다): base에 머리말과 변경 이력이 맞는 짧은 설계서를 둔다. (a) 설계서 본문만 바꾸면 `failure`이고 설명에 `설계서`가 있다. (b) 본문을 바꾸고 변경 이력에 새 항목을 더하고 머리말을 맞추면(옛 방식) `success`. (c) 본문을 바꾸고 이 PR의 조각에 설계서 변경 이력 항목을 더하면 `success`. (d) 본문을 바꾸고 다른 브랜치 이름의 조각에만 설계서 항목이 있으면 `failure`. (e) 본문을 바꾸고 변경 이력의 마지막 항목을 지운 뒤 머리말을 그 앞 항목에 맞추면 `failure`이고 설명에 `설계서`가 있다. (f) 본문을 바꾸고 마지막 항목의 글만 고치면(버전은 그대로) `failure`.
 
 먼저 테스트만 커밋하고, 이 변경 전의 코드에서 새 테스트가 실패하는 것을 진행 로그에 적는다.
 
@@ -170,6 +173,7 @@ grep -qE '^export function parseFragment\(' scripts/lib/changes.ts
 grep -qE '^export function fragmentPathFor\(' scripts/lib/changes.ts
 grep -qE '^export function designVersionProblems\(' scripts/lib/design-version.ts
 grep -qE '^export function readDesignVersion\(' scripts/lib/design-version.ts
+grep -qE '^export function compareVersions\(' scripts/lib/design-version.ts
 test -z "$(grep -lE "from '\.\./gates/" scripts/lib/changes.ts scripts/lib/design-version.ts)"
 test ! -e docs/harness/changes
 awk '/^## 5\. PR/{f=1;next} /^## 6\./{f=0} f' docs/harness/workflow.md | grep -qF 'docs/harness/changes/<계획 id>-s<N>.md'

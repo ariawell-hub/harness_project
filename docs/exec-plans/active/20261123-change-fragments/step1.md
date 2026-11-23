@@ -68,15 +68,17 @@ export function runChangesCollect(
 
 `root`는 리포 루트다. 차례:
 
-1. `<root>/docs/harness/changes/`가 없거나 비었으면 `changes-collect: 모을 조각 없음`을 출력하고 0이다. 파일을 쓰지 않는다.
-2. 경계 확인(`lstatSync`. 링크를 따라가지 않는다): `docs`, `docs/harness`, `docs/harness/changes`가 심볼릭 링크가 아닌 실제 폴더이고, 조각 폴더 안의 항목과 설계서·CHANGELOG가 심볼릭 링크가 아닌 일반 파일이다. 아니면 문제다. 조각 폴더 안의 항목은 `isFragmentPath`여야 한다(하위 폴더나 다른 이름은 문제다).
-3. 상태 확인: `git status --porcelain --untracked-files=all -- docs/harness/design.md docs/harness/CHANGELOG.md docs/harness/changes`의 출력이 비어야 한다(커밋하지 않은 변경이 없다). 비지 않았거나 명령이 실패하면 문제다. 문제 글에 되돌리는 명령 `git restore --source=HEAD --staged --worktree -- docs/harness/design.md docs/harness/CHANGELOG.md docs/harness/changes`와 "앞선 모으기가 중간에 실패했으면 되돌린 뒤 다시 실행하라"를 넣는다.
-4. 설계서와 CHANGELOG, 조각을 읽어 `collectFragments`에 넘긴다(`date`의 기본값은 `today()`). 읽지 못한 파일은 문제다.
-5. 2~4에서 문제가 하나라도 있으면 문제를 줄마다 출력하고 1이다. 아무 파일도 쓰거나 지우지 않는다.
-6. 바뀐 기록 파일을 쓰고(설계서, CHANGELOG 차례), 조각 파일을 하나씩 지운다. 폴더는 재귀로 지우지 않는다. 출력은 `changes-collect: 조각 <N>개, CHANGELOG 항목 <M>개, 설계서 <넣은 버전들 또는 그대로>`이고 0이다.
-7. 6의 쓰기·지우기가 예외로 끝나면 그 자리에서 멈추고, 무엇이 실패했는지와 3의 되돌리는 명령을 출력하고 1이다. 되돌리기 전에 다시 실행하면 3에서 막힌다(항목이 두 번 옮겨지지 않는다).
+1. 폴더 경계(`lstatSync`. 링크를 따라가지 않는다. 조각 폴더가 비었는지 보기 전에 한다): `docs`, `docs/harness`가 심볼릭 링크가 아닌 실제 폴더이고, `docs/harness/changes`는 없거나 심볼릭 링크가 아닌 실제 폴더다. 아니면 문제를 출력하고 1이다(링크가 가리키는 폴더가 비었어도 같다. Codex F1).
+2. `<root>/docs/harness/changes/`가 없거나 비었으면 `changes-collect: 모을 조각 없음`을 출력하고 0이다. 파일을 쓰지 않는다.
+3. 파일 경계(`lstatSync`): 조각 폴더 안의 항목과 설계서·CHANGELOG가 심볼릭 링크가 아닌 일반 파일이다. 아니면 문제다. 조각 폴더 안의 항목은 `isFragmentPath`여야 한다(하위 폴더나 다른 이름은 문제다).
+4. 커밋 확인: `git ls-tree -r --name-only -z HEAD -- docs/harness/design.md docs/harness/CHANGELOG.md docs/harness/changes`의 목록에 설계서·CHANGELOG와 조각 폴더 안의 모든 항목이 있어야 한다. 없는 파일(커밋하지 않은 파일, git이 무시하는 파일)은 문제다. 명령이 실패해도 문제다. 이유: 지운 조각과 고친 기록 파일을 HEAD에서 되돌릴 수 있어야 한다. 5의 `git status`는 무시된 파일을 보이지 않는다(Codex F7).
+5. 상태 확인: `git status --porcelain --untracked-files=all -- docs/harness/design.md docs/harness/CHANGELOG.md docs/harness/changes`의 출력이 비어야 한다(커밋하지 않은 변경이 없다). 비지 않았거나 명령이 실패하면 문제다. 4·5의 문제 글에 되돌리는 명령 `git restore --source=HEAD --staged --worktree -- docs/harness/design.md docs/harness/CHANGELOG.md docs/harness/changes`와 "앞선 모으기가 중간에 실패했으면 되돌린 뒤 다시 실행하라"를 넣는다.
+6. 설계서와 CHANGELOG, 조각을 읽어 `collectFragments`에 넘긴다(`date`의 기본값은 `today()`). 읽지 못한 파일은 문제다.
+7. 3~6에서 문제가 하나라도 있으면 문제를 줄마다 출력하고 1이다. 아무 파일도 쓰거나 지우지 않는다.
+8. 바뀐 기록 파일을 쓰고(설계서, CHANGELOG 차례), 조각 파일을 하나씩 지운다. 폴더는 재귀로 지우지 않는다. 출력은 `changes-collect: 조각 <N>개, CHANGELOG 항목 <M>개, 설계서 <넣은 버전들 또는 그대로>`이고 0이다.
+9. 8의 쓰기·지우기가 예외로 끝나면 그 자리에서 멈추고, 무엇이 실패했는지와 5의 되돌리는 명령을 출력하고 1이다. 되돌리기 전에 다시 실행하면 5에서 막힌다(항목이 두 번 옮겨지지 않는다).
 
-git은 3의 상태 읽기만 쓴다. 스테이징·커밋(`git add`, `git rm`, `git commit`)과 되돌리기(`git restore`)는 실행하지 않는다. 커밋과 되돌리기는 모으기 PR을 여는 세션이 확인하고 한다.
+git은 4·5의 읽기(`git ls-tree`, `git status`)만 쓴다. 스테이징·커밋(`git add`, `git rm`, `git commit`)과 되돌리기(`git restore`)는 실행하지 않는다. 커밋과 되돌리기는 모으기 PR을 여는 세션이 확인하고 한다.
 
 ### 3. `scripts/harness.ts`
 
@@ -96,8 +98,8 @@ git은 3의 상태 읽기만 쓴다. 스테이징·커밋(`git add`, `git rm`, `
 4. 문제(각각 `ok: false`이고 문제 글로 이유를 본다): 형식이 틀린 조각(문제 글에 그 경로), 자리 밖 경로, 설계서 머리말과 마지막 항목의 버전이 어긋남, 마지막 버전이 세 마디가 아님(`v0.8`), CHANGELOG에 `## 다음 버전 (미배포)`가 없음.
 5. 명령: 임시 리포(`docLint`가 설계서를 문서 목록에서 읽도록 설정·`AGENTS.md`·`docs/index.md`·설계서·CHANGELOG를 둔다)에 조각 둘을 두고 실행한다. 종료 코드 0, 출력에 `changes-collect: 조각 2개`, 조각 파일이 없다. 설계서와 CHANGELOG가 1번과 같은 꼴이다(날짜는 실행한 날의 `today()`). 이어서 `docLint`의 오류가 없다. 한 번 더 실행하면 종료 코드 0, 출력에 `모을 조각 없음`이고 설계서·CHANGELOG가 바이트 단위로 그대로다.
 6. 명령: 조각 폴더가 없을 때와 빈 폴더일 때 각각 종료 코드 0, 출력에 `모을 조각 없음`, 설계서·CHANGELOG가 바이트 단위로 그대로다.
-7. 명령: (a) 조각 둘 가운데 하나의 형식이 틀렸을 때, (b) 형식에 맞는 조각 옆에 `notes.txt`가 있을 때, (c) 형식에 맞는 조각이 있고 CHANGELOG에 커밋하지 않은 변경이 있을 때 각각 종료 코드 1이고 출력에 문제가 있다((c)는 되돌리는 명령 `git restore --source=HEAD`가 있다). 설계서·CHANGELOG·폴더 안의 모든 파일이 실행 전과 바이트 단위로 같다.
-8. 경계(심볼릭 링크를 만들 수 없는 환경이면 건너뛴다): 리포 밖 폴더에 형식에 맞는 조각을 두고 (a) `docs/harness/changes`를 그 폴더로 가는 심볼릭 링크로 만들었을 때, (b) 실제 조각 폴더 안에 리포 밖 조각 파일로 가는 심볼릭 링크를 두었을 때, (c) CHANGELOG가 리포 밖 파일로 가는 심볼릭 링크일 때 각각 `runChangesCollect`가 1이다. 리포 밖 파일과 설계서·CHANGELOG(링크 대상 포함)가 실행 전과 바이트 단위로 같다.
+7. 명령: (a) 조각 둘 가운데 하나의 형식이 틀렸을 때, (b) 형식에 맞는 조각 옆에 `notes.txt`가 있을 때, (c) 형식에 맞는 조각이 있고 CHANGELOG에 커밋하지 않은 변경이 있을 때, (d) 커밋한 조각 옆에 형식에 맞지만 커밋하지 않고 `.git/info/exclude`로 무시한 조각이 있을 때 각각 종료 코드 1이고 출력에 문제가 있다((c)는 되돌리는 명령 `git restore --source=HEAD`가 있고, (d)는 무시한 조각의 경로가 있다). 설계서·CHANGELOG·폴더 안의 모든 파일(무시한 조각 포함)이 실행 전과 바이트 단위로 같다.
+8. 경계(심볼릭 링크를 만들 수 없는 환경이면 건너뛴다): 리포 밖 폴더에 형식에 맞는 조각을 두고 (a) `docs/harness/changes`를 그 폴더로 가는 심볼릭 링크로 만들었을 때, (b) 실제 조각 폴더 안에 리포 밖 조각 파일로 가는 심볼릭 링크를 두었을 때, (c) CHANGELOG가 리포 밖 파일로 가는 심볼릭 링크일 때, (d) `docs/harness/changes`를 리포 밖 빈 폴더로 가는 심볼릭 링크로 만들었을 때 각각 `runChangesCollect`가 1이다((d)도 `모을 조각 없음`으로 0이 되지 않는다). 리포 밖 파일과 설계서·CHANGELOG(링크 대상 포함)가 실행 전과 바이트 단위로 같다.
 9. 중간 실패 뒤 재실행: 조각 둘을 두고 `fs.unlink`가 둘째 조각에서 예외를 던지게 해 실행하면 1이고, 출력에 실패한 파일과 `git restore --source=HEAD`가 있다. 그 상태로 다시 실행하면(주입 없이) 1이고 설계서·CHANGELOG가 첫 실행 직후와 바이트 단위로 같다(항목이 두 번 들어가지 않는다). 테스트가 출력의 되돌리는 명령으로 되돌린 뒤 다시 실행하면 0이고, CHANGELOG에 각 항목이 한 번씩, 설계서에 새 버전이 v0.7.82부터 한 번씩 들어간다.
 
 먼저 테스트만 커밋하고, 이 변경 전의 코드에서 새 테스트가 실패하는 것을 진행 로그에 적는다.
@@ -113,7 +115,7 @@ git은 3의 상태 읽기만 쓴다. 스테이징·커밋(`git add`, `git rm`, `
 - `docs/harness/workflow.md` 5절의 "변경 조각" 아래에 하위 항목 "모으기 PR"을 둔다. 적을 것:
   - 언제: 제작자가 지시할 때(대화나 Issue). runner·`start`·CI는 스스로 열지 않는다(의사결정 로그 9).
   - 순서: Issue → `new-task --issue <N> --slug changes-collect --size small` → worktree에서 `node scripts/harness.ts changes-collect` → 결과 확인 → `check` → 초안 PR(보호 경로라 제작자 승인) → `pr-ready`.
-  - 명령이 하는 일: 이름 차례로 읽기, 설계서 변경 이력 항목마다 패치 번호 + 1과 그날 날짜, 머리말 맞추기, CHANGELOG "다음 버전 (미배포)" 끝으로 옮기기, 조각 지우기. 조각이 없으면 아무것도 바꾸지 않는다. 형식이 틀린 조각, 심볼릭 링크, 커밋하지 않은 변경이 있으면 아무것도 바꾸지 않고 실패한다. 도중에 실패하면 출력의 되돌리는 명령으로 되돌린 뒤 다시 실행한다.
+  - 명령이 하는 일: 이름 차례로 읽기, 설계서 변경 이력 항목마다 패치 번호 + 1과 그날 날짜, 머리말 맞추기, CHANGELOG "다음 버전 (미배포)" 끝으로 옮기기, 조각 지우기. 조각이 없으면 아무것도 바꾸지 않는다. 형식이 틀린 조각, 심볼릭 링크, 커밋하지 않은 파일(git이 무시하는 파일 포함)이나 변경이 있으면 아무것도 바꾸지 않고 실패한다. 도중에 실패하면 출력의 되돌리는 명령으로 되돌린 뒤 다시 실행한다.
   - 모으기 PR은 CHANGELOG를 고치므로 자기 조각을 두지 않는다.
   - 모으기 PR이 main과 충돌하면(그 사이 옛 방식 PR이 CHANGELOG·설계서 변경 이력을 고쳤다) main 쪽을 먼저 두고 모은 항목의 버전을 다음 번호로 올린다. 그 사이 main에 더해진 조각은 다음 모으기가 옮긴다.
 - `docs/harness/architecture.md`: 명령 목록과 표에 `commands/changes.ts`(`changes-collect`)를, `lib/changes.ts` 줄에 모으기 계산(`collectFragments`)을 더한다.
@@ -155,7 +157,7 @@ node scripts/harness.ts doc-lint
 
 - `docs/harness/CHANGELOG.md`와 `docs/harness/design.md`를 이 PR에서 고치지 마라. 이유: 이 PR은 자기 조각만으로 `harness-guard`를 통과해야 한다(수용 기준 10).
 - 이 PR에서 모으기를 실행하지 마라(조각 파일을 지우거나 CHANGELOG로 옮기지 마라). 이유: 모으기 PR은 제작자 지시로 따로 연다(의사결정 로그 9).
-- 모으기 명령이 상태 읽기 밖의 git 명령(스테이징, 커밋, `git rm`, `git restore`)을 실행하거나 폴더를 재귀로 지우게 하지 마라. 이유: R14. 모으기 결과와 되돌리기는 PR을 여는 세션이 확인하고 한다.
+- 모으기 명령이 읽기(`git ls-tree`, `git status`) 밖의 git 명령(스테이징, 커밋, `git rm`, `git restore`)을 실행하거나 폴더를 재귀로 지우게 하지 마라. 이유: R14. 모으기 결과와 되돌리기는 PR을 여는 세션이 확인하고 한다.
 - 모으기 명령이 심볼릭 링크를 따라가 읽거나 쓰거나 지우게 하지 마라. 이유: 작업 트리 밖 파일을 옮기고 지울 수 있다(의사결정 로그 14).
 - 형식이 틀린 조각을 건너뛰고 나머지만 모으게 하지 마라. 문제가 있을 때 파일 일부만 쓰게 하지 마라. 커밋하지 않은 변경이 있을 때 모으게 하지 마라. 이유: 건너뛴 기록이 조용히 남거나 사라지고, 일부만 쓰거나 다시 모으면 설계서 버전과 CHANGELOG가 어긋나거나 두 번 들어간다.
 - 모으기를 runner·`start`·CI에서 돌리거나 알리게 하지 마라. 이유: 의사결정 로그 9.
