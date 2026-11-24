@@ -54,4 +54,10 @@ GitHub 웹에서 한다. 브랜치 `feat/20261122-arm64-check-s0`에서 `.github
 
 ## 되돌리는 방법
 
-이 패치의 반대다(세 줄을 "바꾸기 전"의 값으로). `check` 워크플로는 PR 쪽 정의로 돌므로 되돌리는 PR의 `check`는 되돌린 정의(x64)로 돈다. main의 다른 PR은 `origin/main`을 병합하면 되돌린 정의를 받는다.
+되돌리는 PR 하나에서 워크플로와 구조 테스트를 함께 x64로 맞춘다. 워크플로만 되돌리면 구조 테스트가 arm64를 요구해 그 PR의 `check`가 실패한다.
+
+1. 워크플로(제작자): `check.yml`의 세 줄을 "바꾸기 전"의 값으로 되돌린다. 절차는 위 "제작자 작업"과 같다.
+2. 구조 테스트(봇): `scripts/test/ci.test.ts`의 러너 표에서 `'check/check'`의 값을 `'ubuntu-latest'`로, `scripts/test/harness-guard.test.ts`의 `pinned(checkJob, 'arm64', 'check')`를 `pinned(checkJob, 'x64', 'check')`로 바꾼다. 단언과 체크섬 검증 단계는 그대로 둔다.
+3. 순서는 이 PR과 같다. 봇이 테스트를 먼저 고치고, 제작자의 커밋 뒤에 `check`가 통과한다. 고친 두 테스트 파일은 main(arm64)에서 단언 실패로 실패하고 되돌린 정의에서 통과하므로 test-effect도 통과한다.
+
+`check` 워크플로는 PR 쪽 정의로 돌므로 되돌리는 PR의 `check`는 되돌린 정의(x64)로 돈다. main의 다른 PR은 `origin/main`을 병합하면 되돌린 정의를 받는다.
