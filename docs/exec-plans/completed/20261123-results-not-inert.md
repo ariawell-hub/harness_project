@@ -2,7 +2,7 @@
 id: 20261123-results-not-inert
 issue: 225 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -28,6 +28,7 @@ claimed_at: 2026-11-23T06:36:16+09:00
 - `.github/CODEOWNERS`
 - `scripts/test/check-skip.test.ts`
 - `docs/harness/CHANGELOG.md`
+- `docs/harness/changes/20261123-results-not-inert.md`
 - `lab/q10-db/README.md`
 - `docs/exec-plans/active/20261123-results-not-inert.md`
 - 읽기만: `scripts/commands/check.ts`, `scripts/test/profile-web-db.test.ts`, `docs/exec-plans/completed/20261122-patch-not-inert.md`, `docs/harness/workflow.md`
@@ -37,12 +38,18 @@ claimed_at: 2026-11-23T06:36:16+09:00
 - 2026-11-23 접수: PR #188(Issue #180)의 미룬 지적 F15(README의 "`scripts/test/`의 테스트는 `lab/`을 읽지 않는다"가 틀렸다)를 고치다가, 워크플로 패치 말고도 `profile-web-db.test.ts`가 `lab/q10-db/results/darwin-arm64.json`을 읽는 것을 찾았다. 그 파일은 건너뛰기 대상이다(F14와 같은 꼴). #188의 step은 `harness.config.json`을 고칠 수 없어, F14 때 제작자가 정한 방법(별도 PR로 먼저 고친다)을 따라 봇이 Issue #225를 등록하고 `new-task`로 시작했다.
 - 2026-11-23 구현: 테스트를 먼저 고쳤다(`scripts/test/check-skip.test.ts`: "이 리포의 설정" 테스트에서 결과 파일을 "테스트가 읽는 파일"로 옮기고 `lab/q10-db/results/linux-x64.json`을 건너뛰기 대상으로 더했다. 따옴표 안의 `lab/` 경로를 훑는 테스트를 더했다). 설정을 고치기 전에 돌려 실패를 확인했다: 20건 가운데 그 두 테스트가 실패한다(둘 다 `lab/q10-db/results/darwin-arm64.json`이 건너뛰기 대상). 그 사이 PR #214가 병합돼 이 브랜치를 `origin/main`(`3e9e8b2`)으로 빨리 감았다(커밋 전이라 병합 커밋은 없다). 그 뒤 `harness.config.json`의 `protectedPaths`에 경로를 더하고 `codeowners --write`로 `.github/CODEOWNERS`를 다시 만들었다. CHANGELOG "다음 버전" 끝에 한 줄을 더했다(설계서 본문은 바뀌지 않는다). `lab/q10-db/README.md`는 PR #188이 병합된 뒤 맞춘다(아직 고치지 않았다).
 - 2026-11-24T22:27:02+09:00 step 재작업: 구현 판정 1회차(head fd91621. 원장의 1라운드): Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F1: check-skip.test.ts의 lab/ 경로 훑기 정규식이 따옴표 안 경로의 공백을 받지 않아 공백이 든 결과 파일 경로를 놓친다. 맞는 지적이다. 테스트를 먼저 더하고 고친다(제작자 지시로 mac-session이 넘겨받음, 2026-11-24)
+- 2026-11-24 넘겨받기: 담당 `mac-session-2`의 선점(`claim/225`)이 2026-11-23 뒤로 갱신되지 않아 만료된 채 PR이 멈춰 있었다. 제작자가 대화에서 이어 가라고 지시해 `mac-session`이 넘겨받았다. 정식 넘겨받기 방법이 없어(TD-23) frontmatter의 `owner`는 그대로 두고 대화 세션이 이 worktree로 들어가(EnterWorktree) 고쳤다.
+- 2026-11-24 `origin/main`(`a06b7fd`)을 병합했다(충돌 없음). main에 변경 조각(#227)이 들어와, CHANGELOG에 더했던 한 줄을 이 PR의 조각 `docs/harness/changes/20261123-results-not-inert.md`로 옮겼다(승인을 기다리는 동안 CHANGELOG 끝에서 다른 PR과 충돌하지 않게).
+- 2026-11-24 F1 테스트 먼저: 훑기를 루트를 받는 함수(`quotedLabFiles`)로 빼고, 픽스처 리포에 공백이 든 파일(`lab/q10-db/results/trial notes.json`)·작은따옴표가 든 파일(큰따옴표로 적음)·한 줄에 둘을 적은 파일과 없는 파일·glob 글을 두어 찾은 목록을 단언하는 테스트를 더했다. 고치기 전에 돌려 실패를 확인했다(공백이 든 경로와 작은따옴표가 든 경로를 찾지 못한다).
+- 2026-11-24 F1 수정: 정규식이 여는 따옴표와 같은 따옴표에서 닫고, 경로 안의 공백과 다른 따옴표를 받는다(줄바꿈·역슬래시는 받지 않는다). `check-skip.test.ts` 21건 통과. 이 리포를 훑는 테스트도 그대로 통과한다(새로 찾은 경로가 있어도 모두 건너뛰기 대상이 아니다).
+- 2026-11-24 PR #188이 병합돼(2026-11-23) `lab/q10-db/README.md`의 "테스트가 읽는 파일" 문장을 두 파일 모두 보호 경로인 것으로 맞췄다.
 
 ## 의사결정 로그
 
 - 결정: 그 결과 파일을 `protectedPaths`에 더한다(#215와 같은 방법). / 이유: `testInertPaths`에는 빼는 문법이 없고, `lab/**`를 폴더마다 나눠 적으면 새 폴더를 더할 때마다 고쳐야 한다. 실측 결과는 ADR-0007의 근거라 보호할 이유도 있다. / 버린 대안: 테스트가 결과 파일을 읽지 않게 한다(실측과 문서를 맞대는 테스트의 목적이 사라진다), 결과 폴더 전체(`lab/q10-db/results/**`)를 보호한다(테스트가 읽지 않는 결과 파일까지 제작자 승인이 필요해진다. Issue #180의 step1이 더할 Linux·Windows 결과 파일은 테스트가 읽지 않는다).
 - 결정: 있던 테스트의 단언 하나를 바꾼다(`testInert('lab/q10-db/results/darwin-arm64.json')`의 기대를 `true`에서 `false`로 옮긴다). / 이유: 그 단언이 틀린 사실(테스트가 읽지 않는다)을 굳혀 두었고, 이 작업이 고치는 동작이 바로 그것이다. 단언을 지우지 않고 반대쪽 목록으로 옮기며, 건너뛰기 대상인 결과 파일의 단언은 다른 결과 파일로 남긴다(검사를 약화하지 않는다).
 - 결정: 테스트가 적은 `lab/` 경로를 훑는 테스트를 더한다. / 이유: #215와 이번 일 모두 "테스트가 읽는 파일" 목록을 손으로 채우다 빠뜨렸다. 훑기는 따옴표 안의 경로 글만 보므로 경로를 조립해 읽는 테스트는 놓친다. 지금 그런 테스트는 없다(`scripts/test/`에서 `lab/`이 나오는 곳은 이 둘과 주석 하나다). / 버린 대안: 모든 테스트를 실제로 돌려 읽은 파일을 기록한다(비용이 크다).
+- 결정(구현 판정 1회차 F1 뒤): 훑기의 따옴표 짝을 맞추고(역참조) 경로 안의 공백을 받는다. 픽스처 리포로 훑기 함수 자체를 시험한다. / 이유: 이 리포에는 지금 공백이 든 `lab/` 파일이 없어, 리포를 훑는 테스트만으로는 고친 정규식을 확인할 수 없다. / 버린 대안: 공백이 든 실제 파일을 `lab/`에 더한다(시험만을 위한 파일이 실측 폴더에 남는다), 따옴표 안의 모든 글을 받는다(줄을 넘는 템플릿 문자열까지 경로로 읽는다).
 
 ## 발견 사항
 
