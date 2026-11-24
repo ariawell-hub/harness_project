@@ -22,6 +22,17 @@
 runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
 ```
 
+변수 값마다 고르는 러너(GitHub 식의 `==`는 문자열의 대소문자를 가리지 않는다. 계획 검증 1라운드 F1). 안내·보안 문서·설계서에 이 표의 내용을 그대로 적는다.
+
+| `SHORT_JOB_RUNNER`의 값                             | 러너            |
+| --------------------------------------------------- | --------------- |
+| 없음(빈 문자열)                                     | `ubuntu-latest` |
+| `ubuntu-slim`                                       | `ubuntu-slim`   |
+| 대소문자만 다른 값(`UBUNTU-SLIM`, `Ubuntu-Slim` 등) | `ubuntu-slim`   |
+| 그 밖의 값(`ubuntu-latest`, `self-hosted`, `on` 등) | `ubuntu-latest` |
+
+어느 값이든 고르는 라벨은 식에 적힌 두 값 가운데 하나다(대소문자가 달라도 라벨은 소문자 `ubuntu-slim`이다).
+
 ### 1. 워크플로 패치 (`lab/actions-cost/b1-slim/workflows.patch`)
 
 - 네 파일에서 아래 13개 job의 `    runs-on: ubuntu-latest` 줄(앞 공백 4칸)을 스위치 식으로 바꾼다. 줄을 더하거나 지우지 않는다. 다른 줄과 다른 job은 그대로다.
@@ -35,7 +46,7 @@ runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-
 
 B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
 
-- 바꾸는 것: 파일마다 job 이름과 줄 번호, 바꾸기 전과 뒤의 줄. 스위치 식의 뜻(변수가 `ubuntu-slim`일 때만 1코어 러너, 없거나 다른 값이면 `ubuntu-latest`).
+- 바꾸는 것: 파일마다 job 이름과 줄 번호, 바꾸기 전과 뒤의 줄. 스위치 식의 뜻(위의 값마다의 표. 대소문자만 다른 값도 켜진다는 것 포함).
 - 제작자 작업: GitHub 웹에서 브랜치 `feat/20261124-slim-runner-s0`의 네 파일을 고쳐 그 브랜치에 바로 커밋한다(파일마다 커밋 하나). 에이전트가 도는 머신의 터미널에서 하지 않는다(설계서 E5). 이 step에서는 변수를 만들지 않는다.
 - 커밋 뒤의 일: 그 head의 `check`는 기존 러너 테스트가 옛 러너를 요구해 한 번 실패한다(기대한 실패). 봇이 트리를 비교하고 구조 테스트를 올린다.
 - 봇이 확인한 것: 테스트가 지금 워크플로에서 실패하고 패치를 적용한 트리에서 통과한다. 패치는 그 트리의 diff다.
@@ -56,7 +67,7 @@ B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
 - 10.4절의 "self-hosted 러너는 쓰지 않는다" 문단: self-hosted 금지는 그대로 둔다. "모든 작업은 GitHub 호스팅(일회용) 러너에서 돈다"와 하위 항목의 "고른 수단(1코어 컨테이너 러너 등)을 구현하는 Issue가 고치기 전까지 이 문단은 그대로다"를 아래 내용으로 바꾼다.
   - 13개 job은 리포 변수 `SHORT_JOB_RUNNER`가 `ubuntu-slim`이면 1코어 러너(`ubuntu-slim`)에서 돈다. 이 러너는 job마다 새 VM이 아니라 공유 VM 위의 job마다 새 컨테이너다(GitHub 문서의 표현을 적고 출처를 단다). 그 가운데 기록 job(`recorder`)과 Codex 인증 저장 job(`codex-auth-store`)은 비밀을 가진다.
   - 나머지 job(`check`, `selftest`, 판정의 `judge`, `revert`)은 VM 러너에서 돈다.
-  - 변수의 값은 워크플로 식이 두 러너 가운데 하나로만 바꾼다. 변수로 다른 러너를 고를 수 없다.
+  - 변수의 값은 워크플로 식이 두 러너 가운데 하나로만 바꾼다. 변수로 다른 러너를 고를 수 없다. 비교는 대소문자를 가리지 않는다(위의 값마다의 표).
   - 변수는 제작자가 바꾼다(R20. L1 훅이 봇의 `gh variable`·`actions/variables` 호출을 막는다). 리포의 다른 협업자도 바꿀 수 있지만 두 러너 사이를 오갈 뿐이다. 되돌리려면 변수를 지운다(`docs/SECURITY.md`).
   - ADR-0008 링크와 제작자가 묶음을 고른 날(2026-11-22)은 남긴다.
 - E3 행: "둘 다 GitHub 호스팅(일회용) 러너에서 실행하고"를, 판정(`judge`)은 GitHub 호스팅 VM 러너에서 돌고 1분 미만 job(기록 job과 Codex 인증 저장 job 포함)은 스위치를 켜면 1코어 컨테이너 러너에서 돈다는 뜻으로 고친다(10.4절 참조). 나머지 문장은 그대로다.
@@ -66,7 +77,7 @@ B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
 
 "필수 체크 등록 (제작자)" 절 뒤에 절 하나를 더한다: "1분 미만 job의 러너 변수 (제작자)".
 
-- 무엇: 리포 변수 `SHORT_JOB_RUNNER`. 값이 `ubuntu-slim`이면 13개 job이 1코어 러너에서 돈다. 없거나 다른 값이면 `ubuntu-latest`다. 잃는 보장(컨테이너 격리, 비밀을 가진 job 포함)과 설계서 10.4절 링크.
+- 무엇: 리포 변수 `SHORT_JOB_RUNNER`. 값마다 고르는 러너의 표(위의 표 그대로. 대소문자만 다른 값도 켜진다). 잃는 보장(컨테이너 격리, 비밀을 가진 job 포함)과 설계서 10.4절 링크.
 - 켜기: GitHub → 리포 → Settings → Secrets and variables → Actions → Variables 탭 → New repository variable. Name `SHORT_JOB_RUNNER`, Value `ubuntu-slim`. 봇이 요청할 때 한다(넣기 전 값을 잰 뒤).
 - 끄기(되돌리기): 같은 화면에서 변수를 지운다. 바로 다음 실행부터 `ubuntu-latest`다. PR이 필요 없다.
 - 확인: 봇이 실행 기록의 job 라벨(`gh api …/actions/runs/<id>/jobs`의 `labels`)을 본다.
@@ -81,7 +92,14 @@ B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
 - 1·2·4·5·6과 3의 `tests.patch`를 올려 판정을 받은 뒤 Issue #240에 요청을 남긴다(`needs-human`): 브랜치 이름, 파일마다 바꿀 줄과 위치(README 링크), 커밋 뒤 한 번 실패하는 `check`, 끝난 뒤 알릴 방법. 요청은 한 번에 모은다. 요청할 때의 head를 기준 커밋으로 진행 로그에 적는다.
 - 제작자의 커밋을 받으면(`git fetch origin <브랜치>`, `git merge --ff-only origin/<브랜치>`) 봇이 커밋을 더하기 전에, 기준 커밋의 트리에 패치를 적용한 결과와 받은 head의 트리를 통째로 견준다(`docs/SECURITY.md`의 명령). 다르면 멈추고 제작자에게 다른 곳을 알린다. 결과를 진행 로그에 적는다.
 - 같으면 `tests.patch`를 적용하고 그 파일을 지워 커밋하고, AC와 `check`를 통과시키고, 완료 처리한 뒤 push한다.
-- push 뒤 그 head의 `check`가 통과하고, 그 head에서 돈 `gates`의 `evaluate`와 `record`의 job 라벨이 `ubuntu-latest`인지(변수가 없다) 실행 기록으로 확인해 PR 본문과 Issue에 적는다.
+- push 뒤 그 head의 `check`가 통과하는 것을 확인한다. 이 PR의 head에서 도는 `gates`와 판정 워크플로는 그때의 main 정의(고정 러너)로 돌므로 스위치의 확인에 쓰지 않는다(아래 8).
+
+### 8. 병합 뒤 관찰 (수용 기준 2)
+
+- 병합 커밋과 병합 시각을 Issue #240에 적는다(step0의 PR은 병합으로 끝나므로, 계획의 진행 로그에는 step1의 PR이 옮겨 적는다).
+- 병합 시각 뒤에 만들어진 같은 리포 PR의 `gates` 실행(`pull_request_target`, 실행을 만들 때의 main 정의로 돈다) 하나와, `head_sha`가 병합 커밋이거나 그 뒤의 main 커밋인 `judge-claude`·`judge-codex` 실행(`workflow_run`, `head_sha`가 그때의 main 커밋이다) 하나씩을 찾는다. 병합 자체는 `gates`를 돌리지 않으므로 같은 리포 PR의 다음 이벤트(다른 PR의 push, step1 PR의 첫 push)를 기다린다.
+- 그 실행에서 8개 job(`gates`의 `evaluate`·`record`, `judge-claude`의 `plan`·`record`, `judge-codex`의 `plan`·`pubkey`·`store`·`record`)의 job 라벨이 `ubuntu-latest`이고 결과가 `success`인 것을 실행 기록(`gh api repos/<owner>/<repo>/actions/runs/<id>`의 `created_at`·`head_sha`, `…/runs/<id>/jobs`의 `labels`·`conclusion`)으로 확인해 실행 링크와 함께 Issue #240에 남긴다.
+- 라벨이 `ubuntu-latest`가 아니면(변수가 이미 있다) 멈추고 제작자에게 알린다. step1은 이 기록이 Issue에 있어야 시작한다.
 
 ## Acceptance Criteria
 

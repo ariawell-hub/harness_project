@@ -12,7 +12,7 @@
 
 ## 작업
 
-시작 조건: step0이 병합됐고, 2026-11-29 00:00(UTC)이 지났다. 리포 변수 `SHORT_JOB_RUNNER`는 아직 없다(step0 병합 뒤 main의 `gates` 실행이 `ubuntu-latest`에서 돈 것을 Issue에서 확인한다).
+시작 조건: step0이 병합됐고, 2026-11-29 00:00(UTC)이 지났고, step0 작업 8의 병합 뒤 관찰(새 정의로 만들어진 실행에서 8개 job이 `ubuntu-latest`로 성공했다)이 Issue #240에 있다. 리포 변수 `SHORT_JOB_RUNNER`는 아직 없다. 그 관찰(실행 링크)을 이 PR의 진행 로그에 옮겨 적는다.
 
 ### 1. 넣기 전 값을 잰다 (`lab/actions-cost/2026-11-25_2026-11-28.jsonl`)
 
@@ -43,11 +43,29 @@ T=$(mktemp -d) && node scripts/harness.ts actions-cost --since 2026-11-25 --unti
 
 ### 5. 켠 뒤 관찰한다
 
-- 제작자가 켰다고 알리면, 진행 로그에 켠 시각을 적고 완료 처리 커밋까지 올린다. 그 push로 이 PR의 `gates`(`evaluate`, `record`)와 판정 워크플로(`plan`, `pubkey`, `store`, `record`)가 새 러너에서 돈다.
-- 관찰 기간은 변수를 켠 때부터 이 PR의 승인 요청 직전까지다. 그동안 돈 실행(이 PR과 다른 PR)에서 13개 job마다 job 라벨과 결과를 실행 기록(`gh api repos/<owner>/<repo>/actions/runs/<id>/jobs`의 `labels`, `conclusion`)으로 읽는다.
-- PR 본문과 Issue #240에 job마다 하나씩 적는다: job 라벨이 `ubuntu-slim`이고 결과가 성공인 실행의 링크. 관찰 기간에 돌지 않은 job(`failed`, `ci-failure`, `repro`처럼 조건이 있을 때만 도는 job, 승인 때 도는 `review-trigger`)은 이름을 적고 병합 뒤 Issue에서 이어 본다.
-- 러너 탓으로 실패한 job이 있으면(도구가 없다, 15분 제한, 메모리): 바로 Issue #240에 제작자에게 변수를 지워 달라고 요청하고, 실패한 실행과 원인을 적고, 승인을 요청하지 않는다. 다음 할 일은 제작자에게 묻는다(범위를 줄인다 / 고친다 / 그만둔다).
-- 모두 성공했으면 `pr-ready`로 제작자 head 승인을 요청한다.
+13개 job을 둘로 나눈다(계획 검증 1라운드 F3).
+
+- 필수 8개: `check`가 성공한 head마다 돈다. `gates`의 `evaluate`·`record`, `judge-claude`의 `plan`·`record`, `judge-codex`의 `plan`·`pubkey`·`store`·`record`. 승인을 요청하기 전에 최종 head에서 모두 `ubuntu-slim`으로 성공해야 한다.
+- 미룰 수 있는 5개: 조건이 있을 때만 돈다. `judge-claude`의 `failed`(판정 job이 실패했을 때)·`ci-failure`(`check`가 실패했을 때)·`repro`(재현 테스트가 붙은 지적이 있을 때), `judge-codex`의 `repro`, `review-trigger`(리뷰가 제출될 때. 봇은 리뷰를 제출하지 않는다, R20). 일부러 실패나 지적을 만들어 돌리지 않는다.
+
+순서:
+
+- 제작자가 켰다고 알리면, 진행 로그에 켠 시각을 적고 완료 처리 커밋까지 올린다. 이 push의 head가 최종 head다. 그 head의 `check`가 성공하면 `gates`와 두 판정 워크플로가 새 러너에서 돈다.
+- 최종 head의 세 실행이 끝날 때까지 기다린 뒤(그 head의 커밋 상태 `plan-gate`·`review/claude`·`review/codex`가 모두 pending이 아닐 때) worktree에서 아래 확인 명령을 돌린다. 세 상태가 가리키는 실행(`target_url`)의 job을 읽어, 세 상태가 성공이고 필수 8개가 모두 `ubuntu-slim`·`success`일 때만 `통과`를 낸다. 판정 워크플로 실행의 `head_sha`는 PR head가 아니라 main 커밋이라 커밋으로 실행을 찾지 않고 커밋 상태로 찾는다.
+
+```bash
+SHA=$(git rev-parse HEAD) && R=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && T=$(mktemp -d) && \
+gh api "repos/$R/commits/$SHA/status" --jq '.statuses[] | "\(.context) \(.state) \(.target_url)"' > "$T/st" && \
+test "$(grep -cE '^(plan-gate|review/claude|review/codex) success ' "$T/st")" = 3 && \
+grep -E '^(plan-gate|review/claude|review/codex) ' "$T/st" | awk '{print $3}' | sed 's#.*/runs/##' > "$T/ids" && test "$(grep -c "" "$T/ids")" = 3 && \
+for id in $(cat "$T/ids"); do gh api "repos/$R/actions/runs/$id/jobs" --jq '.jobs[] | "\(.name) \(.conclusion) \(.labels | join(","))"' >> "$T/jobs"; done && \
+test "$(grep -cx 'evaluate success ubuntu-slim' "$T/jobs")" = 1 && test "$(grep -cx 'record success ubuntu-slim' "$T/jobs")" = 3 && test "$(grep -cx 'plan success ubuntu-slim' "$T/jobs")" = 2 && test "$(grep -cx 'pubkey success ubuntu-slim' "$T/jobs")" = 1 && test "$(grep -cx 'store success ubuntu-slim' "$T/jobs")" = 1 && \
+echo 통과
+```
+
+- `통과`가 나오면 PR 본문과 Issue #240에 세 실행의 링크와 8개 job의 라벨·결과를 적는다. 미룰 수 있는 5개는 관찰 기간(변수를 켠 때부터 승인 요청 직전까지, 이 PR과 다른 PR의 실행)에 `ubuntu-slim`에서 돈 실행이 있으면 링크를, 없으면 이름을 적고 병합 뒤 Issue에서 이어 본다. 그 뒤 `pr-ready`로 제작자 head 승인을 요청한다.
+- `통과`가 나오지 않으면 승인을 요청하지 않는다. 상태가 아직 pending이면 기다린다. 필수 job이 러너 탓으로 실패했으면(도구가 없다, 15분 제한, 메모리) 바로 Issue #240에 제작자에게 변수를 지워 달라고 요청하고, 실패한 실행과 원인을 적는다. 다음 할 일은 제작자에게 묻는다(범위를 줄인다 / 고친다 / 그만둔다). 러너와 무관한 실패(판정의 지적 등)는 평소대로 고친다. 고친 커밋이 새 최종 head이므로 확인 명령을 다시 돌린다.
+- 미룰 수 있는 5개 가운데 관찰 기간에 돌아 러너 탓으로 실패한 것이 있으면 위와 같이 변수를 지워 달라고 요청하고 승인을 요청하지 않는다.
 
 ## Acceptance Criteria
 
