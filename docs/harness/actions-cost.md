@@ -32,7 +32,7 @@ node scripts/harness.ts actions-cost --from lab/actions-cost/<날짜>_<날짜>.j
 
 - **올림**: job마다 돈 초를 분으로 올림한다(최소 1분). 워크플로 하나에 job이 여럿이면 job마다 따로 올림한다.
 - **시도**: 다시 실행한 시도는 따로 센다. 같은 job을 두 번 돌리면 두 번 청구된다.
-- **단가**: 2코어 Linux x64 러너(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04`)는 분당 $0.006, 2코어 Linux arm64 러너(`ubuntu-24.04-arm`)는 분당 $0.005, 1코어 Linux 러너(`ubuntu-slim`)는 분당 $0.002다(2026-11-22에 확인. 단가: https://docs.github.com/en/billing/reference/actions-runner-pricing, 라벨: https://docs.github.com/en/actions/reference/runners/github-hosted-runners). job마다 그 러너의 단가를 곱해 더한다. 단가를 확인하지 못한 러너와 self-hosted 러너의 분은 청구 분과 금액에 넣지 않고 따로 적는다. 보존 기록에는 단가를 아는 러너의 라벨과 `self-hosted`만 그대로 남고 그 밖의 라벨은 `(기타)`로 남으므로, 새 러너를 쓰기 전에 단가표(`scripts/metrics/actions-cost.ts`의 `RATE_MILLI`)에 먼저 넣는다.
+- **단가**: 2코어 Linux x64 러너(`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04`)는 분당 $0.006, 2코어 Linux arm64 러너(`ubuntu-24.04-arm`)는 분당 $0.005, 1코어 Linux 러너(`ubuntu-slim`)는 분당 $0.002다(2026-11-22에 확인. 단가: https://docs.github.com/en/billing/reference/actions-runner-pricing, 라벨: https://docs.github.com/en/actions/reference/runners/github-hosted-runners). job마다 그 러너의 단가를 곱해 더한다. 단가를 확인하지 못한 러너와 self-hosted 러너의 분은 청구 분과 금액에 넣지 않고 따로 적는다. 보존 기록에는 단가를 아는 러너의 라벨만 그대로 남으므로, 새 러너를 쓰기 전에 단가표(`scripts/metrics/actions-cost.ts`의 `RATE_MILLI`)에 먼저 넣는다.
 - **돌지 않은 job**: 건너뛴 job과 시작하지 못한 job은 0분이다.
 - **PR**: 실행을 PR에 이을 수 있을 때만 잇는다. 가릴 수 없는 실행은 "PR을 찾지 못함"에 따로 보인다. 기본 브랜치의 `push` 실행은 "PR 밖"이다.
 - **보존 기록**: `--save`가 남기는 파일에는 계산에 드는 값만 있다(실행 id, 시도, 허용 목록에 있는 이름, 날짜, 돈 초, 러너 라벨, PR 번호, head 순번). `--from`은 그 파일만으로 같은 값을 낸다.
