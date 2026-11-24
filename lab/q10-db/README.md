@@ -7,8 +7,9 @@
 | `run.ts`                    | 절차 전체를 명령 하나로 돌린다(아래 "절차"). 실패한 자리에서 멈춘다                                                                                    |
 | `trial.ts`                  | 빈 폴더에 시험 프로젝트를 만들고 돌려 결과 파일을 쓴다                                                                                                 |
 | `check-results.ts`          | 결과 파일을 기대값과 대 본다(어긋나면 종료 코드 1). 확인한 버전의 출처. `--confirm`은 확정 조건을 판정한다                                             |
+| `verify-artifacts.ts`       | CI 러너에서 잰 결과 파일의 출처 확인: 아래 "잰 머신" 표가 가리키는 실행의 산출물과 값으로 같은지 본다(GitHub은 읽기만 한다)                            |
 | `results/<platform>-<arch>` | 실행한 머신마다 결과 파일 하나                                                                                                                         |
-| `test/`                     | `check-results.ts`와 `run.ts`의 테스트                                                                                                                 |
+| `test/`                     | 이 폴더 스크립트의 테스트와, 결과 파일·문서가 같은 확정 상태를 말하는지 보는 테스트(`confirmed.test.ts`)                                               |
 | `q10-trial-workflow.patch`  | CI 러너에서 절차를 돌리는 워크플로(`.github/workflows/q10-trial.yml`)의 패치. 워크플로는 제작자가 올린다([워크플로 변경 절차](../../docs/SECURITY.md)) |
 
 결과 파일은 스크립트가 쓴다. 손으로 고치지 않는다. 기대와 다른 결과가 나오면 스크립트나 절차를 고치고 다시 돌린다.
@@ -40,6 +41,8 @@ Linux와 Windows 네이티브의 결과는 GitHub Actions 러너에서 얻을 �
 2. 두 job이 모두 성공하면 산출물(`q10-result-ubuntu-latest`, `q10-result-windows-latest`)을 새 임시 폴더에 받는다: `gh run download <실행 번호> --dir <새 임시 폴더>`.
 3. 받은 폴더의 `linux-<arch>.json`과 `win32-<arch>.json`을 `lab/q10-db/results/`에 복사한다. 내용은 손으로 고치지 않는다. 산출물에 함께 든 다른 환경의 파일(체크아웃된 그대로 올라온 것)은 쓰지 않는다.
 4. `node scripts/harness.ts fmt`로 포맷하고 `node lab/q10-db/check-results.ts <이름>`으로 검사한다. 아래 "잰 머신" 표에 실행 주소와 함께 적는다.
+5. `node lab/q10-db/verify-artifacts.ts`로 출처를 확인한다. 표의 `linux-`·`win32-` 행마다 그 실행이 `main`에서 손으로 돌린 `q10-trial` 실행이고 두 OS의 job이 성공했는지, 그 OS의 산출물(`q10-result-<러너>`)에 든 같은 이름의 파일이 커밋한 결과 파일과 값으로 같은지(JSON으로 읽어 견준다. 포맷 차이는 빠진다) 본다. 문제가 있으면 종료 코드 1이다. 맞지 않으면 표의 주소를 바꾸지 말고 산출물을 다시 받는다.
+   - 아래 "잰 머신" 표는 포매터가 쓰는 꼴로만 읽는다(GitHub이 보여 주는 표와 검사가 읽는 표가 어긋나지 않게). 절에 표는 하나이고 앞뒤에 빈 줄을 둔다. 표의 모든 줄은 맨 앞에서 `|`로 시작해 `|`로 끝나고, 둘째 줄이 구분 줄이며, 모든 줄의 칸 수가 같다. 머리줄에 "결과 파일"·"실행" 칸이 하나씩 있고, 실행 칸에는 실행 주소 하나만 적는다. 절 안에는 HTML 줄과 코드 울타리를 두지 않고, README 어디에도 빈 줄에서 끝나지 않는 HTML 블록(`<!--`, `<pre>` 등)을 두지 않는다. README의 코드 울타리는 맨 앞의 ` ``` ` 또는 `~~~` 셋과 언어 이름(없어도 된다)으로 열고 같은 세 글자만 있는 줄로 닫는다. 다른 꼴이면 행을 하나도 읽지 않고 종료 코드 1이다. `node scripts/harness.ts fmt`로 정리하면 표가 이 꼴이 된다.
 
 받은 파일을 리포에 넣기 전에 검사하려면 `node lab/q10-db/check-results.ts --file <받은 파일>`을 쓸 수 있다(파일을 읽어 검사만 하고 아무것도 쓰지 않는다). 이 검사는 그 파일을 실행 중인 머신의 플랫폼과 대 본다. 받은 머신과 플랫폼이 다르면(Mac에서 받은 `linux-*`·`win32-*`) 복사한 뒤 `<이름>`으로 검사한다.
 
@@ -67,11 +70,13 @@ Linux와 Windows 네이티브의 결과는 GitHub Actions 러너에서 얻을 �
 
 ## 잰 머신
 
-| 결과 파일                   | 머신                 | 날짜       |
-| --------------------------- | -------------------- | ---------- |
-| `results/darwin-arm64.json` | macOS(Apple Silicon) | 2026-11-20 |
+| 결과 파일                   | 머신                            | 날짜       | 실행                                                                     |
+| --------------------------- | ------------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `results/darwin-arm64.json` | macOS(Apple Silicon)            | 2026-11-20 |                                                                          |
+| `results/linux-x64.json`    | GitHub Actions `ubuntu-latest`  | 2026-11-23 | https://github.com/ariawell-hub/harness_project/actions/runs/45180055726 |
+| `results/win32-x64.json`    | GitHub Actions `windows-latest` | 2026-11-23 | https://github.com/ariawell-hub/harness_project/actions/runs/45180055726 |
 
-Windows 네이티브와 Linux에서는 아직 재지 않았다. 그래서 ADR-0007은 잠정이다.
+세 환경(macOS, Linux, Windows 네이티브)의 결과가 모두 검사를 통과해 ADR-0007은 채택이다(2026-11-23). Linux와 Windows 네이티브의 결과 파일은 위 실행(`main`의 `67bd225`에서 손으로 돌린 `q10-trial`)의 산출물이고, `node lab/q10-db/verify-artifacts.ts`로 출처를 확인했다. 그 전 실행(45177957783)은 `trial.ts`가 Corepack의 다운로드 안내를 pnpm 버전으로 읽어 두 job이 실패했다(Issue #233에서 고쳤다).
 
 ## 확정 조건
 
@@ -79,9 +84,9 @@ Windows 네이티브와 Linux에서는 아직 재지 않았다. 그래서 ADR-00
 node lab/q10-db/check-results.ts --confirm
 ```
 
-`results/`에 macOS(`darwin-*`), Windows 네이티브(`win32-*`), Linux(`linux-*`)의 결과 파일이 모두 있고 모두 검사를 통과할 때만 종료 코드 0이다. 결과가 없는 환경과 통과하지 못한 파일을 한 줄씩 낸다. 환경 하나만 더 통과한 상태는 1이다. 지금은 macOS 결과뿐이라 1이다.
+`results/`에 macOS(`darwin-*`), Windows 네이티브(`win32-*`), Linux(`linux-*`)의 결과 파일이 모두 있고 모두 검사를 통과할 때만 종료 코드 0이다. 결과가 없는 환경과 통과하지 못한 파일을 한 줄씩 낸다. 환경 하나만 더 통과한 상태는 1이다. 지금(2026-11-23)은 세 환경의 결과가 모두 통과해 0이다.
 
-Windows는 그 머신에서 처음 작업할 때 위 절차를 돌려 결과 파일을 더한다(기술 부채 표의 TD-14). 검사가 통과하지 않으면 ADR-0007의 "되돌리는 조건"을 따른다.
+Windows 네이티브의 결과는 CI의 `windows-latest` 러너에서 받은 산출물이다(Linux는 같은 실행의 `ubuntu-latest`). 패키지 버전, pnpm 고정 버전, 설치 정책을 바꾸면 위 "CI 러너에서 돌리기"로 다시 잰다. 검사가 통과하지 않으면 ADR-0007의 "되돌리는 조건"을 따른다.
 
 ## 이 확인이 보지 않는 것
 
