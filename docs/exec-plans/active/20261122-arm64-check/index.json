@@ -1,4 +1,0 @@
-{
-  "plan": "20261122-arm64-check",
-  "steps": [{ "step": 0, "name": "arm64", "status": "pending" }]
-}
