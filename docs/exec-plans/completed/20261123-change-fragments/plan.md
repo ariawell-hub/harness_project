@@ -2,7 +2,7 @@
 id: 20261123-change-fragments
 issue: 222 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -139,6 +139,8 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - 수용 기준 6은 step1 테스트와, step1 AC가 이 리포의 클론에서 `changes-collect`를 돌린 뒤 `doc-lint`가 통과하는 것으로 본다(실제 설계서·CHANGELOG로).
 - 수용 기준 7은 있던 `scripts/test/doc-lint-design-version.test.ts`를 고치지 않고 통과하는 것으로 본다.
 - 수용 기준 10은 step1 PR의 `harness-guard` 결과(CI)로 본다.
+- 결과(step1, 2026-11-25, head `fbf90cc`): step1의 AC 20줄이 모두 통과했다. 클론에서의 모으기는 `changes-collect: 조각 4개, CHANGELOG 항목 4개, 설계서 v0.7.83, v0.7.84`였고 그 뒤 `doc-lint`가 통과했다(경고만). `doc-lint-design-version.test.ts`는 고치지 않고 통과한다(수용 기준 7). `check` 결과는 아래 줄.
+- 결과(step1, 2026-11-25): `node scripts/harness.ts check` 통과. `test-effect`: `changes-collect.test.ts` effective(base에서 단언 실패).
 
 ## 다음 할 일
 
