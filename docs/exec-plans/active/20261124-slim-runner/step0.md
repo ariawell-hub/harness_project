@@ -97,9 +97,10 @@ B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
 ### 8. 병합 뒤 관찰 (수용 기준 2)
 
 - 병합 커밋과 병합 시각을 Issue #240에 적는다(step0의 PR은 병합으로 끝나므로, 계획의 진행 로그에는 step1의 PR이 옮겨 적는다).
-- 병합 시각 뒤에 만들어진 같은 리포 PR의 `gates` 실행(`pull_request_target`, 실행을 만들 때의 main 정의로 돈다) 하나와, `head_sha`가 병합 커밋이거나 그 뒤의 main 커밋인 `judge-claude`·`judge-codex` 실행(`workflow_run`, `head_sha`가 그때의 main 커밋이다) 하나씩을 찾는다. 병합 자체는 `gates`를 돌리지 않으므로 같은 리포 PR의 다음 이벤트(다른 PR의 push, step1 PR의 첫 push)를 기다린다.
-- 그 실행에서 8개 job(`gates`의 `evaluate`·`record`, `judge-claude`의 `plan`·`record`, `judge-codex`의 `plan`·`pubkey`·`store`·`record`)의 job 라벨이 `ubuntu-latest`이고 결과가 `success`인 것을 실행 기록(`gh api repos/<owner>/<repo>/actions/runs/<id>`의 `created_at`·`head_sha`, `…/runs/<id>/jobs`의 `labels`·`conclusion`)으로 확인해 실행 링크와 함께 Issue #240에 남긴다.
-- 라벨이 `ubuntu-latest`가 아니면(변수가 이미 있다) 멈추고 제작자에게 알린다. step1은 이 기록이 Issue에 있어야 시작한다.
+- 관찰 대상은 병합 시각 뒤에 `check`가 성공한 같은 리포 PR의 head 하나다. 두 판정 워크플로와 Codex 인증 job(`pubkey`·`store`)이 모두 돌려면 두 검증자가 모두 판정하는 PR이어야 한다(위험도 높음이거나 보호 경로를 바꾼 PR. 절차서 5절). 병합 자체는 `gates`를 돌리지 않는다. 그런 다른 PR의 이벤트가 없으면 step1 PR의 첫 push(계획 `risk: high`이고 보호 경로 `docs/harness/actions-cost.md`를 바꾼다)를 관찰 대상으로 쓴다. step1은 이 관찰을 기다리지 않고 시작하고, 이 관찰은 step1이 변수를 켜 달라고 요청하기(step1 작업 4) 전에 끝낸다.
+- 그 head의 커밋 상태 `plan-gate`·`review/claude`·`review/codex`가 가리키는 세 실행(`target_url`)을 쓴다. 새 정의로 돈 실행인지 본다: `gates` 실행은 `created_at`이 병합 시각 뒤다(`pull_request_target`은 실행을 만들 때의 main 정의로 돈다). 두 판정 실행은 `head_sha`가 병합 커밋이거나 그 뒤의 main 커밋이다(`workflow_run`의 `head_sha`는 그때의 main 커밋이다. `git merge-base --is-ancestor <병합 커밋> <head_sha>`).
+- 그 세 실행에서 8개 job(`gates`의 `evaluate`·`record`, `judge-claude`의 `plan`·`record`, `judge-codex`의 `plan`·`pubkey`·`store`·`record`)의 job 라벨이 `ubuntu-latest`이고 결과가 `success`인 것을 확인한다. step1 작업 5의 확인 명령을 `SHA=<그 head의 40자 SHA> L=ubuntu-latest`로 돌리면 같은 것을 본다. 실행 링크와 함께 Issue #240에 남긴다.
+- 라벨이 `ubuntu-latest`가 아니면(변수가 이미 있다) 멈추고 제작자에게 알린다.
 
 ## Acceptance Criteria
 
