@@ -43,6 +43,8 @@ claimed_at: 2026-11-23T06:36:16+09:00
 - 2026-11-24 F1 테스트 먼저: 훑기를 루트를 받는 함수(`quotedLabFiles`)로 빼고, 픽스처 리포에 공백이 든 파일(`lab/q10-db/results/trial notes.json`)·작은따옴표가 든 파일(큰따옴표로 적음)·한 줄에 둘을 적은 파일과 없는 파일·glob 글을 두어 찾은 목록을 단언하는 테스트를 더했다. 고치기 전에 돌려 실패를 확인했다(공백이 든 경로와 작은따옴표가 든 경로를 찾지 못한다).
 - 2026-11-24 F1 수정: 정규식이 여는 따옴표와 같은 따옴표에서 닫고, 경로 안의 공백과 다른 따옴표를 받는다(줄바꿈·역슬래시는 받지 않는다). `check-skip.test.ts` 21건 통과. 이 리포를 훑는 테스트도 그대로 통과한다(새로 찾은 경로가 있어도 모두 건너뛰기 대상이 아니다).
 - 2026-11-24 PR #188이 병합돼(2026-11-23) `lab/q10-db/README.md`의 "테스트가 읽는 파일" 문장을 두 파일 모두 보호 경로인 것으로 맞췄다.
+- 2026-11-25 구현 판정 2회차(head `1973677`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나. F1은 고쳐졌다고 적었다). F2: 계획의 "검증"이 요구한 세 명령의 결과가 지금 head 기준으로 기록되지 않았다. 맞는 지적이다(위 기록에는 `check-skip.test.ts` 21건만 적었다). 코드는 고치지 않았고, head `1973677`에서 세 명령의 결과를 아래에 적는다.
+- 2026-11-25 검증 결과(head `1973677`. main `a06b7fd` 병합, F1 수정, 완료 처리 뒤): `node scripts/harness.ts codeowners` 통과(`.github/CODEOWNERS`, 보호 경로 29개). `node scripts/harness.ts check` 통과(2026-11-24 push 직전에 이 head에서 실행. fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan, `test-effect`는 `check-skip.test.ts` effective — base에서 단언 실패). `node scripts/harness.ts self-test` 통과(시나리오 10개). 이 줄을 더한 커밋은 계획 파일만 바꾼다.
 
 ## 의사결정 로그
 
