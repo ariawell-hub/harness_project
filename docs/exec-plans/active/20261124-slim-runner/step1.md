@@ -72,14 +72,17 @@ echo 통과
 
 ```bash
 ON=<켠 시각, 예: 2026-11-29T03:00:00Z> && R=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && T=$(mktemp -d) && \
-for wf in gates judge-claude judge-codex review-trigger; do gh run list --repo "$R" --workflow "$wf.yml" --limit 100 --json databaseId,createdAt --jq ".[] | select(.createdAt >= \"$ON\") | .databaseId" >> "$T/ids"; done && \
-touch "$T/failed" && for id in $(cat "$T/ids"); do gh api "repos/$R/actions/runs/$id/jobs" --jq ".jobs[] | select(.conclusion == \"failure\" or .conclusion == \"timed_out\") | \"$id \(.name) \(.conclusion) \(.labels | join(\",\"))\"" >> "$T/failed"; done && \
-echo "실행 $(grep -c "" "$T/ids")개, 실패한 job $(grep -c "" "$T/failed")개" && cat "$T/failed"
+for wf in gates judge-claude judge-codex review-trigger; do gh api --paginate "repos/$R/actions/workflows/$wf.yml/runs?created=%3E%3D$ON&per_page=100" --jq '.workflow_runs[].id' >> "$T/ids" || touch "$T/err"; gh api "repos/$R/actions/workflows/$wf.yml/runs?created=%3E%3D$ON&per_page=1" --jq '.total_count' >> "$T/total" || touch "$T/err"; done && \
+touch "$T/failed" && for id in $(cat "$T/ids"); do gh api "repos/$R/actions/runs/$id/jobs?per_page=100" --jq ".jobs[] | select(.conclusion == \"failure\" or .conclusion == \"timed_out\" or (.status != \"completed\" and (now - ((.created_at // .started_at) | fromdateiso8601)) > 1800)) | \"$id \(.name) \(.status) \(.conclusion) \(.labels | join(\",\"))\"" >> "$T/failed" || touch "$T/err"; done && \
+test ! -e "$T/err" && test "$(grep -c "" "$T/ids")" = "$(awk '{s+=$1} END{print s+0}' "$T/total")" && \
+echo "실행 $(grep -c "" "$T/ids")개, 실패하거나 30분 넘게 끝나지 않은 job $(grep -c "" "$T/failed")개" && cat "$T/failed"
 ```
 
-- `ON`은 제작자가 알린 켠 시각이다. 알리지 않았으면 `ubuntu-slim` 라벨이 처음 나온 job의 `started_at`을 쓴다.
+- `ON`은 제작자가 알린 켠 시각(UTC, `YYYY-MM-DDTHH:MM:SSZ`)이다. 알리지 않았으면 `ubuntu-slim` 라벨이 처음 나온 job의 `started_at`을 쓴다.
+- 빠짐없이 본다(계획 검증 3라운드 F7·F8): 실행 목록은 켠 시각으로 거른 목록(`created>=`)을 페이지 끝까지 읽고(`--paginate`), 읽은 수가 워크플로마다의 `total_count`를 더한 값과 같아야 한다. 목록이나 job 조회가 하나라도 실패하면 표시 파일(`$T/err`)이 남아 명령이 `실행 …개` 줄을 내지 않고 실패로 끝난다. 그때는 감시를 마치지 못한 것이므로 승인을 요청하지 않고 다시 돌린다(조회 중에 새 실행이 생겨 수가 어긋난 때도 다시 돌린다).
+- 실패한 job(`failure`, `timed_out`)과 함께, 만들어진 지 30분이 지나도 끝나지 않은 job(러너를 받지 못해 대기 중이거나 멈춘 job. `conclusion`이 비어 있다)도 낸다(계획 검증 3라운드 claude의 P2). 그런 job이 13개 가운데 라벨이 `ubuntu-slim`인 것이면 러너 문제로 보고 아래와 같이 한다.
 - 언제 돌리나: (1) 최종 head의 `check`가 성공한 뒤 30분이 지나도 세 상태 가운데 없거나 pending인 것이 있을 때, (2) 승인을 요청하기 직전, (3) 병합 뒤 미룬 5개를 이어 볼 때(Issue #240에 날마다 한 번, 5개를 모두 보거나 넣은 뒤 값을 잴 때까지).
-- 출력에 13개 job 가운데 라벨이 `ubuntu-slim`인 실패가 있으면 `gh run view <id> --log-failed`로 실패한 단계를 읽는다. 러너 탓(명령이 없다, 압축 풀기·Node 내려받기 실패, 15분 제한, 메모리 부족으로 죽었다)이면 위와 같이 바로 변수를 지워 달라고 요청하고, 승인을 요청하지 않는다(병합 뒤면 Issue에 적고 다음 할 일을 묻는다). 러너와 무관한 실패(판정의 지적, 다른 PR의 테스트 실패 등)면 그 까닭을 한 줄로 적는다.
+- 출력에 13개 job 가운데 라벨이 `ubuntu-slim`인 실패나 멈춘 job이 있으면 `gh run view <id> --log-failed`로 실패한 단계를 읽는다(멈춘 job은 Actions 실행 기록의 상태와 대기 시간을 적는다). 러너 탓(명령이 없다, 압축 풀기·Node 내려받기 실패, 15분 제한, 메모리 부족으로 죽었다)이면 위와 같이 바로 변수를 지워 달라고 요청하고, 승인을 요청하지 않는다(병합 뒤면 Issue에 적고 다음 할 일을 묻는다). 러너와 무관한 실패(판정의 지적, 다른 PR의 테스트 실패 등)면 그 까닭을 한 줄로 적는다.
 
 ## Acceptance Criteria
 
