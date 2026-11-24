@@ -61,6 +61,9 @@ B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
 - 지금 워크플로에서 이 파일이 단언 실패로 실패하고(러너 표가 13개 job에서 어긋난다), 패치를 적용한 트리에서 통과하는 것을 본다. 결과(테스트 수, 실패 수)를 진행 로그에 적는다.
 - 테스트 변경은 제작자의 워크플로 커밋 전에는 `scripts/test/ci.test.ts`에 올리지 않는다(올리면 그 head의 `check`가 실패한다). 그동안은 `git diff -- scripts/test/ci.test.ts`를 `lab/actions-cost/b1-slim/tests.patch`로 올려 판정에서 함께 본다. 제작자의 커밋을 받은 뒤 `git apply`로 적용하고, 같은 커밋에서 `tests.patch`를 지운다.
 - 다른 테스트 파일이 이 job들의 실제 워크플로 줄을 견주다가 실패하면 그 테스트도 고치고, 그 파일도 merge-base에서 단언 실패로 실패하는지 본다(`test-effect`).
+- `vars` 금지 단언의 예외(구현을 시작하며 찾았다. 진행 로그): 같은 파일의 기존 구조 테스트 6곳이 비밀이 없는 job에 `vars.`가 없기를 단언한다. gates `evaluate`(두 테스트), `review-trigger.yml` 파일 전체, `judge-claude`의 `plan`, `judge-claude`의 `failed`, 두 판정의 `repro`다. 리포 변수는 협업자가 바꿀 수 있어 이 job들의 단계가 읽으면 안 된다는 금지이므로 그대로 둔다. 스위치 식의 `vars.SHORT_JOB_RUNNER`는 GitHub이 러너를 고를 때만 읽고 job의 단계에는 넘기지 않으므로, 그 단언들은 스위치 줄 하나만 빼고 본다.
+  - 빼는 도우미는 글자 그대로 `    runs-on: <스위치 식>`인 줄(앞 공백 4칸, 줄 전체 일치)만 지운다. 같은 job의 다른 줄에 든 `vars.`, 스위치와 비슷하지만 다른 식(변수 이름이나 러너 이름이 다르다, 들여쓰기가 다르다)이 든 줄은 남는다. 이것을 단언하는 테스트를 함께 둔다(남겨야 할 줄을 담은 블록에 도우미를 적용하면 그 줄이 남아 `vars.` 금지에 걸린다).
+  - 6곳의 정규식(`environment:|secrets\.|vars\.` 등)과 다른 단언은 바꾸지 않는다. 바꾸는 것은 검사할 글에서 그 한 줄을 빼는 것뿐이다.
 
 ### 4. 설계서 (`docs/harness/design.md`)
 
@@ -68,6 +71,7 @@ B2의 안내(`lab/actions-cost/b2-arm64/README.md`)와 같은 꼴로 쓴다.
   - 13개 job은 리포 변수 `SHORT_JOB_RUNNER`가 `ubuntu-slim`이면 1코어 러너(`ubuntu-slim`)에서 돈다. 이 러너는 job마다 새 VM이 아니라 공유 VM 위의 job마다 새 컨테이너다(GitHub 문서의 표현을 적고 출처를 단다). 그 가운데 기록 job(`recorder`)과 Codex 인증 저장 job(`codex-auth-store`)은 비밀을 가진다.
   - 나머지 job(`check`, `selftest`, 판정의 `judge`, `revert`)은 VM 러너에서 돈다.
   - 변수의 값은 워크플로 식이 두 러너 가운데 하나로만 바꾼다. 변수로 다른 러너를 고를 수 없다. 비교는 대소문자를 가리지 않는다(위의 값마다의 표).
+  - 변수는 러너를 고를 때만 쓰고 job의 단계에는 넘기지 않는다. 비밀이 없는 job이 `vars`를 읽지 않는다는 구조 테스트는 스위치 줄 하나만 예외로 둔다.
   - 변수는 제작자가 바꾼다(R20. L1 훅이 봇의 `gh variable`·`actions/variables` 호출을 막는다). 리포의 다른 협업자도 바꿀 수 있지만 두 러너 사이를 오갈 뿐이다. 되돌리려면 변수를 지운다(`docs/SECURITY.md`).
   - ADR-0008 링크와 제작자가 묶음을 고른 날(2026-11-22)은 남긴다.
 - E3 행: "둘 다 GitHub 호스팅(일회용) 러너에서 실행하고"를, 판정(`judge`)은 GitHub 호스팅 VM 러너에서 돌고 1분 미만 job(기록 job과 Codex 인증 저장 job 포함)은 스위치를 켜면 1코어 컨테이너 러너에서 돈다는 뜻으로 고친다(10.4절 참조). 나머지 문장은 그대로다.
