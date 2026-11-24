@@ -136,6 +136,8 @@ review_cycle: on-change
 
 - 설계서 v0.7.82 · 변경 조각(Issue #222, TD-39): 보호 경로를 바꾼 PR은 이 파일과 설계서 머리말·변경 이력 끝에 줄을 더하지 않고 PR마다 변경 조각 파일 `docs/harness/changes/<브랜치 이름의 / 뒤>.md`에 적는다. 같은 파일 끝에 줄을 더하던 PR끼리 병합 충돌이 나지 않는다. `harness-guard`는 CHANGELOG를 고쳤거나 그 PR 브랜치 이름의 조각에 base에 없던 CHANGELOG 항목을 더했으면 기록으로 센다. 다른 브랜치 이름의 조각, 형식이 틀린 조각, 브랜치를 모를 때의 조각은 세지 않는다. 설계서를 바꾼 PR에는 설계서 기록(변경 이력에 base의 항목을 남긴 채 더한 더 큰 버전, 또는 조각의 `## 설계서 변경 이력` 항목)을 새로 요구한다. 조각 폴더의 모든 파일의 자리·형식은 `doc-lint`가 `R8 변경 조각`으로 본다. 설계서 버전 읽기를 `scripts/lib/design-version.ts`로 옮겼다(`R8 설계서 버전` 결과는 그대로). CHANGELOG·설계서를 직접 고친 PR도 전처럼 통과한다. 조각을 모으는 명령은 다음 step에서 더한다.
 
+- 설계서 v0.7.83 · 원장의 구현 대기(`parked`, Issue #212. 검사를 약화하지 않는다: 코드가 올라온 head에서는 전과 같이 막는다): 코드를 올린 PR이 계획을 고치려고 변경을 계획만 남기면 앞선 구현 판정의 코드 지적이 열린 채 남아, 그 head에서 판정할 수 없는데도 계획 검증(G1)을 막았다. 이제 기록 job(`scripts/ci/ledger-store.ts`)과 plan job(`scripts/ci/accept-load.ts`)이 계획만 담은 head(`mode=plan`)에서는 계획 폴더 밖 파일에 대한 열린 지적을 `parked`로 두고(계획 전용 판정에서 등록된 지적, 필드 `planRound`는 빼고), 코드가 섞인 head에서는 판정을 반영하기 전에 모두 `open`으로 되돌린다(`scripts/ci/ledger.ts`의 `parkFor`). `parked`는 판정·제작자 승인·반박으로 바뀌지 않고 `review-ledger`를 막지 않으며 상태 설명에 `구현 대기 N`으로 센다. 판정 입력의 원장 파일(`scripts/ci/review-round.ts`)에 그 뜻을 한 줄 적고, 검증자 프롬프트(`scripts/cross-review/prompt.md`)에 판정하지 말라는 항목을 더했다. `pr-state`가 구현 대기 지적의 번호를 알리고, runner(`scripts/runner/review.ts`의 `settledResponses`)는 그 지적에 대한 대응을 세지 않고 남긴다.
+
 ## 0.1.0 — 2026-11-11 (로드맵 1단계 최소 구성)
 
 - 설계서 v0.7.1을 `docs/harness/design.md`로 이관(Q8). 참조 자료·검토 의견은 `docs/harness/background/`로, 기존 Next.js 문서 3개는 `profiles/web/templates/`로 이동.
