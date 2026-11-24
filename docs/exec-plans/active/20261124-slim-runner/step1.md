@@ -71,15 +71,15 @@ echo 통과
 실패 감시(커밋 상태에 기대지 않는다. 계획 검증 2라운드 F5): 러너가 깨지면 기록 job이 상태를 쓰기 전에 실패해 `target_url`이 생기지 않을 수 있고, 판정 실행은 PR을 가리키는 필드가 없다(`pull_requests`가 비어 있고 `head_branch`가 `main`이다). 그래서 이 PR의 실행을 찾지 않고, 켠 뒤에 만들어진 네 워크플로의 실행을 모두 본다. 러너 문제는 어느 PR의 실행에서든 같이 드러난다.
 
 ```bash
-ON=<켠 시각, 예: 2026-11-29T03:00:00Z> && R=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && T=$(mktemp -d) && \
-for wf in gates judge-claude judge-codex review-trigger; do gh api --paginate "repos/$R/actions/workflows/$wf.yml/runs?created=%3E%3D$ON&per_page=100" --jq '.workflow_runs[].id' >> "$T/ids" || touch "$T/err"; gh api "repos/$R/actions/workflows/$wf.yml/runs?created=%3E%3D$ON&per_page=1" --jq '.total_count' >> "$T/total" || touch "$T/err"; done && \
+ON=<켠 시각, 예: 2026-11-29T03:00:00Z> && END=$(date -u +%Y-%m-%dT%H:%M:%SZ) && R=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && T=$(mktemp -d) && \
+for wf in gates judge-claude judge-codex review-trigger; do gh api --paginate "repos/$R/actions/workflows/$wf.yml/runs?created=$ON..$END&per_page=100" --jq '.workflow_runs[].id' > "$T/ids-$wf" || touch "$T/err"; n=$(gh api "repos/$R/actions/workflows/$wf.yml/runs?created=$ON..$END&per_page=1" --jq '.total_count') || touch "$T/err"; { test "$(sort -u "$T/ids-$wf" | grep -c "")" = "$n" && test "$(grep -c "" "$T/ids-$wf")" = "$n"; } || touch "$T/err"; cat "$T/ids-$wf" >> "$T/ids"; done && \
 touch "$T/failed" && for id in $(cat "$T/ids"); do gh api "repos/$R/actions/runs/$id/jobs?per_page=100" --jq ".jobs[] | select(.conclusion == \"failure\" or .conclusion == \"timed_out\" or (.status != \"completed\" and (now - ((.created_at // .started_at) | fromdateiso8601)) > 1800)) | \"$id \(.name) \(.status) \(.conclusion) \(.labels | join(\",\"))\"" >> "$T/failed" || touch "$T/err"; done && \
-test ! -e "$T/err" && test "$(grep -c "" "$T/ids")" = "$(awk '{s+=$1} END{print s+0}' "$T/total")" && \
-echo "실행 $(grep -c "" "$T/ids")개, 실패하거나 30분 넘게 끝나지 않은 job $(grep -c "" "$T/failed")개" && cat "$T/failed"
+test ! -e "$T/err" && \
+echo "$ON..$END 실행 $(grep -c "" "$T/ids")개, 실패하거나 30분 넘게 끝나지 않은 job $(grep -c "" "$T/failed")개" && cat "$T/failed"
 ```
 
 - `ON`은 제작자가 알린 켠 시각(UTC, `YYYY-MM-DDTHH:MM:SSZ`)이다. 알리지 않았으면 `ubuntu-slim` 라벨이 처음 나온 job의 `started_at`을 쓴다.
-- 빠짐없이 본다(계획 검증 3라운드 F7·F8): 실행 목록은 켠 시각으로 거른 목록(`created>=`)을 페이지 끝까지 읽고(`--paginate`), 읽은 수가 워크플로마다의 `total_count`를 더한 값과 같아야 한다. 목록이나 job 조회가 하나라도 실패하면 표시 파일(`$T/err`)이 남아 명령이 `실행 …개` 줄을 내지 않고 실패로 끝난다. 그때는 감시를 마치지 못한 것이므로 승인을 요청하지 않고 다시 돌린다(조회 중에 새 실행이 생겨 수가 어긋난 때도 다시 돌린다).
+- 빠짐없이 본다(계획 검증 3라운드 F7·F8, 4라운드 F9): 감시를 시작할 때 끝 시각 `END`를 정해 두고, 실행 목록과 전체 수를 같은 구간(`created=ON..END`)으로 읽는다. 그 구간에 만들어진 실행은 조회 중에 늘지 않는다. 목록은 페이지 끝까지 읽고(`--paginate`), 워크플로마다 읽은 줄 수와 중복을 뺀 수가 그 구간의 `total_count`와 모두 같아야 한다(페이지 사이에 목록이 밀려 같은 실행을 두 번 읽고 하나를 빠뜨리면 중복을 뺀 수가 모자란다). 목록·전체 수·job 조회가 하나라도 실패하거나 수가 어긋나면 표시 파일(`$T/err`)이 남아 명령이 `… 실행 …개` 줄을 내지 않고 실패로 끝난다. 그때는 감시를 마치지 못한 것이므로 승인을 요청하지 않고 다시 돌린다. `END` 뒤에 만들어진 실행은 다음 감시가 본다(감시마다 `ON`부터 다시 본다).
 - 실패한 job(`failure`, `timed_out`)과 함께, 만들어진 지 30분이 지나도 끝나지 않은 job(러너를 받지 못해 대기 중이거나 멈춘 job. `conclusion`이 비어 있다)도 낸다(계획 검증 3라운드 claude의 P2). 그런 job이 13개 가운데 라벨이 `ubuntu-slim`인 것이면 러너 문제로 보고 아래와 같이 한다.
 - 언제 돌리나: (1) 최종 head의 `check`가 성공한 뒤 30분이 지나도 세 상태 가운데 없거나 pending인 것이 있을 때, (2) 승인을 요청하기 직전, (3) 병합 뒤 미룬 5개를 이어 볼 때(Issue #240에 날마다 한 번, 5개를 모두 보거나 넣은 뒤 값을 잴 때까지).
 - 출력에 13개 job 가운데 라벨이 `ubuntu-slim`인 실패나 멈춘 job이 있으면 `gh run view <id> --log-failed`로 실패한 단계를 읽는다(멈춘 job은 Actions 실행 기록의 상태와 대기 시간을 적는다). 러너 탓(명령이 없다, 압축 풀기·Node 내려받기 실패, 15분 제한, 메모리 부족으로 죽었다)이면 위와 같이 바로 변수를 지워 달라고 요청하고, 승인을 요청하지 않는다(병합 뒤면 Issue에 적고 다음 할 일을 묻는다). 러너와 무관한 실패(판정의 지적, 다른 PR의 테스트 실패 등)면 그 까닭을 한 줄로 적는다.
