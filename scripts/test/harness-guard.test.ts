@@ -613,16 +613,59 @@ test('이 리포의 gates.yml: selftest job은 base의 실행기로 PR의 하네
   assert.doesNotMatch(st, /environment:|secrets\.|vars\.|GH_TOKEN|github\.token|: write|cache/i);
   // PR 유래 값은 env로만 넘긴다: 어느 단계의 run 블록에도 표현식이 없다
   for (const step of st.split('\n      - ')) assert.doesNotMatch(step, /run: \|[\s\S]*\$\{\{/);
-  // 샘플 리포의 check가 시크릿 스캔을 돌리므로 gitleaks를 check 워크플로와 같은 버전·체크섬으로 설치한다.
-  // 없으면 runner 시나리오(flow-full, r45-runner)가 실패한다(PR #109의 첫 실제 실행)
-  const pin = (text: string) => [
-    /GITLEAKS_VERSION: (\S+)/.exec(text)?.[1],
-    /GITLEAKS_SHA256: ([0-9a-f]{64})\b/.exec(text)?.[1],
-  ];
+  // 샘플 리포의 check가 시크릿 스캔을 돌리므로 gitleaks를 check 워크플로와 같은 버전으로 설치한다.
+  // 없으면 runner 시나리오(flow-full, r45-runner)가 실패한다(PR #109의 첫 실제 실행).
+  // 파일과 체크섬은 job마다 그 러너의 아키텍처의 값이다: check job은 arm64 러너로 옮겼고(ADR-0008 B2, Issue #206)
+  // selftest는 x64 그대로다. 체크섬은 gitleaks 8.30.1의 배포 체크섬 목록의 값이다
+  const GITLEAKS: Record<string, { runner: string; sha256: string }> = {
+    arm64: {
+      runner: 'ubuntu-24.04-arm',
+      sha256: 'e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080',
+    },
+    x64: {
+      runner: 'ubuntu-latest',
+      sha256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb',
+    },
+  };
+  const pinned = (text: string, arch: string, name: string) => {
+    const want = GITLEAKS[arch];
+    assert.deepEqual(
+      [...text.matchAll(/GITLEAKS_VERSION: (\S+)/g)].map((m) => m[1]),
+      ['8.30.1'],
+      `${name}: gitleaks 버전`,
+    );
+    assert.deepEqual(
+      [...text.matchAll(/GITLEAKS_SHA256: (\S+)/g)].map((m) => m[1]),
+      [want.sha256],
+      `${name}: ${arch} 파일의 체크섬`,
+    );
+    // 내려받는 파일은 그 아키텍처의 것 하나뿐이다
+    assert.deepEqual(
+      [...text.matchAll(/gitleaks_[^\s"']*_linux_([a-z0-9]+)\.tar\.gz/g)].map((m) => m[1]),
+      [arch],
+      `${name}: 내려받는 파일의 아키텍처`,
+    );
+    assert.ok(
+      text.includes(`/v\${GITLEAKS_VERSION}/gitleaks_\${GITLEAKS_VERSION}_linux_${arch}.tar.gz"`),
+      `${name}: 내려받는 파일 이름`,
+    );
+    // 파일의 아키텍처가 러너와 맞는다
+    assert.deepEqual(
+      [...text.matchAll(/^ {4}runs-on: (\S+)$/gm)].map((m) => m[1]),
+      [want.runner],
+      `${name}: 러너`,
+    );
+    assert.match(
+      text,
+      /echo "\$\{GITLEAKS_SHA256\}  \/tmp\/gitleaks\.tgz" \| sha256sum -c -/,
+      `${name}: 체크섬 검증`,
+    );
+  };
   const checkWf = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/check.yml'), 'utf8');
-  assert.ok(pin(st)[0] && pin(st)[1]);
-  assert.deepEqual(pin(st), pin(checkWf));
-  assert.match(st, /echo "\$\{GITLEAKS_SHA256\}  \/tmp\/gitleaks\.tgz" \| sha256sum -c -/);
+  const checkJob = /\n {2}check:\n([\s\S]*)$/.exec(checkWf)?.[1];
+  assert.ok(checkJob, 'check job이 없다');
+  pinned(checkJob, 'arm64', 'check');
+  pinned(st, 'x64', 'selftest');
   assert.ok(st.indexOf('sha256sum -c -') < st.indexOf('harness.ts self-test'));
   for (const m of st.matchAll(/persist-credentials: (\S+)/g)) assert.equal(m[1], 'false');
   assert.equal([...st.matchAll(/uses: actions\/checkout@/g)].length, 2);
