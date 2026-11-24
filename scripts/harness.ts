@@ -48,6 +48,7 @@ import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
+import { runChangesCollect } from './commands/changes.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { runActionsCost } from './commands/actions-cost.ts';
@@ -88,6 +89,8 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   pr-ready [--undo]                        승인 요청 전 조건 확인 뒤 PR 초안 해제(--undo: 초안으로 되돌림)
   pr-state [--pr <번호>]                   PR의 필수 체크를 출처와 함께 보이고 분류한다(읽기만. 번호가 없으면 현재 브랜치의 PR)
   claim-heartbeat --issue <N>              선점 생존 확인
+  changes-collect                          변경 조각(docs/harness/changes/)을 CHANGELOG "다음 버전 (미배포)"와 설계서
+                                           변경 이력으로 옮기고 조각을 지운다(모으기 PR, 절차서 5절). git은 읽기만 쓴다
   run [--worker <이름> | --prefix runner] [--tool claude|codex] [--once] [--max-iterations N] [--no-wait]
                                            runner. --worker(또는 HARNESS_WORKER)가 없으면 limits.workers만큼
                                            작업자 프로세스(<접두어>-1, <접두어>-2 …)를 띄운다
@@ -1126,6 +1129,8 @@ async function main(argv: string[]): Promise<number> {
       );
       return 0;
     }
+    case 'changes-collect':
+      return runChangesCollect(repoInfo(cwd).root);
     case 'pr-ready': {
       const r = prReady(cwd, { undo: flag('undo') });
       log(

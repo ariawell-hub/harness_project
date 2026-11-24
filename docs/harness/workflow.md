@@ -194,6 +194,13 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
     - 형식은 `doc-lint`가 `R8 변경 조각`으로 본다. 형식이 틀린 조각은 `harness-guard`가 기록으로 세지 않는다. 조각은 일반 파일로 둔다(심볼릭 링크는 둘 다 받지 않는다).
     - 버전과 날짜를 붙여 CHANGELOG·설계서 변경 이력으로 옮기고 조각을 지우는 일은 모으기 PR이 한다. 모으기 PR은 제작자가 지시할 때 연다.
     - CHANGELOG(설계서는 변경 이력)를 직접 고친 PR도 통과한다(모으기 PR, 이 규칙 전에 쓴 계획).
+    - **모으기 PR**: 조각을 CHANGELOG·설계서 변경 이력으로 옮기는 PR이다.
+      - 언제: 제작자가 지시할 때(대화나 Issue). runner·`start`·CI는 스스로 열지 않는다.
+      - 순서: Issue → `node scripts/harness.ts new-task --issue <N> --slug changes-collect --size small` → worktree에서 `node scripts/harness.ts changes-collect` → 결과 확인(바뀐 CHANGELOG·설계서와 지워진 조각) → `check` → 초안 PR(보호 경로라 제작자 승인) → `pr-ready`.
+      - 명령이 하는 일: 조각을 이름 차례로 읽어 CHANGELOG 항목은 "다음 버전 (미배포)" 끝으로 옮기고, 설계서 변경 이력 항목마다 패치 번호를 하나씩 올린 버전과 그날 날짜를 붙여 변경 이력 끝에 넣고 머리말을 맞춘 뒤, 조각 파일을 지운다. 조각이 없으면 아무것도 바꾸지 않는다.
+      - 형식이 틀린 조각, 조각 폴더 안의 다른 파일, 심볼릭 링크와 하드 링크, 커밋하지 않은 파일(git이 무시하는 파일 포함)이나 커밋하지 않은 변경이 있으면 아무것도 바꾸지 않고 실패한다. 쓰거나 지우다 도중에 실패하면 출력의 되돌리는 명령(`git restore --source=HEAD --staged --worktree -- docs/harness/design.md docs/harness/CHANGELOG.md docs/harness/changes`)으로 되돌린 뒤 다시 실행한다. 되돌리기 전에 다시 실행하면 커밋하지 않은 변경으로 막혀 항목이 두 번 옮겨지지 않는다. 명령은 git을 읽기만 한다(스테이징·커밋·되돌리기는 세션이 확인하고 한다).
+      - 모으기 PR은 CHANGELOG를 고치므로 자기 조각을 두지 않는다.
+      - main과 충돌하면(그 사이 옛 방식 PR이 CHANGELOG·설계서 변경 이력을 고쳤다) main 쪽을 먼저 두고 모은 항목의 버전을 다음 번호로 올린다. 그 사이 main에 더해진 조각은 다음 모으기가 옮긴다.
   - **자체 테스트**: 보호 경로를 바꾼 PR에서는 `gates` 워크플로의 `selftest` job이 main의 시나리오로 PR의 하네스를 시험하고, 결과가 `harness-guard`에 합쳐진다. 설명이 `자체 테스트 실패: <id 목록>`이면 `selftest` job 로그에서 그 시나리오의 `✗` 줄을 보고 하네스를 고친다. 로컬에서는 `node scripts/harness.ts self-test --only <id>`로 다시 본다. `자체 테스트 결과가 없다`(`error`)는 job이 보고서를 남기지 못한 것이다(시간 초과, 실행기 오류). job 로그를 본다.
   - 시나리오가 요구하는 동작을 바꾸려면 시나리오를 먼저 고친다. `selftest` job은 PR의 시나리오가 아니라 main의 시나리오를 쓰므로, 동작과 시나리오를 한 PR에서 함께 바꾸면 통과하지 못한다. 먼저 시나리오가 옛 동작과 새 동작을 모두 받도록 고치는 PR(위험도 높음)을 병합하고, 다음 PR에서 동작을 바꾼다.
 - **교차 검증**(`review/claude`, `review/codex`): `check`가 통과하면 판정 워크플로(`judge-claude`, `judge-codex`)가 main의 정의로 돈다. 위험도 낮음은 작성 도구와 다른 검증자 1명, 보통·높음은 둘 다 판정하고, 돌지 않은 쪽은 "해당 없음(통과)"으로 기록된다. 승인이고 P0·P1 지적이 없어야 success다.
