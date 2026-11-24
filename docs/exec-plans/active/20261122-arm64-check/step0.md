@@ -78,25 +78,26 @@ T=$(mktemp -d) && node scripts/harness.ts actions-cost --since 2026-11-20 --unti
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts
-T=$(mktemp -d) && node scripts/harness.ts test-effect --ci > "$T/te" 2>&1 && grep -qF "scripts/test/ci.test.ts: effective(base에서 단언 실패" "$T/te" && grep -qF "scripts/test/harness-guard.test.ts: effective(base에서 단언 실패" "$T/te"
-T=$(mktemp -d) && want=$(export GIT_INDEX_FILE="$T/index"; git read-tree origin/main && git apply --cached lab/actions-cost/b2-arm64/workflows.patch && git write-tree) && test -n "$want" && test "$(git rev-parse "$want:.github/workflows")" = "$(git rev-parse "HEAD:.github/workflows")"
-test "$(git diff --name-only origin/main HEAD -- .github | sort | tr '\n' ' ')" = ".github/workflows/check.yml "
-T=$(mktemp -d) && git diff origin/main HEAD -- .github/workflows > "$T/d" && test "$(grep -c "^-[^-]" "$T/d")" = 3 && test "$(grep -c "^+[^+]" "$T/d")" = 3
-test "$(grep -c "runs-on: ubuntu-24.04-arm" .github/workflows/check.yml)" = 1 && ! grep -q "ubuntu-latest" .github/workflows/check.yml && test -z "$(grep -l "ubuntu-24.04-arm" .github/workflows/*.yml | grep -vx ".github/workflows/check.yml")"
-test -s lab/actions-cost/b2-arm64/README.md && test "$(grep -c "^diff --git" lab/actions-cost/b2-arm64/workflows.patch)" = 1
-test -s lab/actions-cost/2026-11-20_2026-11-23.jsonl && head -1 lab/actions-cost/2026-11-20_2026-11-23.jsonl | grep -q '"since":"2026-11-20","until":"2026-11-23"'
-git diff --quiet origin/main HEAD -- lab/actions-cost/2026-11-17_2026-11-20.jsonl
-T=$(mktemp -d) && grep "^| 2026-11-20~2026-11-23 *| A6 *|" docs/harness/actions-cost.md > "$T/row" && test "$(grep -c "" "$T/row")" = 1 && grep -qF '`2026-11-20_2026-11-23.jsonl`' "$T/row"
-T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*기록 칸\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" | grep "^| 2026-11-20~2026-11-23 " | tr -d ' ' > "$T/a" && test -s "$T/a" && grep "^| 2026-11-20~2026-11-23 *| A6 *|" docs/harness/actions-cost.md | tr -d ' ' | sed 's/|A6|/|/' > "$T/b" && grep -qF "$(cat "$T/a")" "$T/b"
-T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*러너별\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" > "$T/r" && grep -q "^| ubuntu-latest " "$T/r" && ! grep -q "^| ubuntu-24.04-arm " "$T/r"
-node lab/actions-cost/check-doc.ts
-node --test lab/actions-cost/test/check-doc.test.ts
-T=$(mktemp -d) && awk '/^## 재는 방법/{s=1;next} /^## /{s=0} s' docs/harness/actions-cost.md | grep "^- \*\*단가\*\*:" > "$T/l" && test "$(grep -c "" "$T/l")" = 1 && grep -qF "self-hosted" "$T/l"
-grep -q "#206" docs/harness/changes/20261122-arm64-check-s0.md && git diff --quiet origin/main HEAD -- docs/harness/CHANGELOG.md
+node --test scripts/test/ci.test.ts scripts/test/harness-guard.test.ts && \
+T=$(mktemp -d) && node scripts/harness.ts test-effect --ci > "$T/te" 2>&1 && grep -qF "scripts/test/ci.test.ts: effective(base에서 단언 실패" "$T/te" && grep -qF "scripts/test/harness-guard.test.ts: effective(base에서 단언 실패" "$T/te" && \
+T=$(mktemp -d) && want=$(export GIT_INDEX_FILE="$T/index"; git read-tree origin/main && git apply --cached lab/actions-cost/b2-arm64/workflows.patch && git write-tree) && test -n "$want" && test "$(git rev-parse "$want:.github/workflows")" = "$(git rev-parse "HEAD:.github/workflows")" && \
+test "$(git diff --name-only origin/main HEAD -- .github | sort | tr '\n' ' ')" = ".github/workflows/check.yml " && \
+T=$(mktemp -d) && git diff origin/main HEAD -- .github/workflows > "$T/d" && test "$(grep -c "^-[^-]" "$T/d")" = 3 && test "$(grep -c "^+[^+]" "$T/d")" = 3 && \
+test "$(grep -c "runs-on: ubuntu-24.04-arm" .github/workflows/check.yml)" = 1 && ! grep -q "ubuntu-latest" .github/workflows/check.yml && test -z "$(grep -l "ubuntu-24.04-arm" .github/workflows/*.yml | grep -vx ".github/workflows/check.yml")" && \
+test -s lab/actions-cost/b2-arm64/README.md && test "$(grep -c "^diff --git" lab/actions-cost/b2-arm64/workflows.patch)" = 1 && \
+test -s lab/actions-cost/2026-11-20_2026-11-23.jsonl && head -1 lab/actions-cost/2026-11-20_2026-11-23.jsonl | grep -q '"since":"2026-11-20","until":"2026-11-23"' && \
+git diff --quiet origin/main HEAD -- lab/actions-cost/2026-11-17_2026-11-20.jsonl && \
+T=$(mktemp -d) && grep "^| 2026-11-20~2026-11-23 *| A6 *|" docs/harness/actions-cost.md > "$T/row" && test "$(grep -c "" "$T/row")" = 1 && grep -qF '`2026-11-20_2026-11-23.jsonl`' "$T/row" && \
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*기록 칸\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" | grep "^| 2026-11-20~2026-11-23 " | tr -d ' ' > "$T/a" && test -s "$T/a" && grep "^| 2026-11-20~2026-11-23 *| A6 *|" docs/harness/actions-cost.md | tr -d ' ' | sed 's/|A6|/|/' > "$T/b" && grep -qF "$(cat "$T/a")" "$T/b" && \
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*러너별\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" > "$T/r" && grep -q "^| ubuntu-latest " "$T/r" && ! grep -q "^| ubuntu-24.04-arm " "$T/r" && \
+node lab/actions-cost/check-doc.ts && \
+node --test lab/actions-cost/test/check-doc.test.ts && \
+T=$(mktemp -d) && awk '/^## 재는 방법/{s=1;next} /^## /{s=0} s' docs/harness/actions-cost.md | grep "^- \*\*단가\*\*:" > "$T/l" && test "$(grep -c "" "$T/l")" = 1 && grep -qF "self-hosted" "$T/l" && \
+grep -q "#206" docs/harness/changes/20261122-arm64-check-s0.md && git diff --quiet origin/main HEAD -- docs/harness/CHANGELOG.md && \
 node scripts/harness.ts check
 ```
 
+- 블록은 줄 끝의 `&& \`로 이은 하나의 명령이다. 한 줄이라도 실패하면 뒤의 줄은 돌지 않고 블록 전체가 0이 아닌 종료 코드로 끝난다(마지막 줄의 `check`가 앞 줄의 실패를 가리지 않는다. 계획 검증 F4). 아래 "N째 줄"은 블록 안의 줄 차례다.
 - `actions-cost --from`은 GitHub을 읽지 않는다. `origin/main`과 견주는 줄은 로컬의 `origin/main`을 쓴다(AC를 돌리기 전에 `git fetch origin`으로 맞추고, main이 앞서 있으면 `origin/main`을 병합한 뒤에 돌린다).
 - 첫째 줄: 구조 테스트(러너, gitleaks를 받는 job)와 고친 `selftest` 테스트(gitleaks 고정값).
 - 둘째 줄: 고친 테스트 파일 둘이 파일마다 merge-base의 코드에서 단언 실패로 실패한다(`test-effect`가 커밋된 테스트 파일을 merge-base 체크아웃에 덮어써 하나씩 돌린다. 한 파일이라도 거기서 통과하면 `ineffective`라 이 줄이 실패한다).
