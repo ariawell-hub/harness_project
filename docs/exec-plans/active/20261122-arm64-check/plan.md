@@ -23,7 +23,7 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 
 수용 기준:
 
-1. `check.yml`의 `check` job의 `runs-on`이 `ubuntu-24.04-arm`이다. 다른 job 18개(`gates`의 3개, `judge-claude`의 6개, `judge-codex`의 6개, `revert`의 2개, `review-trigger`의 1개)의 `runs-on`은 `ubuntu-latest` 그대로다.
+1. `check.yml`의 `check` job의 `runs-on`이 `ubuntu-24.04-arm`이다. 다른 job 18개(`gates`의 3개, `judge-claude`의 6개, `judge-codex`의 6개, `revert`의 2개, `review-trigger`의 1개)의 `runs-on`은 `ubuntu-latest` 그대로다. `q10-trial`의 `trial`은 OS 행렬(`${{ matrix.os }}`) 그대로다.
 2. gitleaks를 받는 job(`check`, `selftest`)은 러너의 아키텍처에 맞는 파일과 그 체크섬을 쓴다. `check`(arm64): `gitleaks_8.30.1_linux_arm64.tar.gz`, SHA-256 `e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080`. `selftest`(x64, 그대로): `gitleaks_8.30.1_linux_x64.tar.gz`, SHA-256 `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb`. 두 job의 버전은 같다.
 3. 워크플로의 변경은 준비한 패치(`lab/actions-cost/b2-arm64/workflows.patch`)와 전체가 같다. 패치 밖의 워크플로 변경이 없다.
 4. 넣기 전의 값(A6 뒤의 값)이 기록에 있다. 기간은 A6이 병합된 시각(2026-11-19 04:56 UTC, PR #130) 뒤의 첫 UTC 자정부터 나흘인 2026-11-20~2026-11-23이고, 이 PR의 워크플로 변경이 병합되기 전에 끝난다. 보존 기록 `lab/actions-cost/2026-11-20_2026-11-23.jsonl`과 `docs/harness/actions-cost.md` "기록" 표의 행(수단 `A6`). 행의 값과 판단은 그 보존 기록으로 계산한 값과 같다(문서 검사가 본다).
@@ -36,7 +36,7 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 - `.github/workflows/check.yml`의 `check` job: `runs-on`, gitleaks 파일 이름, 체크섬(세 줄). 제작자가 올린다(봇은 워크플로 파일을 push할 수 없다. `docs/SECURITY.md` "워크플로 변경 절차").
 - 그 구조를 단언하는 테스트. `selftest`와 `check`의 gitleaks 버전·체크섬이 같아야 한다는 지금의 테스트(`scripts/test/harness-guard.test.ts`)는 그 자리에서, 버전이 같고 파일과 체크섬은 job마다 그 러너의 아키텍처의 값이어야 한다는 것으로 바꾼다(두 job의 러너가 달라져 체크섬이 같을 수 없다. 체크섬을 정해 둔 값과 견주므로 느슨해지지 않는다). 고치는 테스트 파일 둘(`ci.test.ts`, `harness-guard.test.ts`)은 파일마다 merge-base에서 단언 실패로 실패해야 한다(`test-effect`).
 - 넣기 전 값의 측정과 기록(보존 기록 파일, 기록 표의 행).
-- 문서 `docs/harness/actions-cost.md`의 보존 기록 설명 한 문장(PR #205 판정의 F4, P2로 미룬 것: 보존 기록에 `self-hosted` 라벨도 그대로 남는다는 것이 빠져 있다), 변경 이력 한 줄.
+- 문서 `docs/harness/actions-cost.md`의 보존 기록 설명 한 문장(PR #205 판정의 F4, P2로 미룬 것: 보존 기록에 `self-hosted` 라벨도 그대로 남는다는 것이 빠져 있다), 변경 조각 한 줄(`docs/harness/changes/20261122-arm64-check-s0.md`).
 
 비범위:
 
@@ -54,8 +54,8 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 - `lab/actions-cost/b2-arm64/`
 - `lab/actions-cost/2026-11-20_2026-11-23.jsonl`
 - `docs/harness/actions-cost.md`
-- `docs/harness/CHANGELOG.md`
-- 읽기만: `docs/SECURITY.md`("워크플로 변경 절차"), `docs/decisions/ADR-0008-actions-cost.md`, `.github/workflows/gates.yml`, `lab/actions-cost/check-doc.ts`, `lab/actions-cost/2026-11-17_2026-11-20.jsonl`, `lab/repro-on-demand/README.md`, `.github/workflows/judge-claude.yml`, `.github/workflows/judge-codex.yml`, `.github/workflows/revert.yml`, `.github/workflows/review-trigger.yml`
+- `docs/harness/changes/20261122-arm64-check-s0.md`
+- 읽기만: `docs/SECURITY.md`("워크플로 변경 절차"), `docs/decisions/ADR-0008-actions-cost.md`, `.github/workflows/gates.yml`, `lab/actions-cost/check-doc.ts`, `lab/actions-cost/2026-11-17_2026-11-20.jsonl`, `lab/repro-on-demand/README.md`, `.github/workflows/judge-claude.yml`, `.github/workflows/judge-codex.yml`, `.github/workflows/revert.yml`, `.github/workflows/review-trigger.yml`, `.github/workflows/q10-trial.yml`
 
 ## step 목록
 
@@ -81,6 +81,9 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
   - 남은 것: 2026-11-24 00:00(UTC) 뒤의 측정과 기록 표의 행. 그때까지 push하지 않는다(push마다 `check`와 판정이 돌아 재는 기간의 분이 는다. 판정은 측정까지 든 변경으로 한 번에 받는다).
 - 2026-11-23 `origin/main`(`e9f7ad6`, 10커밋 앞)을 로컬에서 병합했다. `docs/harness/CHANGELOG.md`만 충돌했고, main의 줄을 그대로 두고 이 브랜치의 줄(#206)을 뒤에 붙였다. 병합 뒤에도 워크플로 패치는 `origin/main`에 그대로 적용되고, 구조 테스트는 파일마다 지금 워크플로에서 실패하고(`ci.test.ts` 37개 가운데 1개, `harness-guard.test.ts` 17개 가운데 1개) 패치를 적용한 트리에서 통과한다(37개, 17개).
 - 2026-11-23 구조 테스트를 stash에서 `draft-tests.patch`(이 폴더)로 옮기고 stash를 지웠다. stash는 worktree끼리 공유되어 다른 세션이 꺼낼 수 있다. 세션을 넘기며 `handoff.md`(이 폴더)를 썼다. 두 파일은 push 전에 지운다(인수인계서 참고).
+- 2026-11-24 넣기 전 값을 쟀다(2026-11-24 02:20:15Z~02:50:04Z). 재기 전에 그 기간에 만들어진 실행 가운데 진행 중·대기 중인 것이 없음을 확인했다. 보존 기록 `lab/actions-cost/2026-11-20_2026-11-23.jsonl`(job 7592줄, 실행 2177건). 기록 칸: 청구 6465분, PR 하나당 124.3분, PR 하나당 $0.746, PR head 하나당 17.6분, 30일 환산 $290.93. 러너별: `ubuntu-latest` 4381개 job, `(기타)` 2개 job(3분. 제작자가 2026-11-23에 손으로 돌린 `q10-trial`의 `windows-latest` job이다. 단가표에 Windows가 없어 금액에 들지 않는다). arm64에서 돈 job은 없다.
+- 2026-11-24 `origin/main`(`fda7701`, 6커밋 앞)을 로컬에서 병합했다. 두 가지가 바뀌었다: 보호 경로 PR의 변경 기록은 `CHANGELOG`가 아니라 PR별 조각 파일에 적는다(PR #227), 새 워크플로 `q10-trial.yml`(OS 행렬, 손으로 돌린다. PR #188). `CHANGELOG` 충돌은 main의 판을 그대로 쓰고 이 작업의 줄을 뺐다.
+- 2026-11-24 위 둘과 측정 결과로 step0의 "작업"·AC·금지사항을 고쳤다(의사결정 로그). 계획이 main에 없는 PR이라, 코드(패치·안내·문서)를 되돌려 계획만 남긴 head로 다시 계획 검증을 받는다(절차서 "계획 검증"). 승인 뒤에 코드를 다시 올린다. 구조 테스트 초안(`draft-tests.patch`)은 `q10-trial`을 포함하도록 고쳐 다시 확인했다: 지금 워크플로에서 파일마다 단언 실패로 실패하고(`ci.test.ts` 37개 가운데 1개, `harness-guard.test.ts` 21개 가운데 1개), 패치를 적용한 트리에서 통과한다(37개, 21개).
 
 ## 의사결정 로그
 
@@ -89,8 +92,11 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 - 결정: `selftest`도 이 계획에서 옮기지 않는다(계획 검증 1라운드 F2로 바꿨다. 처음에는 `check`와 함께 옮기려 했다). / 이유: `selftest`는 main의 정의로 돈다. `check` job이 arm64에서 같은 gitleaks 설치와 같은 시나리오를 돌려 보기는 하지만, 실제 job의 조건(15분 제한, main의 실행기와 따로 받은 PR 트리, 보고서를 job 출력으로 넘기는 것)은 병합 전에 재현되지 않는다. 병합 뒤 arm64에서만 실패하면 보호 경로를 바꾸는 PR이 `harness-guard`에서 막히고, 되돌리는 PR도 보호 경로(워크플로)를 바꾸므로 같이 막힌다. / 치르는 값: 264분(기준선의 6.6%)이 x64에 남고, 두 job의 체크섬을 아키텍처마다 고정하도록 테스트를 고친다. / 대안: 함께 옮기고 위험을 제작자에게 알린다.
 - 결정: 넣기 전 값의 측정과 워크플로 변경을 한 step(PR 하나)에 넣는다. / 이유: 제작자의 승인이 한 번으로 준다. 측정은 워크플로 변경이 병합되기 전의 기간(2026-11-20~23)을 재므로 같은 PR에 있어도 섞이지 않는다. 이 PR의 head에서 도는 `check`는 PR 쪽 정의라 제작자의 워크플로 커밋이 올라간 뒤로는 arm64에서 돈다. 그 커밋은 측정을 마친 뒤에 요청한다. / 대안: 측정만 담은 PR을 먼저 병합한다(승인이 두 번이다).
 - 결정: 넣기 전 값의 기간은 2026-11-20~2026-11-23이다(계획 검증 1라운드 F1로 바꿨다. 처음에는 2026-11-19~22였다). / 이유: A6은 2026-11-19 04:56 UTC에 병합됐다(PR #130). `actions-cost`는 기간에 만들어진 실행을 날짜(UTC) 단위로 읽으므로, 그 뒤 첫 UTC 자정부터 재야 A6 전의 실행이 섞이지 않는다. 나흘이라 기준선과 길이가 같다. 2026-11-23(UTC)이 끝난 뒤에 재고, 이 PR은 그 뒤에 병합되므로 기간이 B2 전에 끝난다. / 대안: 2026-11-19~22(A6이 들어간 날의 앞 다섯 시간이 섞인다).
+- 결정: 측정 뒤 step0을 세 곳 고친다(2026-11-24). / 이유: (1) 러너별 표가 `ubuntu-latest` 한 행뿐이어야 한다는 AC가, 이 수단과 무관한 `(기타)` 행(제작자가 손으로 돌린 `q10-trial`의 Windows job 2개, 3분) 때문에 실패한다. 이 AC가 막으려던 것은 arm64 실행이 섞이는 것이라, `ubuntu-24.04-arm` 행이 없는 것을 직접 본다. (2) PR #227 뒤로 보호 경로 PR의 변경 기록은 `CHANGELOG`가 아니라 PR별 조각 파일(`docs/harness/changes/<브랜치의 / 뒤>.md`)에 적는다. (3) 새 워크플로 `q10-trial.yml`이 생겼다. 러너 테스트가 정해 둔 여섯 파일만 읽으면 새 워크플로를 놓치므로 폴더의 모든 파일을 읽고, `q10-trial`의 행렬 러너는 그대로 둔다고 표에 적는다. / 대안: 같은 PR에서 계획 승인 없이 고친다(`plan-gate`가 승인 해시로 막는다), 측정을 다시 한다(보존 기록은 덮어쓰지 않는다. 다시 재도 Windows job은 남는다).
 
 ## 발견 사항
+
+- A6의 효과(판단 시점 1, 2026-11-24): 기준선(2026-11-17~20)과 견주면 PR head 하나당 청구 분은 21.2 → 17.6(17% 감소)이고, PR 하나당 금액은 $0.604 → $0.746(24% 증가)이다. PR 하나당 head 수가 늘어(약 4.8 → 6.6) PR 단위 값이 올랐다. A6이 줄이는 것은 push 하나(head 하나)의 분이라 수단은 되돌리지 않는다. 기준선이 A6이 들어간 날(2026-11-19)과 그다음 날을 포함해, 두 값의 차이는 A6만의 효과보다 작게 나온다. 예산($0.18) 밖은 그대로다.
 
 ## 열린 질문
 
@@ -104,7 +110,7 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 
 ## 다음 할 일
 
-- 2026-11-24 00:00(UTC, 한국 시간 09:00) 뒤에 넣기 전 값을 잰다(step0의 1). 기록 표의 행을 더하고(step0의 2) `check`를 통과시킨 뒤, 로컬에만 있는 커밋(패치·안내·문서)과 함께 push해 코드 판정을 받는다. 그 전에는 push하지 않는다.
+- 고친 계획으로 다시 계획 검증을 받는다(계획만 남긴 head). 승인되면 코드(패치·안내·문서·변경 조각)와 넣기 전 값(보존 기록, 기록 표의 행)을 올려 코드 판정을 받는다.
 - 판정이 끝나면 Issue #206에 `needs-human`으로 제작자의 워크플로 커밋을 요청한다(측정을 마친 뒤에만).
-- 구조 테스트는 써서 확인해 두었고 `draft-tests.patch`(이 폴더)에 있다. push 전에 이 파일과 `handoff.md`를 지우는 커밋을 만든다. 테스트 패치는 그 앞 커밋에 남으니 `git show <커밋>:<경로>`로 꺼낸다. 제작자의 커밋을 받아 트리를 견준 뒤 `git apply`로 적용해 커밋한다.
+- 구조 테스트는 써서 확인해 두었다. 이 폴더의 `draft-tests.patch`는 계획만 남길 때 지웠고 그 앞 커밋에 있다: P=docs/exec-plans/active/20261122-arm64-check/draft-tests.patch; D=$(git log -1 --format=%h --diff-filter=D -- "$P"); git show "$D^:$P"로 꺼낸다. 제작자의 커밋을 받아 트리를 견준 뒤 `git apply`로 적용해 커밋한다.
 - 기다리는 동안 선점은 `claim-heartbeat --issue 206`으로 유지한다(24시간마다 만료).

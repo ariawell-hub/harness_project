@@ -30,7 +30,7 @@ T=$(mktemp -d) && node scripts/harness.ts actions-cost --since 2026-11-20 --unti
 
 ### 2. 기록 표와 문서 (`docs/harness/actions-cost.md`)
 
-- "기록" 표에 기준선 행 다음으로 한 행을 더한다. `수단` 칸은 `A6`, `보존 기록` 칸은 `` `2026-11-20_2026-11-23.jsonl` ``이다. `기간`부터 `30일 환산 금액`까지 여섯 칸은 `node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl` 출력의 "기록 칸" 행을 그대로 옮긴다. `판단` 칸은 문서가 정한 순서로 정하고(`예산 안`·`예산 밖`·`판단 못 함`) 한 줄 설명을 단다. 설명에는 이 행이 A6 뒤이자 B2를 넣기 전의 값이라는 것과, 기준선과 하루(2026-11-20)가 겹친다는 것을 적는다.
+- "기록" 표에 기준선 행 다음으로 한 행을 더한다. `수단` 칸은 `A6`, `보존 기록` 칸은 `` `2026-11-20_2026-11-23.jsonl` ``이다. `기간`부터 `30일 환산 금액`까지 여섯 칸은 `node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl` 출력의 "기록 칸" 행을 그대로 옮긴다. `판단` 칸은 문서가 정한 순서로 정하고(`예산 안`·`예산 밖`·`판단 못 함`) 한 줄 설명을 단다. 설명에는 이 행이 A6 뒤이자 B2를 넣기 전의 값이라는 것과, 기준선과 하루(2026-11-20)가 겹친다는 것을 적는다. 단가를 모르는 러너의 분이 있으면 어느 실행의 것인지 적는다.
 - "재는 방법"의 **단가** 줄에서 보존 기록에 남는 라벨의 설명을 고친다: 단가를 아는 러너의 라벨과 `self-hosted`가 그대로 남는다(PR #205 판정의 F4).
 - 기준선의 표식 구간과 기준선 행은 바꾸지 않는다.
 
@@ -53,10 +53,11 @@ T=$(mktemp -d) && node scripts/harness.ts actions-cost --since 2026-11-20 --unti
 
 고치는 테스트 파일 둘은 **파일마다** 지금 워크플로(merge-base)에서 단언 실패로 실패하고 패치를 적용한 트리에서 통과해야 한다. `check`의 `test-effect`는 고친 테스트 파일을 하나씩 merge-base의 코드에서 돌려, 거기서도 통과하는 파일을 막는다(R5). 그래서 `check` job이 arm64라는 단언을 두 파일에 나눠 둔다: 러너는 `ci.test.ts`, gitleaks 고정값은 `harness-guard.test.ts`. 두 파일을 따로 돌린 결과(merge-base에서 실패한 단언, 패치를 적용한 트리에서의 통과)를 진행 로그에 적는다. 테스트는 제작자의 워크플로 커밋을 받은 뒤에 올린다(그 전에 올리면 `check`가 실패한다).
 
-- 러너(`ci.test.ts`): 워크플로 여섯(`check`, `gates`, `judge-claude`, `judge-codex`, `revert`, `review-trigger`)의 모든 job에 대해, job 블록에 `runs-on:` 줄이 정확히 하나이고 그 값이 아래와 같다. job의 목록도 견준다(job이 늘거나 줄면 테스트가 실패해 러너를 정하게 한다).
+- 러너(`ci.test.ts`): 워크플로 폴더(`.github/workflows/`)의 모든 파일(지금 일곱: `check`, `gates`, `judge-claude`, `judge-codex`, `q10-trial`, `revert`, `review-trigger`)을 읽어 모든 job에 대해, job 블록에 `runs-on:` 줄이 정확히 하나이고 그 값이 아래와 같다. job의 목록도 견준다(job이나 워크플로 파일이 늘거나 줄면 테스트가 실패해 러너를 정하게 한다).
   - `ubuntu-24.04-arm`: `check`의 `check`.
   - `ubuntu-latest`: 나머지 18개(`gates`의 `evaluate`·`selftest`·`record`, `judge-claude`의 `plan`·`judge`·`repro`·`record`·`failed`·`ci-failure`, `judge-codex`의 `plan`·`pubkey`·`judge`·`store`·`repro`·`record`, `revert`의 `plan`·`act`, `review-trigger`의 `trigger`).
-- gitleaks를 받는 job(`ci.test.ts`): 여섯 워크플로에서 `gitleaks_`가 든 job은 `check`의 `check`와 `gates`의 `selftest` 둘뿐이다(다른 job이 gitleaks를 받기 시작하면 실패해 고정값을 정하게 한다).
+  - `${{ matrix.os }}`: `q10-trial`의 `trial`(제작자가 손으로 돌리는 OS 행렬 실물 확인, `ubuntu-latest`와 `windows-latest`. Issue #180. 바꾸지 않는다).
+- gitleaks를 받는 job(`ci.test.ts`): 모든 워크플로 파일에서 `gitleaks_`가 든 job은 `check`의 `check`와 `gates`의 `selftest` 둘뿐이다(다른 job이 gitleaks를 받기 시작하면 실패해 고정값을 정하게 한다).
 - gitleaks 고정값(`harness-guard.test.ts`의 `selftest` 테스트): "`selftest`와 `check`의 버전·체크섬이 같다"는 단언을 아래로 바꾼다. 그 테스트의 다른 단언(체크섬 검증 줄이 있고 자체 테스트 실행보다 앞이다 등)은 그대로 둔다.
   - 두 job의 버전이 같고 `8.30.1`이다.
   - `check` job: 내려받는 파일이 `gitleaks_${GITLEAKS_VERSION}_linux_arm64.tar.gz`이고 체크섬이 `e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080`이다. `linux_x64`가 없다. 체크섬을 검증하는 줄(`sha256sum -c -`)이 있다. merge-base의 `check.yml`은 x64 파일과 x64 체크섬이라 이 단언이 거기서 실패한다.
@@ -65,14 +66,14 @@ T=$(mktemp -d) && node scripts/harness.ts actions-cost --since 2026-11-20 --unti
 
 ### 5. 제작자에게 요청하고, 받은 것을 확인한다
 
-- 나머지(보존 기록, 문서, 패치와 README, 변경 이력)를 올려 판정을 받은 뒤 Issue #206에 요청을 남긴다(`needs-human`): 브랜치 이름, 바꿀 줄과 위치(README 링크), 끝난 뒤 알릴 방법. 요청은 한 번에 모은다.
+- 나머지(보존 기록, 문서, 패치와 README, 변경 조각)를 올려 판정을 받은 뒤 Issue #206에 요청을 남긴다(`needs-human`): 브랜치 이름, 바꿀 줄과 위치(README 링크), 끝난 뒤 알릴 방법. 요청은 한 번에 모은다.
 - 제작자의 커밋을 받으면(`git fetch origin <브랜치>`, `git merge --ff-only origin/<브랜치>`) 봇이 커밋을 더하기 전에, 요청할 때의 head 트리에 패치를 적용한 결과와 받은 head의 트리를 통째로 견준다(`docs/SECURITY.md`의 명령). 다르면 멈추고 제작자에게 다른 곳을 알린다. 결과를 진행 로그에 적는다.
 - 같으면 구조 테스트를 커밋하고, AC와 `check`를 통과시키고, 완료 처리한 뒤 push한다.
 - push 뒤 그 head의 `check` 실행이 `ubuntu-24.04-arm`에서 돌아 통과했는지 실행 기록의 job 라벨과 결과로 확인해 PR 본문과 Issue에 적는다. 통과하지 않으면 승인을 요청하지 않는다.
 
-### 6. 변경 이력 (`docs/harness/CHANGELOG.md`)
+### 6. 변경 조각 (`docs/harness/changes/20261122-arm64-check-s0.md`)
 
-"다음 버전"에 한 줄: Issue #206, `check` job을 옮긴 러너, gitleaks의 arm64 파일과 체크섬, 검사를 약화하지 않는다는 것, `selftest`·판정 job과 1분 미만 job은 옮기지 않았다는 것.
+`docs/harness/CHANGELOG.md`는 고치지 않는다(PR #227 뒤의 규칙. 절차서 5절 "변경 조각"). 조각의 `## CHANGELOG`에 한 줄: Issue #206, `check` job을 옮긴 러너, gitleaks의 arm64 파일과 체크섬, 검사를 약화하지 않는다는 것, `selftest`·판정 job과 1분 미만 job은 옮기지 않았다는 것. 설계서를 고치지 않으므로 `## 설계서 변경 이력`은 두지 않는다.
 
 ## Acceptance Criteria
 
@@ -82,17 +83,17 @@ T=$(mktemp -d) && node scripts/harness.ts test-effect --ci > "$T/te" 2>&1 && gre
 T=$(mktemp -d) && want=$(export GIT_INDEX_FILE="$T/index"; git read-tree origin/main && git apply --cached lab/actions-cost/b2-arm64/workflows.patch && git write-tree) && test -n "$want" && test "$(git rev-parse "$want:.github/workflows")" = "$(git rev-parse "HEAD:.github/workflows")"
 test "$(git diff --name-only origin/main HEAD -- .github | sort | tr '\n' ' ')" = ".github/workflows/check.yml "
 T=$(mktemp -d) && git diff origin/main HEAD -- .github/workflows > "$T/d" && test "$(grep -c "^-[^-]" "$T/d")" = 3 && test "$(grep -c "^+[^+]" "$T/d")" = 3
-test "$(grep -c "runs-on: ubuntu-24.04-arm" .github/workflows/check.yml)" = 1 && ! grep -q "ubuntu-latest" .github/workflows/check.yml && ! grep -q "ubuntu-24.04-arm" .github/workflows/gates.yml .github/workflows/judge-claude.yml .github/workflows/judge-codex.yml .github/workflows/revert.yml .github/workflows/review-trigger.yml
+test "$(grep -c "runs-on: ubuntu-24.04-arm" .github/workflows/check.yml)" = 1 && ! grep -q "ubuntu-latest" .github/workflows/check.yml && test -z "$(grep -l "ubuntu-24.04-arm" .github/workflows/*.yml | grep -vx ".github/workflows/check.yml")"
 test -s lab/actions-cost/b2-arm64/README.md && test "$(grep -c "^diff --git" lab/actions-cost/b2-arm64/workflows.patch)" = 1
 test -s lab/actions-cost/2026-11-20_2026-11-23.jsonl && head -1 lab/actions-cost/2026-11-20_2026-11-23.jsonl | grep -q '"since":"2026-11-20","until":"2026-11-23"'
 git diff --quiet origin/main HEAD -- lab/actions-cost/2026-11-17_2026-11-20.jsonl
 T=$(mktemp -d) && grep "^| 2026-11-20~2026-11-23 *| A6 *|" docs/harness/actions-cost.md > "$T/row" && test "$(grep -c "" "$T/row")" = 1 && grep -qF '`2026-11-20_2026-11-23.jsonl`' "$T/row"
 T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*기록 칸\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" | grep "^| 2026-11-20~2026-11-23 " | tr -d ' ' > "$T/a" && test -s "$T/a" && grep "^| 2026-11-20~2026-11-23 *| A6 *|" docs/harness/actions-cost.md | tr -d ' ' | sed 's/|A6|/|/' > "$T/b" && grep -qF "$(cat "$T/a")" "$T/b"
-T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*러너별\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" > "$T/r" && test "$(grep -c "^|" "$T/r")" = 3 && grep -q "^| ubuntu-latest " "$T/r"
+T=$(mktemp -d) && node scripts/harness.ts actions-cost --from lab/actions-cost/2026-11-20_2026-11-23.jsonl > "$T/out.md" && awk '/^\*\*러너별\*\*/{s=1;next} /^\*\*/{s=0} s' "$T/out.md" > "$T/r" && grep -q "^| ubuntu-latest " "$T/r" && ! grep -q "^| ubuntu-24.04-arm " "$T/r"
 node lab/actions-cost/check-doc.ts
 node --test lab/actions-cost/test/check-doc.test.ts
 T=$(mktemp -d) && awk '/^## 재는 방법/{s=1;next} /^## /{s=0} s' docs/harness/actions-cost.md | grep "^- \*\*단가\*\*:" > "$T/l" && test "$(grep -c "" "$T/l")" = 1 && grep -qF "self-hosted" "$T/l"
-grep -q "#206" docs/harness/CHANGELOG.md
+grep -q "#206" docs/harness/changes/20261122-arm64-check-s0.md && git diff --quiet origin/main HEAD -- docs/harness/CHANGELOG.md
 node scripts/harness.ts check
 ```
 
@@ -101,12 +102,13 @@ node scripts/harness.ts check
 - 둘째 줄: 고친 테스트 파일 둘이 파일마다 merge-base의 코드에서 단언 실패로 실패한다(`test-effect`가 커밋된 테스트 파일을 merge-base 체크아웃에 덮어써 하나씩 돌린다. 한 파일이라도 거기서 통과하면 `ineffective`라 이 줄이 실패한다).
 - 셋째 줄: `origin/main`의 트리에 패치를 적용한 결과와 이 브랜치 head의 `.github/workflows` 폴더가 통째로 같다(패치의 줄이 빠졌거나, 일부만 들어갔거나, 패치 밖의 워크플로 줄이 바뀌었으면 다르다).
 - 넷째·다섯째 줄: `.github` 아래에서 바뀐 파일은 `check.yml`뿐이고, 바뀐 줄은 지운 줄 셋과 더한 줄 셋이다.
-- 여섯째 줄: `check.yml`의 `runs-on`은 arm64 러너 하나뿐이고(이 파일에는 job이 하나다), 다른 워크플로에는 arm64 러너가 없다.
+- 여섯째 줄: `check.yml`의 `runs-on`은 arm64 러너 하나뿐이고(이 파일에는 job이 하나다), 다른 워크플로 파일(폴더의 모든 파일)에는 arm64 러너가 없다.
 - 여덟째 줄: 넣기 전 값의 보존 기록이 있고 머리 줄의 기간이 2026-11-20~2026-11-23이다. 아홉째 줄: 기준선의 보존 기록은 그대로다.
 - 열째 줄: 기록 표에 그 기간의 행이 하나이고 수단이 `A6`, 보존 기록 칸이 그 파일이다.
 - 열한째 줄: 그 행의 여섯 칸이 `--from` 출력의 "기록 칸" 행과 같다(공백을 지우고 견준다. 문서의 행에서 `수단` 칸을 빼면 "기록 칸" 행이 그 앞머리다). 열셋째 줄의 문서 검사도 모든 행의 값과 판단을 보존 기록으로 다시 계산해 견준다.
-- 열두째 줄: 넣기 전 값의 기간에 돈 job은 모두 `ubuntu-latest`에서 돌았다(러너별 구간의 표가 머리 줄, 구분 줄, 그 한 행뿐이다). arm64에서 돈 실행이 섞였으면(제작자의 커밋이 기간 안에 올라갔으면) 행이 늘어 실패한다.
+- 열두째 줄: 넣기 전 값의 기간에 arm64에서 돈 job이 없다(러너별 구간의 표에 `ubuntu-latest` 행이 있고 `ubuntu-24.04-arm` 행이 없다). arm64에서 돈 실행이 섞였으면(제작자의 커밋이 기간 안에 올라갔으면) 그 행이 생겨 실패한다. 단가를 모르는 러너의 행(`(기타)`, 예: 제작자가 손으로 돌린 `q10-trial`의 Windows job)은 이 수단과 무관해 보지 않는다. 그 분은 문서의 판단 순서가 따로 다룬다.
 - 열다섯째 줄: "재는 방법"의 단가 줄이 하나이고 `self-hosted`를 적는다.
+- 열여섯째 줄: 이 PR의 변경 조각에 #206 줄이 있고, CHANGELOG는 main 그대로다. 조각의 형식은 마지막 줄의 `check`(그 안의 `doc-lint`, `R8 변경 조각`)가 본다.
 
 ## 금지사항
 
@@ -116,5 +118,6 @@ node scripts/harness.ts check
 - 받은 트리가 패치와 다르면 그 위에 커밋하지 마라. 이유: 패치 밖의 워크플로 변경이 검토 없이 들어간다. 멈추고 제작자에게 알린다.
 - gitleaks의 체크섬 검증 단계(`sha256sum -c`)를 빼거나 느슨하게 하지 마라. 체크섬을 정해 둔 값과 견주는 단언 없이 두 job의 체크섬 비교만 빼지 마라. 고친 테스트 파일이 merge-base에서도 통과하게 두지 마라(단언을 한 파일에만 몰지 않는다). 이유: 내려받은 실행 파일을 검증 없이 쓰게 된다(R4).
 - `lab/actions-cost/2026-11-17_2026-11-20.jsonl`과 새 보존 기록을 손으로 고치지 마라. 2026-11-23(UTC)이 끝나기 전에 재지 마라. 제작자의 워크플로 커밋을 재기 전에 요청하지 마라. 이유: 보존 기록이 기록 표의 기준이고, 끝나지 않은 날을 재면 그날의 실행이 빠지고, arm64에서 돈 실행이 섞이면 넣기 전 값이 아니다.
+- `docs/harness/CHANGELOG.md`와 설계서의 머리말·변경 이력을 직접 고치지 마라. 이유: 변경 기록은 PR별 조각 파일에 적는다(PR #227). 직접 고치면 다른 PR과 충돌한다.
 - 예산 값, 판단 규칙, 기준선의 표식 구간과 기준선 행을 바꾸지 마라. 이유: 이 step은 수단 하나를 넣고 넣기 전 값을 기록할 뿐이다.
 - 설계서(`docs/harness/design.md`)의 보장과 구조를 바꾸지 마라. 이유: B2는 잃는 보장이 없다(GitHub 호스팅 VM 그대로다).
