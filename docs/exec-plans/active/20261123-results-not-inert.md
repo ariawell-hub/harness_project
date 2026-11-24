@@ -2,7 +2,7 @@
 id: 20261123-results-not-inert
 issue: 225 # GitHub Issue 번호
 type: fix # 브랜치 접두어
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: small
 risk: high # low | normal | high
 author: claude-code
@@ -36,6 +36,7 @@ claimed_at: 2026-11-23T06:36:16+09:00
 
 - 2026-11-23 접수: PR #188(Issue #180)의 미룬 지적 F15(README의 "`scripts/test/`의 테스트는 `lab/`을 읽지 않는다"가 틀렸다)를 고치다가, 워크플로 패치 말고도 `profile-web-db.test.ts`가 `lab/q10-db/results/darwin-arm64.json`을 읽는 것을 찾았다. 그 파일은 건너뛰기 대상이다(F14와 같은 꼴). #188의 step은 `harness.config.json`을 고칠 수 없어, F14 때 제작자가 정한 방법(별도 PR로 먼저 고친다)을 따라 봇이 Issue #225를 등록하고 `new-task`로 시작했다.
 - 2026-11-23 구현: 테스트를 먼저 고쳤다(`scripts/test/check-skip.test.ts`: "이 리포의 설정" 테스트에서 결과 파일을 "테스트가 읽는 파일"로 옮기고 `lab/q10-db/results/linux-x64.json`을 건너뛰기 대상으로 더했다. 따옴표 안의 `lab/` 경로를 훑는 테스트를 더했다). 설정을 고치기 전에 돌려 실패를 확인했다: 20건 가운데 그 두 테스트가 실패한다(둘 다 `lab/q10-db/results/darwin-arm64.json`이 건너뛰기 대상). 그 사이 PR #214가 병합돼 이 브랜치를 `origin/main`(`3e9e8b2`)으로 빨리 감았다(커밋 전이라 병합 커밋은 없다). 그 뒤 `harness.config.json`의 `protectedPaths`에 경로를 더하고 `codeowners --write`로 `.github/CODEOWNERS`를 다시 만들었다. CHANGELOG "다음 버전" 끝에 한 줄을 더했다(설계서 본문은 바뀌지 않는다). `lab/q10-db/README.md`는 PR #188이 병합된 뒤 맞춘다(아직 고치지 않았다).
+- 2026-11-24T22:27:02+09:00 step 재작업: 구현 판정 1회차(head fd91621. 원장의 1라운드): Claude 승인(지적 없음), Codex 수정 요청(P1 하나). F1: check-skip.test.ts의 lab/ 경로 훑기 정규식이 따옴표 안 경로의 공백을 받지 않아 공백이 든 결과 파일 경로를 놓친다. 맞는 지적이다. 테스트를 먼저 더하고 고친다(제작자 지시로 mac-session이 넘겨받음, 2026-11-24)
 
 ## 의사결정 로그
 
