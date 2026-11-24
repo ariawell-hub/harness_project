@@ -1,0 +1,16 @@
+{
+  "plan": "20261123-change-fragments",
+  "steps": [
+    {
+      "step": 0,
+      "name": "fragments",
+      "status": "completed",
+      "completed_at": "2026-11-23T19:01:01+09:00"
+    },
+    {
+      "step": 1,
+      "name": "collect",
+      "status": "pending"
+    }
+  ]
+}

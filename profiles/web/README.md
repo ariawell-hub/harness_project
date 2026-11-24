@@ -107,7 +107,7 @@ node scripts/harness.ts verify -- e2e/login.spec.ts  # 지정한 파일만(여�
 
 ## DB
 
-파일럿 웹 프로젝트의 DB는 PostgreSQL, ORM·마이그레이션 도구는 Drizzle(`drizzle-orm`, `drizzle-kit`)이고, 일회용 DB(설계서 14.3절)는 내장 PostgreSQL(PGlite, `@electric-sql/pglite`)이다. 결정과 이유는 [ADR-0007](../../docs/decisions/ADR-0007-db-postgres-drizzle.md)에 있고 **잠정**이다(macOS에서만 쟀다. Windows 네이티브와 Linux의 결과가 통과해야 확정한다). 확인한 버전(`drizzle-orm` 0.45.4, `drizzle-kit` 0.31.11, `@electric-sql/pglite` 0.5.15)과 절차는 [lab/q10-db](../../lab/q10-db/README.md)에 있다.
+파일럿 웹 프로젝트의 DB는 PostgreSQL, ORM·마이그레이션 도구는 Drizzle(`drizzle-orm`, `drizzle-kit`)이고, 일회용 DB(설계서 14.3절)는 내장 PostgreSQL(PGlite, `@electric-sql/pglite`)이다. 결정과 이유는 [ADR-0007](../../docs/decisions/ADR-0007-db-postgres-drizzle.md)에 있고 **확정**이다(2026-11-23. macOS·Linux·Windows 네이티브의 세 환경에서 `lab/q10-db`의 실측이 통과했다. Linux와 Windows 네이티브는 CI 러너에서 쟀다). 확인한 버전(`drizzle-orm` 0.45.4, `drizzle-kit` 0.31.11, `@electric-sql/pglite` 0.5.15)과 절차는 [lab/q10-db](../../lab/q10-db/README.md)에 있다.
 
 ### 일회용 DB의 규약
 
