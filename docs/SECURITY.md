@@ -116,6 +116,26 @@ main의 필수 상태 체크는 제작자가 리포 설정에서 등록한다(�
 
 `revert-check` 등록(#102 step4): 검증 App이 이미 모든 PR에 `revert-check`를 기록하고 있어(revert PR이 아니면 "revert PR 아님"으로 통과한다) 언제 등록해도 막히는 PR이 없다. 설정에 이 체크를 넣은 PR이 병합된 뒤에는 등록하기 전까지 `required-checks`와 `ops-check` 1번이 `revert-check: 필수 체크로 등록되지 않았다`로 알린다. 위 1~4의 절차에서 검색 칸에 `revert-check`를 넣고 출처를 `harness-recorder`로 고른다.
 
+## 1분 미만 job의 러너 변수 (제작자)
+
+리포 변수 `SHORT_JOB_RUNNER`가 1분 미만 job 13개(`gates`의 `evaluate`·`record`, 두 판정 워크플로의 `plan`·`repro`·`record`와 `judge-claude`의 `failed`·`ci-failure`, `judge-codex`의 `pubkey`·`store`, `review-trigger`의 `trigger`)의 러너를 고른다(ADR-0008 B1, Issue #240). 워크플로의 식이 두 러너 가운데 하나만 고르므로 변수로 다른 러너는 고를 수 없다. GitHub 식의 비교는 대소문자를 가리지 않는다.
+
+| `SHORT_JOB_RUNNER`의 값                             | 러너                                        |
+| --------------------------------------------------- | ------------------------------------------- |
+| 없음(빈 문자열)                                     | `ubuntu-latest`(job마다 새 VM, 분당 $0.006) |
+| `ubuntu-slim`                                       | `ubuntu-slim`(1코어 컨테이너, 분당 $0.002)  |
+| 대소문자만 다른 값(`UBUNTU-SLIM`, `Ubuntu-Slim` 등) | `ubuntu-slim`                               |
+| 그 밖의 값(`ubuntu-latest`, `self-hosted`, `on` 등) | `ubuntu-latest`                             |
+
+잃는 보장: 켜면 이 job들이 job마다 새 VM이 아니라 공유 VM 위의 job마다 새 컨테이너에서 돈다. 그 가운데 기록 job(`recorder`)과 Codex 인증 저장 job(`codex-auth-store`)은 비밀을 가진다. 제작자가 ADR-0008의 묶음 "호스팅 유지"를 고를 때 받아들인 보장이다(설계서 10.4절 "self-hosted 러너는 쓰지 않는다"의 하위 항목).
+
+1. 켜기: GitHub → 리포 → Settings → Secrets and variables → Actions → Variables 탭 → New repository variable. Name `SHORT_JOB_RUNNER`, Value `ubuntu-slim`. 봇이 Issue로 요청할 때 한다(넣기 전 값을 잰 뒤. 켠 시각이 넣은 뒤 값의 기간을 정한다). 켠 시각을 알려 준다.
+2. 끄기(되돌리기): 같은 화면에서 변수를 지운다. 바로 다음 실행부터 `ubuntu-latest`다. PR이 필요 없다. 이 job들이 1코어 러너에서 깨지면(기록·판정이 실패하거나 멈춘다) 봇이 Issue로 끄기를 요청한다.
+
+확인: 봇이 실행 기록의 job 라벨(`gh api repos/<owner>/<repo>/actions/runs/<id>/jobs`의 `labels`)과 결과를 본다. 켠 뒤의 실행을 모두 보는 감시 명령은 계획 `20261124-slim-runner`의 step1에 있다.
+
+봇은 이 변수를 만들거나 바꾸거나 지우지 않는다(R20. L1 훅이 `gh variable set/delete`와 `gh api …/actions/variables`를 막는다). 개인 계정 리포에서는 리포의 다른 협업자도 리포 변수를 바꿀 수 있지만, 위 표대로 두 러너 사이를 오갈 뿐이다.
+
 ## 에이전트용 브라우저 프로필 (제작자)
 
 대화 세션의 에이전트는 MCP 도구로 Chrome을 직접 조종한다(Claude in Chrome 확장, Playwright). L1 훅은 브라우저 도구의 입력에 GitHub 주소가 있으면 막지만(설계서 13.1절), 브라우저 안에서 링크를 누르거나 이미 열린 탭을 조작해 GitHub에 닿는 경로는 보지 못한다. 그 브라우저 프로필에 제작자 GitHub 계정이 로그인되어 있으면 에이전트가 제작자 이름으로 PR을 승인하거나 설정을 바꿀 수 있다(E5, R20).
