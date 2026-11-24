@@ -466,32 +466,64 @@ test('이 리포의 설정: 테스트가 읽는 파일은 건너뛰기 대상이
     assert.equal(testInert(f, cfg), true, f);
 });
 
-/** dir 아래의 .ts 파일(하위 폴더 포함). 리포 기준 상대 경로 */
-function tsFiles(dir: string): string[] {
-  return readdirSync(path.join(HARNESS_ROOT, dir), { withFileTypes: true }).flatMap((d) => {
+/** root 아래 dir의 .ts 파일(하위 폴더 포함). 리포 기준 상대 경로 */
+function tsFiles(root: string, dir: string): string[] {
+  return readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((d) => {
     const rel = `${dir}/${d.name}`;
-    if (d.isDirectory()) return tsFiles(rel);
+    if (d.isDirectory()) return tsFiles(root, rel);
     return d.isFile() && d.name.endsWith('.ts') ? [rel] : [];
   });
 }
 
-test('이 리포의 설정: scripts/test/의 테스트가 따옴표 안에 적은 lab/ 경로는 건너뛰기 대상이 아니다 (Issue #225)', () => {
-  const cfg = loadConfig(HARNESS_ROOT);
-  // 이 파일은 뺀다: 픽스처와 건너뛰기 대상의 예로 lab/ 경로를 적는다
-  const self = 'scripts/test/check-skip.test.ts';
+/**
+ * root의 `scripts/test/` 아래 .ts 파일(skip은 뺀다)이 따옴표 안에 적은 `lab/` 경로 가운데 root에 있는 파일.
+ * glob 글자가 든 글이나 root에 없는 경로는 테스트가 읽는 파일이 아니다
+ */
+function quotedLabFiles(root: string, skip: string): Set<string> {
   const found = new Set<string>();
-  for (const f of tsFiles('scripts/test')) {
-    if (f === self) continue;
-    for (const m of readFileSync(path.join(HARNESS_ROOT, f), 'utf8').matchAll(
-      /['"`](lab\/[^'"`\s]+)['"`]/g,
+  for (const f of tsFiles(root, 'scripts/test')) {
+    if (f === skip) continue;
+    // 여는 따옴표와 같은 따옴표에서 닫는다. 경로 안의 공백과 다른 따옴표는 받고, 줄바꿈·역슬래시는 받지 않는다
+    for (const m of readFileSync(path.join(root, f), 'utf8').matchAll(
+      /(['"`])(lab\/(?:(?!\1)[^\n\\])+)\1/g,
     )) {
-      const rel = m[1];
-      // glob 글자가 든 글이나 리포에 없는 경로는 테스트가 읽는 파일이 아니다
+      const rel = m[2];
       if (/[*?[\]{}]/.test(rel)) continue;
-      const abs = path.join(HARNESS_ROOT, rel);
+      const abs = path.join(root, rel);
       if (existsSync(abs) && statSync(abs).isFile()) found.add(rel);
     }
   }
+  return found;
+}
+
+test('lab/ 경로 훑기: 공백·다른 따옴표가 든 경로도 찾고, 한 줄의 두 경로를 따로 찾는다 (PR #226 F1)', () => {
+  const root = tmp();
+  const files = [
+    'lab/q10-db/results/trial notes.json',
+    "lab/q10-db/results/it's.json",
+    'lab/a.json',
+    'lab/b.json',
+  ];
+  for (const f of files) write(root, f, '{}\n');
+  write(
+    root,
+    'scripts/test/x.test.ts',
+    [
+      "read('lab/q10-db/results/trial notes.json');",
+      `read("lab/q10-db/results/it's.json");`,
+      "for (const f of ['lab/a.json', 'lab/b.json']) read(f);",
+      "read('lab/없는 파일.json');",
+      "read('lab/*.json');",
+      '',
+    ].join('\n'),
+  );
+  assert.deepEqual([...quotedLabFiles(root, '')].sort(), [...files].sort());
+});
+
+test('이 리포의 설정: scripts/test/의 테스트가 따옴표 안에 적은 lab/ 경로는 건너뛰기 대상이 아니다 (Issue #225)', () => {
+  const cfg = loadConfig(HARNESS_ROOT);
+  // 이 파일은 뺀다: 픽스처와 건너뛰기 대상의 예로 lab/ 경로를 적는다
+  const found = quotedLabFiles(HARNESS_ROOT, 'scripts/test/check-skip.test.ts');
   // 훑기가 헛돌지 않는다: profile-web-db.test.ts가 읽는 결과 파일을 찾는다
   assert.ok(found.has('lab/q10-db/results/darwin-arm64.json'), [...found].join(', '));
   for (const f of found)
