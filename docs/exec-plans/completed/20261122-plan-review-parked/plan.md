@@ -121,6 +121,7 @@ claimed_at: 2026-11-22T21:10:49+09:00 # new-task가 채운다
 - 수용 기준 1~6: 원장·기록·판정 입력·`pr-state`·runner 대응 집계의 테스트.
 - 수용 기준 7: AC의 문서 비교 줄과 판정 입력 테스트.
 - 수용 기준 8: AC의 워크플로 비교 줄.
+- 결과(2026-11-25, head `612f2cf`. main `a06b7fd` 병합과 F9 대응 뒤): step0의 AC 16줄이 모두 통과했다(설계서 diff `3 1`, CHANGELOG의 `#212`, `node scripts/harness.ts check` 통과, `node scripts/harness.ts self-test` 통과). 이 줄을 더한 커밋은 계획 파일만 바꾼다.
 - 결과(2026-11-23): step0의 AC 16줄과 `node scripts/harness.ts check` 통과. 여섯 테스트 파일(`ledger` 25, `ledger-accept` 13, `ledger-store` 18, `accept-load` 24, `pr-state` 30, `runner-review` 29)과 `runner-plan-review`·`record`·`ci` 테스트 통과.
 
 ## 다음 할 일
