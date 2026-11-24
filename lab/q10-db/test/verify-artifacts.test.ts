@@ -331,6 +331,50 @@ test('엄격한 꼴: 코드 울타리 밖의 "## 잰 머신" 제목이 정확히
   );
 });
 
+test('엄격한 울타리: 정보 문자열에 백틱이 든 줄 뒤의 HTML 주석에 숨은 표를 읽지 않는다(F5)', () => {
+  // CommonMark: ```x`y 는 울타리를 열지 않는다(문단). 그 뒤의 <!-- 는 --> 까지 주석이라 GitHub에 표가 보이지 않는다
+  const doc = [
+    '# Q10',
+    '',
+    '```x`y',
+    '',
+    '<!--',
+    '```',
+    '## 잰 머신',
+    '',
+    ...OK_TABLE,
+    '',
+    '-->',
+    '',
+    '## 확정 조건',
+    '',
+  ].join('\n');
+  assertRejected(doc, /받지 않는 코드 울타리 줄|HTML 블록/);
+});
+
+test('엄격한 울타리: 맨 앞의 ``` 또는 ~~~ 셋과 단순한 언어 이름으로 열고 같은 세 글자만으로 닫는 꼴만 받는다', () => {
+  const ok = (open: string, close: string) => measured(OK_TABLE, [open, 'node x.ts', close, '']);
+  for (const [open, close] of [
+    ['```', '```'],
+    ['```bash', '```'],
+    ['~~~', '~~~'],
+    ['~~~text', '~~~'],
+  ])
+    assert.deepEqual(readTable(ok(open, close)).problems, [], `${open} … ${close}`);
+  for (const [open, close, why] of [
+    ['```x`y', '```', '정보 문자열의 백틱'],
+    ['  ```bash', '```', '들여 쓴 여는 줄'],
+    ['````', '````', '네 글자'],
+    ['```bash title', '```', '공백이 든 정보 문자열'],
+    ['```', '````', '더 긴 닫는 줄'],
+    ['```', '``` ', '뒤에 공백이 든 닫는 줄'],
+    ['```', '  ```', '들여 쓴 닫는 줄'],
+  ])
+    assertRejected(ok(open, close), /코드 울타리/, why);
+  // 울타리 안의 다른 울타리 모양 줄(CommonMark에서는 글이거나 닫는 줄이 된다)도 받지 않는다
+  assertRejected(measured(OK_TABLE, ['```', '~~~', '```js', '```', '']), /코드 울타리/);
+});
+
 test('엄격한 꼴: 꼴 문제가 있으면 provenanceProblems는 그 문제만 내고, collect는 실행을 조회하지 않는다', () => {
   const doc = measured([HEAD, DELIM, LINUX_LINE.slice(2), WIN_LINE]);
   const input = good();
