@@ -1,0 +1,48 @@
+diff --git a/.github/workflows/q10-trial.yml b/.github/workflows/q10-trial.yml
+new file mode 100644
+index 0000000..59b4c95
+--- /dev/null
++++ b/.github/workflows/q10-trial.yml
+@@ -0,0 +1,42 @@
++# Q10(DB·ORM) 실물 확인을 CI 러너에서 돌린다(Issue #180, ADR-0007의 확정 조건, lab/q10-db/README.md).
++# 손으로만 돈다(workflow_dispatch). 패키지 버전·pnpm 고정 버전·설치 정책을 바꿔 다시 잴 때 돌린다.
++# 비밀·보호 환경·캐시를 쓰지 않는다. 권한은 읽기뿐이다. 액션은 커밋 SHA로 고정한다.
++# 결과 파일은 실행 산출물로만 낸다. 리포에는 올리지 않는다(봇이 받아 PR에 넣는다).
++name: q10-trial
++
++on:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  trial:
++    name: trial (${{ matrix.os }})
++    runs-on: ${{ matrix.os }}
++    timeout-minutes: 20
++    strategy:
++      fail-fast: false
++      matrix:
++        os: [ubuntu-latest, windows-latest]
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
++        with:
++          persist-credentials: false
++
++      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
++        with:
++          node-version: '22.20'
++
++      - name: pnpm (package.json의 packageManager 버전)
++        run: corepack enable
++
++      - name: 실물 확인 (포맷은 건너뛴다. 하네스의 의존성을 설치하지 않는다)
++        run: node lab/q10-db/run.ts --skip-fmt
++
++      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
++        with:
++          name: q10-result-${{ matrix.os }}
++          path: lab/q10-db/results/
++          if-no-files-found: error
++          retention-days: 14

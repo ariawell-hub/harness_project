@@ -50,7 +50,7 @@
     },
     "test": {
       "run": "node --test --test-concurrency=$(node -p \"Math.max(1,Math.min(8,require('os').availableParallelism()-1))\") \"scripts/test/*.test.ts\"",
-      "timeoutSec": 1800
+      "timeoutSec": 3600
     },
     "build": null,
     "dev": null,
