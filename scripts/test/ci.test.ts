@@ -1,6 +1,6 @@
 // CI 기계 판정 결과 조립·기록(scripts/ci/)과 gates 워크플로 불변식. 계획 20261114-ci-gates step0.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { reproJobViolations } from '../gates/harness-guard.ts';
@@ -853,4 +853,66 @@ test('promptFiles·prompt-plan.md: mode=plan일 때만 계획 검증 프롬프�
   assert.doesNotMatch(plan, /대신/);
   assert.match(plan, /검증 항목[^\n]*그대로 적용/);
   assert.match(plan, /추가로/);
+});
+
+// ---------- 러너 (ADR-0008 B2, Issue #206) ----------
+
+// 워크플로 폴더의 모든 파일을 읽는다(워크플로가 늘면 아래 표에 없는 job이 생겨 실패한다)
+const workflowJobs = (): Map<string, string> => {
+  const dir = path.join(HARNESS_ROOT, '.github/workflows');
+  const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+  assert.ok(files.length > 0, '워크플로 파일이 없다');
+  const out = new Map<string, string>();
+  for (const f of files.sort()) {
+    const text = readFileSync(path.join(dir, f), 'utf8');
+    const wf = f.replace(/\.ya?ml$/, '');
+    const found = jobs(text);
+    assert.ok(found.size > 0, `${f}: job이 없다`);
+    for (const [id, block] of found) out.set(`${wf}/${id}`, block);
+  }
+  return out;
+};
+
+test('워크플로: check job만 arm64 2코어 러너로 돌고 나머지 job의 러너는 그대로다', () => {
+  // job이나 워크플로가 늘거나 줄면 여기서 실패한다. 새 job의 러너를 정해 이 표에 적는다.
+  // main의 정의로 도는 job(gates, judge-*, revert)은 병합 전에 실제 조건으로 돌려 볼 수 없어 옮기지 않았다.
+  // q10-trial은 제작자가 손으로 돌리는 실물 확인이다(OS 행렬. Issue #180)
+  const want: Record<string, string> = {
+    'check/check': 'ubuntu-24.04-arm',
+    'gates/evaluate': 'ubuntu-latest',
+    'gates/selftest': 'ubuntu-latest',
+    'gates/record': 'ubuntu-latest',
+    'judge-claude/plan': 'ubuntu-latest',
+    'judge-claude/judge': 'ubuntu-latest',
+    'judge-claude/repro': 'ubuntu-latest',
+    'judge-claude/record': 'ubuntu-latest',
+    'judge-claude/failed': 'ubuntu-latest',
+    'judge-claude/ci-failure': 'ubuntu-latest',
+    'judge-codex/plan': 'ubuntu-latest',
+    'judge-codex/pubkey': 'ubuntu-latest',
+    'judge-codex/judge': 'ubuntu-latest',
+    'judge-codex/store': 'ubuntu-latest',
+    'judge-codex/repro': 'ubuntu-latest',
+    'judge-codex/record': 'ubuntu-latest',
+    'q10-trial/trial': '${{ matrix.os }}',
+    'revert/plan': 'ubuntu-latest',
+    'revert/act': 'ubuntu-latest',
+    'review-trigger/trigger': 'ubuntu-latest',
+  };
+  const got: Record<string, string> = {};
+  for (const [id, block] of workflowJobs()) {
+    const lines = [...block.matchAll(/^\s*runs-on:(.*)$/gm)];
+    assert.equal(lines.length, 1, `${id}: runs-on 줄이 ${lines.length}개다`);
+    // job 바로 아래(공백 4칸)의 줄이어야 한다
+    assert.match(block, /^ {4}runs-on: \S/m, `${id}: runs-on이 job 바로 아래에 없다`);
+    got[id] = lines[0][1].trim();
+  }
+  assert.deepEqual(got, want);
+});
+
+test('워크플로: gitleaks를 받는 job은 check와 selftest 둘뿐이다', () => {
+  // 고정값(파일의 아키텍처, 체크섬)은 harness-guard.test.ts의 selftest 테스트가 job마다 본다.
+  // 다른 job이 gitleaks를 받기 시작하면 여기서 실패한다. 그 job의 고정값을 그 테스트에 더한다
+  const got = [...workflowJobs()].filter(([, block]) => /gitleaks_/i.test(block)).map(([id]) => id);
+  assert.deepEqual(got.sort(), ['check/check', 'gates/selftest']);
 });

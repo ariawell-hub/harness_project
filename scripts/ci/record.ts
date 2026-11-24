@@ -1,5 +1,7 @@
 // 기록 job(gates 워크플로 record): 판정 결과를 검사한 뒤 검증 App 토큰으로 PR head에 커밋 상태를 쓴다(10.4절).
 // LLM을 실행하지 않고 PR 코드를 실행하지 않는다. 토큰 값은 어떤 출력에도 넣지 않는다.
+import { setTimeout as delay } from 'node:timers/promises';
+import { log } from '../lib/util.ts';
 import { patchOf, withPatch } from './binding.ts';
 import { mergeSelfTest } from './selftest-result.ts';
 import {
@@ -160,30 +162,129 @@ export async function recordReview(o: RecordReviewOptions): Promise<StatusPayloa
   );
 }
 
+/** 커밋 상태 쓰기의 다시 시도에 쓰는 값(ms) */
+export interface StatusRetry {
+  /** 상태 하나에 보내는 요청 수의 상한(첫 요청 포함) */
+  attempts: number;
+  /** n번째 실패 뒤 다음 요청까지 기다리는 시간 */
+  waitsMs: readonly number[];
+  /** 요청 하나의 시간 제한 */
+  timeoutMs: number;
+  /** poster 하나가 다시 시도(대기 + 둘째부터의 요청)에 쓸 수 있는 시간 */
+  budgetMs: number;
+  /** 다시 보내는 요청에 남겨야 하는 시간. 상한까지 이만큼 남지 않으면 보내지 않는다 */
+  minRequestMs: number;
+}
+
+/**
+ * 커밋 상태 쓰기의 다시 시도(10.4절). GitHub API의 일시 오류(HTTP 5xx, 응답 없음)에만 한다.
+ * `budgetMs`는 record job의 시간 제한(5분) 안에 끝나게 하는 값이다: 다시 보내는 요청은 상한까지 남은 시간 안에서만 보낸다
+ */
+export const STATUS_RETRY: StatusRetry = {
+  attempts: 4,
+  waitsMs: [2_000, 6_000, 15_000],
+  timeoutMs: 30_000,
+  budgetMs: 60_000,
+  minRequestMs: 5_000,
+};
+
+/** 실패한 요청 하나. `what`은 로그에 내도 되는 고정된 글(상태 코드, 오류의 종류)이고 `body`는 응답 본문의 앞부분이다 */
+interface PostFailure {
+  retryable: boolean;
+  what: string;
+  body: string | null;
+}
+
+/**
+ * 커밋 상태 하나를 쓰는 함수를 만든다. 일시 오류면 `STATUS_RETRY`대로 다시 보내고, 그래도 실패하거나
+ * 다시 보낼 오류가 아니면(HTTP 4xx) 예외다(fail-closed: 부르는 쪽이 거기서 끝난다).
+ * 같은 상태를 두 번 써도 결과는 같다(GitHub은 context마다 마지막 상태를 쓴다). 그래서 응답을 받지 못한 요청도 다시 보낸다.
+ * 다시 시도를 알리는 줄에는 context, 상태 코드, 오류의 종류만 넣는다(토큰·응답 본문을 넣지 않는다)
+ */
 export function githubStatusPoster(o: {
   token: string;
   repo: string;
   sha: string;
   targetUrl: string;
   apiUrl?: string;
+  /** 다시 시도를 알리는 줄을 받는다. 기본은 표준 출력 */
+  log?: (line: string) => void;
+  /** 테스트용: 대기, 시계(ms), 다시 시도의 값 */
+  sleep?: (ms: number) => Promise<unknown>;
+  now?: () => number;
+  retry?: Partial<StatusRetry>;
 }): (p: StatusPayload) => Promise<void> {
   const api = (o.apiUrl ?? 'https://api.github.com').replace(/\/$/, '');
   const url = `${api}/repos/${o.repo}/statuses/${o.sha}`;
+  const say = o.log ?? log;
+  const sleep = o.sleep ?? ((ms: number) => delay(ms));
+  const now = o.now ?? (() => performance.now());
+  const R: StatusRetry = { ...STATUS_RETRY, ...o.retry };
+  /** 이 poster가 다시 시도에 쓴 시간(ms): 대기를 시작한 때부터 그 요청이 끝날 때까지를 더한다 */
+  let spentMs = 0;
+  /**
+   * 다시 시도(상한 확인부터 다시 보낸 요청이 끝날 때까지)는 poster 안에서 한 번에 하나씩 한다.
+   * 동시에 쓰는 상태들이 저마다 같은 `spentMs`를 보고 다시 보내면 합해서 상한을 넘는다. 첫 요청은 함께 보내도 된다
+   */
+  let turn: Promise<unknown> = Promise.resolve();
+  const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = turn.then(fn);
+    turn = run.catch(() => undefined);
+    return run;
+  };
+  /** 요청 하나. 시간 제한은 요청마다 새로 건다(앞 요청의 만료된 신호를 물려받지 않는다) */
+  const once = async (p: StatusPayload, limitMs: number): Promise<PostFailure | null> => {
+    // 시간 제한은 정수(ms)여야 한다. 신호는 try 밖에서 만든다: 값이 틀려 나는 예외를 "응답 없음"으로 읽지 않는다
+    const signal = AbortSignal.timeout(Math.max(1, Math.floor(limitMs)));
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${o.token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ...p, target_url: o.targetUrl }),
+        signal,
+      });
+    } catch (e) {
+      // 오류의 글은 넣지 않는다. 종류(이름)만 쓴다
+      const name = e instanceof Error && /^[A-Za-z]{1,40}$/.test(e.name) ? e.name : 'Error';
+      return { retryable: true, what: `응답 없음(${name})`, body: null };
+    }
+    if (res.ok) return null;
+    const body = (await res.text().catch(() => '')).slice(0, 300);
+    return { retryable: res.status >= 500, what: `HTTP ${res.status}`, body };
+  };
+  const failed = (p: StatusPayload, f: PostFailure, sent: number, overBudget: boolean) =>
+    new Error(
+      `커밋 상태 기록 실패(${p.context}): ${f.what}${f.body === null ? '' : ` ${f.body}`}${sent > 1 ? ` (${sent}회 시도)` : ''}${overBudget ? ' (시간 상한)' : ''}`,
+    );
   return async (p) => {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${o.token}`,
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ ...p, target_url: o.targetUrl }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) {
-      const body = (await res.text().catch(() => '')).slice(0, 300);
-      throw new Error(`커밋 상태 기록 실패(${p.context}): HTTP ${res.status} ${body}`);
+    let f = await once(p, R.timeoutMs);
+    for (let sent = 1; f; sent++) {
+      const wait = R.waitsMs[sent - 1];
+      if (!f.retryable || sent >= R.attempts || wait === undefined) throw failed(p, f, sent, false);
+      const last = f;
+      f = await oneAtATime(async () => {
+        // 상한까지 대기 뒤에 요청 하나를 보낼 시간이 남아야 다시 보낸다
+        if (spentMs + wait + R.minRequestMs > R.budgetMs) throw failed(p, last, sent, true);
+        say(
+          `record: 커밋 상태 기록 다시 시도(${p.context}): ${last.what}, ${wait / 1000}초 뒤 ${sent + 1}/${R.attempts}번째`,
+        );
+        const from = now();
+        try {
+          await sleep(wait);
+          // 대기가 예정보다 길어졌을 수 있다. 남은 시간을 다시 재서, 모자라면 보내지 않고 요청의 시간 제한도 남은 시간으로 줄인다
+          const left = R.budgetMs - spentMs - (now() - from);
+          if (left < R.minRequestMs) throw failed(p, last, sent, true);
+          return await once(p, Math.min(R.timeoutMs, left));
+        } finally {
+          spentMs += now() - from;
+        }
+      });
     }
   };
 }

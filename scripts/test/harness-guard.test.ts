@@ -113,6 +113,159 @@ test('CHANGELOG 누락, 체크리스트 누락·미체크는 실패, 본문을 �
   assert.equal(run(f, { body: null }).result.state, 'error');
 });
 
+// ---------- 변경 조각 (TD-39, Issue #222. 계획 20261123-change-fragments step0) ----------
+// CHANGELOG 대신 그 PR 브랜치 이름의 조각에 더한 항목도 기록으로 받는다. 설계서를 바꾸면 설계서 기록도 요구한다
+
+const BRANCH = 'feat/20261114-demo-s0'; // repo()가 만드는 브랜치
+const OWN = 'docs/harness/changes/20261114-demo-s0.md';
+const OTHER = 'docs/harness/changes/20261114-other-s0.md';
+const fragment = (changelog: string[], design: string[] = [], name = '20261114-demo-s0') =>
+  `# 변경 조각: ${name}\n\n## CHANGELOG\n\n${changelog.map((x) => `- ${x}\n`).join('')}` +
+  (design.length ? `\n## 설계서 변경 이력\n\n${design.map((x) => `- ${x}\n`).join('')}` : '');
+
+/**
+ * base에 `baseFiles`를 더해 커밋한 뒤 PR이 `files`를 바꾼 것으로 판정한다(CHANGELOG는 그대로). 값이 null이면 지운다.
+ * `branch`가 null이면 브랜치를 넘기지 않는다
+ */
+function guardWith(
+  files: Record<string, string | null>,
+  o: { baseFiles?: Record<string, string>; branch?: string | null } = {},
+): ReturnType<typeof harnessGuard> {
+  const r = repo();
+  for (const [f, c] of Object.entries(o.baseFiles ?? {})) write(r.root, f, c);
+  const base = o.baseFiles ? commitAll(r.root, 'base files') : r.base;
+  for (const [f, c] of Object.entries(files)) {
+    if (c === null) sh('git', ['rm', '-q', f], r.root);
+    else write(r.root, f, c);
+  }
+  commitAll(r.root, 'change');
+  const branch = o.branch === undefined ? BRANCH : (o.branch ?? undefined);
+  return harnessGuard({ ...r, base, prBody: BODY, branch });
+}
+const X = { 'scripts/x.ts': 'export const x = 1\n' };
+
+test('변경 조각: CHANGELOG를 고치지 않고 이 PR의 조각만 더해도 통과(runGates도 브랜치를 넘긴다)', async () => {
+  const g = guardWith({ ...X, [OWN]: fragment(['바꿈']) });
+  assert.equal(g.result.state, 'success', g.result.details.join('\n'));
+  assert.deepEqual(g.signals, []);
+  const r = repo();
+  write(r.root, 'scripts/x.ts', 'export const x = 1\n');
+  write(r.root, OWN, fragment(['바꿈']));
+  const head = commitAll(r.root, 'change');
+  const out = await runGates({ ...r, branch: BRANCH, headSha: head, prBody: BODY, reviews: [] });
+  const guard = out.results.find((x) => x.context === 'harness-guard')!;
+  assert.equal(guard.state, 'success', guard.description);
+});
+
+test('변경 조각: 형식이 틀리거나 자리 밖이거나 다른 브랜치의 조각이거나 브랜치를 모르면 기록으로 세지 않는다', () => {
+  const cases: [string, Record<string, string>, string | null | undefined][] = [
+    [
+      'CHANGELOG 항목 없음',
+      {
+        [OWN]: '# 변경 조각: 20261114-demo-s0\n\n## CHANGELOG\n\n## 설계서 변경 이력\n\n- 고쳤다\n',
+      },
+      undefined,
+    ],
+    ['형식 틀림', { [OWN]: fragment(['v0.7.90 (2026-11-14): 바꿈']) }, undefined],
+    ['자리 밖 이름', { 'docs/harness/changes/notes.md': fragment(['바꿈']) }, undefined],
+    [
+      '하위 폴더',
+      { 'docs/harness/changes/sub/20261114-demo-s0.md': fragment(['바꿈']) },
+      undefined,
+    ],
+    ['다른 브랜치의 조각', { [OTHER]: fragment(['바꿈'], [], '20261114-other-s0') }, undefined],
+    ['브랜치를 모름', { [OWN]: fragment(['바꿈']) }, null],
+  ];
+  for (const [what, files, branch] of cases) {
+    const g = guardWith({ ...X, ...files }, { branch });
+    assert.equal(g.result.state, 'failure', what);
+    assert.match(g.result.description, /CHANGELOG/, what);
+    assert.match(g.result.description, /변경 조각/, what);
+  }
+  // 이 PR의 조각 자리가 형식에 맞는 리포 안 다른 파일로 가는 심볼릭 링크다(Codex F13). 링크 객체(모드 120000)를
+  // 색인에 바로 넣어 커밋한다(Windows는 권한이 없으면 링크를 만들 수 없다). 작업 트리의 그 자리에는 링크를 따라간
+  // 것과 같은 글을 둔다: 링크를 따라 읽는 판정이면 이것을 기록으로 센다
+  const r = repo();
+  write(r.root, 'scripts/x.ts', 'export const x = 1\n');
+  write(r.root, 'notes/frag.md', fragment(['바꿈']));
+  sh('git', ['add', '-A'], r.root);
+  const blob = runSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: r.root,
+    input: '../../../notes/frag.md',
+  });
+  sh(
+    'git',
+    ['update-index', '--add', '--cacheinfo', `120000,${blob.stdout.trim()},${OWN}`],
+    r.root,
+  );
+  sh('git', ['commit', '-q', '-m', 'change'], r.root);
+  assert.match(sh('git', ['ls-tree', 'HEAD', '--', OWN], r.root), /^120000 blob /);
+  write(r.root, OWN, fragment(['바꿈']));
+  const linked = harnessGuard({ ...r, prBody: BODY, branch: BRANCH });
+  assert.equal(linked.result.state, 'failure', '심볼릭 링크 조각');
+  assert.match(linked.result.description, /변경 조각/);
+});
+
+test('변경 조각: base에 있던 이 PR의 조각은 새 CHANGELOG 항목을 더했을 때만 기록이다', () => {
+  const baseFiles = { [OWN]: fragment(['앞 항목']) };
+  const designOnly = guardWith({ ...X, [OWN]: fragment(['앞 항목'], ['설계서만']) }, { baseFiles });
+  assert.equal(designOnly.result.state, 'failure');
+  assert.match(designOnly.result.description, /변경 조각/);
+  assert.equal(guardWith({ ...X, [OWN]: null }, { baseFiles }).result.state, 'failure');
+  const added = guardWith({ ...X, [OWN]: fragment(['앞 항목', '새 항목']) }, { baseFiles });
+  assert.equal(added.result.state, 'success', added.result.details.join('\n'));
+});
+
+test('설계서 기록: 설계서를 바꾸면 변경 이력이나 이 PR의 조각에 설계서 항목이 있어야 한다', () => {
+  const DESIGN = 'docs/harness/design.md';
+  const design = (body: string, extra = '', head = 'v0.1.1 · 상태: 초안 · 최종 갱신: 2026-11-14') =>
+    `# 설계서\n\n> 버전 ${head}\n\n- **변경 이력**\n  - v0.1 (2026-11-13): 처음\n  - v0.1.1 (2026-11-14): 둘째\n${extra}\n## 1. 본문\n\n${body}\n`;
+  const baseFiles = { [DESIGN]: design('옛 글') };
+  const log = { [OWN]: fragment(['바꿈']) };
+  // (a) 본문만 바꾸면 실패
+  const bodyOnly = guardWith({ [DESIGN]: design('새 글'), ...log }, { baseFiles });
+  assert.equal(bodyOnly.result.state, 'failure');
+  assert.match(bodyOnly.result.description, /설계서/);
+  // (b) 옛 방식: 변경 이력에 항목을 더하고 머리말을 맞춘다
+  const oldWay = design(
+    '새 글',
+    '  - v0.1.2 (2026-11-15): 셋째\n',
+    'v0.1.2 · 상태: 초안 · 최종 갱신: 2026-11-15',
+  );
+  const b = guardWith({ [DESIGN]: oldWay, ...log }, { baseFiles });
+  assert.equal(b.result.state, 'success', b.result.details.join('\n'));
+  // (c) 이 PR의 조각에 설계서 항목
+  const c = guardWith(
+    { [DESIGN]: design('새 글'), [OWN]: fragment(['바꿈'], ['1절을 고쳤다']) },
+    { baseFiles },
+  );
+  assert.equal(c.result.state, 'success', c.result.details.join('\n'));
+  // (d) 다른 브랜치의 조각에만 설계서 항목
+  const d = guardWith(
+    {
+      [DESIGN]: design('새 글'),
+      ...log,
+      [OTHER]: fragment(['다른 PR'], ['1절을 고쳤다'], '20261114-other-s0'),
+    },
+    { baseFiles },
+  );
+  assert.equal(d.result.state, 'failure');
+  assert.match(d.result.description, /설계서/);
+  // (e) 마지막 항목을 지우고 머리말을 그 앞 항목에 맞추면 기록이 아니다
+  const dropped = design('새 글', '', 'v0.1 · 상태: 초안 · 최종 갱신: 2026-11-13').replace(
+    '  - v0.1.1 (2026-11-14): 둘째\n',
+    '',
+  );
+  const e = guardWith({ [DESIGN]: dropped, ...log }, { baseFiles });
+  assert.equal(e.result.state, 'failure');
+  assert.match(e.result.description, /설계서/);
+  // (f) 마지막 항목의 글만 고치면(버전은 그대로) 기록이 아니다
+  const reworded = design('새 글').replace('둘째\n', '둘째(고침)\n');
+  const f = guardWith({ [DESIGN]: reworded, ...log }, { baseFiles });
+  assert.equal(f.result.state, 'failure');
+  assert.match(f.result.description, /설계서/);
+});
+
 test('워크플로 캐시 사용은 실패', () => {
   for (const add of [
     '      - uses: actions/cache@0000000000000000000000000000000000000000\n',
@@ -460,16 +613,59 @@ test('이 리포의 gates.yml: selftest job은 base의 실행기로 PR의 하네
   assert.doesNotMatch(st, /environment:|secrets\.|vars\.|GH_TOKEN|github\.token|: write|cache/i);
   // PR 유래 값은 env로만 넘긴다: 어느 단계의 run 블록에도 표현식이 없다
   for (const step of st.split('\n      - ')) assert.doesNotMatch(step, /run: \|[\s\S]*\$\{\{/);
-  // 샘플 리포의 check가 시크릿 스캔을 돌리므로 gitleaks를 check 워크플로와 같은 버전·체크섬으로 설치한다.
-  // 없으면 runner 시나리오(flow-full, r45-runner)가 실패한다(PR #109의 첫 실제 실행)
-  const pin = (text: string) => [
-    /GITLEAKS_VERSION: (\S+)/.exec(text)?.[1],
-    /GITLEAKS_SHA256: ([0-9a-f]{64})\b/.exec(text)?.[1],
-  ];
+  // 샘플 리포의 check가 시크릿 스캔을 돌리므로 gitleaks를 check 워크플로와 같은 버전으로 설치한다.
+  // 없으면 runner 시나리오(flow-full, r45-runner)가 실패한다(PR #109의 첫 실제 실행).
+  // 파일과 체크섬은 job마다 그 러너의 아키텍처의 값이다: check job은 arm64 러너로 옮겼고(ADR-0008 B2, Issue #206)
+  // selftest는 x64 그대로다. 체크섬은 gitleaks 8.30.1의 배포 체크섬 목록의 값이다
+  const GITLEAKS: Record<string, { runner: string; sha256: string }> = {
+    arm64: {
+      runner: 'ubuntu-24.04-arm',
+      sha256: 'e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080',
+    },
+    x64: {
+      runner: 'ubuntu-latest',
+      sha256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb',
+    },
+  };
+  const pinned = (text: string, arch: string, name: string) => {
+    const want = GITLEAKS[arch];
+    assert.deepEqual(
+      [...text.matchAll(/GITLEAKS_VERSION: (\S+)/g)].map((m) => m[1]),
+      ['8.30.1'],
+      `${name}: gitleaks 버전`,
+    );
+    assert.deepEqual(
+      [...text.matchAll(/GITLEAKS_SHA256: (\S+)/g)].map((m) => m[1]),
+      [want.sha256],
+      `${name}: ${arch} 파일의 체크섬`,
+    );
+    // 내려받는 파일은 그 아키텍처의 것 하나뿐이다
+    assert.deepEqual(
+      [...text.matchAll(/gitleaks_[^\s"']*_linux_([a-z0-9]+)\.tar\.gz/g)].map((m) => m[1]),
+      [arch],
+      `${name}: 내려받는 파일의 아키텍처`,
+    );
+    assert.ok(
+      text.includes(`/v\${GITLEAKS_VERSION}/gitleaks_\${GITLEAKS_VERSION}_linux_${arch}.tar.gz"`),
+      `${name}: 내려받는 파일 이름`,
+    );
+    // 파일의 아키텍처가 러너와 맞는다
+    assert.deepEqual(
+      [...text.matchAll(/^ {4}runs-on: (\S+)$/gm)].map((m) => m[1]),
+      [want.runner],
+      `${name}: 러너`,
+    );
+    assert.match(
+      text,
+      /echo "\$\{GITLEAKS_SHA256\}  \/tmp\/gitleaks\.tgz" \| sha256sum -c -/,
+      `${name}: 체크섬 검증`,
+    );
+  };
   const checkWf = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/check.yml'), 'utf8');
-  assert.ok(pin(st)[0] && pin(st)[1]);
-  assert.deepEqual(pin(st), pin(checkWf));
-  assert.match(st, /echo "\$\{GITLEAKS_SHA256\}  \/tmp\/gitleaks\.tgz" \| sha256sum -c -/);
+  const checkJob = /\n {2}check:\n([\s\S]*)$/.exec(checkWf)?.[1];
+  assert.ok(checkJob, 'check job이 없다');
+  pinned(checkJob, 'arm64', 'check');
+  pinned(st, 'x64', 'selftest');
   assert.ok(st.indexOf('sha256sum -c -') < st.indexOf('harness.ts self-test'));
   for (const m of st.matchAll(/persist-credentials: (\S+)/g)) assert.equal(m[1], 'false');
   assert.equal([...st.matchAll(/uses: actions\/checkout@/g)].length, 2);

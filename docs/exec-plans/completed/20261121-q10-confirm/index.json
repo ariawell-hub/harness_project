@@ -1,0 +1,17 @@
+{
+  "plan": "20261121-q10-confirm",
+  "steps": [
+    {
+      "step": 0,
+      "name": "ci-trial",
+      "status": "completed",
+      "completed_at": "2026-11-23T12:42:12+09:00"
+    },
+    {
+      "step": 1,
+      "name": "confirm",
+      "status": "completed",
+      "completed_at": "2026-11-24T10:16:05+09:00"
+    }
+  ]
+}

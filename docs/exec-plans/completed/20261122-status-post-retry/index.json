@@ -1,0 +1,11 @@
+{
+  "plan": "20261122-status-post-retry",
+  "steps": [
+    {
+      "step": 0,
+      "name": "status-retry",
+      "status": "completed",
+      "completed_at": "2026-11-23T00:06:09+09:00"
+    }
+  ]
+}
