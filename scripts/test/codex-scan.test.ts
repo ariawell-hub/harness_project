@@ -116,8 +116,25 @@ test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로
     'Nov 21st, 2026 8:36 AM UTC',
     'Nov 21st, 2026 8:36 AM +09:00',
     'Nov 21st, 2026 8:36 AM (KST)',
+    // 판정 F5: 2~5자가 아닌 시간대 이름, 붙여 쓴 표기, 쉼표 뒤의 시간대
+    'Nov 21st, 2026 8:36 AM America/Los_Angeles',
+    'Nov 21st, 2026 8:36 AM Pacific Time',
+    'Nov 21st, 2026 8:36 AM Coordinated Universal Time',
+    'Nov 21st, 2026 8:36 AM/PST',
+    'Nov 21st, 2026 8:36 AM-08:00',
+    'Nov 21st, 2026 8:36 AM [UTC]',
+    'Nov 21st, 2026 8:36 AM, PST',
+    'Nov 21st, 2026 8:36 AM; UTC+9',
+    'Nov 21st, 2026 8:36 AM\nAmerica/New_York',
   ])
     assert.equal(usageLimitOutput(`usage limit. try again at ${at}`), 'usage-limit', at);
+  // 시각 표기가 문장 끝(마침표·느낌표·물음표, 글의 끝, 뒤따르는 공백만)으로 끝나면 시각을 읽는다
+  for (const tail of ['', '.', '. Upgrade to Pro.', '!', '?', ' ', ' \n', '.\u0007 x'])
+    assert.equal(
+      usageLimitOutput(`usage limit. try again at Nov 21st, 2026 8:36 AM${tail}`),
+      'usage-limit@2026-11-21T08:36Z',
+      JSON.stringify(tail),
+    );
   // 한도가 아니다
   for (const m of [
     'stream disconnected',

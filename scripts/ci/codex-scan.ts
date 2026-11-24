@@ -39,9 +39,10 @@ export function usageLimitOutput(message: string): string | null {
       message,
     );
   if (!m) return 'usage-limit';
-  // 시간대가 붙은 표기(`8:36 AM PST`, `+09:00`, `(KST)`)
-  if (/^\s*(?:[a-z]{2,5}\b|[+-]\d|\()/i.test(message.slice(m.index + m[0].length)))
-    return 'usage-limit';
+  // 시각 표기의 끝을 본다(판정 F5): 글의 끝이나 문장 끝(`.`·`!`·`?`)이면 받는다. 그 밖에는 공백·쉼표·쌍반점 뒤에
+  // 글자·숫자·괄호·부호·`/`가 오면 시간대가 붙은 표기로 본다(`8:36 AM PST`, `America/Los_Angeles`, `-08:00`, `(KST)`)
+  const rest = message.slice(m.index + m[0].length);
+  if (!/^[.!?]/.test(rest) && /^[\s,;]*[\p{L}\p{N}([{+\-\/]/u.test(rest)) return 'usage-limit';
   const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
   const h12 = Number(m[4]);
   if (h12 < 1 || h12 > 12) return 'usage-limit';
