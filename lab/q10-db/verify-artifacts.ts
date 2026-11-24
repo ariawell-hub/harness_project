@@ -108,28 +108,40 @@ const HINT =
   'README를 포매터로 정리하고(node scripts/harness.ts fmt) 잰 머신 절에는 표 하나와 문단만 둔다';
 /** 구분 줄의 칸: 하이픈 하나 이상, 앞뒤에 콜론을 둘 수 있다 */
 const DELIMITER_CELL = /^:?-+:?$/;
-/** 코드 울타리를 여는 줄(들여쓰기 3칸까지, ``` 또는 ~~~ 셋 이상) */
+/** 코드 울타리 모양의 줄(들여쓰기 3칸까지, ``` 또는 ~~~ 셋 이상) */
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+/** 받는 여는 줄: 맨 앞의 ``` 또는 ~~~ 셋과 단순한 언어 이름(없어도 된다) */
+const FENCE_OPEN_OK = /^(```|~~~)[A-Za-z0-9_+.-]*$/;
 /** 빈 줄에서 끝나지 않는 HTML 블록(CommonMark 1~5형): 닫는 표시까지 뒤의 제목·표를 글로 만든다 */
 const LONG_HTML_RE =
   /^ {0,3}<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:pre|script|style|textarea)(?:[\s>]|$))/i;
 
-/** 각 줄이 코드 울타리 안인가(여는 줄·닫는 줄 포함). 끝까지 닫히지 않았으면 unclosed가 참이다 */
-function fenceMap(lines: string[]): { inside: boolean[]; unclosed: boolean } {
+/**
+ * 각 줄이 코드 울타리 안인가(여는 줄·닫는 줄 포함)와, 받지 않는 울타리 모양 줄의 번호.
+ * 울타리도 엄격한 꼴만 받는다(제작자 결정 2026-11-24, F5): 맨 앞의 ``` 또는 ~~~ 셋과 단순한 언어 이름으로 열고,
+ * 같은 세 글자만 있는 줄로 닫는다. 그 밖의 울타리 모양 줄(들여쓰기, 네 글자 이상, 백틱·공백이 든 정보 문자열,
+ * 뒤에 공백이 든 닫는 줄, 울타리 안의 다른 울타리 모양 줄)은 CommonMark에서 해석이 갈리므로 받지 않는다.
+ * 받는 꼴만 있으면 이 판정은 CommonMark와 같다
+ */
+function fenceMap(lines: string[]): { inside: boolean[]; unclosed: boolean; bad: number[] } {
   const inside: boolean[] = [];
+  const bad: number[] = [];
   let open: string | null = null;
-  for (const l of lines) {
+  lines.forEach((l, i) => {
     if (open === null) {
-      const m = FENCE_RE.exec(l);
-      if (m) open = m[1];
+      if (FENCE_RE.test(l)) {
+        const m = FENCE_OPEN_OK.exec(l);
+        if (m) open = m[1];
+        else bad.push(i);
+      }
       inside.push(open !== null);
     } else {
       inside.push(true);
-      const close = new RegExp(`^ {0,3}${open[0] === '`' ? '`' : '~'}{${open.length},}[ \\t]*$`);
-      if (close.test(l)) open = null;
+      if (l === open) open = null;
+      else if (FENCE_RE.test(l)) bad.push(i);
     }
-  }
-  return { inside, unclosed: open !== null };
+  });
+  return { inside, unclosed: open !== null, bad };
 }
 
 /**
@@ -137,7 +149,7 @@ function fenceMap(lines: string[]): { inside: boolean[]; unclosed: boolean } {
  * 포매터가 쓰는 꼴이 아니면 행을 하나도 내지 않고 꼴 문제를 낸다. GitHub이 보여 주는 표와 이 검사가 읽는 표가
  * 어긋날 여지를 남기지 않기 위해서다(GFM의 모든 꼴을 흉내 내지 않는다).
  *
- * - README: 코드 울타리 밖의 `## 잰 머신` 제목이 정확히 하나. 닫히지 않은 코드 울타리와,
+ * - README: 코드 울타리 밖의 `## 잰 머신` 제목이 정확히 하나. 코드 울타리는 엄격한 꼴만(fenceMap) 있고 모두 닫힌다.
  *   빈 줄에서 끝나지 않는 HTML 블록(`<!--` `<?` `<!X` `<![CDATA[` `<pre` `<script` `<style` `<textarea`)이 없다.
  * - 절(그 제목부터 다음 `## ` 앞까지): HTML 줄(`<`로 시작)과 코드 울타리가 없다. 표는 하나다:
  *   `|`로 시작하는 첫 줄부터 다음 빈 줄까지. 그 앞은 빈 줄(또는 제목 바로 뒤), 그 밖에는 `|`로 시작하는 줄이 없다.
@@ -151,7 +163,11 @@ export function readTable(readme: string): { rows: Row[]; problems: string[] } {
   const bad: string[] = [];
   const fail = (why: string) => bad.push(`${PROBLEM}: ${why}(${HINT})`);
   const at = (i: number) => `README ${i + 1}번째 줄`;
-  const { inside, unclosed } = fenceMap(lines);
+  const { inside, unclosed, bad: badFences } = fenceMap(lines);
+  for (const i of badFences)
+    fail(
+      `${at(i)}: 받지 않는 코드 울타리 줄이다(맨 앞의 \`\`\` 또는 ~~~ 셋과 언어 이름으로 열고, 같은 세 글자만 있는 줄로 닫는다)`,
+    );
   if (unclosed) fail('닫히지 않은 코드 울타리가 있다');
   lines.forEach((l, i) => {
     if (!inside[i] && LONG_HTML_RE.test(l))
