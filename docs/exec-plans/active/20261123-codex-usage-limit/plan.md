@@ -84,6 +84,18 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
   - F2(P1): 시각을 모르는 한도에서 runner가 권할 행동이 정해지지 않았다. → 시각이 있는 한도, 시각을 모르는 한도, 한도가 아닌 경우의 추천 글을 수용 기준 4에 각각 적고 세 경우를 테스트로 단언하게 했다.
 - 2026-11-23 계획 검증 2라운드(head `86ca288`): codex 수정 요청(P1 1. F1·F2는 해소됐다고 적었다), claude 판정 없음(error. 판정 job이 허용 밖 도구 `Bash`를 불러 유출 검사가 막았다. 발견 사항). 받아들였다.
   - F3(P1): 잇는 테스트가 마지막에 `recordReview` 함수에 값을 직접 넘겨, `record-review` 명령이 `--unavailable`을 받고도 함수에 넘기지 않으면 모든 단언이 통과한다. → 수용 기준 6을 세 명령 모두 실제 명령으로 잇고 가짜 GitHub API가 받은 상태를 단언하는 새 테스트 파일(`usage-limit-cli.test.ts`, `accept-cli.test.ts`와 같은 꼴)로 바꿨다.
+- 2026-11-23 계획 검증 3라운드(head `37e7901`): 두 검증자 승인(G1, 원장 차단 없음).
+- 2026-11-24 넘겨받기: 계획 승인 뒤 구현이 시작되지 않은 채 멈춰 있었다(선점 `claim/223`은 2026-11-23 12:59 뒤로 갱신되지 않아 만료, 로컬 worktree 없음). 제작자가 대화에서 이어 가라고 지시해 작업자 `mac-session`이 넘겨받았다. 원격 브랜치로 worktree를 다시 만들고 대화 세션이 그 안으로 들어가(EnterWorktree) 고쳤다. frontmatter의 `owner`는 그대로 둔다(TD-23).
+- 2026-11-24 `origin/main`(`a06b7fd`)을 병합했다(충돌 없음).
+- 2026-11-24 1번(한도 인식) 테스트 먼저: `codex-scan.test.ts`에 `usageLimitOutput`(문구와 시각, 대소문자·서수·12시 표기, 없는 날짜·시각, 다른 표기·시간대가 붙은 표기, 한도 아님), `isUnavailableValue`, `scanCodexRun`의 `unavailable`(마지막 `turn.failed`만, 비밀·제어 문자가 섞여도 정한 형식, 그 밖의 실패·통과에는 없음)을 더하고 돌렸다. 내보내기가 없어 불러오기에서 실패했다. 구현 뒤 12건 통과.
+- 2026-11-24 2번(명령) 테스트 먼저: `scan-output.test.ts`에 `codex-scan --unavailable-out`(한도면 값 한 줄·종료 코드 1·판정 파일 없음·`GITHUB_OUTPUT`에 쓴 줄 없음, 그 밖의 실패·통과에는 파일 없음)과 `codex-unavailable`(받는 값, 앞뒤 공백·줄바꿈, 둘째 줄·없는 날짜·원문은 받지 않음, 파일 없음, `GITHUB_OUTPUT` 없음, 언제나 종료 코드 0)을 자식 프로세스로 더했다(자식에는 `PATH`와 테스트가 만든 `GITHUB_OUTPUT`만 넘긴다). 구현 전에 4건이 실패했다(모르는 옵션·모르는 명령). 구현 뒤 14건 통과.
+- 2026-11-24 3번(기록 설명) 테스트 먼저: `record.test.ts`에 `recordReview`의 한도 설명(시각 있음·모름, 판정 파일 없음·빈 글), 형식이 아닌 값은 지금 설명, 판정이 있거나 해당 없음·이어받기·깨진 판정이면 값을 보지 않음, `usageLimitOf`의 왕복과 다른 설명은 null을 더했다. `usageLimitOf`가 없어 불러오기에서 실패했다. 구현 뒤 통과.
+- 2026-11-24 4번(runner 알림) 테스트 먼저: `runner-pr.test.ts`에 CI 대기 알림의 A) 세 경우(시각이 있는 한도 둘이면 가장 늦은 시각, 시각을 모르는 한도와 섞이면 시각 있는 쪽, 시각을 모르는 한도, 한도 아님·한도 설명과 한 글자 다른 설명)와 B)·C)·"다시 실행하지 않는다"가 그대로인지를 더했다. 구현 전에 2건이 실패했다(지금 글이 나왔다). 구현 뒤 14건 통과.
+- 2026-11-24 잇는 테스트 `usage-limit-cli.test.ts`(수용 기준 6): 1~4번 구현 뒤에 썼다(테스트 먼저가 아니다). 세 명령을 자식 프로세스로 잇고 로컬 가짜 GitHub API가 받은 `review/codex`의 `state`·`description`을 단언한다(시각 있는 한도, 시각 모름, 한도 아님). 3건 통과. 변경 전 코드에서 실패하는지는 `check`의 `test-effect`로 본다(아래).
+- 2026-11-24 5번(워크플로 패치): `ci.test.ts`에 judge-codex 단언(`scan` 명령의 `--unavailable-out`, `scan` 바로 뒤·봉인 앞의 `why`와 조건·명령·비밀 없음, 봉인이 마지막에 `always()`, `judge` 출력의 `unavailable`이 `repro` 바로 아래, `record`의 `UNAVAILABLE` 환경 변수와 `--unavailable "$UNAVAILABLE"`)을 먼저 더해 지금 워크플로에서 실패하는 것을 봤다(`why` 단계 없음: `9,-1,10`). 워크플로를 고친 트리에서 `ci.test.ts` 38건과 step의 AC(일곱 파일 120건)가 통과했다. 그 상태의 `git diff -- .github/workflows/judge-codex.yml`을 `lab/codex-usage-limit/judge-codex.patch`로 저장하고, 워크플로와 `ci.test.ts`를 되돌렸다(`ci.test.ts`의 변경은 리포 밖 파일로 옮겨 두었다. push 1에 넣지 않는다). 되돌린 트리에 패치가 `git apply --check`로 그대로 적용된다. 제작자가 넣을 줄과 위치는 `lab/codex-usage-limit/README.md`.
+- 2026-11-24 6번(문서): 설계서 10.1절 "검증자 장애"와 10.4절 "판정 job 안의 유출 검사"에 한 항목씩, `docs/SECURITY.md`에 "사용 한도에 걸렸을 때"(runner 알림이 가리키는 확인 방법), 기술 부채 표(TD-50 해결, TD-56에 상태 설명으로 가를 수 있게 된 것, 새 TD-70·TD-71). 변경 기록은 변경 조각 `docs/harness/changes/20261123-codex-usage-limit-s0.md`(의사결정 로그).
+- 2026-11-24 Claude 검증자 조사: `claude-scan`은 `result` 이벤트가 `is_error`면 "실행 오류(판정 없음)"로 실패하고 문구는 로그에만 남긴다. `judge-claude`의 실패한 실행 5건을 봤다: 3건은 허용 밖 도구(`Bash`) 호출(44669039688, 44885889572, 45109695141), 2건(44290534509, 44288744654, 2026-11-18)은 job이 돌기 전 워크플로 수준 실패였다. 한도로 끝난 실행은 없었다(발견 사항).
+- 2026-11-24 push 1 전 `node scripts/harness.ts check` 통과(워크플로와 `ci.test.ts`를 되돌린 트리). `test-effect`: `runner-pr`·`scan-output`·`usage-limit-cli`는 변경 전 코드에서 단언 실패(잇는 테스트는 `codex-scan`이 모르는 옵션으로 끝나 종료 코드 단언이 실패한다), `codex-scan`·`record`는 새 내보내기가 없어 불러오기에서 실패(단언은 위 테스트 먼저 기록대로 직접 확인했다).
 
 ## 의사결정 로그
 
@@ -92,11 +104,15 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 결정: 풀리는 시각은 UTC로 읽는다. / 이유: 문구("Nov 21st, 2026 8:36 AM")에 시간대가 없다. Codex CLI는 실행한 기계의 시각대로 적는 것으로 보이고 GitHub 호스팅 러너의 시각대는 UTC다. 설명에 `UTC`를 붙여 기준을 밝힌다. 틀리면 설명의 시각만 틀리고 상태는 그대로다.
 - 결정: "워크플로만 바뀐 트리에서도 AC가 실패한다"는 수용 기준으로 두지 않는다. / 이유: 스크립트 변경(push 1)이 제작자의 워크플로 커밋보다 먼저 올라가므로 그런 head는 이 PR에 생기지 않는다. 그런 트리가 생겨도 `record-review`는 모르는 옵션에서 실패하고(TD-17에서 고친 옵션 검사) `review/codex`가 기록되지 않아 병합이 막힌다(fail-closed). / 버린 대안: 옛 워크플로를 요구하는 단언을 지금 테스트에 더한다(#143은 기존 단언이 그 역할을 했다. 이번에는 바뀌는 줄을 지금 단언하는 테스트가 없다).
 - 결정: 한도 값은 `codex-scan`이 파일에 쓰고, 뒤의 단계 `why`(`if: always() && steps.scan.outcome == 'failure'`)가 `codex-unavailable`로 검사해 job 출력에 쓴다(판정 1라운드 F1). / 이유: 실패로 끝나는 단계가 `GITHUB_OUTPUT`에 쓴 값이 넘어가는지를 병합 전에 확인할 길이 없다. 성공하는 단계의 출력이 실패한 job에서 다음 job으로 가는 것은 봉인·저장 경로(`seal` → `store`)가 이미 쓰고 있고 실행 44542064356에서 확인했다. `codex-scan`이 실패할 때 job 출력을 쓰지 않는다는 #143의 약속도 그대로다. / 버린 대안: `codex-scan`이 실패하면서 `GITHUB_OUTPUT`에 쓴다(처음 계획. 넘어가는지 병합 뒤에야 안다).
+- 결정(2026-11-24 구현): CHANGELOG와 설계서 머리말·변경 이력을 직접 고치지 않고 변경 조각(`docs/harness/changes/20261123-codex-usage-limit-s0.md`)에 적는다. step의 "작업" 6은 "머리말·변경 이력. `CHANGELOG`"라고 적었지만, 그 뒤 main에 변경 조각(#227, 절차서 5절)이 들어와 보호 경로 PR은 조각에 적게 됐다. / 이유: 이 PR은 제작자의 워크플로 커밋과 승인을 기다리는 동안 열려 있어, 직접 고치면 먼저 병합되는 PR과 그 세 자리에서 충돌하고 새 커밋이 승인을 철회시킨다(TD-39). 조각 폴더는 계획의 "관련 파일·문서"에 없어 `scope` 경고가 날 수 있다(묶인 섹션이라 고치지 않고 PR 본문에 이유를 적는다). / 버린 대안: 직접 고친다(절차서는 받아 준다. 충돌을 다시 만든다).
+- 결정(2026-11-24 구현): 한도 설명을 만드는 글과 읽는 함수(`usageLimitOf`)를 `scripts/ci/record.ts` 한곳에 둔다. 형식 검사(`isUnavailableValue`)는 `scripts/ci/codex-scan.ts`에 두고 기록 쪽이 불러 쓴다(step의 "작업" 1·3). runner는 `usageLimitOf`만 부른다. / 이유: 설명의 글과 판별이 어긋나면 runner의 추천이 조용히 지금 글로 돌아간다. 한곳에서 만들고 읽으면 왕복 테스트로 묶을 수 있다.
+- 결정(2026-11-24 구현): `docs/SECURITY.md`에 "사용 한도에 걸렸을 때"를 더한다. / 이유: runner 알림의 시각을 모르는 경우 추천과 B)가 그 문서를 가리키는데, 지금 문서에는 한도를 확인하는 방법이 없다. 범위 안의 파일이다.
 - 결정: `codex-unavailable`은 언제나 종료 코드 0이다. / 이유: 이 단계는 설명을 덧붙이는 일뿐이다. 실패해도 출력이 비어 기록 job은 지금 설명을 쓰고(fail-closed는 그대로), 봉인 단계는 `always()`라 영향이 없다. 실패로 끝내면 판정 job 화면에 실패한 단계가 둘로 보여 원인을 가린다.
 
 ## 발견 사항
 
-- Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: 구현 push에서 TD로 등록한다(제작자에게 보고했다)
+- Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: TD-71
+- Claude 판정 job에서 사용 한도가 어떻게 보이는지(수용 기준 8): `claude-scan`은 `result` 이벤트의 `is_error`로 "실행 오류(판정 없음)"를 내고 문구는 판정 job 로그에만 남아, `review/claude` 설명은 지금의 Codex와 같이 "판정 없음(판정 job 실패 또는 유출 검사 불통과)"뿐이다. `judge-claude`의 실패한 실행 5건 가운데 한도로 끝난 것은 없어 실제 문구는 확인하지 못했다. runner는 Claude 한도 문구를 `Claude AI usage limit reached|<유닉스 초>` 꼴로 가정한다(`scripts/runner/agents.ts`, `scripts/selftest/fake-agent.ts`). 같은 방식(`unavailable` 출력과 `why` 단계)으로 할지는 실제 문구를 본 뒤 정한다. → 처리: TD-70
 
 ## 열린 질문
 

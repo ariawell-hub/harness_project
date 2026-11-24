@@ -1,0 +1,45 @@
+diff --git a/.github/workflows/judge-codex.yml b/.github/workflows/judge-codex.yml
+index 2b0721d..63def88 100644
+--- a/.github/workflows/judge-codex.yml
++++ b/.github/workflows/judge-codex.yml
+@@ -146,6 +146,7 @@ jobs:
+     outputs:
+       verdict: ${{ steps.scan.outputs.verdict }}
+       repro: ${{ steps.scan.outputs.repro }}
++      unavailable: ${{ steps.why.outputs.unavailable }}
+       sealed: ${{ steps.seal.outputs.sealed }}
+       key_id: ${{ steps.seal.outputs.key_id }}
+     steps:
+@@ -253,9 +254,16 @@ jobs:
+           OUT="$RUNNER_TEMP/verdict.json"
+           node base/scripts/harness.ts codex-scan --events "$RUNNER_TEMP/codex-events.jsonl" \
+             --last "$RUNNER_TEMP/codex-last.txt" --stderr "$RUNNER_TEMP/codex-stderr.log" \
+-            --pr "$GITHUB_WORKSPACE/pr" --auth "$CODEX_HOME/auth.json" --out "$OUT"
++            --pr "$GITHUB_WORKSPACE/pr" --auth "$CODEX_HOME/auth.json" --out "$OUT" \
++            --unavailable-out "$RUNNER_TEMP/codex-unavailable.txt"
+           echo "verdict=$(base64 -w0 "$OUT")" >> "$GITHUB_OUTPUT"
+ 
++      # 실패한 scan 단계의 출력에 기대지 않는다: 성공하는 이 단계가 한도 값 파일을 검사해 job 출력으로 넘긴다(Issue #223)
++      - name: 사용 한도를 기록 job에 넘긴다 (LLM 없음. 정한 형식의 값만)
++        id: why
++        if: always() && steps.scan.outcome == 'failure'
++        run: node base/scripts/harness.ts codex-unavailable --file "$RUNNER_TEMP/codex-unavailable.txt"
++
+       # 판정·검사가 실패해도 실행 중 갱신된 토큰은 저장해야 한다(13.3절)
+       - name: 인증 봉인 (LLM 없음. 평문은 러너 밖으로 나가지 않는다)
+         id: seal
+@@ -417,6 +425,8 @@ jobs:
+           # 계획 검증(G1): plan job이 계산한 값. 계획 전용 head에서 review/*가 success면 원장에 계획 승인을 남긴다
+           MODE: ${{ needs.plan.outputs.mode }}
+           PLAN_HASH: ${{ needs.plan.outputs.plan_hash }}
++          # 판정이 없을 때 설명에 적을 사용 한도(정한 형식만. record-review가 다시 검사한다, Issue #223)
++          UNAVAILABLE: ${{ needs.judge.outputs.unavailable }}
+         run: |
+           [ "$NEEDED" = "false" ] || NEEDED=true
+           F="$RUNNER_TEMP/verdict.json"
+@@ -426,4 +436,4 @@ jobs:
+             --patch "$PATCH" --carried-from "$CARRIED" \
+             --config-root base --pr-number "$PR_NUMBER" --prompt-base "$PROMPT_BASE" \
+             --round-changed "$ROUND_CHANGED" --repro-results "$REPRO" \
+-            --mode "$MODE" --plan-hash "$PLAN_HASH"
++            --mode "$MODE" --plan-hash "$PLAN_HASH" --unavailable "$UNAVAILABLE"

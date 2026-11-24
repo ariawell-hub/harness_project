@@ -7,7 +7,57 @@ import path from 'node:path';
 import type { ClaudeScan } from './claude-scan.ts';
 import { secretNeedles, validateVerdict } from './verdict.ts';
 
-export type CodexScan = ClaudeScan;
+/**
+ * 실패 결과의 `unavailable`: 마지막 `turn.failed`가 사용 한도일 때만 있다. 값은 `isUnavailableValue`를 통과하는
+ * 정한 형식뿐이다(오류 문구 원문은 넣지 않는다. Issue #223)
+ */
+export type CodexScan =
+  | Extract<ClaudeScan, { ok: true }>
+  | (Extract<ClaudeScan, { ok: false }> & { unavailable?: string });
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const UNAVAILABLE_RE = /^usage-limit(?:@(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z)?$/;
+
+/** 그 UTC 시각이 실재하면 `YYYY-MM-DDTHH:MMZ`, 아니면 null */
+function utcStamp(y: number, mo: number, d: number, h: number, mi: number): string | null {
+  if (mo < 1 || mo > 12 || d < 1 || h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  const t = new Date(Date.UTC(y, mo - 1, d, h, mi));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${String(y).padStart(4, '0')}-${p(mo)}-${p(d)}T${p(h)}:${p(mi)}Z`;
+}
+
+/**
+ * Codex 오류 문구가 사용 한도인가(Issue #223). 한도면 `usage-limit`, 문구에 풀리는 시각
+ * (`try again at Nov 21st, 2026 8:36 AM`)이 있고 실재하면 `usage-limit@2026-11-21T08:36Z`, 한도가 아니면 null.
+ * 시각에 시간대 표기가 없어 UTC로 읽는다(GitHub 호스팅 러너의 시각대). 다른 표기와 시간대가 붙은 표기는 시각을 모르는 것으로 본다
+ */
+export function usageLimitOutput(message: string): string | null {
+  if (!/usage limit/i.test(message)) return null;
+  const m =
+    /try again at ([a-z]{3}) (\d{1,2})(?:st|nd|rd|th), (\d{4}) (\d{1,2}):(\d{2}) ([ap]m)(?![a-z0-9])/i.exec(
+      message,
+    );
+  if (!m) return 'usage-limit';
+  // 시간대가 붙은 표기(`8:36 AM PST`, `+09:00`, `(KST)`)
+  if (/^\s*(?:[a-z]{2,5}\b|[+-]\d|\()/i.test(message.slice(m.index + m[0].length)))
+    return 'usage-limit';
+  const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
+  const h12 = Number(m[4]);
+  if (h12 < 1 || h12 > 12) return 'usage-limit';
+  const h = (h12 % 12) + (m[6].toLowerCase() === 'pm' ? 12 : 0);
+  const at = utcStamp(Number(m[3]), mo, Number(m[2]), h, Number(m[5]));
+  return at ? `usage-limit@${at}` : 'usage-limit';
+}
+
+/** 판정 job과 기록 job 사이에 나르는 한도 값의 형식 검사: `usage-limit` 또는 실재하는 UTC 시각이 붙은 것 */
+export function isUnavailableValue(v: string): boolean {
+  const m = UNAVAILABLE_RE.exec(v);
+  if (!m) return false;
+  if (m[1] === undefined) return true;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number);
+  return utcStamp(y, mo, d, h, mi) !== null;
+}
 
 // 셸 명령과 메시지 말고는 쓰지 않아야 한다. error 항목은 Codex 자체 경고다
 export const CODEX_ALLOWED_ITEMS = [
@@ -152,11 +202,14 @@ export function scanCodexRun(o: {
 
   if (!events.length) return fail('실행 기록이 비어 있다');
   if (turnFailed) {
-    const m = String(turnFailed.error?.message ?? '-')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 300);
-    return fail('실행 오류(turn.failed, 판정 없음)', secretIn(m) ? '<redacted>' : m);
+    const raw = String(turnFailed.error?.message ?? '-');
+    const m = raw.replace(/\s+/g, ' ').trim().slice(0, 300);
+    // 한도 값은 자르기·가리기 전 원문에서 읽는다. 값은 정한 형식뿐이라 원문이 섞이지 않는다
+    const unavailable = usageLimitOutput(raw);
+    return {
+      ...fail('실행 오류(turn.failed, 판정 없음)', secretIn(m) ? '<redacted>' : m),
+      ...(unavailable === null ? {} : { unavailable }),
+    };
   }
   if (secretLines) return fail('실행 기록에 비밀 값이 보인다');
   if (other) return fail('허용 밖 항목 종류가 실행 기록에 있다(셸·메시지 밖의 도구)');

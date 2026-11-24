@@ -18,7 +18,12 @@ import {
   writeCodexConfig,
   type AuthSnapshot,
 } from './ci/codex-auth.ts';
-import { authTokenValues, codexOutputSchema, scanCodexRun } from './ci/codex-scan.ts';
+import {
+  authTokenValues,
+  codexOutputSchema,
+  isUnavailableValue,
+  scanCodexRun,
+} from './ci/codex-scan.ts';
 import { githubGet, githubGraphql, resolvePr } from './ci/pr.ts';
 import { RevertError, actRevert, parseRevertAction, planRevert } from './ci/revert.ts';
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
@@ -123,8 +128,9 @@ CI(gates 워크플로, 10.4절):
   record-review --context <review/claude|review/codex> --needed <true|false> --verdict <파일>
                 --head-sha <sha> --repo-slug <owner/name> --target-url <url> [--patch <id>] [--carried-from <sha>]
                 [--pr-number <N> --config-root <base> --prompt-base <sha> --round-changed <base64 JSON>]
-                [--repro-results <base64 JSON>] [--mode <plan|code> --plan-hash <해시>]
+                [--repro-results <base64 JSON>] [--mode <plan|code> --plan-hash <해시>] [--unavailable <값>]
                                            검증자 판정 검사 뒤 review/* 기록(스캔할 비밀은 SCAN_SECRETS에 줄 단위)
+                                           판정이 없고 --unavailable이 한도 값이면 설명에 사용 한도와 풀리는 시각을 적는다(error 그대로)
                                            PR 번호를 주면 지적 원장 댓글을 고치고 review-ledger도 기록한다(토큰은 LEDGER_TOKEN)
                                            mode가 plan이면 review/*가 success일 때 원장에 계획 승인을 남긴다(G1)
   review-plan --repo <pr> --config-root <base> --base <sha> --head-ref <브랜치> [--pr-number <N>] [--base-sha <sha>]
@@ -154,7 +160,12 @@ CI(gates 워크플로, 10.4절):
   codex-auth seal --auth <auth.json> --sodium-dir <폴더>   공개키(PUBKEY)로 봉인해 $GITHUB_OUTPUT에 sealed=
   codex-schema --out <파일>                 codex exec --output-schema용 스키마
   codex-scan --events <jsonl> --last <파일> --stderr <파일> --pr <pr 폴더> --auth <auth.json> --out <verdict.json>
+             [--unavailable-out <파일>]
                                            Codex 실행 기록 유출 검사(실행 전 시크릿은 SCAN_AUTH_JSON)
+                                           마지막 turn.failed가 사용 한도면 --unavailable-out 파일에 값 한 줄
+                                           (usage-limit 또는 usage-limit@YYYY-MM-DDTHH:MMZ)을 쓴다. 종료 코드는 그대로 1
+  codex-unavailable --file <파일>          그 파일의 한도 값을 형식 검사해 $GITHUB_OUTPUT에 unavailable=를 쓴다.
+                                           형식이 아니거나 파일이 없으면 쓰지 않는다. 종료 코드는 언제나 0(Issue #223)
   required-checks                          main 필수 체크의 등록·출처를 설정(ci.requiredChecks)과 비교(읽기만)
   codeowners [--write]                     .github/CODEOWNERS를 protectedPaths에서 만든 내용과 비교(다르면 종료 코드 1).
                                            --write는 파일을 다시 만든다(손으로 고치지 않는다, 10.4절)
@@ -263,6 +274,9 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   deny: { type: 'string' },
   'sodium-dir': { type: 'string' },
   events: { type: 'string' },
+  'unavailable-out': { type: 'string' },
+  unavailable: { type: 'string' },
+  file: { type: 'string' },
   last: { type: 'string' },
   stderr: { type: 'string' },
   pr: { type: 'string' },
@@ -498,6 +512,8 @@ async function main(argv: string[]): Promise<number> {
         }),
         patch: str('patch') || undefined,
         carriedFrom: str('carried-from') || undefined,
+        // 판정 job의 사용 한도 값(Issue #223). 판정이 없을 때만 보고 형식 검사는 recordReview가 한다
+        unavailable: str('unavailable'),
         // 형식 검사와 시크릿 스캔을 통과한 판정만 온다. 원장에는 위치와 제목만 남으므로 근거·제안은 이 로그에서 본다(10.1절)
         onVerdict: (v) => {
           seen = v;
@@ -909,11 +925,35 @@ async function main(argv: string[]): Promise<number> {
       if (!r.ok) {
         log(`codex-scan: 실패 — ${r.reason}`);
         if (r.errorText !== undefined) log(`codex-scan: 오류 문구: ${r.errorText}`);
+        // 사용 한도(Issue #223): 값은 파일에만 쓴다. 실패로 끝나는 경로에서는 GITHUB_OUTPUT을 쓰지 않는다(#143).
+        // 뒤의 codex-unavailable 단계가 이 파일을 검사해 job 출력으로 넘긴다
+        const unavailableOut = str('unavailable-out');
+        if (r.unavailable !== undefined && unavailableOut) {
+          writeFileSync(unavailableOut, `${r.unavailable}\n`);
+          log(`codex-scan: 사용 한도: ${r.unavailable}`);
+        }
         return 1;
       }
       writeFileSync(out, JSON.stringify(r.verdict) + '\n');
       writeReproOutput(r.verdict);
       log('codex-scan: 통과, 판정을 냈다');
+      return 0;
+    }
+    case 'codex-unavailable': {
+      // codex-scan이 실패한 뒤의 단계(Issue #223). 설명을 덧붙이는 일뿐이라 언제나 0으로 끝난다:
+      // 출력이 비면 기록 job은 지금 설명을 쓴다(fail-closed 그대로)
+      try {
+        const file = str('file');
+        const raw = file && existsSync(file) ? readFileSync(file, 'utf8') : '';
+        const value = raw.trim();
+        if (!/[\r\n]/.test(value) && isUnavailableValue(value)) {
+          const output = process.env.GITHUB_OUTPUT;
+          if (output) appendFileSync(output, `unavailable=${value}\n`);
+          log(`codex-unavailable: ${value}`);
+        } else log('codex-unavailable: 넘길 값이 없다');
+      } catch {
+        log('codex-unavailable: 넘길 값이 없다');
+      }
       return 0;
     }
     case 'ci-pr': {

@@ -8,8 +8,18 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ledgerData, parseLedger, parseLedgerData } from '../ci/ledger.ts';
-import { reviewLogLines } from '../ci/record.ts';
-import { RECORDED_CONTEXTS, serializeResults, type GateResult } from '../ci/results.ts';
+import {
+  recordReview,
+  reviewLogLines,
+  usageLimitOf,
+  type RecordReviewOptions,
+} from '../ci/record.ts';
+import {
+  RECORDED_CONTEXTS,
+  serializeResults,
+  type GateResult,
+  type StatusPayload,
+} from '../ci/results.ts';
 import { decodeSelfTest, mergeSelfTest, validateSelfTest } from '../ci/selftest-result.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
@@ -996,4 +1006,104 @@ test('record-status: 실패한 시나리오가 있으면 failure, 모두 통과�
   await run(statusArgs(gatesFile()), { ...env, SELFTEST_B64: '' });
   assert.equal(guardStatus().description, '보호 경로 변경 2개: 통과');
   assert.ok(state.auth.every((a) => a.endsWith('Bearer app-token')));
+});
+
+// 사용 한도(Issue #223): 판정이 없을 때만 --unavailable 값을 보고, 정한 형식이면 설명에 한도와 풀리는 시각을 적는다
+const NO_VERDICT = '판정 없음(판정 job 실패 또는 유출 검사 불통과)';
+const LIMIT_AT_DESC =
+  '판정 없음: 검증자 사용 한도(풀림 2026-11-21 08:36 UTC). 풀린 뒤 판정 워크플로를 다시 실행한다';
+const LIMIT_DESC =
+  '판정 없음: 검증자 사용 한도(풀리는 시각 모름). 풀린 뒤 판정 워크플로를 다시 실행한다';
+
+async function recordDirect(o: Partial<RecordReviewOptions>) {
+  const posted: StatusPayload[] = [];
+  const p = await recordReview({
+    context: 'review/codex',
+    needed: true,
+    raw: null,
+    secrets: [],
+    headSha: HEAD,
+    repo: 'o/r',
+    post: async (s) => {
+      posted.push(s);
+    },
+    ...o,
+  });
+  assert.deepEqual(posted, [p], '상태를 하나만 쓴다');
+  return p;
+}
+
+test('recordReview --unavailable: 판정이 없고 한도 값이면 error 그대로 설명에 한도와 풀리는 시각을 적는다', async () => {
+  for (const raw of [null, '', ' \n']) {
+    const at = await recordDirect({ raw, unavailable: 'usage-limit@2026-11-21T08:36Z' });
+    assert.deepEqual([at.state, at.description], ['error', LIMIT_AT_DESC]);
+    const unknown = await recordDirect({ raw, unavailable: 'usage-limit' });
+    assert.deepEqual([unknown.state, unknown.description], ['error', LIMIT_DESC]);
+  }
+  // GitHub 커밋 상태 설명의 상한(140자) 안이라 자르지 않는다
+  assert.ok(LIMIT_AT_DESC.length <= 140 && LIMIT_DESC.length <= 140);
+});
+
+test('recordReview --unavailable: 값이 비었거나 형식이 아니면 지금 설명 그대로다', async () => {
+  for (const unavailable of [
+    undefined,
+    '',
+    ' usage-limit',
+    'usage-limit\n',
+    'usage-limit@2027-02-29T08:36Z',
+    'usage-limit@2026-11-21T08:36',
+    'rate-limit',
+    'You have hit your usage limit',
+  ]) {
+    const p = await recordDirect({ unavailable });
+    assert.deepEqual([p.state, p.description], ['error', NO_VERDICT], JSON.stringify(unavailable));
+  }
+});
+
+test('recordReview --unavailable: 판정이 있거나 해당 없음·이어받기면 값을 보지 않는다', async () => {
+  const verdict = JSON.stringify({
+    verdict: 'approve',
+    risk: 'low',
+    summary: '요약',
+    findings: [],
+  });
+  const base = await recordDirect({ raw: verdict, patch: 'b'.repeat(40) });
+  const withValue = await recordDirect({
+    raw: verdict,
+    patch: 'b'.repeat(40),
+    unavailable: 'usage-limit@2026-11-21T08:36Z',
+  });
+  assert.deepEqual(withValue, base);
+  assert.equal(base.state, 'success');
+  // 깨진 판정도 지금처럼 판정 검사로 판단한다
+  const broken = await recordDirect({ raw: 'not json', unavailable: 'usage-limit' });
+  assert.deepEqual([broken.state, broken.description], ['error', '판정 JSON 파싱 실패']);
+  const skip = await recordDirect({ needed: false, unavailable: 'usage-limit' });
+  assert.equal(skip.state, 'success');
+  assert.match(skip.description, /^해당 없음/);
+  const carried = await recordDirect({
+    carriedFrom: '2'.repeat(40),
+    patch: 'b'.repeat(40),
+    unavailable: 'usage-limit',
+  });
+  assert.equal(carried.state, 'success');
+  assert.match(carried.description, /^이어받음 222222222222/);
+});
+
+test('usageLimitOf: recordReview가 만든 한도 설명만 알아보고 풀리는 시각을 돌려준다', async () => {
+  const at = await recordDirect({ unavailable: 'usage-limit@2026-11-21T08:36Z' });
+  assert.deepEqual(usageLimitOf(at.description), { at: '2026-11-21 08:36' });
+  const unknown = await recordDirect({ unavailable: 'usage-limit' });
+  assert.deepEqual(usageLimitOf(unknown.description), { at: null });
+  for (const d of [
+    NO_VERDICT,
+    '',
+    '승인 (지적 없음)',
+    `${LIMIT_AT_DESC}.`,
+    ` ${LIMIT_DESC}`,
+    LIMIT_AT_DESC.replace('2026-11-21 08:36', '2027-02-29 08:36'),
+    LIMIT_AT_DESC.replace('2026-11-21 08:36', '2026-11-21 8:36'),
+    LIMIT_AT_DESC.replace(' UTC', ''),
+  ])
+    assert.equal(usageLimitOf(d), null, d);
 });

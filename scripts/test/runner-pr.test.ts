@@ -380,6 +380,75 @@ test('runner: 같은 head에서 CI 대기가 ciStallHours를 넘으면 needs-hum
   }
 });
 
+// 사용 한도(Issue #223): 기다리는 체크의 설명이 기록 job의 한도 설명이면 "사람이 결정할 것"의 A)를 바꿔 적는다
+const limitDesc = (at: string | null) =>
+  `판정 없음: 검증자 사용 한도(${at ? `풀림 ${at} UTC` : '풀리는 시각 모름'}). 풀린 뒤 판정 워크플로를 다시 실행한다`;
+const NO_VERDICT = '판정 없음(판정 job 실패 또는 유출 검사 불통과)';
+
+/** 두 검증자 상태를 error(설명)로 둔 채 CI 대기가 ciStallHours를 넘겨 알린 글 */
+async function stallBody(claude: string, codex: string): Promise<string> {
+  const t = setup();
+  try {
+    const pr = await openPr(t);
+    setAll(t, pr.head(), { 'review/claude': null, 'review/codex': null });
+    t.gh.setCheck(pr.head(), {
+      context: 'review/claude',
+      creator: BOT,
+      state: 'error',
+      description: claude,
+    });
+    t.gh.setCheck(pr.head(), {
+      context: 'review/codex',
+      creator: BOT,
+      state: 'error',
+      description: codex,
+    });
+    await run(t.fx.root);
+    writePrWait(pr.worktree, {
+      head: pr.head(),
+      since: new Date(Date.now() - 25 * 3_600_000).toISOString(),
+      reported: false,
+    });
+    assert.equal(await run(t.fx.root), 'human');
+    const stalls = t.raw().issues[0].comments.filter((c) => c.body.includes('CI 대기가'));
+    assert.equal(stalls.length, 1);
+    const body = stalls[0].body;
+    // 기다리는 체크의 설명은 지금처럼 적고, B)·C)와 다시 실행하지 않는다는 글은 그대로다
+    assert.ok(body.includes(claude) && body.includes(codex), body);
+    assert.match(body, /- B\) 검증자 인증·사용량 한도를 확인한다\(`docs\/SECURITY.md`\)\./);
+    assert.match(body, /- C\) 포기한다\(PR을 닫는다\)\./);
+    assert.match(body, /runner는 판정 워크플로를 다시 실행하지 않는다\./);
+    assert.equal((body.match(/- A\) /g) ?? []).length, 1, body);
+    return body;
+  } finally {
+    t.fx.cleanup();
+  }
+}
+
+test('runner: CI 대기 알림의 추천은 풀리는 시각이 있는 한도면 가장 늦은 시각 뒤에 다시 실행하라고 적는다 (Issue #223)', async () => {
+  const body = await stallBody(limitDesc('2026-11-21 09:10'), limitDesc('2026-11-21 08:36'));
+  assert.match(
+    body,
+    /- A\) 풀리는 시각\(2026-11-21 09:10 UTC\) 뒤에 판정 워크플로를 다시 실행한다\(추천\)\. 판정이 기록되면 runner가 이어 간다\./,
+  );
+  // 시각을 모르는 한도가 섞여도 시각이 있는 쪽으로 적는다
+  const mixed = await stallBody(limitDesc(null), limitDesc('2026-11-22 00:05'));
+  assert.match(mixed, /- A\) 풀리는 시각\(2026-11-22 00:05 UTC\) 뒤에/);
+});
+
+test('runner: CI 대기 알림의 추천은 시각을 모르는 한도면 풀렸는지 확인한 뒤 다시 실행하라고, 한도가 아니면 지금 글을 적는다 (Issue #223)', async () => {
+  const unknown = await stallBody(NO_VERDICT, limitDesc(null));
+  assert.match(
+    unknown,
+    /- A\) 검증자 사용 한도가 풀렸는지 확인한 뒤\(`docs\/SECURITY.md`\) 판정 워크플로를 다시 실행한다\(추천\)\. 판정이 기록되면 runner가 이어 간다\./,
+  );
+  const none = await stallBody(NO_VERDICT, `${limitDesc('2026-11-21 08:36')}.`);
+  assert.match(
+    none,
+    /- A\) Actions에서 멈춘 워크플로를 다시 실행한다\(추천\)\. 판정이 기록되면 runner가 이어 간다\./,
+  );
+});
+
 test('runner: 필수 체크가 모두 success인데 자동 병합이 꺼져 있으면 다시 켠다', async () => {
   const t = setup();
   try {
