@@ -19,6 +19,8 @@
        - 설정 모듈 대역 `scripts/lib/config.ts`가 `export class ConfigError extends Error {}`이고, 판정 모듈 대역 `scripts/hooks/decide.ts`가 각각: 문법 오류인 글, 불러올 때 `throw new Error('boom')`, 불러올 때 `throw null`, 불러올 때 문자열을 던짐, `decide`를 export하지 않음(`export {};`).
        - 설정 모듈 대역 `scripts/lib/config.ts`가 불러올 때 `throw null`.
        - 판정 모듈 대역의 `decide`가 `null`을 던짐(불러오기는 되고 판정에서 던진다).
+       - 오류 처리 중 재던짐: 판정 모듈 대역이 불러올 때 `process.stderr.write`를 던지는 함수로 바꾼 뒤 `null`을 던진다. 이 경우는 종료 코드 2만 단언한다(메시지를 쓸 수 없다).
+     - (다-2) 재던짐 테스트가 `finally`를 본다는 확인: 진입 파일 사본에서 `catch`의 `try { 메시지 쓰기 } finally { process.exit(2) }`를 `finally` 없이 차례로 쓴 꼴(메시지 쓰기 뒤 `process.exit(2)`)로 바꾸고(바꿀 글이 정확히 한 번 있어야 한다), 위 재던짐 대역으로 실행하면 종료 코드가 2가 아니다.
      - (라) 링크 경로의 `scripts/hooks/session.ts`: Stop 입력, 환경 `HARNESS_FAKE_GH`(열린 PR 하나, `mergeState: DIRTY`)와 `CLAUDE_PROJECT_DIR`, `HARNESS_SESSION` 없음 → 종료 코드 0이고 stdout의 `systemMessage`에 그 PR 번호가 있다.
      - (마) 링크 경로의 `scripts/verify/web.ts --config x`(현재 폴더는 리포) → 종료 코드 1, stderr에 `받을 수 없는 인자`.
    - `scripts/test/entry.test.ts`(새 파일): `isEntry` 단위 테스트. 참: 같은 파일의 절대 경로, 링크(정션)를 거친 경로, 현재 폴더 기준 상대 경로, 테스트 파일 자신의 URL과 `process.argv[1]`. 거짓: 다른 파일, `argv1`이 `undefined`(테스트 파일 자신의 URL로도 거짓), 빈 문자열, 없는 파일(어느 쪽이든).
