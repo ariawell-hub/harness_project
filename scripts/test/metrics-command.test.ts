@@ -421,8 +421,7 @@ function guardCp(decide: Decide): CpGuard {
 const show = (c: Call) => [c.cmd, ...c.args].join(' ');
 
 const REPO_INFO_GIT = [
-  'git rev-parse --show-toplevel --absolute-git-dir --git-common-dir',
-  'git symbolic-ref --short -q HEAD',
+  'git rev-parse --show-toplevel --absolute-git-dir --git-common-dir --abbrev-ref=loose HEAD',
 ];
 
 // ── 기본 자료원 테스트의 고정 응답. 허용 목록(metrics-allow.ts)의 gh 꼴마다 하나 ──
@@ -1074,7 +1073,7 @@ test('쓰기 시도 감지는 fs와 node:fs 어느 표기로 가져온 쓰기도
 
 // ── 자식 프로세스 ──
 
-test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 목록의 git 다섯뿐이다', () => {
+test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 목록의 git 넷뿐이다', () => {
   const { work } = repo();
   const guard = guardCp(() => 'run');
   let r: Result;
@@ -1084,22 +1083,22 @@ test('메모리 자료로 실행하는 동안 뜬 자식 프로세스는 허용 
     guard.restore();
   }
   assert.equal(r.code, 0, r.err);
-  // repoInfo의 둘이 먼저 오고, 그 뒤는 docLint의 문서 목록과 커밋 시각 읽기, 마지막에 변경 조각 목록 읽기 하나다
-  assert.deepEqual(guard.seen.slice(0, 2).map(show), REPO_INFO_GIT);
+  // repoInfo의 하나가 먼저 오고, 그 뒤는 docLint의 문서 목록과 커밋 시각 읽기, 마지막에 변경 조각 목록 읽기 하나다
+  assert.deepEqual(guard.seen.slice(0, REPO_INFO_GIT.length).map(show), REPO_INFO_GIT);
   for (const c of guard.seen) {
     assert.equal(c.cmd, 'git', show(c));
     assert.ok(matchShape(GIT_READ_SHAPES, c.args), show(c));
   }
   const names = guard.seen.map((c) => matchShape(GIT_READ_SHAPES, c.args)?.name);
-  assert.deepEqual(names.slice(0, 3), ['rev-parse', 'symbolic-ref', 'ls-files']);
+  assert.deepEqual(names.slice(0, 2), ['rev-parse', 'ls-files']);
   assert.equal(names.at(-1), 'ls-files-changes', names.join(', '));
   assert.ok(
-    names.slice(3, -1).every((n) => n === 'log'),
+    names.slice(2, -1).every((n) => n === 'log'),
     names.join(', '),
   );
   assert.deepEqual(
     GIT_READ_SHAPES.map((x) => x.name),
-    ['rev-parse', 'symbolic-ref', 'ls-files', 'log', 'ls-files-changes'],
+    ['rev-parse', 'ls-files', 'log', 'ls-files-changes'],
   );
 });
 
@@ -1175,10 +1174,10 @@ test('기본 자료원 경로: 허용 목록의 읽기 명령만 띄우고 파�
   assert.equal(named('events').length, 1);
   assert.equal(named('repoComments').length, 1);
   assert.equal(gh.length, 15);
-  // gh 밖은 허용 목록의 git뿐이다: repoInfo의 둘, docLint의 문서 목록(과 커밋 시각 읽기)
+  // gh 밖은 허용 목록의 git뿐이다: repoInfo의 하나, docLint의 문서 목록(과 커밋 시각 읽기)
   const others = cpGuard.seen.filter((c) => c.cmd !== 'gh');
-  assert.deepEqual(others.slice(0, 2).map(show), REPO_INFO_GIT);
-  assert.deepEqual(others.slice(2, 3).map(show), [
+  assert.deepEqual(others.slice(0, REPO_INFO_GIT.length).map(show), REPO_INFO_GIT);
+  assert.deepEqual(others.slice(REPO_INFO_GIT.length, REPO_INFO_GIT.length + 1).map(show), [
     'git ls-files -z --cached --others --exclude-standard -- *.md',
   ]);
   for (const c of others) {
