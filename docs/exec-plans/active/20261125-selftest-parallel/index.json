@@ -1,0 +1,10 @@
+{
+  "plan": "20261125-selftest-parallel",
+  "steps": [
+    {
+      "step": 0,
+      "name": "parallel",
+      "status": "pending"
+    }
+  ]
+}
