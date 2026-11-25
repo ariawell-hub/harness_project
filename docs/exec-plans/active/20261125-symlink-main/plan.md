@@ -20,11 +20,11 @@ L1 훅(`scripts/hooks/guard.ts`)은 파일 끝의 직접 실행 판정(`path.res
 
 1. 링크를 거친 경로로 불린 L1 훅이 직접 경로와 같게 판정한다: 리포를 가리키는 링크(macOS·Linux는 심볼릭 링크, Windows는 정션) 아래의 `scripts/hooks/guard.ts`에 금지 호출(`git push --force origin main`, `gh pr review 7 --approve`)을 넣으면 종료 코드 2와 규칙 이름(R14, R20)이 나오고, 허용 호출(`ls`)은 0이다(테스트).
 2. L1 훅의 진입 파일에는 직접 실행 판정이 없다: `scripts/hooks/guard.ts`는 실행 전용이고 불리면 늘 검사한다. 판정 코드(`normalize`, `buildContext`, `decide` 등)는 새 파일 `scripts/hooks/decide.ts`로 옮기고 테스트는 그쪽을 import한다. `scripts/hooks/guard.ts`의 글에 `import.meta.url`과 `process.argv`가 없다(테스트).
-3. 훅 코드를 불러오지 못해도 막는다(fail-closed): 진입 파일이 판정 모듈을 불러오지 못하면(모듈 없음, 문법 오류, 불러올 때 던짐) 금지 호출이든 허용 호출이든 종료 코드 2와 fail-closed 메시지로 끝난다. 지금은 불러오기 오류에서 Node가 종료 코드 1로 끝나고, Claude Code는 종료 코드 1을 경고로만 보아 막지 않는다(테스트: 진입 파일만 임시 폴더에 복사해 실행한다).
+3. 훅 코드를 불러오지 못해도 막는다(fail-closed): 진입 파일이 판정 모듈이나 설정 모듈을 불러오지 못하면 금지 호출이든 허용 호출이든 종료 코드 2와 fail-closed 메시지로 끝난다. 불러오지 못하는 경우는 모듈 없음, 문법 오류, 불러올 때 던짐(`Error` 객체와 `Error`가 아닌 값(`null`, 문자열) 모두), 판정 함수가 없음이다. 오류 메시지를 만들거나 쓰다가 다시 던져도 종료 코드 2로 끝난다. 지금은 불러오기 오류에서 Node가 종료 코드 1로 끝나고, Claude Code는 종료 코드 1을 경고로만 보아 막지 않는다(테스트: 임시 폴더에 진입 파일을 복사하고, 판정 모듈과 설정 모듈은 없거나 위의 경우를 만드는 대역 파일로 둔다).
 4. 세션 훅과 `verify` 웹 구현도 링크를 거친 경로로 불리면 돈다: 링크 경로의 `scripts/hooks/session.ts`가 Stop 입력과 가짜 GitHub 상태(열린 PR 하나)에서 그 PR의 알림(`systemMessage`)을 내고, 링크 경로의 `scripts/verify/web.ts`가 받을 수 없는 인자(`--config x`)에 종료 코드 1과 "받을 수 없는 인자"를 낸다(테스트). 두 파일은 새 함수 `isEntry`(새 파일 `scripts/lib/entry.ts`)로 판정한다.
-5. `isEntry(moduleUrl, argv1)`는 두 경로를 실제 경로로 풀어 견준다: 같은 파일이면(절대 경로, 링크를 거친 경로, 현재 폴더 기준 상대 경로) 참이고, 다른 파일이거나 `argv1`이 없거나 풀 수 없는 경로(없는 파일)면 거짓이다(테스트).
+5. `isEntry(moduleUrl, argv1)`는 두 경로를 실제 경로로 풀어 견준다: 같은 파일이면(절대 경로, 링크를 거친 경로, 현재 폴더 기준 상대 경로) 참이고, 다른 파일이거나 `argv1`이 `undefined`·빈 문자열이거나 풀 수 없는 경로(없는 파일)면 거짓이다. `argv1`에는 기본값이 없다: 호출자가 `process.argv[1]`을 넘기고, `undefined`를 넘기면 `moduleUrl`이 지금 실행 중인 파일이어도 거짓이다(테스트).
 6. 기존 동작이 그대로다: `scripts/test/guard.test.ts`(import 줄 하나만 바꾼다), `session-hook.test.ts`, `selftest.test.ts`(진입 파일의 `process.exit(2)`는 두 곳 그대로다), `profile-web-db.test.ts`가 단언을 고치지 않고 통과하고, `node scripts/harness.ts self-test`가 통과한다.
-7. 설계서 13.1절 "훅 구현 규칙"에 진입 파일 규칙(직접 실행 판정을 두지 않는다, 판정 모듈을 불러오지 못해도 종료 코드 2)이 적히고 같은 절의 "남는 위험"이 이에 맞는다. `docs/harness/architecture.md`의 진입점·모듈 설명이 맞다. `lab/`에 남는 같은 판정은 기술 부채 표의 새 행으로 남는다. `node scripts/harness.ts check`가 통과한다.
+7. 설계서 13.1절 "훅 구현 규칙"에 진입 파일 규칙(직접 실행 판정을 두지 않는다, 판정 모듈을 불러오지 못해도 종료 코드 2)이 적히고 같은 절의 "남는 위험"이 이에 맞는다. `docs/harness/architecture.md`의 진입점·모듈 설명이 맞다. `lab/`에 남는 같은 판정은 기술 부채 표의 새 행으로 남는다. `node scripts/harness.ts check`가 통과하고, 그 안의 `test-effect`가 새 링크 테스트(`scripts/test/entry-link.test.ts`)를 변경 전 코드에서 "단언 실패"로 판정한다(모듈 없음 같은 다른 이유의 실패가 아니다).
 
 ## 범위 / 비범위
 
@@ -32,7 +32,7 @@ L1 훅(`scripts/hooks/guard.ts`)은 파일 끝의 직접 실행 판정(`path.res
 
 - `scripts/lib/entry.ts`(새 파일): `isEntry`.
 - `scripts/hooks/decide.ts`(새 파일): `scripts/hooks/guard.ts`의 진입(`main`) 밖 코드를 옮긴다. 규칙·메시지·export 이름은 그대로다.
-- `scripts/hooks/guard.ts`: 실행 전용 진입 파일. 정적 import는 `node:` 모듈만 두고, 판정 모듈은 `try` 안에서 동적으로 불러와 불러오기 오류도 `catch`의 종료 코드 2로 막는다. 파일 끝에서 조건 없이 실행한다.
+- `scripts/hooks/guard.ts`: 실행 전용 진입 파일. 정적 import는 `node:` 모듈만 두고, 판정 모듈은 `try` 안에서 동적으로 불러와 불러오기 오류도 `catch`의 종료 코드 2로 막는다. `catch`는 메시지를 만들다 다시 던져도 `finally`에서 종료 코드 2로 끝난다. 파일 끝에서 조건 없이 실행한다.
 - `scripts/hooks/session.ts`, `scripts/verify/web.ts`: 파일 끝의 직접 실행 판정을 `isEntry`로 바꾼다.
 - 테스트: 새 파일 `scripts/test/entry.test.ts`, `scripts/test/entry-link.test.ts`, `scripts/test/guard.test.ts`의 import 줄 하나.
 - 문서: 설계서 13.1절, `docs/harness/architecture.md`, 변경 조각, 기술 부채 표(새 행 하나).
@@ -64,12 +64,18 @@ L1 훅(`scripts/hooks/guard.ts`)은 파일 끝의 직접 실행 판정(`path.res
   - `scripts/hooks/guard.ts`에 `git push --force origin main`: 직접 경로 종료 코드 2(`[R14 파괴적 git]`), 링크 경로 출력 없이 0.
   - `scripts/hooks/session.ts`에 Stop + 가짜 GitHub 상태(열린 PR #7, 충돌): 직접 경로는 알림을 냈고, 링크 경로는 출력 없이 0.
   - `scripts/verify/web.ts --config x`: 직접 경로 종료 코드 1("받을 수 없는 인자"), 링크 경로 출력 없이 0.
+- 2026-11-25 계획만 담은 초안 PR #246을 열었다. 계획 검증을 기다리는 동안 step0을 로컬에서 구현했다(올리지 않았다). 새 링크 테스트는 변경 전 코드에서 다섯 개 모두 단언으로 실패했고(`test-effect`도 "base에서 단언 실패"), 구현 뒤 AC 명령이 통과했다(테스트 74개, `self-test` 시나리오 10개).
+- 2026-11-25 계획 검증 1회차: Claude 승인(지적 없음), Codex 수정 요청(P1 셋). 셋 다 맞는 지적이라 계획을 고쳤다.
+  - F1: `isEntry`의 `argv1`에 기본값(`process.argv[1]`)을 두면 `undefined`를 명시적으로 넘겨도 기본값으로 바뀌어, 지금 실행 중인 파일의 URL로는 "`argv1`이 없으면 거짓"이 지켜지지 않는다. → 기본값을 없애고 호출자가 `process.argv[1]`을 넘긴다. 테스트에 실행 중인 파일의 URL과 `undefined`를 넣었다(수용 기준 5).
+  - F2: 진입 파일만 복사한 테스트는 모듈 없음만 본다. 모듈이 있는데 불러오다 실패하는 경우(문법 오류, `Error`가 아닌 값을 던짐, 판정 함수 없음)와 `catch` 안에서 다시 던지는 경우를 보지 않는다. → 대역 모듈로 그 경우들을 만들고, `catch`는 메시지 처리를 `try`/`finally`로 감싸 종료 코드 2에 늘 닿게 했다(수용 기준 3, step0 작업 1·4).
+  - F3: step의 AC에 전체 `check`가 없고, 새 링크 테스트가 변경 전 코드에서 단언으로 실패했는지 확인하는 명령도 없다. → AC에 `check`와 `test-effect` 판정 줄 확인을 더했다(수용 기준 7).
 
 ## 의사결정 로그
 
 - 결정: L1 훅 진입 파일(`guard.ts`)은 직접 실행을 판정하지 않고 늘 검사하며, 판정 코드는 `decide.ts`로 옮긴다 / 이유: L1 훅은 R20 등이 기대는 강제 장치라, "직접 실행인가"를 판정하는 길 자체를 없애야 판정이 틀려 조용히 0으로 끝나는 일이 없다. 실제 경로로 견주는 판정도 풀지 못하는 경로에서는 거짓이 된다 / 버린 대안: (가) `guard.ts`에서 `isEntry`로 견주기만 한다(판정이 남는다). (나) 훅 명령을 새 진입 파일로 바꾼다(`.claude/settings.json`·`.codex/hooks.json`과, 훅 명령의 경로를 확인하는 자체 테스트 시나리오 `mcp-guard`를 함께 고쳐야 한다. 자체 테스트 파일 수정은 main의 시나리오로 시험받으므로 PR을 나눠야 한다). (다) `import.meta.main`(Node 문서에서 초기 개발 단계이고, 엔진 하한 22.18에서 있는지 확인하지 않았다).
 - 결정: 진입 파일이 판정 모듈을 동적으로 불러와 불러오기 오류도 `catch`에서 종료 코드 2로 막는다 / 이유: 파일 머리의 주석은 "내부 오류가 나도 종료 코드 2로 막는다"인데, 정적 import가 실패하면 그 `try`에 닿기 전에 Node가 종료 코드 1로 끝나 Claude Code가 막지 않는다. 진입 파일을 다시 짜는 김에 Issue가 함께 보라고 한 fail-closed를 불러오기 단계까지 넓힌다 / 버린 대안: 정적 import를 그대로 둔다(불러오기 오류에서 열린다).
 - 결정: 세션 훅과 `verify` 웹 구현은 `isEntry`(실제 경로 비교)로 판정한다 / 이유: 두 파일은 테스트가 함수를 import하므로(`session-hook.test.ts`, `verify-*.test.ts`) 진입 파일을 나누려면 테스트 import를 여럿 고쳐야 한다. 세션 훅은 알림용(fail-open)이고 `verify`는 L1 같은 강제 장치가 아니다. `lab/q10-db/verify-artifacts.ts`의 `isMain`과 같은 방식이다 / 버린 대안: 세 파일 모두 진입 파일을 나눈다(변경이 커지고 테스트 import를 여럿 고친다).
+- 결정: `isEntry`의 `argv1`은 기본값 없이 받는다(계획 검증 F1) / 이유: 기본값이 있으면 명시적 `undefined`가 기본값으로 바뀌어 "실행 경로가 없으면 거짓"을 함수의 계약으로 지킬 수 없다. 호출자가 넘기면 무엇을 견주는지 호출하는 줄에서 보인다 / 버린 대안: 인자를 생략할 때만 `process.argv[1]`을 쓴다(`arguments.length`로 가른다. 계약이 호출 형태에 따라 달라진다).
 
 ## 발견 사항
 
