@@ -127,7 +127,7 @@ main의 필수 상태 체크는 제작자가 리포 설정에서 등록한다(�
 | 대소문자만 다른 값(`UBUNTU-SLIM`, `Ubuntu-Slim` 등) | `ubuntu-slim`                               |
 | 그 밖의 값(`ubuntu-latest`, `self-hosted`, `on` 등) | `ubuntu-latest`                             |
 
-잃는 보장: 켜면 이 job들이 job마다 새 VM이 아니라 공유 VM 위의 job마다 새 컨테이너에서 돈다. 그 가운데 기록 job(`recorder`)과 Codex 인증 저장 job(`codex-auth-store`)은 비밀을 가진다. 제작자가 ADR-0008의 묶음 "호스팅 유지"를 고를 때 받아들인 보장이다(설계서 10.4절 "self-hosted 러너는 쓰지 않는다"의 하위 항목).
+잃는 보장: 켜면 이 job들이 job마다 새 VM이 아니라 공유 VM 위의 job마다 새 컨테이너에서 돈다. 그 가운데 기록 job(`recorder`)과 Codex 인증 저장 job(`codex-auth-store`)은 비밀을 가진다. 제작자가 ADR-0008의 묶음 "호스팅 유지"를 고를 때 받아들인 보장이다([설계서 10.4절](harness/design.md) "self-hosted 러너는 쓰지 않는다"의 하위 항목).
 
 1. 켜기: GitHub → 리포 → Settings → Secrets and variables → Actions → Variables 탭 → New repository variable. Name `SHORT_JOB_RUNNER`, Value `ubuntu-slim`. 봇이 Issue로 요청할 때 한다(넣기 전 값을 잰 뒤. 켠 시각이 넣은 뒤 값의 기간을 정한다). 켠 시각을 알려 준다.
 2. 끄기(되돌리기): 같은 화면에서 변수를 지운다. 바로 다음 실행부터 `ubuntu-latest`다. PR이 필요 없다. 이 job들이 1코어 러너에서 깨지면(기록·판정이 실패하거나 멈춘다) 봇이 Issue로 끄기를 요청한다.
