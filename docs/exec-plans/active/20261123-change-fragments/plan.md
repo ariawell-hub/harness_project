@@ -2,7 +2,7 @@
 id: 20261123-change-fragments
 issue: 222 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -103,6 +103,7 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - 2026-11-25 그 사이 `origin/main`(`e183ae7`, #236)을 병합했다. 기술 부채 표의 같은 자리(TD-69 뒤)에 main이 TD-70·71을 더해 충돌했고, 번호는 겹치지 않아 main 쪽 행 뒤에 이 PR의 TD-72·73을 두었다.
 - 2026-11-25 F1~F4 테스트 먼저(테스트 수는 9건 그대로, AC): 3번 테스트에 머리말 설명 안의 앞선 `최종 갱신:`(F3)과 패치 번호 `9007199254740992`(F4)를, 7번에 `assume-unchanged`로 숨긴 조각 수정과 `skip-worktree`로 숨긴 CHANGELOG 수정(F1, 수정본이 그대로 남는지)을, 8번에 `docs`가 링크이고 링크 너머의 `harness`가 파일일 때 `docs/harness` 문제가 출력되지 않는지(F2)를 더했다. 고치기 전에 3·7·8번이 실패했다(F1은 숨긴 수정본을 실제로 모아 지웠다).
 - 2026-11-25 F1~F4 고침: F3 머리말은 줄 머리의 버전과 줄 끝의 최종 갱신만 바꾼다. F4 패치 번호를 `BigInt`로 올린다. F2 폴더 경계는 위 폴더부터 보고 실제 폴더가 아니면 그 자리에서 1로 끝난다. F1 `git ls-tree`를 `--name-only` 없이 불러 blob id를 받고, 각 파일의 바이트로 git blob id(SHA-1·SHA-256)를 계산해 견준다(CRLF로 꺼낸 작업 트리는 LF로 바꾼 바이트도 견준다). 다르면 문제로 내고, 이때는 되돌리는 명령을 권하지 않는다(숨긴 수정이 사라진다). 9건 통과, `tsc` 통과. 절차서 5절과 코드 구조 문서에 한 마디씩 더했다.
+- 2026-11-25T12:43:49+09:00 step1 재작업: 구현 판정 2회차(head 1cc9043): Claude 승인(지적 없음), Codex 수정 요청(P1 하나. F2·F3·F4는 고쳐졌다고 적었다). F1(P0)이 다시 열렸다: CRLF를 LF로 바꾼 바이트도 견주는 탓에 LF를 강제하는 리포에서 줄 끝만 CRLF로 바꾸고 숨긴 수정이 통과한다. F5: 8번 테스트가 mv 실행 파일에 기대 Windows 네이티브에서 깨질 수 있다. 둘 다 맞는 지적이다. 테스트를 먼저 더하고 고친다
 
 ## 의사결정 로그
 
