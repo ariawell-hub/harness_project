@@ -2,7 +2,7 @@
 id: 20261125-approval-main-merge
 issue: 243 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -70,6 +70,7 @@ claimed_at: 2026-11-25T10:32:13+09:00 # new-task가 채운다
 - 2026-11-25 12:25 계획 검증 7회차(`3c23e63`): claude·codex 승인, 차단 지적 없음(전체 9, F1~F9 `fixed`). 계획 검증(G1) 통과.
 - 2026-11-25 12:35 step0 구현을 커밋했다(`a23bf81`). 계획 검증 동안 worktree에 두었던 구현이다: `approvalPending`의 내용 기반 판정, 회귀 테스트 6개(A~F), `rules.ts` 안내문, 절차서 5절·architecture 문구, TD-38 관찰, 변경 조각. step0 AC 7줄 통과, 구현을 포함한 `check` 통과(test-effect: `guard.test.ts`가 base에서 단언 실패). step0 완료.
 - 2026-11-25T12:59:51+09:00 step0 재작업: 구현 판정 F10(P1, codex): diff.ignoreSubmodules 설정이 승인 요청 뒤 gitlink 변경을 숨긴다. git diff에 --ignore-submodules=none을 붙이고 회귀 테스트를 더한다
+- 2026-11-25 13:05 F10 대응: 구현 판정 1회차(`6a35c71`)는 claude 승인, codex 수정 요청 P1 1건(F10). 받아들였다. `diff.ignoreSubmodules=all`을 설정하고 표시 뒤 gitlink를 더한 커밋이 막히는지 보는 테스트를 먼저 더해 실패(0)를 확인했고, `changedNames`의 `git diff`에 `--ignore-submodules=none`을 붙여 통과시켰다(승인 요청 규칙 테스트 10개 통과). step0 다시 완료.
 
 ## 의사결정 로그
 
