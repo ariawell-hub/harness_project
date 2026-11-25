@@ -243,6 +243,42 @@ test('collectFragments: 마지막 변경 이력 항목에 딸린 줄이 있으�
     ]),
   );
   assert.deepEqual(designVersionProblems(r.design), []);
+  // 판정 F3: 머리말의 설명 안에 앞선 "최종 갱신:" 글이 있어도 줄 끝의 최종 갱신만 바꾸고 설명은 그대로 둔다
+  const noted = (version: string, date: string) =>
+    `> 버전 v${version} · 참고: 최종 갱신: 2026-01-01 · 최종 갱신: ${date}`;
+  const withNote = okOf(
+    collect({
+      design: designText(noted('0.7.81', '2026-11-23')),
+      fragments: [B],
+      date: '2026-11-24',
+    }),
+  );
+  assert.equal(
+    withNote.design,
+    collectedDesign('2026-11-24').replace(
+      head('0.7.83', '2026-11-24'),
+      noted('0.7.83', '2026-11-24'),
+    ),
+  );
+  assert.deepEqual(designVersionProblems(withNote.design), []);
+  // 판정 F4: 패치 번호가 안전 정수(2^53 - 1)를 넘어도 정확히 하나씩 올린다
+  const big = '9007199254740992';
+  const huge = okOf(
+    collect({
+      design: designText(head(`0.7.${big}`, '2026-11-23'), [
+        '  - v0.7.80 (2026-11-22): 앞 항목',
+        `  - v0.7.${big} (2026-11-23): 마지막 항목`,
+      ]),
+      fragments: [B],
+      date: '2026-11-24',
+    }),
+  );
+  assert.deepEqual(huge.versions, ['v0.7.9007199254740993', 'v0.7.9007199254740994']);
+  assert.match(
+    huge.design,
+    /^> 버전 v0\.7\.9007199254740994 · 상태: 초안 · 최종 갱신: 2026-11-24$/m,
+  );
+  assert.deepEqual(designVersionProblems(huge.design), []);
 });
 
 test('collectFragments: 형식이 틀린 조각, 자리 밖 경로, 어긋난 머리말, 세 마디가 아닌 버전, "다음 버전" 절이 없는 CHANGELOG는 실패다', () => {
@@ -331,6 +367,30 @@ test('changes-collect: 형식이 틀린 조각, 조각이 아닌 파일, 커밋�
       },
       /20261124-b-s0\.md/,
     ],
+    // 판정 F1(P0): 색인 표시로 git status에서 숨긴 커밋하지 않은 수정. 수정본은 그대로 남아야 한다
+    [
+      '(e) assume-unchanged로 숨긴 조각 수정',
+      () => {
+        const root = repo([A, B]);
+        write(root, A.rel, frag('20261124-a', ['a 하나', 'a 둘', 'a 셋(커밋하지 않음)']));
+        sh('git', ['update-index', '--assume-unchanged', A.rel], root);
+        return root;
+      },
+      /20261124-a\.md: HEAD에 커밋된 내용과 다르다/,
+    ],
+    [
+      '(f) skip-worktree로 숨긴 CHANGELOG 수정',
+      () => {
+        const root = repo([A]);
+        writeFileSync(
+          path.join(root, CHANGELOG_PATH),
+          read(root, CHANGELOG_PATH) + '\n- 숨긴 줄\n',
+        );
+        sh('git', ['update-index', '--skip-worktree', CHANGELOG_PATH], root);
+        return root;
+      },
+      /CHANGELOG\.md: HEAD에 커밋된 내용과 다르다/,
+    ],
   ];
   for (const [name, make, why] of cases) {
     const root = make();
@@ -391,6 +451,23 @@ test('changes-collect: 심볼릭 링크(조각 폴더, 조각, 기록 파일)와
     const r = direct(root);
     assert.equal(r.code, 1, `(e) 하드 링크: ${r.out}`);
     assert.deepEqual(snapshot(root, [twin]), before);
+  }
+  // (f) 판정 F2: `docs`가 링크면 그 자리에서 멈추고 링크 너머의 `docs/harness`를 보지 않는다
+  // (링크 너머의 harness는 파일이라, 계속 봤다면 그 문제도 출력에 나온다)
+  const elsewhere = path.join(outside, 'docs-elsewhere');
+  mkdirSync(elsewhere);
+  writeFileSync(path.join(elsewhere, 'harness'), '파일\n');
+  const linked = repo([]);
+  sh('git', ['rm', '-r', '-q', '--cached', 'docs'], linked);
+  const real = path.join(linked, 'docs');
+  const moved = path.join(outside, 'docs-moved');
+  sh('mv', [real, moved], linked);
+  if (tryLink(() => symlinkSync(elsewhere, real, 'dir'))) {
+    const r = direct(linked);
+    assert.equal(r.code, 1, `(f) docs 링크: ${r.out}`);
+    assert.match(r.out, /changes-collect: docs: /);
+    assert.doesNotMatch(r.out, /docs\/harness: /);
+    assert.equal(readFileSync(path.join(elsewhere, 'harness'), 'utf8'), '파일\n');
   }
 });
 

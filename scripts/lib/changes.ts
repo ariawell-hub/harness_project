@@ -152,7 +152,8 @@ export function collectFragments(i: CollectInput): CollectResult {
   const designLines = i.design.split('\n');
   let insertAt = -1;
   let headLine = -1;
-  let next: number[] | null = null;
+  // 버전 비교(`compareVersions`)와 같은 정밀도로 올린다(판정 F4: 안전 정수를 넘는 패치 번호)
+  let next: bigint[] | null = null;
   const versionProblems = designVersionProblems(i.design);
   for (const p of versionProblems) problems.push(p.what);
   const dv = readDesignVersion(i.design);
@@ -163,7 +164,7 @@ export function collectFragments(i: CollectInput): CollectResult {
       problems.push(
         `설계서 변경 이력의 마지막 버전 v${last}가 <정수>.<정수>.<정수>가 아니라 패치 번호를 올릴 수 없다`,
       );
-    else next = [Number(m[1]), Number(m[2]), Number(m[3])];
+    else next = [BigInt(m[1]), BigInt(m[2]), BigInt(m[3])];
     insertAt = dv.value.end;
     headLine = dv.value.head.line;
   }
@@ -183,7 +184,7 @@ export function collectFragments(i: CollectInput): CollectResult {
   const versions: string[] = [];
   const added: string[] = [];
   for (const text of frags.flatMap((f) => f.design)) {
-    next[2]++;
+    next[2] += 1n;
     const v = `v${next.join('.')}`;
     versions.push(v);
     added.push(`  - ${v} (${i.date}): ${text}${designNl}`);
@@ -192,9 +193,10 @@ export function collectFragments(i: CollectInput): CollectResult {
   if (added.length > 0) {
     const lines = [...designLines];
     lines.splice(insertAt, 0, ...added);
+    // 머리말 파서가 읽는 자리만 바꾼다: 줄 머리의 버전과 줄 끝의 최종 갱신. 가운데 설명은 그대로 둔다(판정 F3)
     lines[headLine] = lines[headLine]
       .replace(/^> 버전 v\S+/, `> 버전 ${versions[versions.length - 1]}`)
-      .replace(/최종 갱신: \d{4}-\d{2}-\d{2}/, `최종 갱신: ${i.date}`);
+      .replace(/최종 갱신: \d{4}-\d{2}-\d{2}(\s*)$/, `최종 갱신: ${i.date}$1`);
     design = lines.join('\n');
     const after = designVersionProblems(design);
     if (after.length > 0) return { ok: false, problems: after.map((p) => p.what) };

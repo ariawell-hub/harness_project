@@ -2,6 +2,7 @@
 // 조각 파일을 지운다(TD-39, Issue #222. 모으기 PR, 절차서 5절). 제작자가 지시할 때 모으기 PR을 여는 세션이 돌린다.
 // 문제가 하나라도 있으면 아무 파일도 쓰지 않는다. 링크를 따라가지 않고, 하드 링크로 이어진 파일에 쓰지 않는다.
 // git은 읽기(`git ls-tree`, `git status`)만 쓴다. 스테이징·커밋·되돌리기는 PR을 여는 세션이 확인하고 한다.
+import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { CHANGES_DIR, collectFragments, isFragmentPath } from '../lib/changes.ts';
@@ -32,6 +33,18 @@ function kindOf(abs: string): Kind {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 'none';
     throw e;
   }
+}
+
+/**
+ * 파일 바이트가 그 git blob(`oid`, SHA-1 또는 SHA-256 리포)과 같은가. 줄 끝을 CRLF로 꺼낸 작업 트리(`core.autocrlf`)도
+ * 같다고 본다(CRLF를 LF로 바꾼 바이트도 견준다). git 명령을 더 띄우지 않고 객체 id를 직접 계산한다
+ */
+function sameAsBlob(content: Buffer, oid: string): boolean {
+  const algo = oid.length === 64 ? 'sha256' : 'sha1';
+  const id = (b: Buffer) => createHash(algo).update(`blob ${b.length}\0`).update(b).digest('hex');
+  if (id(content) === oid) return true;
+  const lf = Buffer.from(content.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return lf.length !== content.length && id(lf) === oid;
 }
 
 const KIND_TEXT: Record<Kind, string> = {
@@ -65,17 +78,16 @@ export function runChangesCollect(
   };
 
   try {
-    // 1. 폴더 경계: 조각 폴더가 비었는지 보기 전에 링크가 아닌 실제 폴더인지 본다(링크가 가리키는 빈 폴더도 막는다)
-    const boundary: string[] = [];
+    // 1. 폴더 경계: 조각 폴더가 비었는지 보기 전에 링크가 아닌 실제 폴더인지 본다(링크가 가리키는 빈 폴더도 막는다).
+    // 위 폴더부터 보고 실제 폴더가 아닌 것을 만나면 그 자리에서 멈춘다: 그 아래 경로는 링크 너머를 읽는다(판정 F2)
     for (const d of ['docs', 'docs/harness']) {
       const k = kindOf(abs(d));
       if (k !== 'dir')
-        boundary.push(`${d}: 심볼릭 링크가 아닌 실제 폴더여야 한다(${KIND_TEXT[k]})`);
+        return fail([`${d}: 심볼릭 링크가 아닌 실제 폴더여야 한다(${KIND_TEXT[k]})`], false);
     }
-    const dirKind = boundary.length ? 'other' : kindOf(abs(CHANGES_DIR));
-    if (!boundary.length && dirKind !== 'none' && dirKind !== 'dir')
-      boundary.push(`${CHANGES_DIR}: 없거나 실제 폴더여야 한다(${KIND_TEXT[dirKind]})`);
-    if (boundary.length) return fail(boundary, false);
+    const dirKind = kindOf(abs(CHANGES_DIR));
+    if (dirKind !== 'none' && dirKind !== 'dir')
+      return fail([`${CHANGES_DIR}: 없거나 실제 폴더여야 한다(${KIND_TEXT[dirKind]})`], false);
 
     // 2. 모을 조각이 없으면 아무것도 바꾸지 않는다
     const names = dirKind === 'dir' ? readdirSync(abs(CHANGES_DIR)).sort() : [];
@@ -88,6 +100,7 @@ export function runChangesCollect(
     const problems: string[] = [];
 
     // 3. 파일 경계: 링크가 아닌 일반 파일이고 하드 링크 수가 1이다. 조각 폴더 안은 조각 자리의 파일만 둔다
+    const plain = new Set<string>();
     for (const rel of files) {
       const s = lstatSync(abs(rel), { throwIfNoEntry: false });
       if (!s) problems.push(`${rel}: 없다`);
@@ -97,6 +110,7 @@ export function runChangesCollect(
         problems.push(
           `${rel}: 하드 링크 수가 ${s.nlink}이다(다른 이름과 이어진 파일에는 쓰지 않는다)`,
         );
+      else plain.add(rel);
     }
     for (const rel of fragRels)
       if (!isFragmentPath(rel))
@@ -104,19 +118,33 @@ export function runChangesCollect(
           `${rel}: 조각 파일의 자리·이름이 아니다(${CHANGES_DIR}/<브랜치 이름의 / 뒤>.md)`,
         );
 
-    // 4. 커밋 확인: 지운 조각과 고친 기록 파일을 HEAD에서 되돌릴 수 있어야 한다(git이 무시하는 파일도 막는다)
+    // 4. 커밋 확인: 지운 조각과 고친 기록 파일을 HEAD에서 되돌릴 수 있어야 한다(git이 무시하는 파일도 막는다).
+    // 파일의 바이트가 HEAD의 blob과 같은지도 본다: 색인 표시(assume-unchanged, skip-worktree)로 git status에
+    // 보이지 않는 수정은 HEAD로 되돌릴 수 없어, 그 파일을 읽어 옮기고 지우면 수정이 사라진다(판정 F1)
     let restore = false;
-    const tree = gitTry(['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', ...RECORDS], root);
+    const tree = gitTry(['ls-tree', '-r', '-z', 'HEAD', '--', ...RECORDS], root);
     if (!tree.ok) {
       problems.push('HEAD의 기록 파일 목록을 읽지 못했다(git ls-tree)');
       restore = true;
     } else {
-      const committed = new Set(tree.stdout.split('\0').filter(Boolean));
-      for (const rel of files)
-        if (!committed.has(rel)) {
+      const committed = new Map<string, { mode: string; oid: string }>();
+      for (const entry of tree.stdout.split('\0').filter(Boolean)) {
+        const m = /^(\d+) blob ([0-9a-f]+)\t(.+)$/s.exec(entry);
+        if (m) committed.set(m[3], { mode: m[1], oid: m[2] });
+      }
+      for (const rel of files) {
+        const c = committed.get(rel);
+        if (!c) {
           problems.push(`${rel}: HEAD에 커밋되지 않은 파일이다(git이 무시하는 파일 포함)`);
           restore = true;
+        } else if (c.mode !== '100644' && c.mode !== '100755') {
+          problems.push(`${rel}: HEAD에서 일반 파일이 아니다(모드 ${c.mode})`);
+        } else if (plain.has(rel) && !sameAsBlob(readFileSync(abs(rel)), c.oid)) {
+          problems.push(
+            `${rel}: HEAD에 커밋된 내용과 다르다(git status에 보이지 않는 색인 표시가 있을 수 있다. git ls-files -v로 보고, 수정을 커밋하거나 표시를 푼 뒤 다시 실행하라)`,
+          );
         }
+      }
     }
     // 5. 상태 확인: 커밋하지 않은 변경이 없다(앞선 모으기가 남긴 변경이면 항목이 두 번 옮겨진다)
     const status = gitTry(
