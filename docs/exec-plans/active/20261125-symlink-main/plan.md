@@ -2,7 +2,7 @@
 id: 20261125-symlink-main
 issue: 237 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -75,6 +75,7 @@ L1 훅(`scripts/hooks/guard.ts`)은 파일 끝의 직접 실행 판정(`path.res
 - 2026-11-25 계획 검증 3회차: Claude 승인(지적 없음), Codex는 F4를 닫고 새 지적 하나(P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
   - F5: 대조 테스트는 바꾼 사본의 종료 코드가 2가 아니기만 하면 통과하므로, 바꾼 사본이 문법 오류로 오류 처리에 닿지 못해도(종료 코드 1) 통과한다. → 재던짐 대역이 stderr 쓰기를 부르면 표식 파일을 남기게 하고, 원본과 바꾼 사본 모두에서 표식과 신호 없는 종료를 먼저 확인한 뒤 종료 코드를 단언한다. 임시 폴더에서 세 꼴로 확인했다: 원본(표식 있음, 2), `finally`를 뺀 사본(표식 있음, 1), 문법 오류를 넣은 사본(표식 없음, 1).
 - 2026-11-25 계획 검증 4회차(head `bfeafbe`): Claude·Codex 승인(지적 없음). 원장에 `계획 검증(G1): 해시 00c7ee833b61 · 승인: claude, codex`가 남았다. 로컬 구현(F4·F5의 테스트 포함)을 올린다.
+- 2026-11-25T12:24:10+09:00 step0 재작업: 구현 검증 F6(Codex P1): 설정 모듈은 있고 판정 모듈만 없는 경우를 불러오기 실패 테스트에 더한다
 
 ## 의사결정 로그
 
