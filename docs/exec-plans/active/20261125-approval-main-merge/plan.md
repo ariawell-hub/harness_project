@@ -2,7 +2,7 @@
 id: 20261125-approval-main-merge
 issue: 243 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -69,6 +69,7 @@ claimed_at: 2026-11-25T10:32:13+09:00 # new-task가 채운다
 - 2026-11-25 12:20 계획 검증 6회차(`b122715`): claude 승인, codex 수정 요청. F3만 열려 있다(AC가 양옆에 공백이 있는 `|`만 칸 경계로 봐서, 공백 없는 `|`로 칸을 더 만들면 다른 칸의 문장도 설명 열로 읽는다). 재판정 5회 뒤에도 열려 있어 다시 제작자에게 물었다. 제작자 답(대화): "A: 한 번 더 고친다". AC가 TD-38 행을 모든 `|`로 나눠 칸이 정확히 5개일 때만 둘째 칸을 보게 고쳤다. 원본은 통과하고, 앞의 변형본 6개와 공백 없는·있는 `|`로 "본 것" 구간을 다음 칸으로 밀어낸 변형본 2개는 실패하는 것을 확인했다.
 - 2026-11-25 12:25 계획 검증 7회차(`3c23e63`): claude·codex 승인, 차단 지적 없음(전체 9, F1~F9 `fixed`). 계획 검증(G1) 통과.
 - 2026-11-25 12:35 step0 구현을 커밋했다(`a23bf81`). 계획 검증 동안 worktree에 두었던 구현이다: `approvalPending`의 내용 기반 판정, 회귀 테스트 6개(A~F), `rules.ts` 안내문, 절차서 5절·architecture 문구, TD-38 관찰, 변경 조각. step0 AC 7줄 통과, 구현을 포함한 `check` 통과(test-effect: `guard.test.ts`가 base에서 단언 실패). step0 완료.
+- 2026-11-25T12:59:51+09:00 step0 재작업: 구현 판정 F10(P1, codex): diff.ignoreSubmodules 설정이 승인 요청 뒤 gitlink 변경을 숨긴다. git diff에 --ignore-submodules=none을 붙이고 회귀 테스트를 더한다
 
 ## 의사결정 로그
 
