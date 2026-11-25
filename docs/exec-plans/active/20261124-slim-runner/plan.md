@@ -99,6 +99,8 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 - 2026-11-25 올리기 전에 예외 방법이 되는지 로컬에서 확인했다: 스위치 상수와 도우미(`withoutSwitch`, 스위치 줄 하나만 뺀다)를 gates 불변식 앞에 두고 6곳의 검사 글에만 적용했다(정규식은 그대로). 도우미가 다른 `vars.` 줄(들여쓰기·주석·러너·변수 이름이 다른 줄, 값을 그대로 쓰는 줄, 단계의 환경 변수)을 남기는 테스트를 더했다. 지금 워크플로에서 `ci.test.ts` 39개 가운데 2개(러너 표, 스위치 식)가 단언 실패로 실패하고, 13줄을 바꾼 트리에서 39개가 모두 통과하고 전체 테스트 1338개가 통과했다.
 - 2026-11-25 고친 계획으로 다시 받은 계획 검증(head `fddac68`): 두 검증자 승인(지적 없음). 계획 승인 해시 `c46a370665e3`.
 - 2026-11-25 step0의 워크플로·구조 테스트 밖의 것을 올렸다: 워크플로 패치(`lab/actions-cost/b1-slim/workflows.patch`, 네 파일 13줄. 위 확인을 한 트리의 diff), 구조 테스트 초안(`lab/actions-cost/b1-slim/tests.patch`, `ci.test.ts`의 diff), 적용 안내(`README.md`), 설계서 10.4절·E3, `docs/SECURITY.md`의 "1분 미만 job의 러너 변수 (제작자)", 변경 조각. 판정을 받은 뒤 이 push의 head를 기준 커밋으로 Issue #240에 워크플로 커밋을 요청한다.
+- 2026-11-25 step0 코드 판정(head `559d902`): `review/claude` 승인(지적 없음), `review/codex` 승인(P2 1), `review-ledger` 차단 지적 없음, `harness-guard` 통과(보호 경로 변경 3개, 자체 테스트 10). codex P2 F12(`docs/SECURITY.md`의 새 절에 설계서 10.4절로 가는 링크가 없다)는 받아들여 마지막 push에서 링크를 더했다. Issue #240에 제작자 작업(1/2)을 요청했다.
+- 2026-11-25 제작자가 GitHub 웹에서 네 워크플로를 파일마다 한 커밋으로 올렸다(`afd354c`, `8997c74`, `bbf91ad`, `62cfef6`, 01:33~01:34Z). 봇 커밋 전에 받은 트리를 기준 커밋 `559d902`에 `workflows.patch`를 적용한 트리와 견줘 같았다(`b3d751b`). 이어서 `tests.patch`를 `scripts/test/ci.test.ts`에 적용하고 그 파일을 지웠다.
 
 ## 의사결정 로그
 
@@ -118,8 +120,8 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 
 ## 발견 사항
 
-- Issue #240 본문의 "13개 모두 main의 정의로 돈다"는 틀렸다(`review-trigger`는 PR 쪽 정의). → 처리: Issue #240에 바로잡는 댓글
-- `ubuntu-slim` 이미지 목록에 gzip이 없다. `actions/setup-node`는 Node를 `.tar.gz`로 받아 풀 수 있다. 실제로 도는지는 step1에서 변수를 켠 뒤 첫 실행으로 본다. → 처리: step1의 관찰(수용 기준 5)
+- Issue #240 본문의 "13개 모두 main의 정의로 돈다"는 틀렸다(`review-trigger`는 PR 쪽 정의). → 처리: #240(2026-11-24 바로잡는 댓글)
+- `ubuntu-slim` 이미지 목록에 gzip이 없다. `actions/setup-node`는 Node를 `.tar.gz`로 받아 풀 수 있다. 실제로 도는지는 step1에서 변수를 켠 뒤 첫 실행으로 본다. → 처리: [step1](step1.md)(작업 5의 확인 명령과 수용 기준 5의 관찰)
 
 ## 열린 질문
 
@@ -134,5 +136,6 @@ ADR-0008에서 제작자가 묶음 "호스팅 유지"를 골랐다(순서 A6 →
 
 ## 다음 할 일
 
-- step0의 코드 판정을 받고, Issue #240에 제작자의 워크플로 커밋(네 파일 13줄)을 요청한다. 받으면 트리를 견주고 `tests.patch`를 적용해(그 파일은 지운다) AC·`check`·완료 처리 뒤 push한다.
+- step0의 최종 head 판정을 받고 `pr-ready`로 제작자 head 승인(2/2)을 요청한다. 병합 뒤 새 정의로 만들어진 실행에서 8개 job이 `ubuntu-latest`로 성공한 것을 Issue #240에 남긴다(step0 작업 8).
+- 2026-11-29 00:00 UTC 뒤 `new-task --plan 20261124-slim-runner --step 1`로 step1을 시작한다.
 - 선점은 `claim-heartbeat --issue 240`으로 유지한다(24시간마다 만료).
