@@ -74,6 +74,7 @@ L1 훅(`scripts/hooks/guard.ts`)은 파일 끝의 직접 실행 판정(`path.res
   - F4: 대역 테스트는 처음 불러올 때나 판정할 때 던지는 경우뿐이라 오류를 처리하는 중에 다시 던지는 경우가 없다. `finally`를 뺀 구현도 모든 대역 테스트를 통과하고, 그 상황에서는 종료 코드 1로 끝나 막지 않는다. → 대역이 `process.stderr.write`를 던지게 바꾼 뒤 던지는 경우를 더하고, 같은 경우를 `finally`를 뺀 진입 파일 사본으로 돌려 종료 코드가 2가 아님을 단언한다(수용 기준 3, step0 작업 1 (다)·(다-2)).
 - 2026-11-25 계획 검증 3회차: Claude 승인(지적 없음), Codex는 F4를 닫고 새 지적 하나(P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
   - F5: 대조 테스트는 바꾼 사본의 종료 코드가 2가 아니기만 하면 통과하므로, 바꾼 사본이 문법 오류로 오류 처리에 닿지 못해도(종료 코드 1) 통과한다. → 재던짐 대역이 stderr 쓰기를 부르면 표식 파일을 남기게 하고, 원본과 바꾼 사본 모두에서 표식과 신호 없는 종료를 먼저 확인한 뒤 종료 코드를 단언한다. 임시 폴더에서 세 꼴로 확인했다: 원본(표식 있음, 2), `finally`를 뺀 사본(표식 있음, 1), 문법 오류를 넣은 사본(표식 없음, 1).
+- 2026-11-25 계획 검증 4회차(head `bfeafbe`): Claude·Codex 승인(지적 없음). 원장에 `계획 검증(G1): 해시 00c7ee833b61 · 승인: claude, codex`가 남았다. 로컬 구현(F4·F5의 테스트 포함)을 올린다.
 
 ## 의사결정 로그
 
@@ -94,9 +95,12 @@ L1 훅(`scripts/hooks/guard.ts`)은 파일 끝의 직접 실행 판정(`path.res
 
 ## 검증 방법과 결과
 
-- step0의 AC 명령(새 테스트 두 파일과 기존 훅·세션·자체 테스트 파일, `self-test`, 진입 파일 글 확인).
-- `node scripts/harness.ts check`(test-effect: 새 링크 테스트가 변경 전 코드에서 단언으로 실패해야 한다).
+- step0의 AC 명령(새 테스트 두 파일과 기존 훅·세션·자체 테스트 파일, `self-test`, 진입 파일 글 확인, `test-effect` 판정 줄, `check`).
+- 결과(2026-11-25, macOS, Node 22.23.3):
+  - 변경 전 코드에서 새 링크 테스트가 모두 단언으로 실패했다. `test-effect`: `scripts/test/entry-link.test.ts: effective(base에서 단언 실패, 종료 코드 1)`. `entry.test.ts`와 import 줄만 바꾼 `guard.test.ts`는 새 모듈이 없어 "단언 실패 아님"으로 표시된다(`entry.test.ts`의 단언은 `isEntry`의 참·거짓 사례를 직접 본다).
+  - AC의 `node --test` 여섯 파일 통과, `self-test` 시나리오 10개 통과, 진입 파일 글에 `import.meta.url`·`process.argv` 없음, `check` 통과. 최종 트리의 결과는 PR #246 본문의 "검증"에 적는다.
+  - `check`의 doc-lint 경고(R8 검토 필요) 가운데 이 변경과 닿는 것은 ADR-0002(`related_code`에 `scripts/hooks/guard.ts`)다. ADR-0002의 내용(코어 훅은 `scripts/hooks/guard.ts` 하나이고 두 도구가 같은 stdin 규약과 종료 코드 2를 쓴다)은 그대로 맞아 고치지 않았다. 나머지 다섯은 이 변경 전부터 있던 경고다.
 
 ## 다음 할 일
 
-- 계획 검증(G1) 승인을 원장에서 확인한 뒤 step0의 구현을 올린다(로컬에서는 끝났다). 그 뒤 완료 처리, `origin/main` 병합, `check`, `pr-ready`로 제작자 승인을 요청한다(위험도 high).
+- 완료 처리 뒤 구현을 올리고, `origin/main` 병합·`check`를 확인한 뒤 `pr-ready`로 제작자 승인을 요청한다(위험도 high).
