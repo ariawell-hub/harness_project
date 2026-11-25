@@ -129,6 +129,14 @@ test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로
     'Nov 21st, 2026 8:36 AM utc',
     'Nov 21st, 2026 8:36 AM, GMT+9',
     'Nov 21st, 2026 8:36 AM Eastern Standard Time',
+    // 판정 F7: 소문자·섞어 쓴 시간대 약어와 이름
+    'Nov 21st, 2026 8:36 AM pst',
+    'Nov 21st, 2026 8:36 AM Pst',
+    'Nov 21st, 2026 8:36 AM, pdt',
+    'Nov 21st, 2026 8:36 AM kst.',
+    'Nov 21st, 2026 8:36 AM cest',
+    'Nov 21st, 2026 8:36 AM pacific time',
+    'Nov 21st, 2026 8:36 AM eastern daylight time',
   ])
     assert.equal(usageLimitOutput(`usage limit. try again at ${at}`), 'usage-limit', at);
   // 시각 표기 뒤가 글의 끝·문장 끝이거나, 시간대가 아닌 안내 문구면 시각을 읽는다(판정 F6: 쉼표 뒤의 안내)

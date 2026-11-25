@@ -22,7 +22,62 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
  * `Time`으로 끝나는 이름(`Pacific Time`, `Eastern Standard Time`)
  */
 const TIME_ZONE_LIKE =
-  /^(?:[A-Z]{2,5}(?![a-z])|(?:[Uu][Tt][Cc]|[Gg][Mm][Tt])(?![a-z])|[A-Z][A-Za-z_]+\/[A-Za-z_]|[+-]\d|[([{/]|(?:[A-Z][a-z]+ ){1,3}Time\b)/;
+  /^(?:[A-Z]{2,5}(?![a-z])|[A-Z][A-Za-z_]+\/[A-Za-z_]|[+-]\d|[([{/]|(?:[A-Z][a-z]+ ){1,3}Time\b)/;
+/**
+ * 대소문자를 가리지 않고 알아보는 시간대 약어와 이름(판정 F7: `pst`, `Pst`, `pacific time`). 약어는 낱말 하나로만 본다
+ * (`pstx`는 아니다). 안내 문구의 흔한 낱말(`or`, `see`, `upgrade`)과 겹치지 않는 것만 둔다
+ */
+const TIME_ZONE_NAMED = new RegExp(
+  '^(?:(?:' +
+    [
+      'utc',
+      'gmt',
+      'pst',
+      'pdt',
+      'pt',
+      'mst',
+      'mdt',
+      'mt',
+      'cst',
+      'cdt',
+      'ct',
+      'est',
+      'edt',
+      'et',
+      'akst',
+      'akdt',
+      'hst',
+      'ast',
+      'adt',
+      'nst',
+      'ndt',
+      'bst',
+      'ist',
+      'cet',
+      'cest',
+      'eet',
+      'eest',
+      'wet',
+      'west',
+      'msk',
+      'sast',
+      'kst',
+      'jst',
+      'hkt',
+      'sgt',
+      'ict',
+      'wib',
+      'aest',
+      'aedt',
+      'acst',
+      'acdt',
+      'awst',
+      'nzst',
+      'nzdt',
+    ].join('|') +
+    ')(?![a-z])|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?: standard| daylight)? time\\b)',
+  'i',
+);
 const UNAVAILABLE_RE = /^usage-limit(?:@(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z)?$/;
 
 /** 그 UTC 시각이 실재하면 `YYYY-MM-DDTHH:MMZ`, 아니면 null */
@@ -49,7 +104,8 @@ export function usageLimitOutput(message: string): string | null {
   // 시각 표기의 끝을 본다(판정 F5·F6): 글의 끝이나 문장 끝(`.`·`!`·`?`)이면 받는다. 그 밖에는 공백·쉼표·쌍반점 뒤의
   // 첫 낱말이 시간대처럼 생겼을 때만 시각을 모르는 것으로 본다. 안내 문구(`, or upgrade to Pro.`)는 시각을 지킨다
   const rest = message.slice(m.index + m[0].length);
-  if (!/^[.!?]/.test(rest) && TIME_ZONE_LIKE.test(rest.replace(/^[\s,;]*/, '')))
+  const head = rest.replace(/^[\s,;]*/, '');
+  if (!/^[.!?]/.test(rest) && (TIME_ZONE_LIKE.test(head) || TIME_ZONE_NAMED.test(head)))
     return 'usage-limit';
   const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
   const h12 = Number(m[4]);
