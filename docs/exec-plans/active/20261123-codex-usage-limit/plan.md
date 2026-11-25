@@ -93,7 +93,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 2026-11-24 4번(runner 알림) 테스트 먼저: `runner-pr.test.ts`에 CI 대기 알림의 A) 세 경우(시각이 있는 한도 둘이면 가장 늦은 시각, 시각을 모르는 한도와 섞이면 시각 있는 쪽, 시각을 모르는 한도, 한도 아님·한도 설명과 한 글자 다른 설명)와 B)·C)·"다시 실행하지 않는다"가 그대로인지를 더했다. 구현 전에 2건이 실패했다(지금 글이 나왔다). 구현 뒤 14건 통과.
 - 2026-11-24 잇는 테스트 `usage-limit-cli.test.ts`(수용 기준 6): 1~4번 구현 뒤에 썼다(테스트 먼저가 아니다). 세 명령을 자식 프로세스로 잇고 로컬 가짜 GitHub API가 받은 `review/codex`의 `state`·`description`을 단언한다(시각 있는 한도, 시각 모름, 한도 아님). 3건 통과. 변경 전 코드에서 실패하는지는 `check`의 `test-effect`로 본다(아래).
 - 2026-11-24 5번(워크플로 패치): `ci.test.ts`에 judge-codex 단언(`scan` 명령의 `--unavailable-out`, `scan` 바로 뒤·봉인 앞의 `why`와 조건·명령·비밀 없음, 봉인이 마지막에 `always()`, `judge` 출력의 `unavailable`이 `repro` 바로 아래, `record`의 `UNAVAILABLE` 환경 변수와 `--unavailable "$UNAVAILABLE"`)을 먼저 더해 지금 워크플로에서 실패하는 것을 봤다(`why` 단계 없음: `9,-1,10`). 워크플로를 고친 트리에서 `ci.test.ts` 38건과 step의 AC(일곱 파일 120건)가 통과했다. 그 상태의 `git diff -- .github/workflows/judge-codex.yml`을 `lab/codex-usage-limit/judge-codex.patch`로 저장하고, 워크플로와 `ci.test.ts`를 되돌렸다(`ci.test.ts`의 변경은 리포 밖 파일로 옮겨 두었다. push 1에 넣지 않는다). 되돌린 트리에 패치가 `git apply --check`로 그대로 적용된다. 제작자가 넣을 줄과 위치는 `lab/codex-usage-limit/README.md`.
-- 2026-11-24 6번(문서): 설계서 10.1절 "검증자 장애"와 10.4절 "판정 job 안의 유출 검사"에 한 항목씩, `docs/SECURITY.md`에 "사용 한도에 걸렸을 때"(runner 알림이 가리키는 확인 방법), 기술 부채 표(TD-50 해결, TD-56에 상태 설명으로 가를 수 있게 된 것, 새 TD-70·TD-71). 변경 기록은 변경 조각 `docs/harness/changes/20261123-codex-usage-limit-s0.md`(의사결정 로그).
+- 2026-11-24 6번(문서): 설계서 10.1절 "검증자 장애"와 10.4절 "판정 job 안의 유출 검사"에 한 항목씩, `docs/SECURITY.md`에 "사용 한도에 걸렸을 때"(runner 알림이 가리키는 확인 방법), 기술 부채 표(TD-50 해결, TD-56에 상태 설명으로 가를 수 있게 된 것, 새 TD-74·TD-75). 변경 기록은 변경 조각 `docs/harness/changes/20261123-codex-usage-limit-s0.md`(의사결정 로그).
 - 2026-11-24 Claude 검증자 조사: `claude-scan`은 `result` 이벤트가 `is_error`면 "실행 오류(판정 없음)"로 실패하고 문구는 로그에만 남긴다. `judge-claude`의 실패한 실행 5건을 봤다: 3건은 허용 밖 도구(`Bash`) 호출(44669039688, 44885889572, 45109695141), 2건(44290534509, 44288744654, 2026-11-18)은 job이 돌기 전 워크플로 수준 실패였다. 한도로 끝난 실행은 없었다(발견 사항).
 - 2026-11-24 push 1 전 `node scripts/harness.ts check` 통과(워크플로와 `ci.test.ts`를 되돌린 트리). `test-effect`: `runner-pr`·`scan-output`·`usage-limit-cli`는 변경 전 코드에서 단언 실패(잇는 테스트는 `codex-scan`이 모르는 옵션으로 끝나 종료 코드 단언이 실패한다), `codex-scan`·`record`는 새 내보내기가 없어 불러오기에서 실패(단언은 위 테스트 먼저 기록대로 직접 확인했다).
 - 2026-11-24 push 1(head `54914fa`)을 올렸다.
@@ -115,8 +115,8 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 
 ## 발견 사항
 
-- Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: TD-71
-- Claude 판정 job에서 사용 한도가 어떻게 보이는지(수용 기준 8): `claude-scan`은 `result` 이벤트의 `is_error`로 "실행 오류(판정 없음)"를 내고 문구는 판정 job 로그에만 남아, `review/claude` 설명은 지금의 Codex와 같이 "판정 없음(판정 job 실패 또는 유출 검사 불통과)"뿐이다. `judge-claude`의 실패한 실행 5건 가운데 한도로 끝난 것은 없어 실제 문구는 확인하지 못했다. runner는 Claude 한도 문구를 `Claude AI usage limit reached|<유닉스 초>` 꼴로 가정한다(`scripts/runner/agents.ts`, `scripts/selftest/fake-agent.ts`). 같은 방식(`unavailable` 출력과 `why` 단계)으로 할지는 실제 문구를 본 뒤 정한다. → 처리: TD-70
+- Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: TD-75
+- Claude 판정 job에서 사용 한도가 어떻게 보이는지(수용 기준 8): `claude-scan`은 `result` 이벤트의 `is_error`로 "실행 오류(판정 없음)"를 내고 문구는 판정 job 로그에만 남아, `review/claude` 설명은 지금의 Codex와 같이 "판정 없음(판정 job 실패 또는 유출 검사 불통과)"뿐이다. `judge-claude`의 실패한 실행 5건 가운데 한도로 끝난 것은 없어 실제 문구는 확인하지 못했다. runner는 Claude 한도 문구를 `Claude AI usage limit reached|<유닉스 초>` 꼴로 가정한다(`scripts/runner/agents.ts`, `scripts/selftest/fake-agent.ts`). 같은 방식(`unavailable` 출력과 `why` 단계)으로 할지는 실제 문구를 본 뒤 정한다. → 처리: TD-74
 
 ## 열린 질문
 

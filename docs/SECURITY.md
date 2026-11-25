@@ -59,7 +59,7 @@ GitHub → Settings → Environments → `judge-codex` → `CODEX_AUTH_JSON`에 
 - `review/codex`의 설명이 `판정 없음: 검증자 사용 한도(풀림 <YYYY-MM-DD HH:MM> UTC). …`이면 Codex 계정이 사용 한도에 걸린 것이다. 상태는 error라 병합이 막히고, 하네스는 판정을 다시 돌리지 않는다(다시 돌려도 판정 없이 사용량만 쓴다). 시각은 Codex의 오류 문구를 UTC로 읽은 것이다.
 - 그 시각이 지난 뒤 Actions에서 그 PR head의 `judge-codex` 실행을 다시 실행한다(Re-run all jobs). 판정이 기록되면 runner가 이어 간다.
 - 설명이 `풀리는 시각 모름`이면 Codex 앱이나 계정의 사용량 화면에서 한도가 풀렸는지 확인한 뒤 다시 실행한다. 판정 job 로그의 `codex-scan: 오류 문구:` 줄에도 문구가 있다(비밀은 가려진다).
-- 다른 검증자로 대신하지 않는다(설계서 10.1절 "검증자 장애"). Claude 판정 job은 한도를 아직 따로 알리지 않는다(TD-70): `review/claude`가 `판정 없음(…)`이면 판정 job 로그의 `claude-scan: 오류 문구:` 줄을 본다.
+- 다른 검증자로 대신하지 않는다(설계서 10.1절 "검증자 장애"). Claude 판정 job은 한도를 아직 따로 알리지 않는다(TD-74): `review/claude`가 `판정 없음(…)`이면 판정 job 로그의 `claude-scan: 오류 문구:` 줄을 본다.
 
 ## 검증 App 권한 변경 (제작자)
 
