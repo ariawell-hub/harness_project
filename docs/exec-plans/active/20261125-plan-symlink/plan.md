@@ -24,19 +24,19 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
 
 1. 새 파일 `scripts/lib/plan-read.ts`의 세 함수는 링크를 따라가지 않는다.
    - `findPlanSafe(root, id)`: `findPlan`과 같은 후보 순서로 계획을 찾는다. `readPlanFile(root, rel)`: 계획 안 파일의 글(없으면 `null`). `listPlanDir(root, rel)`: 계획 폴더의 이름 목록(없으면 `[]`). 한 판정 안에서 여러 자리를 읽을 때는 색인을 한 번만 읽는 `planReader(root)`(`find`·`read`·`list`)를 쓴다.
-   - 먼저 색인을 본다(`root`가 git 작업 트리 안일 때): 그 경로나 위 폴더 자리가 색인에 심볼릭 링크(모드 120000)나 서브모듈(160000)로 있으면 그 자리를 적은 `PlanPathError`를 던진다. 작업 트리에 그 자리가 없어도 던진다(색인에만 링크로 있는 자리). `core.symlinks=false`로 받아 링크가 일반 파일이 된 체크아웃을 잡는다. 색인을 읽지 못하면 던진다. git 작업 트리가 아니면 색인은 보지 않는다(색인이 없다).
+   - 먼저 색인을 본다(`root`가 git 작업 트리 안일 때): 그 경로나 위 폴더 자리가 색인에 심볼릭 링크(모드 120000)나 서브모듈(160000)로 있으면 그 자리를 적은 `PlanPathError`를 던진다. 작업 트리에 그 자리가 없어도 던진다(색인에만 링크로 있는 자리). 폴더를 읽을 때(`listPlanDir`)는 그 폴더 아래의 색인 항목 가운데 링크·서브모듈이 있으면(작업 트리 목록에 없어도) 그 항목의 자리를 적어 던진다. `core.symlinks=false`로 받아 링크가 일반 파일이 된 체크아웃을 잡는다. 색인을 읽지 못하면 던진다. git 작업 트리가 아니면 색인은 보지 않는다(색인이 없다).
    - 그다음 `root`부터 그 경로까지의 각 자리를 `lstat`으로 본다. 어느 자리든 심볼릭 링크이면 `PlanPathError`를 던진다. 폴더 자리는 폴더, 파일 자리는 일반 파일이어야 한다(아니면 던진다). 자리가 없으면 없는 것으로 돌려준다.
-   - 경로는 계획 id로 만든 것이고 git에는 `--literal-pathspecs`로 넘긴다(테스트: 위 경우마다 던짐·없음·글을 단언).
+   - 색인은 경로 인자 없이 통째로 읽어(`git ls-files -s -z`) 경로를 git에 넘기지 않는다(테스트: 위 경우마다 던짐·없음·글을 단언).
 2. 계획을 읽는 판정 코드가 이 함수로 읽는다: `scripts/gates/plan-gate.ts`(계획 찾기, 계획·`index.json`·step 파일 읽기), `scripts/gates/risk-gate.ts`의 `planRisk`, `scripts/ci/plan-hash.ts`(`planHash`, `planHashes`, `planMode`), `scripts/ci/review-plan.ts`의 `planAuthor`, `scripts/ci/review-input.ts`의 계획·step 파일 찾기. 함수마다 자기가 읽는 자리에 링크가 있으면(링크 자체, `core.symlinks=false`로 받은 일반 파일 모두) 실패 쪽이다. 읽지 않는 자리의 링크는 그 함수의 결과를 바꾸지 않는다.
    - 계획 파일이나 계획 폴더의 링크: 아래 모두.
-   - `index.json`이나 step 파일의 링크: `planGate`, `planHash`·`planHashes`·`planMode`, `writeReviewInput`의 step 줄. `planRisk`·`planAuthor`는 `plan.md`만 읽으므로 정상 계획의 값을 낸다(`risk: high`, `author: claude-code`).
+   - `index.json`이나 step 파일의 링크(작업 트리에는 없고 색인에만 링크로 있는 step 파일 포함): `planGate`, `planHash`·`planHashes`·`planMode`, `writeReviewInput`의 step 줄. `planRisk`·`planAuthor`는 `plan.md`만 읽으므로 정상 계획의 값을 낸다(`risk: high`, `author: claude-code`).
    - `planGate`는 통과가 아니다: 문제 하나가 "계획 자리가 일반 파일·폴더가 아니다(심볼릭 링크·서브모듈)"와 그 자리를 적는다.
    - `riskGate`(`gates`의 `guarded` 안)는 통과가 아니다(`assessRisk`가 던져 `error`). `planReview`는 위험도 high다(이미 있는 `catch`).
    - `planHash`·`planHashes`는 던지고, `planMode`는 `{ mode: 'code', hash: '' }`다.
    - `planAuthor`는 `''`이다(작성자를 모르면 위험도 낮음에서도 Codex가 판정한다).
    - `writeReviewInput`의 `context.md`는 그 자리를 "읽지 않음(일반 파일·폴더가 아니다)"으로 적는다(계획 줄 또는 step 줄).
    - 어느 결과에도 링크 대상의 글(테스트가 링크 대상에 넣은 표식, `risk: low`, `author: codex`)이 나오지 않는다(테스트).
-3. 링크의 꼴: 계획 파일(`plan.md`) 링크, 계획 폴더 링크, `index.json` 링크, step 파일 링크, 그리고 계획 파일·계획 폴더 링크를 커밋한 뒤 `core.symlinks=false`로 받은 체크아웃. 링크 대상은 리포 밖의 "그럴듯한 계획"(`risk: low`, `author: codex`, 표식 글)이다(테스트, 새 파일 `scripts/test/plan-symlink.test.ts`. 변경 전 코드에서는 링크 대상을 읽어 단언으로 실패한다).
+3. 링크의 꼴: 계획 파일(`plan.md`) 링크, 계획 폴더 링크, `index.json` 링크, step 파일 링크, 계획 파일·계획 폴더 링크를 커밋한 뒤 `core.symlinks=false`로 받은 체크아웃, 그리고 step 파일이 작업 트리에는 없고 색인에만 링크로 있는 꼴. 링크 대상은 리포 밖의 "그럴듯한 계획"(`risk: low`, `author: codex`, 표식 글)이다(테스트, 새 파일 `scripts/test/plan-symlink.test.ts`. 변경 전 코드에서는 링크 대상을 읽어 단언으로 실패한다).
 4. 기존 동작이 그대로다: 기존 테스트(`plan-gate.test.ts`, `plan-hash.test.ts`, `risk-gate.test.ts`, `gates.test.ts`, `ci.test.ts`, `scope.test.ts`, `runner-plan-review.test.ts`, `task.test.ts`)가 단언을 고치지 않고 통과한다. 이 리포의 `docs/exec-plans/`에 있는 계획 폴더마다 새 읽기로 계산한 `planHash`가 그 커밋의 `planHashAt(root, 'HEAD', …)`와 같다(테스트). 커밋하지 않은(추적되지 않은) 계획 파일도 전처럼 읽어 `plan-gate --mode plan`이 통과한다(테스트).
 5. 설계서 10.4절 "심볼릭 링크" 항목에 계획을 읽는 base 스크립트가 체크아웃 설정과 무관하게 링크를 따라가지 않는다는 것을 적는다. `docs/harness/architecture.md`의 라이브러리 목록과 변경 조각이 맞다. `node scripts/harness.ts check`가 통과하고, 그 안의 `test-effect`가 새 테스트(`scripts/test/plan-symlink.test.ts`)를 변경 전 코드에서 "단언 실패"로 판정한다.
 
@@ -77,6 +77,10 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
   - F2: 계획 해시는 `plan.md`와 step 파일만 읽어 `index.json` 링크를 거절할 단계가 없다. → `planHash`가 `index.json` 자리도 확인하되 해시 입력은 그대로 둔다(step0 작업 3).
   - F3: 작업 트리에 자리가 없으면 색인을 보기 전에 "없음"으로 돌아가, 색인에만 링크로 있는 자리를 놓친다. → 색인을 먼저 본다. 단위 테스트에 그 꼴을 넣었다(수용 기준 1, step0 작업 1·2).
   - F4(P2): 제목이 "HEAD 커밋 읽기로 맞춘다"라 작업 트리에서 읽는 설계와 어긋난다. → 제목을 고쳤다.
+- 2026-11-25 계획 검증 2회차: Claude 승인(지적 없음), Codex는 F2·F3을 닫고 F1을 남겼으며 새 지적 하나(F5, P1)를 냈다. 맞는 지적이라 계획을 고쳤다. 그동안 로컬에서 구현했고(올리지 않았다) AC의 테스트 목록이 통과했다(테스트 146개).
+  - F1(남음): 수용 기준은 `index.json` 링크에서도 검증 입력의 step 줄이 "읽지 않음"이라 했는데 step0 작업 3은 step 파일 자리만 확인하라고 적었다. → `index.json` 자리와 step 파일 자리를 모두 확인한다고 적었다(구현은 이미 둘 다 본다).
+  - F5: 계획 해시는 폴더 목록으로 step 파일을 찾으므로, step 파일이 작업 트리에는 없고 색인에만 링크로 있으면 그 자리를 검사하지 않아 step이 빠진 해시를 낸다. → 폴더 읽기가 그 폴더 아래의 색인 링크·서브모듈도 거절한다(수용 기준 1). 링크의 꼴 (사)와 단위 테스트를 더했다(수용 기준 3, step0 작업 1·2).
+  - 구현과 어긋나던 문구 하나를 함께 고쳤다: 색인은 경로 인자 없이 통째로 읽는다(`--literal-pathspecs`로 경로를 넘기지 않는다).
 
 ## 의사결정 로그
 
