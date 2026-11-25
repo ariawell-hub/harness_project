@@ -1,0 +1,11 @@
+{
+  "plan": "20261123-windows-test-speed",
+  "steps": [
+    {
+      "step": 0,
+      "name": "fewer-spawns",
+      "status": "completed",
+      "completed_at": "2026-11-24T00:53:53+09:00"
+    }
+  ]
+}
