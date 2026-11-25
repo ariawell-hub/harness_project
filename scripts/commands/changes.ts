@@ -36,15 +36,15 @@ function kindOf(abs: string): Kind {
 }
 
 /**
- * 파일 바이트가 그 git blob(`oid`, SHA-1 또는 SHA-256 리포)과 같은가. 줄 끝을 CRLF로 꺼낸 작업 트리(`core.autocrlf`)도
- * 같다고 본다(CRLF를 LF로 바꾼 바이트도 견준다). git 명령을 더 띄우지 않고 객체 id를 직접 계산한다
+ * 파일 바이트가 그 git blob(`oid`, SHA-1 또는 SHA-256 리포)과 바이트 그대로 같은가. 줄 끝을 바꿔 보지 않는다(판정 F1
+ * 2회차: 줄 끝만 CRLF로 바꾼 숨긴 수정도 커밋하지 않은 바이트다). 이 리포는 `.gitattributes`로 작업 트리를 LF로 두므로
+ * 같은 파일이면 바이트가 같다. 줄 끝을 바꿔 꺼내는 체크아웃에서는 다르다고 보아 모으지 않는다(막는 쪽).
+ * git 명령을 더 띄우지 않고 객체 id를 직접 계산한다
  */
 function sameAsBlob(content: Buffer, oid: string): boolean {
   const algo = oid.length === 64 ? 'sha256' : 'sha1';
-  const id = (b: Buffer) => createHash(algo).update(`blob ${b.length}\0`).update(b).digest('hex');
-  if (id(content) === oid) return true;
-  const lf = Buffer.from(content.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
-  return lf.length !== content.length && id(lf) === oid;
+  const id = createHash(algo).update(`blob ${content.length}\0`).update(content).digest('hex');
+  return id === oid;
 }
 
 const KIND_TEXT: Record<Kind, string> = {
@@ -141,7 +141,7 @@ export function runChangesCollect(
           problems.push(`${rel}: HEAD에서 일반 파일이 아니다(모드 ${c.mode})`);
         } else if (plain.has(rel) && !sameAsBlob(readFileSync(abs(rel)), c.oid)) {
           problems.push(
-            `${rel}: HEAD에 커밋된 내용과 다르다(git status에 보이지 않는 색인 표시가 있을 수 있다. git ls-files -v로 보고, 수정을 커밋하거나 표시를 푼 뒤 다시 실행하라)`,
+            `${rel}: HEAD에 커밋된 내용과 다르다(줄 끝 포함 바이트로 견준다. git status에 보이지 않는 색인 표시가 있을 수 있다. git ls-files -v로 보고, 수정을 커밋하거나 표시를 푼 뒤 다시 실행하라)`,
           );
         }
       }

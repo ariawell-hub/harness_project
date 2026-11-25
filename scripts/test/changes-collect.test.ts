@@ -9,6 +9,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmdirSync,
   symlinkSync,
   unlinkSync,
@@ -391,6 +392,17 @@ test('changes-collect: 형식이 틀린 조각, 조각이 아닌 파일, 커밋�
       },
       /CHANGELOG\.md: HEAD에 커밋된 내용과 다르다/,
     ],
+    // 판정 F1(P0) 2회차: 줄 끝만 CRLF로 바꾼 숨긴 수정도 커밋하지 않은 바이트다(이 리포는 LF를 강제한다)
+    [
+      '(g) 줄 끝만 CRLF로 바꾸고 숨긴 조각 수정',
+      () => {
+        const root = repo([A, B]);
+        write(root, A.rel, A.text.replace(/\n/g, '\r\n'));
+        sh('git', ['update-index', '--assume-unchanged', A.rel], root);
+        return root;
+      },
+      /20261124-a\.md: HEAD에 커밋된 내용과 다르다/,
+    ],
   ];
   for (const [name, make, why] of cases) {
     const root = make();
@@ -460,8 +472,8 @@ test('changes-collect: 심볼릭 링크(조각 폴더, 조각, 기록 파일)와
   const linked = repo([]);
   sh('git', ['rm', '-r', '-q', '--cached', 'docs'], linked);
   const real = path.join(linked, 'docs');
-  const moved = path.join(outside, 'docs-moved');
-  sh('mv', [real, moved], linked);
+  // 같은 임시 폴더 안에서 옮긴다(외부 실행 파일 `mv`에 기대지 않는다. 판정 F5: Windows 네이티브)
+  renameSync(real, path.join(path.dirname(linked), 'docs-moved'));
   if (tryLink(() => symlinkSync(elsewhere, real, 'dir'))) {
     const r = direct(linked);
     assert.equal(r.code, 1, `(f) docs 링크: ${r.out}`);
