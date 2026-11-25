@@ -83,6 +83,8 @@ function entryOnly(files: { decide: string | null; config: string | null }): str
 test('L1 훅 진입 파일이 판정 모듈을 불러오지 못하면 어떤 호출이든 종료 코드 2로 막는다(fail-closed)', () => {
   const cases: [string, { decide: string | null; config: string | null }][] = [
     ['모듈 없음', { decide: null, config: null }],
+    // 진입 파일은 설정 모듈을 먼저 불러온다: 설정 모듈이 있어야 판정 모듈을 불러오는 자리에 닿는다
+    ['판정 모듈만 없음(설정 모듈은 있음)', { decide: null, config: CONFIG_OK }],
     ['판정 모듈 문법 오류', { decide: 'export const = ;\n', config: CONFIG_OK }],
     [
       '판정 모듈이 불러올 때 Error를 던짐',
