@@ -2,7 +2,7 @@
 id: 20261125-approval-main-merge
 issue: 243 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -67,6 +67,8 @@ claimed_at: 2026-11-25T10:32:13+09:00 # new-task가 채운다
 - 2026-11-25 11:32 계획 검증 4회차(`8de5889`): claude 승인, codex 수정 요청. F7·F8·F9는 `fixed`. F3만 열려 있다(TD-38 관찰 구간 AC가 push 범위와 "받아들였다"만 보고 토큰 권한·#207 병합 기록은 보지 않는다). 재판정 3회 뒤에도 열려 있어(`pr-state`의 오래 열린 지적) 절차서 8절대로 제작자에게 물었다. 제작자 답(대화): "A: 한 번 더 고친다". TD-38 관찰 구간에 정해 둔 문장 전체가 글자 그대로 있는지 보게 AC를 고쳤다.
 - 2026-11-25 11:44 계획 검증 5회차(`d5f4b02`): claude 승인, codex 수정 요청. F3만 열려 있다(관찰 구간을 제목부터 TD-38 행 끝까지로 잡아, 문장을 상태 열에만 적어도 통과한다). 재판정 4회 뒤에도 열려 있어 다시 제작자에게 물었다. 제작자 답(대화): "A: 한 번 더 고친다". AC가 TD-38 행이 하나인지 보고, 설명 열만 잘라 두 제목이 차례로 붙어 있는지 확인한 뒤, 각 구간을 다음 굵은 제목이나 칸 끝에서 잘라 검사하게 고쳤다. 원본은 통과하고 변형본 6개(문장을 상태 열로 옮김, 뒤 구간에 적음, 제목 하나씩 삭제, 사이에 제목 끼움, 행 중복)는 실패하는 것을 확인했다.
 - 2026-11-25 12:20 계획 검증 6회차(`b122715`): claude 승인, codex 수정 요청. F3만 열려 있다(AC가 양옆에 공백이 있는 `|`만 칸 경계로 봐서, 공백 없는 `|`로 칸을 더 만들면 다른 칸의 문장도 설명 열로 읽는다). 재판정 5회 뒤에도 열려 있어 다시 제작자에게 물었다. 제작자 답(대화): "A: 한 번 더 고친다". AC가 TD-38 행을 모든 `|`로 나눠 칸이 정확히 5개일 때만 둘째 칸을 보게 고쳤다. 원본은 통과하고, 앞의 변형본 6개와 공백 없는·있는 `|`로 "본 것" 구간을 다음 칸으로 밀어낸 변형본 2개는 실패하는 것을 확인했다.
+- 2026-11-25 12:25 계획 검증 7회차(`3c23e63`): claude·codex 승인, 차단 지적 없음(전체 9, F1~F9 `fixed`). 계획 검증(G1) 통과.
+- 2026-11-25 12:35 step0 구현을 커밋했다(`a23bf81`). 계획 검증 동안 worktree에 두었던 구현이다: `approvalPending`의 내용 기반 판정, 회귀 테스트 6개(A~F), `rules.ts` 안내문, 절차서 5절·architecture 문구, TD-38 관찰, 변경 조각. step0 AC 7줄 통과, 구현을 포함한 `check` 통과(test-effect: `guard.test.ts`가 base에서 단언 실패). step0 완료.
 
 ## 의사결정 로그
 
@@ -76,13 +78,17 @@ claimed_at: 2026-11-25T10:32:13+09:00 # new-task가 채운다
 
 ## 발견 사항
 
+- L1 훅은 `$CLAUDE_PROJECT_DIR`(메인 체크아웃)의 `scripts/hooks/guard.ts`로 돈다. 이 수정은 병합 뒤 메인 체크아웃이 `origin/main`을 당겨야 대화 세션에 적용된다. → 처리: 해당 없음(`start`가 당긴다. 당기지 못하면 이유를 출력한다)
+- 계획 검증에서 F3(문서 기록 확인 AC)이 7회차까지 이어졌다. 표 행 하나를 셸 한 줄로 검사하는 AC는 구간·칸 경계의 빈틈을 하나씩 지적받았다. → 처리: 해당 없음(진행 로그에 회차별 대응을 적었다)
+
 ## 열린 질문
 
 ## 검증 방법과 결과
 
 - step0 AC: 새 회귀 테스트와 기존 승인 요청·`pr-ready`·runner PR 테스트, 문서 기록 확인 명령.
 - `node scripts/harness.ts check`(test-effect로 새 테스트가 변경 전 코드에서 단언 실패하는지 본다).
+- 결과(2026-11-25): step0 AC 7줄 통과. `check` 통과, test-effect `scripts/test/guard.test.ts: effective(base에서 단언 실패, 종료 코드 1)`. doc-lint의 R8 경고 6건은 계획만 올린 `check`에도 같게 나오는 기존 경고다(`docs/harness/CHANGELOG.md`는 변경 조각으로 대신한다).
 
 ## 다음 할 일
 
-- 고친 계획만 push해 계획 검증 7회차를 받는다. 승인 뒤 step0 구현.
+- 완료 처리를 push하고 구현 판정을 받는다. 판정이 끝나면 `pr-ready`로 제작자 head 승인을 요청한다(위험도 high).
