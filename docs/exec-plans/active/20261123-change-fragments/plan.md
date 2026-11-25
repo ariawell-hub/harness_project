@@ -2,7 +2,7 @@
 id: 20261123-change-fragments
 issue: 222 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -99,6 +99,7 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - 2026-11-25 step1 시작: step0이 병합된 뒤(#227) step1이 멈춰 있었다(선점 `claim/222`는 2026-11-23 18:13 뒤로 갱신되지 않아 만료). 제작자가 대화에서 이어 가라고 지시해(2026-11-24) 작업자 `mac-session`이 `new-task --plan 20261123-change-fragments --step 1`로 브랜치와 worktree를 만들었다(main `a06b7fd`). frontmatter의 `owner`는 그대로 둔다(TD-23).
 - 2026-11-25 step1 테스트 먼저: `scripts/test/changes-collect.test.ts`(테스트 9건)를 썼다. `collectFragments`와 `runChangesCollect`는 동적으로 가져오고 결과를 값으로 받아 단언한다. 이 변경 전의 코드에서 돌려 9건 모두 단언 실패(`ERR_ASSERTION`)로 끝나는 것을 봤다(1~4: `collectFragments 없음`, 5~7: 모르는 명령, 8·9: `runChangesCollect 없음`). 테스트만 먼저 커밋한다.
 - 2026-11-25 step1 구현: `scripts/lib/changes.ts`에 `collectFragments`(설계서는 `design-version.ts`로 읽는다. `scripts/gates/`를 가져오지 않는다), 새 파일 `scripts/commands/changes.ts`의 `runChangesCollect`(폴더 경계 → 빈 폴더 → 파일 경계 → `git ls-tree` → `git status` → 읽기·계산 → 쓰기·지우기 차례), `scripts/harness.ts`의 `changes-collect` 분기와 `HELP` 한 줄. `changes-collect.test.ts` 9건 통과(macOS라 링크 경우를 건너뛰지 않았다). 문서: 절차서 5절 "모으기 PR", 하네스 코드 구조 문서, 기술 부채 표(TD-39 해결, 새 TD-72·TD-73. 번호는 의사결정 로그 17), 이 PR의 조각 `docs/harness/changes/20261123-change-fragments-s1.md`.
+- 2026-11-25T11:04:54+09:00 step1 재작업: 구현 판정 1회차(head 002d689): Claude 승인(지적 없음), Codex 수정 요청(P0 1, P1 3). F1(P0): assume-unchanged·skip-worktree로 표시된 조각의 커밋하지 않은 수정을 git status가 보이지 않아 지울 수 있다. F2: docs가 링크여도 docs/harness를 lstat한다. F3: 머리말 설명 안의 앞선 최종 갱신 날짜를 바꾼다. F4: 패치 번호를 Number로 올려 안전 정수를 넘으면 같은 값이 된다. 모두 맞는 지적이다. 테스트를 먼저 더하고 고친다
 
 ## 의사결정 로그
 
