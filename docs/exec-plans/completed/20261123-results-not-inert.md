@@ -45,6 +45,8 @@ claimed_at: 2026-11-23T06:36:16+09:00
 - 2026-11-24 PR #188이 병합돼(2026-11-23) `lab/q10-db/README.md`의 "테스트가 읽는 파일" 문장을 두 파일 모두 보호 경로인 것으로 맞췄다.
 - 2026-11-25 구현 판정 2회차(head `1973677`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나. F1은 고쳐졌다고 적었다). F2: 계획의 "검증"이 요구한 세 명령의 결과가 지금 head 기준으로 기록되지 않았다. 맞는 지적이다(위 기록에는 `check-skip.test.ts` 21건만 적었다). 코드는 고치지 않았고, head `1973677`에서 세 명령의 결과를 아래에 적는다.
 - 2026-11-25 검증 결과(head `1973677`. main `a06b7fd` 병합, F1 수정, 완료 처리 뒤): `node scripts/harness.ts codeowners` 통과(`.github/CODEOWNERS`, 보호 경로 29개). `node scripts/harness.ts check` 통과(2026-11-24 push 직전에 이 head에서 실행. fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan, `test-effect`는 `check-skip.test.ts` effective — base에서 단언 실패). `node scripts/harness.ts self-test` 통과(시나리오 10개). 이 줄을 더한 커밋은 계획 파일만 바꾼다.
+- 2026-11-25 `origin/main`(`e183ae7`, #236)을 병합했다(충돌 없음). 구현 판정 3회차(head `f71a93d`): Claude 승인(지적 없음), Codex 수정 요청(P1 둘). F2가 다시 열렸다(검증 기록이 `1973677` 기준이다). F3(`scripts/lib/git.ts:61`, 첫 커밋 전 작업 트리에 `HEAD` 파일이 있으면 브랜치 이름을 잘못 낸다, 재현됨)은 이 PR의 변경이 아니라 main 병합으로 들어온 #236의 코드다(`git diff origin/main...HEAD -- scripts/lib/git.ts`가 비었다). 이 PR에서 고치지 않고 반박했고, 제작자에게 따로 고치자고 알렸다.
+- 2026-11-25 검증 결과(head `f71a93d`. main `e183ae7` 병합 뒤): `node scripts/harness.ts codeowners` 통과(보호 경로 29개), `node scripts/harness.ts check` 통과(push 직전 이 head에서 실행), `node scripts/harness.ts self-test` 통과(시나리오 10개). 이 줄을 더한 커밋은 계획 파일만 바꾼다.
 
 ## 의사결정 로그
 
