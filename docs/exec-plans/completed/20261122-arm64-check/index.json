@@ -1,0 +1,11 @@
+{
+  "plan": "20261122-arm64-check",
+  "steps": [
+    {
+      "step": 0,
+      "name": "arm64",
+      "status": "completed",
+      "completed_at": "2026-11-24T19:29:56+09:00"
+    }
+  ]
+}
