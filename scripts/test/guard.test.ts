@@ -812,6 +812,17 @@ test('승인 요청 규칙: 기본 브랜치와 공통 조상이 없어 비교�
   assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
 });
 
+test('승인 요청 규칙: 서브모듈 표시 설정과 상관없이 표시 뒤 gitlink를 더한 커밋을 막는다(Issue #243, F10)', () => {
+  const r = approvalRepo('origin', 'main');
+  // 사용자 설정이 diff에서 서브모듈 변경을 숨겨도 비교에는 넣는다
+  sh('git', ['config', 'diff.ignoreSubmodules', 'all'], r.wt);
+  sh('git', ['update-index', '--add', '--cacheinfo', `160000,${r.asked},vendor/component`], r.wt);
+  // commitAll(add -A)은 작업 트리에 없는 gitlink를 지우므로 색인을 그대로 커밋한다
+  sh('git', ['commit', '-q', '-m', 'add gitlink'], r.wt);
+  assert.equal(r.pending(), 1);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
+});
+
 test('승인 요청 규칙은 같은 명령 안의 금지 규칙(R…)을 가리지 않는다', () => {
   const c = ctx({ approvalPending: () => 3, planRisk: () => 'high' });
   assert.match(bash('gh pr ready 1; gh pr review 1 --approve', c)!.rule, /^R20/);

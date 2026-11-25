@@ -67,9 +67,15 @@ function mergeBase(a: string, b: string, cwd: string): string | null {
   return r.ok ? r.stdout.trim() : null;
 }
 
-/** a와 b 사이에 내용이 다른 파일 이름. 실패하면 null. 파일 이름을 git 인자로 넘기지 않는다(pathspec이 된다) */
+/**
+ * a와 b 사이에 내용이 다른 파일 이름. 실패하면 null. 파일 이름을 git 인자로 넘기지 않는다(pathspec이 된다).
+ * 서브모듈(gitlink) 변경은 사용자 설정(`diff.ignoreSubmodules` 등)과 상관없이 넣는다(F10)
+ */
 function changedNames(a: string, b: string, cwd: string): Set<string> | null {
-  const r = gitTry(['diff', '--name-only', '-z', '--no-renames', a, b], cwd);
+  const r = gitTry(
+    ['diff', '--name-only', '-z', '--no-renames', '--ignore-submodules=none', a, b],
+    cwd,
+  );
   return r.ok ? new Set(r.stdout.split('\0').filter(Boolean)) : null;
 }
 
