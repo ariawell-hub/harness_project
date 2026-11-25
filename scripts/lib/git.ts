@@ -46,17 +46,30 @@ export interface RepoInfo {
   branch: string;
 }
 
+const REPO_DIRS_ARGS = ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'];
+
+/**
+ * 부를 때마다 git으로 읽는다(담아 두지 않는다). 보통은 git 한 번이다(Issue #230: Windows에서 git 한 번이 55~94ms).
+ * `--abbrev-ref=loose`는 `symbolic-ref --short`와 같은 규칙으로 줄인다(기본인 엄격한 규칙은 같은 짧은 이름의
+ * 원격 추적 ref가 있으면 `heads/…`를 낸다). detached HEAD면 `HEAD`를 낸다.
+ * 그 명령이 실패하면(커밋이 없는 브랜치는 128, 리포 아님) 예전 순서(rev-parse → symbolic-ref)로 읽는다.
+ * 그래서 돌려주는 값과 던지는 예외는 예전 두 번 읽기와 같다
+ */
 export function repoInfo(cwd: string): RepoInfo {
-  const out = git(
-    ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'],
-    cwd,
-  ).split('\n');
+  const one = gitTry([...REPO_DIRS_ARGS, '--abbrev-ref=loose', 'HEAD'], cwd);
+  const lines = one.stdout.replace(/\n$/, '').split('\n');
+  if (one.ok && lines.length === 4) return toRepoInfo(cwd, lines, lines[3].trim());
+  const out = git(REPO_DIRS_ARGS, cwd).split('\n');
+  // 커밋이 없는 브랜치에서도 동작하도록 symbolic-ref를 쓴다. detached HEAD면 'HEAD'
+  const sym = gitTry(['symbolic-ref', '--short', '-q', 'HEAD'], cwd);
+  return toRepoInfo(cwd, out, sym.ok ? sym.stdout.trim() : 'HEAD');
+}
+
+/** `rev-parse --show-toplevel --absolute-git-dir --git-common-dir`의 세 줄과 브랜치로 RepoInfo를 만든다 */
+function toRepoInfo(cwd: string, out: string[], branch: string): RepoInfo {
   const root = out[0];
   const gitDir = path.resolve(out[1]);
   const commonDir = path.resolve(cwd, out[2]);
-  // 커밋이 없는 브랜치에서도 동작하도록 symbolic-ref를 쓴다. detached HEAD면 'HEAD'
-  const sym = gitTry(['symbolic-ref', '--short', '-q', 'HEAD'], cwd);
-  const branch = sym.ok ? sym.stdout.trim() : 'HEAD';
   return {
     root,
     gitDir,
