@@ -75,7 +75,9 @@ const TIME_ZONE_NAMED = new RegExp(
       'nzst',
       'nzdt',
     ].join('|') +
-    ')(?![a-z])|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?: standard| daylight)? time\\b)',
+    // 약어는 홀로 붙었을 때만 본다(판정 F9): 글의 끝, 문장부호, 부호 오프셋이 이어질 때. 뒤에 낱말이 이어지면
+    // 안내 문장의 첫 낱말이다(`West Coast users …`)
+    ')(?=\\s*$|[.,;:!?)\\]]|\\s*[+-]\\d)|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?: standard| daylight)? time\\b)',
   'i',
 );
 const UNAVAILABLE_RE = /^usage-limit(?:@(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z)?$/;

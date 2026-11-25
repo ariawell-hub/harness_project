@@ -106,6 +106,8 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 2026-11-25 F6 테스트 먼저: 시각을 지켜야 하는 꼬리(`, or upgrade to Pro.`, ` or upgrade to Pro (…)`, `; see the usage page`, `, Upgrade to Pro.`, ` Upgrade to Pro`)와 시각을 몰라야 하는 꼬리(`utc`, `, GMT+9`, `Eastern Standard Time`)를 더하고 돌려 실패를 봤다. 고침: 시각 뒤가 문장 끝이 아니면 공백·쉼표·쌍반점 뒤 첫 낱말이 시간대처럼 생겼을 때만 시각을 모르는 것으로 본다(대문자 약어, 대소문자를 가리지 않는 `UTC`·`GMT`, IANA 이름, 부호 오프셋, 괄호·`/`, `Time`으로 끝나는 이름. `TIME_ZONE_LIKE`). 29건 통과.
 - 2026-11-25 이 head(`f3228ef`)의 로컬 `check`에서 `test` 1건이 한 번 실패했다(다른 세션의 `check`와 겹쳐 평소보다 두 배 넘게 오래 걸렸고 출력이 잘려 이름을 남기지 못했다). 같은 커밋에서 `test`를 다시 돌려 1357건 통과, `check`도 다시 통과해 push했다.
 - 2026-11-25 구현 판정 3회차(head `f3228ef`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨. F6은 고쳐졌다고 적었다). F7: 소문자로 쓴 `pst`가 붙은 시각을 UTC로 읽는다. 맞는 지적이다. 테스트를 먼저 더했다(`pst`, `Pst`, `, pdt`, `kst.`, `cest`, `pacific time`, `eastern daylight time`은 시각 모름). 고치기 전에 실패했다. 고침: 알려진 시간대 약어(북미·유럽·아시아·오세아니아의 흔한 것)와 북미 시간대 이름을 대소문자를 가리지 않고 낱말 하나로 알아보는 패턴(`TIME_ZONE_NAMED`)을 더했다. 안내 문구의 흔한 낱말(`or`, `see`, `upgrade`)과 겹치는 것은 넣지 않아 F6의 꼬리는 시각을 지킨다. 29건 통과.
+- 2026-11-25 구현 판정 4회차(head `5103b01`): Claude 승인(P2 하나), Codex 수정 요청(P1 하나. F7은 고쳐졌다고 적었다). F9: `, West Coast users should check their local time.`의 `West`를 시간대 약어 `WEST`로 읽어 시각을 버린다. 맞는 지적이고 F7 수정이 만든 회귀다. 테스트를 먼저 더했다(`West Coast users …`, `, it may take a while`은 시각을 지키고, 홀로 붙은 `west`, `west.`, `pst, or upgrade to Pro.`는 시각 모름). 고치기 전에 실패했다. 고침: 대소문자 무관 약어는 홀로 붙었을 때만(글의 끝, 문장부호, 부호 오프셋이 이어질 때) 시간대로 본다. 뒤에 낱말이 이어지면 안내 문장의 첫 낱말이다. `, est. wait …`처럼 약어 뒤에 마침표가 오는 글은 `kst.`와 가릴 수 없어 시각 모름 쪽으로 둔다(테스트 목록에서 뺐다). 29건 통과.
+- 2026-11-25 같은 날 PR #242의 Codex 판정이 실제로 사용 한도에 걸렸다(판정 실행 45545579256): 문구는 `You’ve hit your usage limit. Upgrade to Pro (…), visit … to purchase more credits or try again at 3:00 PM.`로 날짜 없이 시각만 있다. 이 구현은 이 꼴을 "풀리는 시각 모름"(`usage-limit`)으로 읽는다(테스트에 고정했다). 한도가 풀릴 때까지(러너 시각 15:00) push하지 않는다(절차서 5절).
 
 ## 의사결정 로그
 
@@ -123,6 +125,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 
 - Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: TD-75
 - Claude 판정 job에서 사용 한도가 어떻게 보이는지(수용 기준 8): `claude-scan`은 `result` 이벤트의 `is_error`로 "실행 오류(판정 없음)"를 내고 문구는 판정 job 로그에만 남아, `review/claude` 설명은 지금의 Codex와 같이 "판정 없음(판정 job 실패 또는 유출 검사 불통과)"뿐이다. `judge-claude`의 실패한 실행 5건 가운데 한도로 끝난 것은 없어 실제 문구는 확인하지 못했다. runner는 Claude 한도 문구를 `Claude AI usage limit reached|<유닉스 초>` 꼴로 가정한다(`scripts/runner/agents.ts`, `scripts/selftest/fake-agent.ts`). 같은 방식(`unavailable` 출력과 `why` 단계)으로 할지는 실제 문구를 본 뒤 정한다. → 처리: TD-74
+- 실제 Codex 한도 문구에는 날짜 없이 시각만 있는 꼴(`try again at 3:00 PM.`)이 있다(2026-11-25, 판정 실행 45545579256). 계획의 수용 기준 1이 든 꼴(`Nov 21st, 2026 8:36 AM`)과 다르다. 이 꼴은 어느 날의 시각인지 몰라 "풀리는 시각 모름"으로 적는다(상태와 알림은 맞고, 풀리는 시각만 빠진다). 시각만이라도 적을지는 수용 기준을 바꾸는 일이라 이 step에서 하지 않는다. → 처리: 해당 없음
 
 ## 열린 질문
 

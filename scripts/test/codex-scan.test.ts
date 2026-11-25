@@ -97,6 +97,13 @@ test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로
   );
   // 시각이 없다
   assert.equal(usageLimitOutput('You have hit your usage limit.\nTry again later'), 'usage-limit');
+  // 날짜 없이 시각만 있다(실제 문구, 2026-11-25 PR #242의 판정 실행 45545579256): 어느 날인지 몰라 시각을 모르는 것으로 본다
+  assert.equal(
+    usageLimitOutput(
+      'You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:00 PM.',
+    ),
+    'usage-limit',
+  );
   // 없는 날짜·시각
   for (const at of [
     'Feb 30th, 2027 8:36 AM',
@@ -137,6 +144,10 @@ test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로
     'Nov 21st, 2026 8:36 AM cest',
     'Nov 21st, 2026 8:36 AM pacific time',
     'Nov 21st, 2026 8:36 AM eastern daylight time',
+    // 판정 F9: 소문자 약어가 접미사로 홀로 붙은 경우는 계속 시각 모름
+    'Nov 21st, 2026 8:36 AM west',
+    'Nov 21st, 2026 8:36 AM west.',
+    'Nov 21st, 2026 8:36 AM pst, or upgrade to Pro.',
   ])
     assert.equal(usageLimitOutput(`usage limit. try again at ${at}`), 'usage-limit', at);
   // 시각 표기 뒤가 글의 끝·문장 끝이거나, 시간대가 아닌 안내 문구면 시각을 읽는다(판정 F6: 쉼표 뒤의 안내)
@@ -154,6 +165,9 @@ test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로
     '; see the usage page',
     ', Upgrade to Pro.',
     ' Upgrade to Pro',
+    // 판정 F9: 약어와 같은 글자로 시작하는 안내 문장(뒤에 낱말이 이어진다)은 시간대가 아니다
+    ', West Coast users should check their local time.',
+    ', it may take a while',
   ])
     assert.equal(
       usageLimitOutput(`usage limit. try again at Nov 21st, 2026 8:36 AM${tail}`),
