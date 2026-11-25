@@ -16,6 +16,13 @@ export type CodexScan =
   | (Extract<ClaudeScan, { ok: false }> & { unavailable?: string });
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+/**
+ * 시각 뒤에 붙은 시간대처럼 생긴 글의 머리: 대문자 약어(`PST`, `UTC+9`, `CEST`), `UTC`·`GMT`(대소문자 무시),
+ * IANA 이름(`America/Los_Angeles`), 부호 오프셋(`+09:00`, `-08:00`), 괄호·`/`로 붙인 표기(`(KST)`, `[UTC]`, `/PST`),
+ * `Time`으로 끝나는 이름(`Pacific Time`, `Eastern Standard Time`)
+ */
+const TIME_ZONE_LIKE =
+  /^(?:[A-Z]{2,5}(?![a-z])|(?:[Uu][Tt][Cc]|[Gg][Mm][Tt])(?![a-z])|[A-Z][A-Za-z_]+\/[A-Za-z_]|[+-]\d|[([{/]|(?:[A-Z][a-z]+ ){1,3}Time\b)/;
 const UNAVAILABLE_RE = /^usage-limit(?:@(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z)?$/;
 
 /** 그 UTC 시각이 실재하면 `YYYY-MM-DDTHH:MMZ`, 아니면 null */
@@ -39,10 +46,11 @@ export function usageLimitOutput(message: string): string | null {
       message,
     );
   if (!m) return 'usage-limit';
-  // 시각 표기의 끝을 본다(판정 F5): 글의 끝이나 문장 끝(`.`·`!`·`?`)이면 받는다. 그 밖에는 공백·쉼표·쌍반점 뒤에
-  // 글자·숫자·괄호·부호·`/`가 오면 시간대가 붙은 표기로 본다(`8:36 AM PST`, `America/Los_Angeles`, `-08:00`, `(KST)`)
+  // 시각 표기의 끝을 본다(판정 F5·F6): 글의 끝이나 문장 끝(`.`·`!`·`?`)이면 받는다. 그 밖에는 공백·쉼표·쌍반점 뒤의
+  // 첫 낱말이 시간대처럼 생겼을 때만 시각을 모르는 것으로 본다. 안내 문구(`, or upgrade to Pro.`)는 시각을 지킨다
   const rest = message.slice(m.index + m[0].length);
-  if (!/^[.!?]/.test(rest) && /^[\s,;]*[\p{L}\p{N}([{+\-\/]/u.test(rest)) return 'usage-limit';
+  if (!/^[.!?]/.test(rest) && TIME_ZONE_LIKE.test(rest.replace(/^[\s,;]*/, '')))
+    return 'usage-limit';
   const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
   const h12 = Number(m[4]);
   if (h12 < 1 || h12 > 12) return 'usage-limit';
