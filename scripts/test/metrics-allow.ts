@@ -135,16 +135,23 @@ export function ghReadShapes(defaultBranch: string): Shape[] {
 const REPO_PATH = /^(?![-/:])[^\0]+$/;
 
 /**
- * `repoInfo`(scripts/lib/git.ts)가 실행하는 둘과 `docLint`(scripts/gates/doc-lint.ts)가 실행하는 셋
+ * `repoInfo`(scripts/lib/git.ts)가 실행하는 하나와 `docLint`(scripts/gates/doc-lint.ts)가 실행하는 셋
  * (문서 목록과 커밋 시각은 step2, 변경 조각 목록은 계획 20261123-change-fragments step0).
- * 다섯 다 읽기만 한다. `log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 맞는다
+ * 넷 다 읽기만 한다. `log`는 `--` 앞 네 자리가 맞고 그 뒤가 경로뿐일 때만 맞는다.
+ * `repoInfo`는 커밋이 없는 브랜치에서만 예전 둘(`rev-parse` 세 자리, `symbolic-ref`)을 대신 실행하는데, 지표는 커밋이 있는 리포에서 돌아 그 둘은 목록에 두지 않는다(계획 20261123-windows-test-speed step0)
  */
 export const GIT_READ_SHAPES: Shape[] = [
   {
     name: 'rev-parse',
-    args: ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'],
+    args: [
+      'rev-parse',
+      '--show-toplevel',
+      '--absolute-git-dir',
+      '--git-common-dir',
+      '--abbrev-ref=loose',
+      'HEAD',
+    ],
   },
-  { name: 'symbolic-ref', args: ['symbolic-ref', '--short', '-q', 'HEAD'] },
   {
     name: 'ls-files',
     args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'],
