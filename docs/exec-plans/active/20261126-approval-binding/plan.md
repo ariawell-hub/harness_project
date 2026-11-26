@@ -117,9 +117,10 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 ## 검증 방법과 결과
 
 - step0: AC 명령과 `node scripts/harness.ts check`.
+- 2026-11-26 step0 head `97522cc`: AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 21건, 관련 다섯 파일 109건 통과.
 - step1: 테스트 리포 실측 결과(`lab/approval-binding/results/`).
 
 ## 다음 할 일
 
-1. 계획만 담은 초안 PR로 계획 검증(G1)을 받는다.
-2. 승인 뒤 step0을 테스트부터 구현한다.
+1. step0 구현 판정을 받고 제작자 승인을 요청한다(이 PR 자체가 위험도 높음이라 지금 규칙의 제작자 head 승인이 필요하다).
+2. 병합 뒤 step1(테스트 리포 실측)을 새 브랜치에서 한다.
