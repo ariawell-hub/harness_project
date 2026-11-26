@@ -11,7 +11,7 @@
 테스트를 먼저 쓰고, 구현 전에 실패하는 것을 확인해 진행 로그에 적는다(R5).
 
 1. **옵션과 고리**: `runChangesCollect`의 `o` 형에 `noFollow?: boolean`(기본 켬)과 `hooks?: { afterRead?: (rel: string) => void; beforeChange?: (rel: string) => void }`를 더한다. `CollectFs.writeFile`의 형은 `(file: string, text: string, fd: number) => void`, `CollectFs.unlink`는 조각 폴더가 작업 폴더일 때 이름(`<조각 파일 이름>`)으로 불린다. 있던 테스트의 주입 함수는 그대로 동작해야 한다.
-2. **테스트**(`scripts/test/changes-collect.test.ts`): 계획 수용 기준 7의 (가)~(타). 링크를 못 만드는 환경이면 `tryLink`로 그 경우를 건너뛴다(하드 링크 (다)와 (바)·(자)·(차)·(카)·(타)는 심볼릭 링크 없이 돈다. (타)는 255바이트 이름을 만들지 못하는 환경이면 건너뛴다). 각 경우 종료 코드 1, 알림 문구, 리포 밖 파일 바이트(또는 남아 있음), 되돌리는 명령의 경로 목록(없으면 명령 줄이 없음)을 단언한다.
+2. **테스트**(`scripts/test/changes-collect.test.ts`): 계획 수용 기준 7의 (가)~(타). 링크를 못 만드는 환경이면 `tryLink`로 그 경우를 건너뛴다(하드 링크 (다)와 (바)·(자)·(차)·(카)·(타)는 심볼릭 링크 없이 돈다. (타)는 255바이트 이름을 만들지 못하는 환경이면 건너뛴다). (타) 밖의 각 경우는 종료 코드 1, 알림 문구, 리포 밖 파일 바이트(또는 남아 있음), 되돌리는 명령의 경로 목록(없으면 명령 줄이 없음)을 단언한다. (타)는 종료 코드 0, CHANGELOG에 그 조각의 항목이 들어간 것, 조각 폴더가 빈 것을 단언한다.
 3. **구현**(`scripts/commands/changes.ts`):
    - 1번 폴더 경계 때 폴더 셋의 `lstatSync(…, { bigint: true })` 식별자를, 3번 파일 경계 때 파일 식별자를 기록한다.
    - `openChecked(rel, flags)`: `openSync(abs, flags | NOFOLLOW | NONBLOCK)`(없는 상수는 0, `noFollow: false`면 `NOFOLLOW`는 0). 연 핸들의 `fstatSync(fd, { bigint: true })`가 일반 파일, 링크 수 1, 식별자 같음이 아니면 닫고 "그 파일이 아니다". 링크라 열리지 않거나(`ELOOP`, `EMLINK`) 없으면 같은 결과.
