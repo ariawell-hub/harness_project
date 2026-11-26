@@ -4,15 +4,12 @@
 // 완료 처리로는 해시가 바뀌지 않는다.
 // PR 트리는 데이터로만 읽는다(base 스크립트가 실행한다).
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import path from 'node:path';
 import { changedFiles } from '../gates/risk-gate.ts';
 import { gitTry, showFile } from '../lib/git.ts';
 import {
   PLAN_BOUND_SECTIONS,
   STEP_BOUND_SECTIONS,
   boundPlanSection,
-  findPlan,
   findPlanAt,
   normalizeBound,
   parseBranch,
@@ -20,6 +17,7 @@ import {
   planCandidates,
   section,
 } from '../lib/plan.ts';
+import { findPlanSafe, planReader } from '../lib/plan-read.ts';
 
 const STEP_FILE_RE = /^step(0|[1-9]\d*)\.md$/;
 
@@ -53,16 +51,19 @@ function hashFrom(src: PlanSource, planDir: string): string | null {
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
 
-/** 작업 트리에 있는 계획의 해시(sha256 hex 64자). plan.md가 없으면 예외 */
+/**
+ * 작업 트리에 있는 계획의 해시(sha256 hex 64자). plan.md가 없으면 예외.
+ * 계획 자리의 링크는 따라가지 않고 던진다(PlanPathError, Issue #194). index.json은 해시에 넣지 않지만 그 자리도
+ * 확인한다(링크면 던진다): 계획 폴더의 어느 파일도 링크 대상을 이 계획으로 읽지 않는다.
+ * step 파일도 해시를 계산하기 전에 목록의 원래 이름으로 확인한다: hashFrom은 번호를 숫자로 바꿔 경로를 다시
+ * 만들므로, 숫자로 바꾸면 달라지는 이름(step9007199254740993.md)의 링크를 읽지 않는다. 해시 입력은 그대로다
+ */
 export function planHash(root: string, planDir: string): string {
-  const h = hashFrom(
-    {
-      read: (f) =>
-        existsSync(path.join(root, f)) ? readFileSync(path.join(root, f), 'utf8') : null,
-      list: (d) => (existsSync(path.join(root, d)) ? readdirSync(path.join(root, d)) : []),
-    },
-    planDir,
-  );
+  const reader = planReader(root);
+  reader.read(`${planDir}/index.json`);
+  for (const name of reader.list(planDir))
+    if (STEP_FILE_RE.test(name)) reader.read(`${planDir}/${name}`);
+  const h = hashFrom({ read: (f) => reader.read(f), list: (d) => reader.list(d) }, planDir);
   if (h === null) throw new Error(`${planDir}/plan.md가 없어 계획 해시를 계산할 수 없다`);
   return h;
 }
@@ -96,7 +97,7 @@ export interface PlanHashes {
 /** 브랜치의 계획(step 폴더 형식)의 지금 해시와 base의 해시. 계획 폴더가 없으면 null */
 export function planHashes(root: string, base: string, branch: string): PlanHashes | null {
   const b = parseBranch(branch);
-  const ref = b ? findPlan(root, b.id) : null;
+  const ref = b ? findPlanSafe(root, b.id) : null;
   if (!b || !ref?.dir) return null;
   const hash = planHash(root, ref.dir);
   const baseRef = findPlanAt((f) => showFile(root, base, f), b.id);
@@ -116,12 +117,14 @@ export interface PlanMode {
  */
 export function planMode(o: { root: string; base: string; branch: string }): PlanMode {
   const b = parseBranch(o.branch);
-  const ref = b ? findPlan(o.root, b.id) : null;
-  if (!b || !ref?.dir) return { mode: 'code', hash: '' };
+  if (!b) return { mode: 'code', hash: '' };
   let hash: string;
   try {
+    const ref = findPlanSafe(o.root, b.id);
+    if (!ref?.dir) return { mode: 'code', hash: '' };
     hash = planHash(o.root, ref.dir);
   } catch {
+    // 계획 자리의 링크(PlanPathError)도 여기로 온다: 계획 승인을 남기지 않는다
     return { mode: 'code', hash: '' };
   }
   const dirs = planCandidates(b.id).flatMap((c) => (c.dir ? [`${c.dir}/`] : []));

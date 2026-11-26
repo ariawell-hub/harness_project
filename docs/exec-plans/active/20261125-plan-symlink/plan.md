@@ -86,6 +86,7 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
   - 같은 push에 `origin/main` 병합(#217)을 함께 올린다.
 - 2026-11-26 계획 검증 4회차(head `b4d6cfa`): Claude 승인, Codex는 F6을 닫고 새 지적 하나(F7, P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
   - F7: 해시 계산기는 step 이름의 번호를 숫자로 바꿔 경로를 다시 만든다. 색인에만 있는 `step9007199254740993.md` 링크는 목록에 들어가지만 계산기는 반올림된 `step9007199254740992.md`를 읽어, 원래 링크를 거절하지 못한다. → 해시를 계산하기 전에 목록의 원래 이름으로 step 파일 자리를 확인한다(해시 입력은 그대로, step0 작업 3). 그 꼴의 테스트를 더했다(step0 작업 1, 수용 기준 3).
+- 2026-11-26 계획 검증 5회차(head `91a498b`): Claude·Codex 승인(지적 없음). 원장에 `계획 검증(G1): 해시 88815ead7ee4 · 승인: claude, codex`가 남았다(미룸 1: F4, P2). 로컬 구현(F5~F7 반영)을 올린다.
 
 ## 의사결정 로그
 
@@ -94,7 +95,9 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
 
 ## 발견 사항
 
-<!-- 예상과 달랐던 것 → 처리: [문서](경로) | #Issue | TD-N | 해당 없음 -->
+- 지금 CI에서는 계획을 읽는 job이 모두 `core.symlinks false`로 PR 트리를 받아, 위 코드가 실제로 링크를 따라간 적은 없다(보호가 워크플로 설정 한 줄에만 있었다). 이 계획은 코드에도 같은 보호를 둔다. → 처리: [설계서 10.4절 "심볼릭 링크"](../../../harness/design.md)
+- 재현 job 두 곳(`judge-claude.yml`·`judge-codex.yml`의 `repro`)은 `core.symlinks false` 없이 PR 트리를 받는다. 계획을 읽지 않고 PR 코드를 실행하는 job이고 비밀·쓰기 권한이 없다(10.4절). → 처리: 해당 없음
+- 계획 해시 계산기(`hashFrom`)는 step 이름의 번호를 숫자로 바꿔 경로를 다시 만들어, 숫자로 바꾸면 달라지는 이름(`step9007199254740993.md`)의 글은 해시에 묶이지 않는다. step 파일은 `index.json`의 순서(0부터 n-1)로만 읽히므로(`plan-gate`, runner) 그런 이름의 step은 실행되지 않는다. 링크 판정은 원래 이름으로 한다(F7). → 처리: 해당 없음
 
 ## 열린 질문
 
@@ -103,9 +106,8 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
 ## 검증 방법과 결과
 
 - step0의 AC 명령(새 테스트 두 파일, 기존 판정 테스트, `test-effect` 판정 줄, `check`).
+- 결과(2026-11-26, macOS, Node 22.23.3): 새 테스트(`plan-read.test.ts` 9개, `plan-symlink.test.ts` 12개)가 변경 전 코드에서 링크 꼴마다 단언으로 실패했고 구현 뒤 모두 통과했다. AC의 테스트 목록 전체와 `check`의 결과는 PR #249 본문의 "검증"에 적는다.
 
 ## 다음 할 일
 
-- 계획 검증 4회차(F6 반영)의 판정을 기다린다.
-- step0 구현은 이 worktree에 커밋하지 않은 채 있다: `scripts/lib/plan-read.ts`, 다섯 호출자, `scripts/test/plan-read.test.ts`·`plan-symlink.test.ts`, 설계서 10.4절·architecture.md·변경 조각. F5를 반영한 상태로 새 테스트 19개와 AC의 기존 테스트가 통과했다. 계획만 담은 head에서 G1 승인을 받기 전에는 커밋·push하지 않는다(코드가 섞이면 계획 검증으로 판정되지 않는다).
-- G1 승인 뒤: 구현 커밋 → AC·`check` → `complete-step` → push → 두 검증자 판정 → `pr-ready`로 제작자 승인 요청(위험도 high).
+- 구현 커밋 → AC·`check` → `complete-step` → push → 두 검증자 판정 → `pr-ready`로 제작자 승인 요청(위험도 high).
