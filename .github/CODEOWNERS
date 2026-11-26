@@ -28,3 +28,4 @@
 /docs/SECURITY.md @ariawell-hub
 /docs/exec-plans/TEMPLATE*.md @ariawell-hub
 /lab/q10-db/q10-trial-workflow.patch @ariawell-hub
+/lab/q10-db/results/darwin-arm64.json @ariawell-hub

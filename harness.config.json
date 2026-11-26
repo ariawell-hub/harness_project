@@ -136,7 +136,8 @@
     "docs/core-beliefs.md",
     "docs/SECURITY.md",
     "docs/exec-plans/TEMPLATE*.md",
-    "lab/q10-db/q10-trial-workflow.patch"
+    "lab/q10-db/q10-trial-workflow.patch",
+    "lab/q10-db/results/darwin-arm64.json"
   ],
   "ci": {
     "environments": ["judge-claude", "judge-codex", "codex-auth-store", "recorder", "revert"],
