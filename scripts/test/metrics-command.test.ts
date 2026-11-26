@@ -421,7 +421,7 @@ function guardCp(decide: Decide): CpGuard {
 const show = (c: Call) => [c.cmd, ...c.args].join(' ');
 
 const REPO_INFO_GIT = [
-  'git rev-parse --show-toplevel --absolute-git-dir --git-common-dir --abbrev-ref=loose HEAD',
+  'git rev-parse --show-toplevel --absolute-git-dir --git-common-dir --abbrev-ref=loose HEAD --',
 ];
 
 // ── 기본 자료원 테스트의 고정 응답. 허용 목록(metrics-allow.ts)의 gh 꼴마다 하나 ──
