@@ -1,0 +1,10 @@
+{
+  "plan": "20261127-changes-nofollow",
+  "steps": [
+    {
+      "step": 0,
+      "name": "nofollow",
+      "status": "pending"
+    }
+  ]
+}
