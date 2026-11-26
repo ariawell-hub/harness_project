@@ -1,0 +1,15 @@
+{
+  "plan": "20261126-approval-binding",
+  "steps": [
+    {
+      "step": 0,
+      "name": "bind",
+      "status": "pending"
+    },
+    {
+      "step": 1,
+      "name": "live",
+      "status": "pending"
+    }
+  ]
+}

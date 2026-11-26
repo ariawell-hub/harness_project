@@ -1,0 +1,33 @@
+# Step 1: live
+
+## 읽어야 할 파일
+
+- 계획의 수용 기준 7, step0이 바꾼 파일(`scripts/gates/risk-gate.ts`, `scripts/ci/gates.ts`)
+- `docs/SECURITY.md`의 "테스트 리포 준비", `lab/ops-transition/README.md`(테스트 리포 `ariawell-hub/harness-ops-lab`의 운영 방식)
+
+## 작업
+
+step0이 main에 병합된 뒤 한다.
+
+1. 테스트 리포의 하네스를 step0 병합 뒤 main의 트리로 맞춘다(봇이 PR로 올린다. 보호 경로라 제작자 승인이 필요하다. 이 승인을 아래 첫 확인과 묶지 않는다).
+2. 테스트 리포에서 보호 경로를 바꾸는 시험 PR 하나를 연다. 제작자에게 승인을 요청한다(Issue에 `needs-human`, 무엇을 승인하는지 적는다).
+3. 승인 뒤:
+   - (가) 테스트 리포 main에 다른 커밋을 넣고(봇의 위험도 낮음 PR을 자동 병합), 시험 PR에 main 병합 커밋만 올린다. 그 head의 `risk-gate`가 `제작자 head 승인 이어받음`인지, 리뷰 API가 리뷰의 커밋을 무엇으로 보고하는지 기록한다.
+   - (나) 시험 PR에 일반 커밋 하나를 올린다. `risk-gate`가 `제작자 head 승인 필요`인지, 리뷰 API가 무엇을 보고하는지 기록한다.
+4. 결과를 `lab/approval-binding/results/live.json`(사례별 head, 리뷰 API의 커밋, `risk-gate` 상태·설명, 시각)과 `lab/approval-binding/README.md`(절차와 해석)에 남긴다. 변경 조각 `docs/harness/changes/20261126-approval-binding-s1.md`.
+5. 시험 PR은 닫는다(병합하지 않는다).
+
+## Acceptance Criteria
+
+```bash
+test -f lab/approval-binding/results/live.json
+node -e "const r=JSON.parse(require('fs').readFileSync('lab/approval-binding/results/live.json','utf8'));const c=Object.fromEntries(r.cases.map(x=>[x.id,x]));if(!/이어받음/.test(c['main-merge'].riskGate.description))process.exit(1);if(c['normal-commit'].riskGate.state==='success')process.exit(1)"
+grep -qF 'Issue #250' docs/harness/changes/20261126-approval-binding-s1.md
+node scripts/harness.ts check
+```
+
+## 금지사항
+
+- 제작자 대신 승인하지 마라. 이유: R20.
+- 테스트 리포의 보호 설정·environment·App 설정을 바꾸지 마라. 이유: R20. 필요하면 제작자에게 요청한다.
+- 시험 PR을 병합하지 마라. 이유: 시험용이다.
