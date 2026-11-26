@@ -81,7 +81,8 @@ claimed_at: 2026-11-26T12:58:52+09:00 # new-task가 채운다
 ## 검증 방법과 결과
 
 - step0의 AC 명령과 `node scripts/harness.ts check`.
+- 2026-11-26 head `a36c0f1`: AC 8줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `repo-info.test.ts` 8건, `metrics-command.test.ts`와 합쳐 41건 통과.
 
 ## 다음 할 일
 
-1. 완료 처리, 구현 판정, 승인 요청.
+1. 구현 판정을 받고 승인을 요청한다.
