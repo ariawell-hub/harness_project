@@ -1,11 +1,10 @@
 // risk-gate (10.1·10.3절, R13·R20). 위험도를 정하고, "높음"이면 제작자 계정의 head 승인을 확인한다.
 // 위험도는 올릴 수만 있다(B11): 계획 risk, 경로별 최소 위험도, 보호 경로(stage), 판정할 수 없는 파일 형식, 신호 중 최댓값.
 // 설정(cfg)은 main 쪽이다. PR 트리의 설정으로 판정하지 않는다.
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { HarnessConfig } from '../lib/config.ts';
 import { git } from '../lib/git.ts';
-import { RISKS, findPlan, parseBranch, parseDoc } from '../lib/plan.ts';
+import { RISKS, parseBranch, parseDoc } from '../lib/plan.ts';
+import { planReader } from '../lib/plan-read.ts';
 import { globToRegExp, matchesAny } from '../lib/util.ts';
 
 export type Risk = 'low' | 'normal' | 'high';
@@ -44,11 +43,13 @@ export interface AssessOptions {
 function planRisk(root: string, branch: string): Risk | null {
   const b = parseBranch(branch);
   if (!b) return null;
-  const ref = findPlan(root, b.id);
+  // 계획 자리의 링크는 따라가지 않고 던진다(assessRisk가 던져 risk-gate는 error, Issue #194)
+  const reader = planReader(root);
+  const ref = reader.find(b.id);
   if (!ref) return null;
-  const f = path.join(root, ref.file);
-  if (!existsSync(f)) return null;
-  const risk = parseDoc(readFileSync(f, 'utf8')).frontmatter?.risk;
+  const text = reader.read(ref.file);
+  if (text === null) return null;
+  const risk = parseDoc(text).frontmatter?.risk;
   return typeof risk === 'string' && (RISKS as readonly string[]).includes(risk)
     ? (risk as Risk)
     : null;

@@ -1,8 +1,6 @@
 // plan-gate (R1, G1, 10.3절): 계획 파일·필수 섹션·size·risk·step 상태·자기 step 작업·AC·금지사항 불변·발견 사항 처리.
 // 중·대 규모의 G1(계획 교차 검증 확인)은 호출자가 넘긴 해시와 원장의 계획 승인으로 판정한다. planReview.required로 켠다.
 // CI에서는 main의 이 스크립트가 PR head 체크아웃(pr/)을 데이터로만 읽는다. PR 코드를 실행하지 않는다.
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { HarnessConfig } from '../lib/config.ts';
 import { showFile } from '../lib/git.ts';
 import {
@@ -12,7 +10,6 @@ import {
   STEP_BOUND_SECTIONS,
   STEP_STATUSES,
   extractCommands,
-  findPlan,
   findPlanAt,
   hashText,
   isBlank,
@@ -26,6 +23,7 @@ import {
   type PlanRef,
   type StepIndex,
 } from '../lib/plan.ts';
+import { PlanPathError, planReader, type PlanReader } from '../lib/plan-read.ts';
 import type { Problem } from '../lib/util.ts';
 
 const DOC = 'docs/harness/design.md R1, 8절 / docs/harness/workflow.md';
@@ -112,12 +110,29 @@ function checkG1(g: PlanG1 | undefined): { ok: boolean | null; what: string; how
   };
 }
 
-function read(root: string, rel: string): string | null {
-  const f = path.join(root, rel);
-  return existsSync(f) ? readFileSync(f, 'utf8') : null;
+/**
+ * 계획 자리(계획 파일·폴더, index.json, step 파일)에 링크·서브모듈이 있으면 그 자리를 적은 문제 하나로 막는다.
+ * 계획은 링크를 따라가지 않고 읽는다(scripts/lib/plan-read.ts, Issue #194): 링크 대상을 이 PR의 계획으로 읽지 않는다
+ */
+export function planGate(o: PlanGateOptions): PlanGateResult {
+  try {
+    return planGateWith(o, planReader(o.root));
+  } catch (e) {
+    if (!(e instanceof PlanPathError)) throw e;
+    return {
+      problems: [
+        P(
+          `계획 자리가 일반 파일·폴더가 아니다(심볼릭 링크·서브모듈): ${e.place}`,
+          '계획 자리에 링크를 두지 말고 계획을 일반 파일로 커밋하라',
+        ),
+      ],
+      notes: [],
+      plan: null,
+    };
+  }
 }
 
-export function planGate(o: PlanGateOptions): PlanGateResult {
+function planGateWith(o: PlanGateOptions, reader: PlanReader): PlanGateResult {
   const problems: Problem[] = [];
   const notes: string[] = [];
   const b = parseBranch(o.branch);
@@ -130,7 +145,7 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
     );
     return { problems, notes, plan: null };
   }
-  const ref = findPlan(o.root, b.id);
+  const ref = reader.find(b.id);
   if (!ref) {
     problems.push(
       P(
@@ -149,7 +164,7 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
     );
     return { problems, notes, plan: ref };
   }
-  const text = read(o.root, ref.file)!;
+  const text = reader.read(ref.file)!;
   const doc = parseDoc(text);
   const fm = doc.frontmatter;
   if (!fm) {
@@ -209,7 +224,7 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
       if (isBlank(section(doc.body, s)))
         problems.push(P(`필수 섹션 "## ${s}"가 비어 있다`, '섹션을 채워라(8.2절 템플릿)'));
     }
-    const idxText = read(o.root, `${ref.dir}/index.json`);
+    const idxText = reader.read(`${ref.dir}/index.json`);
     if (!idxText)
       problems.push(P(`${ref.dir}/index.json이 없다`, 'step 목록을 index.json에 적어라'));
     else {
@@ -240,7 +255,7 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
           problems.push(
             P(`step${i} 이름(${s.name})이 kebab-case가 아니다`, '한두 단어 kebab-case로 지어라'),
           );
-        const sf = read(o.root, stepFile(ref, i));
+        const sf = reader.read(stepFile(ref, i));
         if (!sf) {
           problems.push(
             P(`${stepFile(ref, i)}가 없다`, 'TEMPLATE-step.md로 step 지시서를 만들어라'),
@@ -312,7 +327,7 @@ export function planGate(o: PlanGateOptions): PlanGateResult {
     if (baseRef?.dir) {
       for (let i = 0; i < (index?.steps.length ?? 0); i++) {
         const baseText = readBase(stepFile(baseRef, i));
-        const headText = read(o.root, stepFile(ref, i));
+        const headText = reader.read(stepFile(ref, i));
         if (baseText === null || headText === null) {
           if (baseText === null && i <= b.step && b.step > 0)
             notes.push(`step${i} 파일이 base에 없다: 계획 수정으로 본다(G1 재검증 대상)`);
