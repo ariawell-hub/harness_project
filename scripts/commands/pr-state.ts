@@ -73,7 +73,8 @@ export function behindOf(
 
 /**
  * 오래 열린 지적(9.1절)을 한 줄씩 낸다. 대화 세션이 제작자에게 물을 신호다. 읽기만 한다.
- * 지적의 제목·위치(검증자 출력)는 내지 않는다. 원장을 가릴 수 없으면(ci.recorderBot 없음) 아무것도 내지 않는다
+ * 지적의 제목·위치(검증자 출력)는 내지 않는다. 원장을 가릴 수 없으면(ci.recorderBot 없음) 아무것도 내지 않는다.
+ * 구현 대기(parked, Issue #212)인 지적이 있으면 번호를 한 줄로 알린다: 고치거나 반박할 것이 없다는 신호다
  */
 function logLongOpen(gh: GitHubPort, cfg: HarnessConfig, pr: number): void {
   if (!cfg.ci.recorderBot) return;
@@ -82,6 +83,14 @@ function logLongOpen(gh: GitHubPort, cfg: HarnessConfig, pr: number): void {
     for (const x of ledger ? longOpen(ledger) : [])
       log(
         `- 오래 열린 지적: ${x.entry.id} [${x.entry.severity}, ${x.entry.reviewer}] 재판정 ${x.rejudged}회 뒤에도 열려 있다 — 대화 세션은 더 고쳐 올리기 전에 제작자에게 묻는다(절차서 8절)`,
+      );
+    const parked = (ledger?.findings ?? [])
+      .filter((e) => e.status === 'parked')
+      .map((e) => e.id)
+      .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    if (parked.length)
+      log(
+        `- 구현 대기 지적: ${parked.join(', ')} — 계획만 담은 head라 판정하지 않는다. 구현을 올리면 다시 열려 판정받는다(절차서 2절)`,
       );
   } catch (e) {
     log(`- 오래 열린 지적 확인: 원장을 읽지 못했다(${(e as Error).message.split('\n')[0]})`);

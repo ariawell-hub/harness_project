@@ -24,6 +24,7 @@ import { listWorktrees, repoInfo } from '../lib/git.ts';
 import { getGitHub, runIdOf, type CommitCheck } from '../lib/github.ts';
 import { FakeGitHub, addFakeIssue, initFakeState, type FakeState } from '../lib/github-fake.ts';
 import { sessionText } from '../runner/agents.ts';
+import { divergence } from '../runner/divergence.ts';
 import { pickNext } from '../runner/next.ts';
 import { blockText, reviewPrompt } from '../runner/prompt.ts';
 import {
@@ -1614,4 +1615,103 @@ test('longOpen: 미룬 지적·닫힌 지적·받아들인 지적·P2·P3은 대
     longOpen(l).map((x) => x.entry.id),
     ['F1', 'F2', 'F9', 'F10'],
   );
+});
+
+// ---------- 구현 대기(parked): 계획만 담은 head에서 판정할 수 없는 코드 지적 (Issue #212) ----------
+
+/** 그 지적들의 상태를 바꾼 원장(기록 job이 구현 대기로 두거나 되돌린 것) */
+const withStatus = (l: Ledger, status: Entry['status'], ...ids: string[]): Ledger => ({
+  ...l,
+  findings: l.findings.map((e) => (ids.includes(e.id) ? { ...e, status } : e)),
+});
+
+test('settledResponses·failedResponses: 구현 대기인 지적의 대응은 성공으로도 실패로도 세지 않고 남긴다', () => {
+  let l = judged(emptyLedger(BASE), 'codex', 'h0', [finding('P1', 'src/a.ts', 3, '코드 지적')]);
+  const state: ReviewState = {
+    responses: { F1: [{ head: 'h1', kind: 'fix', counted: false }] },
+    round: null,
+    pending: [],
+    rebuttals: {},
+    reverted: null,
+  };
+  // 대응을 올린 head가 계획만 담고 있어 그 지적이 구현 대기가 됐다(그 검증자가 그 head를 판정했다)
+  l = judged(l, 'codex', 'h1', []);
+  const parked = withStatus(l, 'parked', 'F1');
+  assert.deepEqual(settledResponses(state, parked), [], '닫힌 것이 아니다');
+  assert.deepEqual(failedResponses(state, parked), [], '열린 채 남은 것도 아니다');
+  assert.equal(state.responses.F1[0].counted, false, '대응 기록이 그대로 남는다');
+  // 코드가 다시 올라와 열림으로 돌아왔고 그 검증자가 대응 head를 판정했다: 지금의 규칙대로 실패다
+  assert.deepEqual(failedResponses(state, withStatus(parked, 'open', 'F1')), ['F1']);
+  assert.deepEqual(settledResponses(state, withStatus(parked, 'open', 'F1')), []);
+  // 고쳐진 것으로 닫히면 닫힌 대응이다
+  for (const closed of ['fixed', 'rejected', 'deferred', 'accepted'] as const) {
+    assert.deepEqual(settledResponses(state, withStatus(parked, closed, 'F1')), ['F1'], closed);
+    assert.deepEqual(failedResponses(state, withStatus(parked, closed, 'F1')), [], closed);
+  }
+});
+
+test('openBlocking·longOpen·deadlocked·divergence: 구현 대기인 지적은 대응 대상도, 오래 열린 지적도, 교착도, 발산 신호도 아니다', () => {
+  const h = (c: string) => c.repeat(40);
+  let l = judged(emptyLedger(BASE), 'codex', h('0'), [
+    finding('P1', 'src/a.ts', 1, '구현 대기가 될 것'),
+    finding('P0', 'src/b.ts', 2, '열린 채인 것'),
+  ]);
+  for (const c of ['1', '2', '3'])
+    l = judged(
+      l,
+      'codex',
+      h(c),
+      [],
+      [
+        { id: 'F1', status: 'open', note: '' },
+        { id: 'F2', status: 'open', note: '' },
+      ],
+    );
+  const parked = withStatus(l, 'parked', 'F1');
+  assert.deepEqual(
+    openBlocking(parked).map((e) => e.id),
+    ['F2'],
+  );
+  assert.deepEqual(
+    longOpen(l).map((x) => x.entry.id),
+    ['F1', 'F2'],
+  );
+  assert.deepEqual(
+    longOpen(parked).map((x) => x.entry.id),
+    ['F2'],
+  );
+  // 교착: 반박 2회, 둘째 반박 head를 그 검증자가 판정했다
+  const reb = (head: string) => ({
+    head,
+    kind: 'rebuttal' as const,
+    counted: true,
+    evidence: 'src/a.ts',
+    summary: '요지',
+  });
+  const state: ReviewState = {
+    responses: { F1: [reb(h('1')), reb(h('2'))] },
+    round: null,
+    pending: [],
+    rebuttals: {},
+    reverted: null,
+  };
+  assert.deepEqual(deadlocked(state, l), ['F1']);
+  assert.deepEqual(deadlocked(state, parked), []);
+  // 발산: 구현 대기는 새 차단 지적으로도 해소로도 세지 않는다
+  const before = {
+    open: [
+      { id: 'F1', file: 'src/a.ts', line: 1 },
+      { id: 'F2', file: 'src/b.ts', line: 2 },
+    ],
+    maxId: 2,
+    head: h('3'),
+  };
+  assert.deepEqual(divergence(before, parked), { diverged: false, signals: [] });
+  // 대응 전에는 열려 있지 않던 지적이 구현 대기로 보여도 새 지적이 아니다
+  assert.deepEqual(divergence({ ...before, open: [before.open[1]] }, parked), {
+    diverged: false,
+    signals: [],
+  });
+  // 견줌: 같은 자리에서 열림이면 다시 열린 새 차단 지적으로 센다
+  assert.equal(divergence({ ...before, open: [before.open[1]] }, l).diverged, true);
 });
