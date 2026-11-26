@@ -6,6 +6,7 @@ import {
   emptyLedger,
   ledgerData,
   ledgerStatus,
+  parkFor,
   parseLedger,
   parseLedgerData,
   renderLedger,
@@ -278,4 +279,25 @@ test('applyVerdict: 승인된 P1 뒤의 새 지적은 있던 등록 규칙(동�
   const s = ledgerStatus(l);
   assert.equal(s.state, 'failure');
   assert.match(s.description, /열린 차단 지적 2건: F2, F4, 제작자 승인 1/);
+});
+
+// --- 구현 대기(parked, Issue #212)
+
+test('applyOwnerAccepts: 구현 대기인 P1에 대한 제작자 승인 댓글은 반영되지 않는다. 열림으로 되돌아온 뒤에는 반영된다', () => {
+  const parked = ledger(entry({ severity: 'P1', status: 'parked', openedAt: T0 }));
+  const accepts = [{ id: 'F1', commentId: 100, at: T1 }];
+  const held = applyOwnerAccepts(parked, accepts);
+  assert.equal(held.ledger.findings[0].status, 'parked');
+  assert.deepEqual(held.applied, []);
+  assert.deepEqual(
+    held.ignored.map((x) => [x.id, x.reason]),
+    [['F1', '열린 지적이 아니다']],
+  );
+  assert.deepEqual(held.reopened, []);
+  const back = applyOwnerAccepts(parkFor(parked, false), accepts);
+  assert.equal(back.ledger.findings[0].status, 'accepted');
+  assert.deepEqual(
+    back.applied.map((a) => a.id),
+    ['F1'],
+  );
 });
