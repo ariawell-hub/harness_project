@@ -93,6 +93,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-26 계획 검증 4회차(head `fb5672c`): Claude 승인, Codex 수정 요청(P1 하나, F12: check suite 조회의 기본 `latest` 필터가 최초 suite를 빠뜨릴 수 있으니 `filter=all`을 쓰라). 반박한다. 확인(2026-11-26, `commits/5027f12…/check-suites`): 쿼리 없이, `?filter=latest`, `?filter=all` 세 경우 모두 Actions suite 넷(`03:40:49Z`, `03:40:51Z`, `04:18:30Z`, 승인 뒤 `04:36:30Z`)을 같게 돌려준다. `filter`는 check run 목록의 인자이고 check suite 목록은 같은 커밋의 suite를 모두 준다. 대신 읽기 경로 테스트에 "한 커밋의 suite 여럿(승인 전·후)을 거르지 않고 모두 넘긴다"를 더했다(step0 작업 5).
 - 2026-11-26 계획 검증 5회차(head `aa92dc4`): 두 검증자 승인(G1, F12 반박 받아들여짐).
 - 2026-11-26 구현 전에 읽다가 범위 밖 파일을 찾았다: `scripts/test/harness-guard.test.ts`의 "신호가 있으면 risk-gate가 높음 → 제작자 head 승인이 있어야 통과"가 리뷰의 `commitId`로 승인을 주고 success를 단언한다. 새 규칙에서는 승인 자료(suite)를 함께 줘야 한다. 관련 파일과 step0 작업 5에 더하고 계획만 다시 올린다(코드는 아직 커밋하지 않았다). `scripts/test/revert-check.test.ts`는 승인 리뷰가 없는 failure만 단언해, 승인 리뷰가 없으면 자료를 읽기 전에 failure로 끝내는 순서로 두면 그대로 통과한다.
+- 2026-11-26 계획 검증 6회차(head `9b9a5f9`): Claude 승인, Codex 수정 요청(P1 둘). 둘 다 받아들였다. F13(harness-guard 테스트에 승인 자료만 더하면 merge-base 코드에서도 통과해 R5 test-effect에 걸린다) → "승인 자료 없이 리뷰의 `commitId`만 맞으면 error" 단언을 더한다(새 동작, merge-base에서는 success). F14(승인 리뷰가 없는 위험도 높음 PR에서 자료를 읽지 않는다는 조건을 검증하지 않는다) → `ci.test.ts`의 `gates` 테스트에서 부른 횟수로 단언하게 했다(step0 작업 5). 코드는 아직 커밋하지 않았다.
 
 ## 의사결정 로그
 
