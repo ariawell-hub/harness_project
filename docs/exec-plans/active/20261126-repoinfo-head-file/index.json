@@ -4,7 +4,8 @@
     {
       "step": 0,
       "name": "end-of-revs",
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-11-26T13:45:33+09:00"
     }
   ]
 }
