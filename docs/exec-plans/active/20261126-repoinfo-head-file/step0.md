@@ -5,6 +5,7 @@
 - `ARCHITECTURE.md`, `docs/harness/architecture.md`(`lib/git.ts` 줄)
 - `scripts/lib/git.ts`의 `REPO_DIRS_ARGS`, `repoInfo`, `toRepoInfo`
 - `scripts/test/repo-info.test.ts`(있던 테스트 다섯, `spawned`와 `expected` 도우미)
+- `scripts/test/metrics-allow.ts`의 `GIT_READ_SHAPES`(`rev-parse` 꼴)와 그 위 주석, `scripts/test/metrics-command.test.ts`의 `REPO_INFO_GIT`
 - 계획 `docs/exec-plans/active/20261126-repoinfo-head-file/plan.md`의 수용 기준
 
 ## 작업
@@ -16,17 +17,19 @@
    - (나) 빠른 경로의 git 호출이 종료 코드 0으로 끝나도 출력의 다섯째 줄이 정확히 `--`가 아니면(다섯째 줄이 다른 글, 줄이 넷, 줄이 여섯) 예전 경로로 간다. `spawned`처럼 `spawnSync`를 감싸, 빠른 경로 호출(인자에 `--abbrev-ref=loose`가 있는 것)에만 꾸민 출력과 종료 코드 0을 돌려주고 나머지는 실제로 실행한다. 예전 경로가 불렸는지(`symbolic-ref`), 돌려준 값이 `expected(cwd)`와 같은지 단언한다.
    - (다) 커밋이 있는 리포의 detached HEAD, 브랜치와 같은 짧은 이름의 태그·원격 추적 ref가 있을 때 `repoInfo`가 git을 한 번만 띄우고 값이 `expected(cwd)`와 같다(있던 77행 테스트는 값만 본다).
 2. **구현**: `scripts/lib/git.ts`의 `repoInfo` 빠른 경로 인자 끝에 `--`를 더한다(`[...REPO_DIRS_ARGS, '--abbrev-ref=loose', 'HEAD', '--']`). 출력이 다섯 줄이고 다섯째 줄이 정확히 `--`일 때만 넷째 줄을 브랜치로 쓴다. 그 밖에는 지금처럼 예전 경로로 간다. 함수의 설명 주석을 맞춘다.
+   - 지표 명령의 허용 목록이 이 명령의 인자를 정확히 못박고 있다. `scripts/test/metrics-allow.ts`의 `GIT_READ_SHAPES` `rev-parse` 꼴 끝에 `'--'`를 더하고(옛 꼴은 남기지 않는다), `scripts/test/metrics-command.test.ts`의 `REPO_INFO_GIT` 끝에 ` --`를 더한다. 다른 꼴과 단언은 그대로다.
 3. **문서**: `docs/harness/architecture.md`의 `lib/git.ts` 줄에 적힌 빠른 경로 명령에 끝의 `--`와 다섯째 줄 확인을 반영한다.
 4. **기록**: 변경 조각 `docs/harness/changes/20261126-repoinfo-head-file-s0.md`에 CHANGELOG 한 줄(Issue #252, #236의 회귀를 고쳤다는 것, git 실행 횟수는 그대로라는 것). 설계서는 고치지 않으므로 `## 설계서 변경 이력`을 두지 않는다.
 
 ## Acceptance Criteria
 
 ```bash
-node --test scripts/test/repo-info.test.ts
+node --test scripts/test/repo-info.test.ts scripts/test/metrics-command.test.ts
+grep -qF "'--abbrev-ref=loose', 'HEAD', '--'" scripts/test/metrics-allow.ts
 test "$(grep -c '^test(' scripts/test/repo-info.test.ts)" = 8
 grep -qF "'--abbrev-ref=loose', 'HEAD', '--'" scripts/lib/git.ts
 grep -qF "abbrev-ref=loose HEAD --" docs/harness/architecture.md
-BASE="$(git merge-base HEAD origin/main)" && test "$(git diff --name-only "$BASE" HEAD -- scripts | sort | tr '\n' ' ')" = "scripts/lib/git.ts scripts/test/repo-info.test.ts "
+BASE="$(git merge-base HEAD origin/main)" && test "$(git diff --name-only "$BASE" HEAD -- scripts | sort | tr '\n' ' ')" = "scripts/lib/git.ts scripts/test/metrics-allow.ts scripts/test/metrics-command.test.ts scripts/test/repo-info.test.ts "
 grep -qF 'Issue #252' docs/harness/changes/20261126-repoinfo-head-file-s0.md
 node scripts/harness.ts check
 ```
@@ -36,3 +39,4 @@ node scripts/harness.ts check
 - `scripts/test/repo-info.test.ts`의 있던 테스트를 고치지 마라. 이유: 있던 동작(값, git 실행 횟수)이 그대로임을 보이는 근거다.
 - `repoInfo`가 보통 경우에 git을 두 번 이상 띄우게 하지 마라. 이유: Issue #230(Windows 속도)의 목적이다.
 - `scripts/lib/git.ts`의 다른 함수를 바꾸지 마라. 이유: 범위 밖이다.
+- 지표 허용 목록에 옛 `rev-parse` 꼴을 남기거나 다른 꼴을 넓히지 마라. 이유: 허용 목록은 지표 명령이 띄우는 프로세스를 정확히 못박는 검사다(R4). 바뀐 인자 하나만 맞춘다.
