@@ -1,4 +1,0 @@
-{
-  "plan": "20261125-plan-symlink",
-  "steps": [{ "step": 0, "name": "safe-read", "status": "pending" }]
-}
