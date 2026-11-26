@@ -696,9 +696,26 @@ test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승�
   assert.equal(get(no, 'risk-gate').state, 'failure');
   const yes = await runGates({
     ...o,
-    reviews: [{ user: 'maker', state: 'APPROVED', commitId: head, submittedAt: 't' }],
+    reviews: [
+      { user: 'maker', state: 'APPROVED', commitId: head, submittedAt: '2026-11-14T01:00:00Z' },
+    ],
+    // 승인 head는 리뷰 전에 생긴 Actions check suite로 정한다(Issue #250)
+    approvalInputs: async () => ({
+      suites: {
+        [head]: [{ appId: 15368, headBranch: o.branch, createdAt: '2026-11-14T00:00:00Z' }],
+      },
+      forcePushedAt: [],
+    }),
   });
   assert.equal(get(yes, 'risk-gate').state, 'success');
+  // 승인 자료가 없으면 리뷰의 commitId가 head여도 승인을 확인할 수 없다(GitHub이 그 값을 옮겨 보고한다, Issue #250)
+  const unread = await runGates({
+    ...o,
+    reviews: [
+      { user: 'maker', state: 'APPROVED', commitId: head, submittedAt: '2026-11-14T01:00:00Z' },
+    ],
+  });
+  assert.equal(get(unread, 'risk-gate').state, 'error');
 });
 
 // ---------- 파일 이름을 글자 그대로 읽는다 (TD-28, Issue #218) ----------

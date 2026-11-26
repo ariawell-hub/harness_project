@@ -977,7 +977,7 @@ pnpm test src/auth/login-guard.spec.ts
 | `plan-gate` | 계획 파일·필수 섹션·`size`·`risk`. 중·대는 코드 없는 커밋에서 받은 계획 검증 결과와 핵심 섹션 해시 일치. 이 PR이 맡은 step이 `completed`(마지막 step이면 계획 전체, 8.3절). 자기 step 파일의 작업·AC·금지사항을 바꾸지 않았는지, "발견 사항"마다 처리가 적혀 있는지(8.2~8.3절) | R1 |
 | `review/claude`, `review/codex` | 위험도에 맞는 검증자의 승인(아래 결속 기준) | R12 |
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
-| `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
+| `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고, 승인 head(리뷰 제출 때의 PR head, 10.3절)가 지금 head이거나 그 뒤로 main 병합만 더했다 | R13, R20 |
 | `deps-guard` | lockfile 전체 변경 검사 | R17 |
 | `harness-guard` | 보호 경로 변경 시 체크리스트·변경 기록(`CHANGELOG` 또는 그 PR의 변경 조각. 설계서를 바꿨으면 설계서 기록도)·하네스 자체 테스트(`gates` 워크플로의 `selftest` job 결과를 기록 job이 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 success가 아니다. 10.4절), PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한 탐지, 기존 자체 테스트 파일의 수정·삭제 표시, 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
@@ -996,9 +996,15 @@ pnpm test src/auth/login-guard.spec.ts
 | 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다, PR이 바꾼 파일의 내용이 옛 head와 바이트 단위로 같다. 위험도 높음은 patch-id가 같아도 다시 검증 |
 | 계획 전용 커밋 | — | 진행 로그·상태·위치만 바뀌었으면 LLM 재검증 없이 `plan-gate`만 실행 |
 | 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC·금지사항 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
-| 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
+| 제작자 승인(위험도 높음) | 승인 head(H0): 리뷰 제출 때 PR head였던 커밋. 리뷰 제출보다 앞서 생긴 Actions check suite로 정한다(0.2절 설정 + `risk-gate`) | main 병합으로만 갱신했고 다음을 모두 만족하면 이어받는다: H0가 head의 조상이다, H0 뒤 커밋(main에 없는 것)이 모두 main을 들여온 병합이다, patch-id가 같다, PR이 바꾼 파일의 내용이 바이트 단위로 같다, H0 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다. 그 밖의 커밋이 생기면 다시 승인 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
+- **제작자 승인 결속 구현**(Issue #250. `scripts/gates/risk-gate.ts`의 `ownerApproval`, `scripts/ci/binding.ts`의 `ownerApprovalCarry`, `scripts/ci/gates.ts`의 `readApprovalInputs`)
+  - 리뷰가 보고하는 커밋(`commit_id`)은 쓰지 않는다. PR #226에서 승인 뒤 main 병합 커밋 둘을 올리자 REST·GraphQL 모두 그 리뷰의 커밋을 새 head로 보고해, `commit_id === head`로 보던 `risk-gate`가 다시 승인 없이 통과했다.
+  - 승인 head(H0): 제작자의 마지막 판정 리뷰가 승인이면, PR 커밋마다 GitHub Actions App(`ACTIONS_APP_ID`)이 PR head 브랜치에서 만든 check suite의 가장 이른 생성 시각을 보고, 그 시각이 리뷰 제출보다 엄격히 앞선(초 단위) 커밋을 후보로 삼는다(제출 전에 push됐다). H0는 후보 가운데 이력의 끝(나머지 후보 모두의 후손, PR 체크아웃의 `git merge-base --is-ancestor`)이다. suite 시각은 GitHub 서버 시각이고 push 뒤에만 생기지만 push 순서와 뒤바뀔 수 있어(지연) 끝을 고르는 데 쓰지 않는다. 강제 push가 없으면 후보는 한 줄을 이루고, 그 끝은 제출 때의 head이거나(그 suite가 늦으면) 그 조상이다(조상이면 이어받기 조건이 더 엄격해질 뿐이다). 승인 뒤 같은 커밋에 생긴 suite(재판정)는 H0를 바꾸지 않는다.
+  - 모호하면 승인으로 보지 않는다: H0의 첫 suite가 제출 60초 안이다(같은 초, 서비스 사이 시계 차이, 승인 직전 push), 후보가 한 줄 이력을 이루지 않거나 조상 관계를 읽지 못한다.
+  - PR에 head 강제 push 이벤트가 하나라도 있으면(시각과 무관하게) 승인으로 보지 않는다. 강제 push가 있으면 suite 시각(늦게 생길 수 있다)으로 제출 때의 head를 복원할 수 없다: 강제 push로 사라진 승인 head 대신 옛 커밋이 잡히거나, 강제 push 뒤 옛 head의 suite가 늦게 생겨 H0로 잡힌다. 강제 push가 없으면 head는 fast-forward로만 바뀌어, 늦게 생긴 suite가 가리키는 커밋은 제출 때 head의 조상이고 이어받기 조건이 더 엄격해질 뿐이다. 하네스는 강제 push를 하지 않는다(R2). 강제 push가 있었던 PR은 새 PR로 다시 올린다.
+  - 이어받으면 상태 설명이 `위험도 높음, 제작자 head 승인 이어받음 <H0 12자리>: …`다. 승인 리뷰가 없으면 자료를 읽지 않고 failure, 자료(PR 커밋, 커밋별 check suite, 강제 push 이벤트)를 읽지 못하면 error다(fail-closed). 자료는 위험도가 높음이고 승인 리뷰가 있을 때만 판정 job의 읽기 토큰(`pull-requests`·`checks`)으로 읽는다. PR 커밋이 250개에 닿으면 목록이 잘렸을 수 있어 읽지 못한 것으로 본다.
 - **계획 검증(G1) 구현**(`scripts/ci/plan-hash.ts`, `scripts/gates/plan-gate.ts`)
   - 계획 해시: `plan.md`의 "목표와 수용 기준"·"범위 / 비범위"·"관련 파일·문서" 섹션과 계획 폴더의 모든 `step<N>.md`(번호순)의 "작업"·"Acceptance Criteria"·"금지사항" 섹션을 이름과 함께 이어 sha256(64자)을 낸다. 줄 끝 공백과 섹션 앞뒤 빈 줄은 뗀다. frontmatter, 진행·의사결정 로그, `index.json`, 폴더 위치(`active/`·`completed/`), step의 "읽어야 할 파일"은 넣지 않는다. step에서 묶는 섹션 목록은 `scripts/lib/plan.ts`의 `STEP_BOUND_SECTIONS` 한 곳에 있고, 자기 step 불변 규칙도 같은 목록을 쓴다. 이 목록을 바꾸면 그 전에 기록된 계획 승인이 무효가 되므로, 원장에 계획 승인이 기록된 채 열려 있는 PR이 없을 때 바꾼다. 그래서 계획 전용 커밋(완료 처리)으로는 해시가 바뀌지 않는다.
   - `plan-gate`는 중·대 규모 계획에서 차례로 본다. (a) merge-base에 있는 같은 계획의 해시가 지금 해시와 같으면 통과(이미 main에 들어간 계획이다. 뒤 step의 PR이 여기에 해당한다). (b) 아니면 원장의 `planReview.hash`가 지금 해시와 같고 두 검증자가 모두 `approvals`에 있으면 통과. (c) 그 밖은 실패. 뒤 step의 PR에서 핵심 섹션을 고치면 (a)가 성립하지 않아 그 PR에서 다시 검증받는다(8.2절).
@@ -1059,7 +1065,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 기록 job | `pull_request_target` (main 정의) | 실행하지 않는다 | 검증 App 키(`recorder` environment). LLM 없음 |
 | revert 워크플로: 결정 job(`plan`) | `workflow_run`(`check` 완료, main 정의). main의 push 실행이 실패했을 때만 | 실행하지 않는다(main 체크아웃의 스크립트만) | 비밀·environment 없음. 토큰은 읽기뿐(`contents`·`pull-requests`·`checks`) |
 | revert 워크플로: 실행 job(`act`) | 위와 같음. 결정이 "아무것도 하지 않음"이 아닐 때만 | 실행하지 않는다 | revert용 봇 토큰(`revert` environment)으로 실패한 job 재실행, `revert/<SHA>` 브랜치 push·PR·자동 병합, Issue 재오픈·댓글. 워크플로 토큰에는 쓰기 권한 없음. LLM 없음. 결정 job의 출력은 형식을 다시 검사한 뒤에만 쓴다 |
-| 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
+| 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을, `risk-gate`가 PR 커밋의 check suite를 읽는 `checks`) |
 
 - 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
   - **자체 테스트 합치기**(12.4절): 판정 job은 PR이 보호 경로를 바꿨는지를 job 출력 `selftest`(`true`·`false`. 판단하지 못하면 `true`)로 낸다. `true`면 `selftest` job이 `node base/scripts/harness.ts self-test --harness pr`로 main의 실행기·시나리오를 PR의 하네스에 대해 돌리고, 종료 코드와 무관하게 보고서(시나리오별 결과)를 job 출력으로 넘긴다. 이 job은 하네스의 의존성을 설치하지 않지만 gitleaks는 `check` 워크플로와 같은 버전·체크섬으로 설치한다. runner 시나리오가 샘플 리포에서 `check`를 돌리고 그 시크릿 스캔에 gitleaks가 필요하기 때문이다(없으면 그 시나리오들이 실패한다). 기록 job은 그 보고서를 형식·head SHA·시나리오 id 형식(`[a-z0-9-]{1,40}`)으로 검사해 `harness-guard` 결과에 합친다(`scripts/ci/selftest-result.ts`). 보고서가 없거나 깨졌거나 시나리오가 0개면 `error`, 통과하지 못한 시나리오가 있으면 `failure`, 모두 통과면 설명 끝에 `자체 테스트 통과 <N>`을 붙인다. `harness-guard` 자신의 실패·오류는 그대로 남는다. 판정 job이 `selftest` 값을 남기지 못했으면(빈 값) 필요한 것으로 본다. 보고서는 PR 코드를 실행한 job이 쓴 값이라, 상태 설명에는 형식 검사를 통과한 시나리오 id와 개수만 넣고 보고서의 글은 넣지 않는다.
