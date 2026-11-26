@@ -1,0 +1,11 @@
+{
+  "plan": "20261122-plan-review-parked",
+  "steps": [
+    {
+      "step": 0,
+      "name": "parked",
+      "status": "completed",
+      "completed_at": "2026-11-23T01:26:08+09:00"
+    }
+  ]
+}
