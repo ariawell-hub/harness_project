@@ -131,10 +131,10 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 ## 발견 사항
 
-- 옛 방식(check suite 시각으로 승인 head 추정)의 남은 위험과 경계 사례는 진행 로그 F15~F20에 있다. 새 방식에서는 쓰지 않는다.
-- 테스트 리포 `ariawell-hub/harness-ops-lab`이 봇 토큰으로 보이지 않는다(2026-11-26, `GET repos` 404). 지운 것인지 권한이 바뀐 것인지 제작자에게 알린다.
-- 규칙 세트의 `created_at`(16:11:33Z)과 봇이 처음 본 시각(16:18:41Z)이 다르다. step1의 `github.dismissStaleSince`는 계획대로 늦은 쪽(`rule.firstSeenAt`)을 쓴다. 그 사이에 받은 승인(#253·#254의 승인 포함)은 step1 병합 뒤 열려 있으면 다시 받아야 한다.
-- 일반 커밋에서 GitHub은 리뷰 커밋을 새 head로 옮기지 않는다. `gates`가 철회 직전에 리뷰를 읽어도 리뷰 커밋이 head가 아니라 failure다.
+- 옛 방식(check suite 시각으로 승인 head 추정)의 남은 위험과 경계 사례는 진행 로그 F15~F20에 있다. 새 방식에서는 쓰지 않는다. → 처리: 해당 없음
+- 테스트 리포 `ariawell-hub/harness-ops-lab`이 봇 토큰으로 보이지 않는다(2026-11-26, `GET repos` 404). 지운 것인지 권한이 바뀐 것인지 제작자에게 알린다. → 처리: #250
+- 규칙 세트의 `created_at`(16:11:33Z)과 봇이 처음 본 시각(16:18:41Z)이 다르다. step1의 `github.dismissStaleSince`는 계획대로 늦은 쪽(`rule.firstSeenAt`)을 쓴다. 그 사이에 받은 승인(#253·#254의 승인 포함)은 step1 병합 뒤 열려 있으면 다시 받아야 한다. → 처리: [lab/approval-binding/README.md](../../../../lab/approval-binding/README.md)
+- 일반 커밋에서 GitHub은 리뷰 커밋을 새 head로 옮기지 않는다. `gates`가 철회 직전에 리뷰를 읽어도 리뷰 커밋이 head가 아니라 failure다. → 처리: [lab/approval-binding/README.md](../../../../lab/approval-binding/README.md)
 
 ## 열린 질문
 
