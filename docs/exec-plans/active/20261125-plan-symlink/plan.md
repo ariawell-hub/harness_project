@@ -2,7 +2,7 @@
 id: 20261125-plan-symlink
 issue: 194 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -92,6 +92,7 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
   - F8: `root` 자체가 심볼릭 링크면 그 아래 자리의 `lstat`이 링크를 따라간다. → `root`(`path.resolve`로 끝의 `/`를 뗀다)도 `lstat`해 링크이거나 폴더가 아니면 자리 `.`로 `PlanPathError`. 단위 테스트(끝에 `/`가 붙은 꼴 포함)와, 링크인 `root`에서 `planGate`가 막히는 통합 테스트를 더했다.
   - F9: 색인을 읽지 못한 오류(링크가 아닌 일반 오류)를 `planAuthor`가 다시 던져, `planReview`가 위험도 계산의 `catch`(high)에 닿기 전에 멈췄다. → `planAuthor`는 어떤 오류든 `''`이다. 같은 실패가 위험도 계산에서도 나서 high와 두 검증자가 된다. 깨진 색인에서 `planReview`가 `{ risk: high, author: '', claude: true, codex: true }`인 테스트를 더했다.
   - F10: 검증자 입력(계획 파일)에 지금 구현의 AC·`check`·`test-effect` 결과가 없었다. → 아래 "검증 방법과 결과"에 이번 구현의 실제 결과를 적었다.
+- 2026-11-26T10:17:35+09:00 step0 재작업: 구현 검증 2회차(Codex): F8 root 검사를 git 색인 읽기보다 앞에, F10 실제 check 결과를 커밋 SHA와 함께 적는다
 
 ## 의사결정 로그
 
