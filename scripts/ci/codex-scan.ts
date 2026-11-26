@@ -17,64 +17,11 @@ export type CodexScan =
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 /**
- * 시각 뒤에 붙은 시간대처럼 생긴 글의 머리: 대문자 약어(`PST`, `UTC+9`, `CEST`), `UTC`·`GMT`(대소문자 무시),
- * IANA 이름(`America/Los_Angeles`), 부호 오프셋(`+09:00`, `-08:00`), 괄호·`/`로 붙인 표기(`(KST)`, `[UTC]`, `/PST`),
- * `Time`으로 끝나는 이름(`Pacific Time`, `Eastern Standard Time`)
+ * 시각 표기 바로 뒤가 이 꼴일 때만 시각을 읽는다: 글의 끝, 공백뿐, 또는 문장 끝(`.`·`!`·`?` 바로 뒤에 글자·숫자가 붙지 않는다).
+ * 그 밖의 글이 이어지면 시간대인지 안내인지 가리지 않고 시각을 모르는 것으로 본다(제작자 결정 2026-11-26: 가리는 규칙은
+ * 판정 F5~F10에서 반례가 되풀이됐다. 틀린 시각을 적는 일을 없애고, 드문 꼴에서 시각을 잃는 쪽을 택한다)
  */
-const TIME_ZONE_LIKE =
-  /^(?:[A-Z]{2,5}(?![a-z])|[A-Z][A-Za-z_]+\/[A-Za-z_]|[+-]\d|[([{/]|(?:[A-Z][a-z]+ ){1,3}Time\b)/;
-/**
- * 대소문자를 가리지 않고 알아보는 시간대 약어와 이름(판정 F7: `pst`, `Pst`, `pacific time`). 약어는 낱말 하나로만 본다
- * (`pstx`는 아니다). 영어 낱말과 겹치지 않는 약어는 뒤에 안내가 바로 이어져도 시간대다(판정 F10: `pst or upgrade`)
- */
-const TIME_ZONE_STRONG = new RegExp(
-  '^(?:(?:' +
-    [
-      'utc',
-      'gmt',
-      'pst',
-      'pdt',
-      'mst',
-      'mdt',
-      'cst',
-      'cdt',
-      'edt',
-      'akst',
-      'akdt',
-      'hst',
-      'adt',
-      'nst',
-      'ndt',
-      'bst',
-      'ist',
-      'cet',
-      'cest',
-      'eet',
-      'eest',
-      'msk',
-      'sast',
-      'kst',
-      'jst',
-      'hkt',
-      'sgt',
-      'ict',
-      'wib',
-      'aest',
-      'aedt',
-      'acst',
-      'acdt',
-      'awst',
-      'nzst',
-      'nzdt',
-    ].join('|') +
-    ')(?![a-z])|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?: standard| daylight)? time\\b)',
-  'i',
-);
-/**
- * 영어 낱말·흔한 줄임과 겹치는 약어(`west`, `est.`, `et`)는 홀로 붙었을 때만 시간대로 본다(판정 F9): 글의 끝,
- * 문장부호, 부호 오프셋이 이어질 때. 뒤에 낱말이 이어지면 안내 문장의 첫 낱말이다(`West Coast users …`)
- */
-const TIME_ZONE_WEAK = /^(?:west|wet|est|et|ct|mt|pt|ast)(?=\s*$|[.,;:!?)\]]|\s*[+-]\d)/i;
+const TIME_END = /^(?:\s*$|[.!?](?![\p{L}\p{N}]))/u;
 const UNAVAILABLE_RE = /^usage-limit(?:@(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z)?$/;
 
 /** 그 UTC 시각이 실재하면 `YYYY-MM-DDTHH:MMZ`, 아니면 null */
@@ -98,15 +45,8 @@ export function usageLimitOutput(message: string): string | null {
       message,
     );
   if (!m) return 'usage-limit';
-  // 시각 표기의 끝을 본다(판정 F5·F6): 글의 끝이나 문장 끝(`.`·`!`·`?`)이면 받는다. 그 밖에는 공백·쉼표·쌍반점 뒤의
-  // 첫 낱말이 시간대처럼 생겼을 때만 시각을 모르는 것으로 본다. 안내 문구(`, or upgrade to Pro.`)는 시각을 지킨다
-  const rest = message.slice(m.index + m[0].length);
-  const head = rest.replace(/^[\s,;]*/, '');
-  if (
-    !/^[.!?]/.test(rest) &&
-    (TIME_ZONE_LIKE.test(head) || TIME_ZONE_STRONG.test(head) || TIME_ZONE_WEAK.test(head))
-  )
-    return 'usage-limit';
+  // 시각 표기의 끝을 본다(엄격한 규칙, TIME_END)
+  if (!TIME_END.test(message.slice(m.index + m[0].length))) return 'usage-limit';
   const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
   const h12 = Number(m[4]);
   if (h12 < 1 || h12 > 12) return 'usage-limit';

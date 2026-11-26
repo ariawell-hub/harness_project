@@ -148,30 +148,37 @@ test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로
     'Nov 21st, 2026 8:36 AM west',
     'Nov 21st, 2026 8:36 AM west.',
     'Nov 21st, 2026 8:36 AM pst, or upgrade to Pro.',
-    // 판정 F10: 영어 낱말과 겹치지 않는 약어는 뒤에 안내가 바로 이어져도 시간대다
+    // 판정 F10: 약어 뒤에 안내가 바로 이어지는 꼴
     'Nov 21st, 2026 8:36 AM pst or upgrade to Pro.',
     'Nov 21st, 2026 8:36 AM kst and try later',
     'Nov 21st, 2026 8:36 AM utc or later',
+    'Nov 21st, 2026 8:36 AM est or upgrade to Pro.',
+    // 문장 끝 부호에 바로 붙인 표기
+    'Nov 21st, 2026 8:36 AM.PST',
+    'Nov 21st, 2026 8:36 AM.utc',
+    // 제작자 결정(2026-11-26, 엄격한 규칙): 시각 뒤에 문장 끝이 아닌 글이 이어지면 시간대인지 안내인지 가리지 않고
+    // 시각을 모르는 것으로 본다. 틀린 시각을 적는 일을 없앤다(판정 F5~F10에서 가리는 규칙의 반례가 되풀이됐다)
+    'Nov 21st, 2026 8:36 AM, or upgrade to Pro.',
+    'Nov 21st, 2026 8:36 AM or upgrade to Pro (https://openai.com/chatgpt/pricing).',
+    'Nov 21st, 2026 8:36 AM; see the usage page',
+    'Nov 21st, 2026 8:36 AM, Upgrade to Pro.',
+    'Nov 21st, 2026 8:36 AM Upgrade to Pro',
+    'Nov 21st, 2026 8:36 AM, West Coast users should check their local time.',
+    'Nov 21st, 2026 8:36 AM, it may take a while',
   ])
     assert.equal(usageLimitOutput(`usage limit. try again at ${at}`), 'usage-limit', at);
-  // 시각 표기 뒤가 글의 끝·문장 끝이거나, 시간대가 아닌 안내 문구면 시각을 읽는다(판정 F6: 쉼표 뒤의 안내)
+  // 시각 표기 바로 뒤가 글의 끝, 공백뿐, 또는 문장 끝(`.`·`!`·`?` 바로 뒤에 글자·숫자가 붙지 않는다)일 때만 시각을 읽는다.
+  // 실제 문구는 모두 마침표로 끝난다
   for (const tail of [
     '',
     '.',
     '. Upgrade to Pro.',
+    '. Visit https://chatgpt.com/settings/usage to purchase more credits.',
     '!',
     '?',
     ' ',
     ' \n',
     '.\u0007 x',
-    ', or upgrade to Pro.',
-    ' or upgrade to Pro (https://openai.com/chatgpt/pricing).',
-    '; see the usage page',
-    ', Upgrade to Pro.',
-    ' Upgrade to Pro',
-    // 판정 F9: 약어와 같은 글자로 시작하는 안내 문장(뒤에 낱말이 이어진다)은 시간대가 아니다
-    ', West Coast users should check their local time.',
-    ', it may take a while',
   ])
     assert.equal(
       usageLimitOutput(`usage limit. try again at Nov 21st, 2026 8:36 AM${tail}`),
