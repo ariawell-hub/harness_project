@@ -4,8 +4,7 @@
     {
       "step": 0,
       "name": "safe-read",
-      "status": "completed",
-      "completed_at": "2026-11-26T09:39:53+09:00"
+      "status": "in_progress"
     }
   ]
 }

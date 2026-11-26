@@ -2,7 +2,7 @@
 id: 20261125-plan-symlink
 issue: 194 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -87,6 +87,7 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
 - 2026-11-26 계획 검증 4회차(head `b4d6cfa`): Claude 승인, Codex는 F6을 닫고 새 지적 하나(F7, P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
   - F7: 해시 계산기는 step 이름의 번호를 숫자로 바꿔 경로를 다시 만든다. 색인에만 있는 `step9007199254740993.md` 링크는 목록에 들어가지만 계산기는 반올림된 `step9007199254740992.md`를 읽어, 원래 링크를 거절하지 못한다. → 해시를 계산하기 전에 목록의 원래 이름으로 step 파일 자리를 확인한다(해시 입력은 그대로, step0 작업 3). 그 꼴의 테스트를 더했다(step0 작업 1, 수용 기준 3).
 - 2026-11-26 계획 검증 5회차(head `91a498b`): Claude·Codex 승인(지적 없음). 원장에 `계획 검증(G1): 해시 88815ead7ee4 · 승인: claude, codex`가 남았다(미룸 1: F4, P2). 로컬 구현(F5~F7 반영)을 올린다.
+- 2026-11-26T09:50:32+09:00 step0 재작업: 구현 검증 1회차(Codex P1 셋): F8 root 자체의 링크, F9 색인 읽기 실패 때 planReview가 high로 떨어지게, F10 검증 결과를 계획에 적는다
 
 ## 의사결정 로그
 
