@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
-import { gatesOutput, runGates, selfTestNeeded } from './ci/gates.ts';
+import { gatesOutput, readApprovalInputs, runGates, selfTestNeeded } from './ci/gates.ts';
 import { planCarry } from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
@@ -1044,6 +1044,17 @@ async function main(argv: string[]): Promise<number> {
               target,
             )
         : undefined;
+      // 제작자 승인 판정 자료(Issue #250): 위험도 높음이고 승인 리뷰가 있을 때만 runGates가 부른다
+      const approvalInputs =
+        Number.isInteger(number) && number > 0
+          ? () =>
+              readApprovalInputs({
+                api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                graphql: githubGraphql(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                repo: process.env.GITHUB_REPOSITORY ?? '',
+                pr: number,
+              })
+          : undefined;
       const r = await runGates({
         root,
         cfg,
@@ -1054,6 +1065,7 @@ async function main(argv: string[]): Promise<number> {
         prBody,
         planReview,
         targetCheck,
+        approvalInputs,
       });
       // 결과 파일에는 크기를 맞춘 결과를, 요약에는 원래 결과를 쓴다(ci/gates.ts의 gatesOutput)
       const output = gatesOutput(r);

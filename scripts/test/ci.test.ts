@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { reproJobViolations } from '../gates/harness-guard.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { runGates, summaryMarkdown } from '../ci/gates.ts';
+import { ACTIONS_APP_ID } from '../ci/protection.ts';
 import { recordStatuses } from '../ci/record.ts';
 import { REVIEW_DIR, writeReviewInput } from '../ci/review-input.ts';
 import { planReview } from '../ci/review-plan.ts';
@@ -121,6 +122,58 @@ test('runGates: 계획 없는 브랜치는 plan-gate failure, 첫 문제와 건�
   assert.match(pg.description, /계획 파일이 없다/);
   assert.ok(pg.details.length >= 1);
   assert.match(summaryMarkdown(r), /plan-gate/);
+});
+
+test('runGates: 위험도 높음이고 승인 리뷰가 있을 때만 승인 자료를 읽고, Actions App의 suite로 승인이 success다 (Issue #250)', async () => {
+  const hi = prRepo(PLAN.replace('risk: normal', 'risk: high'));
+  const cfg = loadConfig(hi.root);
+  const review = [
+    { user: 'maker', state: 'APPROVED', commitId: hi.head, submittedAt: '2026-11-26T01:00:00Z' },
+  ];
+  let asked = 0;
+  const inputs = (appId: number | null) => async () => {
+    asked++;
+    if (appId === null) return null;
+    return {
+      suites: { [hi.head]: [{ appId, headBranch: BRANCH, createdAt: '2026-11-26T00:00:00Z' }] },
+      forcePushedAt: [],
+    };
+  };
+  const gate = async (
+    r: { root: string; base: string; head: string },
+    reviews: typeof review,
+    appId: number | null,
+  ) => {
+    const out = await runGates({
+      root: r.root,
+      cfg: loadConfig(r.root),
+      base: r.base,
+      branch: BRANCH,
+      headSha: r.head,
+      reviews,
+      approvalInputs: inputs(appId),
+    });
+    return out.results.find((x) => x.context === 'risk-gate')!;
+  };
+  assert.equal(cfg.github.owner, 'maker');
+  const ok = await gate(hi, review, ACTIONS_APP_ID);
+  assert.equal(ok.state, 'success', ok.description);
+  assert.match(ok.description, /제작자 head 승인/);
+  assert.equal(asked, 1);
+  // 다른 App의 suite만 있으면 승인 head를 정하지 못한다
+  const other = await gate(hi, review, ACTIONS_APP_ID + 1);
+  assert.equal(other.state, 'failure', other.description);
+  assert.equal(asked, 2);
+  // 자료를 읽지 못하면 확인할 수 없다
+  assert.equal((await gate(hi, review, null)).state, 'error');
+  assert.equal(asked, 3);
+  // 승인 리뷰가 없으면 읽지 않고 failure
+  assert.equal((await gate(hi, [], ACTIONS_APP_ID)).state, 'failure');
+  assert.equal(asked, 3);
+  // 위험도가 높음이 아니면 읽지 않는다
+  const lo = prRepo();
+  assert.equal((await gate(lo, review, ACTIONS_APP_ID)).state, 'success');
+  assert.equal(asked, 3);
 });
 
 test('runGates: 검사가 예외를 던지면 그 context만 error', async () => {
