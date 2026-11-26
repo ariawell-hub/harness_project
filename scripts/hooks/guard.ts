@@ -1,194 +1,21 @@
-// L1 훅 진입점. Claude Code·Codex의 PreToolUse 훅이 stdin으로 JSON을 넘긴다.
+// L1 훅 진입 파일. Claude Code·Codex의 PreToolUse 훅이 stdin으로 JSON을 넘긴다(.claude/settings.json, .codex/hooks.json).
 // 차단은 종료 코드 2 + stderr 메시지(13.1절 훅 구현 규칙). 0이 아닌 다른 코드는 차단이 아니므로 쓰지 않는다.
 // 내부 오류가 나도 종료 코드 2로 막는다(fail-closed): R20은 L1에 기대기 때문이다(13.2절).
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { approvalPending, planRiskOf } from '../lib/approval.ts';
-import {
-  ConfigError,
-  resolveDbCommands,
-  resolveMcpGuard,
-  type DbCommandRule,
-} from '../lib/config.ts';
-import { hasCommits, tryRepoInfo, type RepoInfo } from '../lib/git.ts';
-import { findPlan, parseDoc } from '../lib/plan.ts';
-import { formatProblem } from '../lib/util.ts';
-import { evaluate, type GuardContext, type GuardInput } from './rules.ts';
-import { commandName, type Dialect } from './shell.ts';
+//
+// 실행 전용이다. 불리면 늘 검사하고, 직접 실행됐는지 판정하지 않는다(Issue #237): 실행 경로와 모듈 경로를 견주던
+// 판정은 링크를 거친 경로(링크한 폴더, macOS의 /tmp·/var 아래, Windows의 정션)로 불리면 거짓이 되어 검사 없이
+// 종료 코드 0으로 끝났다. 그래서 이 파일은 import하지 않는다(stdin을 읽고 프로세스를 끝낸다). 판정 코드는
+// decide.ts에 있고 테스트는 그쪽을 import한다.
+// 판정 모듈은 try 안에서 불러온다: 정적 import가 실패하면 Node가 종료 코드 1로 끝나 훅이 막지 못한다.
+import { readFileSync } from 'node:fs';
 
-type Json = Record<string, unknown>;
-
-const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash']);
-
-/**
- * 셸 도구 명령을 해석할 방언(ADR-0005, 설계서 13.1절).
- * Claude Code `PowerShell` 도구는 PowerShell, `Bash` 도구는 POSIX(Windows에서는 Git Bash).
- * Windows에서 형식을 실측하지 않은 그 밖의 셸 도구(Codex 등)는 두 방식으로 모두 판정한다(fail-closed).
- */
-function shellDialects(tool: string, platform: NodeJS.Platform): Dialect[] {
-  if (/^powershell$/i.test(tool)) return ['powershell'];
-  if (/^bash$/i.test(tool)) return ['posix'];
-  return platform === 'win32' ? ['posix', 'powershell'] : ['posix'];
-}
-
-function quote(a: string): string {
-  return /^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`;
-}
-
-function argvToScript(argv: string[]): string {
-  if (argv.length >= 3 && SHELLS.has(commandName(argv[0])) && /^-[a-z]*c$/.test(argv[1]))
-    return argv[2];
-  return argv.map(quote).join(' ');
-}
-
-export function patchFiles(patch: string): string[] {
-  const out: string[] = [];
-  for (const m of patch.matchAll(
-    /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm,
-  )) {
-    out.push((m[1] ?? m[2]).trim());
-  }
-  return out;
-}
-
-export function normalize(
-  payload: Json,
-  platform: NodeJS.Platform = process.platform,
-): GuardInput | null {
-  const tool = String(payload.tool_name ?? payload.toolName ?? '');
-  if (/^mcp__/i.test(tool)) {
-    // MCP 도구 입력의 command·cwd·patch는 도구마다 뜻이 달라 셸 명령이나 패치로 읽지 않는다
-    return {
-      kind: 'mcp',
-      tool,
-      input: payload.tool_input ?? payload.toolInput ?? payload.input ?? {},
-      cwd: String(payload.cwd ?? process.cwd()),
-    };
-  }
-  const ti = (payload.tool_input ?? payload.toolInput ?? payload.input ?? {}) as Json;
-  const cwd = String(ti.workdir ?? ti.cwd ?? payload.cwd ?? process.cwd());
-  const str = (x: unknown) => (typeof x === 'string' ? x : undefined);
-
-  const patch =
-    str(ti.patch) ??
-    (str(ti.input)?.includes('*** Begin Patch') ? str(ti.input) : undefined) ??
-    (str(ti.command)?.includes('*** Begin Patch') ? str(ti.command) : undefined);
-  if (/apply_patch/i.test(tool) || patch) {
-    return { kind: 'write', files: patchFiles(patch ?? ''), cwd };
-  }
-  if (/^(Read|NotebookRead|view|read_file|Grep|Glob)$/i.test(tool)) {
-    const f = str(ti.file_path) ?? str(ti.notebook_path) ?? str(ti.path);
-    return { kind: 'read', files: f ? [f] : [], cwd };
-  }
-  if (
-    /^(Edit|Write|MultiEdit|NotebookEdit|write_file|edit_file|create_file|str_replace_editor)$/i.test(
-      tool,
-    )
-  ) {
-    const f = str(ti.file_path) ?? str(ti.notebook_path) ?? str(ti.path);
-    return { kind: 'write', files: f ? [f] : [], cwd };
-  }
-  const cmd = ti.command ?? ti.cmd;
-  if (
-    /^(Bash|PowerShell|shell|exec_command|local_shell|unified_exec|run_shell_command|container\.exec)$/i.test(
-      tool,
-    ) ||
-    cmd !== undefined
-  ) {
-    const dialects = shellDialects(tool, platform);
-    if (Array.isArray(cmd))
-      return { kind: 'bash', command: argvToScript(cmd.map(String)), cwd, dialects };
-    if (typeof cmd === 'string') return { kind: 'bash', command: cmd, cwd, dialects };
-  }
-  return null;
-}
-
-function loadGuardConfig(root: string | null): {
-  dbPatterns: string[];
-  dbClients: string[];
-  dbCommands?: unknown;
-  mcp?: unknown;
-} {
-  if (!root) return { dbPatterns: [], dbClients: [] };
-  const f = path.join(root, 'harness.config.json');
-  if (!existsSync(f)) return { dbPatterns: [], dbClients: [] };
-  const cfg = JSON.parse(readFileSync(f, 'utf8')) as {
-    guard?: { dbPatterns?: string[]; dbClients?: string[]; dbCommands?: unknown; mcp?: unknown };
-  };
-  return {
-    dbPatterns: cfg.guard?.dbPatterns ?? [],
-    dbClients: cfg.guard?.dbClients ?? [],
-    dbCommands: cfg.guard?.dbCommands,
-    mcp: cfg.guard?.mcp,
-  };
-}
-
-/** 경로가 속한 리포(worktree). 아직 없는 파일이면 존재하는 가장 가까운 상위 폴더로 찾는다 */
-export function repoOfPath(abs: string): RepoInfo | null {
-  let d = abs;
-  while (!existsSync(d)) {
-    const up = path.dirname(d);
-    if (up === d) return null;
-    d = up;
-  }
-  if (!statSync(d).isDirectory()) d = path.dirname(d);
-  return tryRepoInfo(d);
-}
-
-/** worktree에 있는 계획의 frontmatter owner. 못 찾거나 못 읽으면 null(호출자가 막는다) */
-export function planOwnerOf(root: string, id: string): string | null {
-  const ref = findPlan(root, id);
-  if (!ref) return null;
+async function main(): Promise<void> {
+  let isConfigError: (e: unknown) => boolean = () => false;
   try {
-    const owner = parseDoc(readFileSync(path.join(root, ref.file), 'utf8')).frontmatter?.owner;
-    return typeof owner === 'string' && owner ? owner : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 판정 문맥. 작업자 이름 규칙은 new-task의 owner 기본값과 같다 */
-export function buildContext(
-  cwd: string,
-  worker = process.env.HARNESS_WORKER ?? 'session',
-): GuardContext {
-  const repo = tryRepoInfo(cwd);
-  const { dbPatterns, dbClients } = loadGuardConfig(repo?.root ?? null);
-  // guard.dbCommands도 guard.mcp처럼 메인 체크아웃의 설정으로 판정한다: worktree의 빈 목록이나 옛 설정이
-  // 메인의 차단을 풀 수 없다. Bash 명령을 판정할 때만 읽고(한 번 읽어 다시 쓴다), 틀리면 던져서 그 호출을 막는다
-  let dbCommands: DbCommandRule[] | null = null;
-  return {
-    repo,
-    hasCommits: repo ? hasCommits(repo.root) : undefined,
-    hasPlan: (root, id) => findPlan(root, id) !== null,
-    repoOf: repoOfPath,
-    planOwner: planOwnerOf,
-    worker,
-    approvalPending,
-    planRisk: planRiskOf,
-    dbPatterns,
-    dbClients,
-    dbCommands: () =>
-      (dbCommands ??= resolveDbCommands(loadGuardConfig(repo?.mainRoot ?? null).dbCommands)),
-    // MCP 규칙은 메인 체크아웃의 설정으로 판정한다(훅 코드도 그쪽 것이 돈다):
-    // worktree에서 고친, 아직 병합되지 않은 설정으로 규칙을 풀 수 없다. MCP 호출 때만 읽고, 틀리면 던져서 막는다
-    mcp: () => resolveMcpGuard(loadGuardConfig(repo?.mainRoot ?? null).mcp),
-  };
-}
-
-export function decide(payload: Json): string | null {
-  const input = normalize(payload);
-  if (!input) return null;
-  const p = evaluate(input, buildContext(input.cwd));
-  return p ? formatProblem(p) : null;
-}
-
-function main(): void {
-  let raw = '';
-  try {
-    raw = readFileSync(0, 'utf8');
-    const payload = JSON.parse(raw || '{}') as Json;
+    const { ConfigError } = await import('../lib/config.ts');
+    isConfigError = (e) => e instanceof ConfigError;
+    const { decide } = await import('./decide.ts');
+    const payload = JSON.parse(readFileSync(0, 'utf8') || '{}') as Record<string, unknown>;
     const msg = decide(payload);
     if (msg) {
       process.stderr.write(`하네스 L1 훅이 차단했다.\n${msg}\n`);
@@ -196,15 +23,37 @@ function main(): void {
     }
     process.exit(0);
   } catch (e) {
-    process.stderr.write(
-      e instanceof ConfigError
-        ? `하네스 L1 훅이 설정을 읽지 못해 안전을 위해 차단했다(fail-closed): ${e.message}\n` +
-            '고치는 법: 메인 체크아웃의 harness.config.json을 고쳐야 한다(보호 경로). 제작자에게 알려라. 근거: docs/harness/design.md 13.1절\n'
-        : `하네스 L1 훅 내부 오류로 안전을 위해 차단했다(fail-closed): ${(e as Error).message}\n` +
-            '고치는 법: scripts/hooks/guard.ts를 고치는 별도 계획을 만들어라. 근거: docs/harness/design.md 13.1절\n',
-    );
-    process.exit(2);
+    // 메시지를 쓰다가 다시 던져도 종료 코드 2로 끝난다
+    try {
+      process.stderr.write(failureMessage(e, isConfigError));
+    } finally {
+      process.exit(2);
+    }
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+/**
+ * fail-closed 메시지. 어떤 값이 와도 던지지 않는다: 던진 값은 Error가 아닐 수 있고(null, 문자열, 글로 바꾸다
+ * 던지는 객체), 설정 오류인지 가리다 던질 수도 있다(설정 모듈의 ConfigError가 클래스가 아닐 때)
+ */
+function failureMessage(e: unknown, isConfigError: (e: unknown) => boolean): string {
+  let config = false;
+  let why = '(설명할 수 없는 값)';
+  try {
+    config = isConfigError(e);
+  } catch {
+    // 가리지 못하면 내부 오류로 쓴다
+  }
+  try {
+    why = e instanceof Error ? e.message : String(e);
+  } catch {
+    // 위의 기본 설명을 쓴다
+  }
+  return config
+    ? `하네스 L1 훅이 설정을 읽지 못해 안전을 위해 차단했다(fail-closed): ${why}\n` +
+        '고치는 법: 메인 체크아웃의 harness.config.json을 고쳐야 한다(보호 경로). 제작자에게 알려라. 근거: docs/harness/design.md 13.1절\n'
+    : `하네스 L1 훅 내부 오류로 안전을 위해 차단했다(fail-closed): ${why}\n` +
+        '고치는 법: scripts/hooks/guard.ts·decide.ts를 고치는 별도 계획을 만들어라. 근거: docs/harness/design.md 13.1절\n';
+}
+
+await main();

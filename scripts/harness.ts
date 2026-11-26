@@ -560,6 +560,8 @@ async function main(argv: string[]): Promise<number> {
           changedSinceLastRound: changed,
           repro: reproMap,
           plan,
+          // 구현 대기(Issue #212): --mode가 plan일 때만 계획만 담은 head다. 없거나 다른 값이면 코드가 섞인 것으로 본다
+          planOnly: isPlan,
           api: ledgerToken ? githubLedgerApi(ledgerToken, process.env.GITHUB_API_URL) : null,
           post: githubStatusPoster({
             token,
@@ -654,6 +656,7 @@ async function main(argv: string[]): Promise<number> {
               number,
               recorderBot,
               owner: cfg.github.owner,
+              planOnly: pm.mode === 'plan',
             });
             ledger = r.ledger;
             rebuttals = r.rebuttals;
