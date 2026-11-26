@@ -20,7 +20,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 수용 기준:
 
-1. `risk-gate`는 리뷰가 보고하는 커밋(`commit_id`)에 기대지 않고, 제작자의 마지막 판정 리뷰(승인)가 **제출된 시각에 PR의 head였던 커밋**(승인 head, H0)을 하네스가 정한다. H0는 이 PR의 커밋 가운데 GitHub Actions App(`ACTIONS_APP_ID`)이 PR head 브랜치에서 만든 check suite의 첫 생성 시각이 리뷰 제출 시각보다 엄격히 앞선 것 중 가장 늦은 것이다(check suite의 생성 시각은 GitHub 서버 시각이고 봇이 만들 수 없다). H0의 첫 suite 시각이 제출 60초 안이거나, 그 시각 이후에 PR head 강제 push가 있으면 승인 head가 모호하다고 보고 승인으로 보지 않는다(같은 초, 시계 차이, 승인 직전 push, 강제 push로 승인 head가 PR 커밋 목록에서 사라진 경우).
+1. `risk-gate`는 리뷰가 보고하는 커밋(`commit_id`)에 기대지 않고, 제작자의 마지막 판정 리뷰(승인)가 **제출된 시각에 PR의 head였던 커밋**(승인 head, H0)을 하네스가 정한다. H0는 이 PR의 커밋 가운데 GitHub Actions App(`ACTIONS_APP_ID`)이 PR head 브랜치에서 만든 check suite의 첫 생성 시각이 리뷰 제출 시각보다 엄격히 앞선 것 중 가장 늦은 것이다(check suite의 생성 시각은 GitHub 서버 시각이고 봇이 만들 수 없다). H0의 첫 suite 시각이 제출 60초 안이면 승인 head가 모호하다고 보고 승인으로 보지 않는다(같은 초, 시계 차이, 승인 직전 push). PR에 head 강제 push 이벤트가 하나라도 있으면(시각과 무관하게) 승인으로 보지 않는다: 강제 push가 있으면 suite 시각(지연될 수 있다)으로 제출 때의 head를 복원할 수 없다(강제 push로 사라진 승인 head, 강제 push 뒤 늦게 생긴 옛 head의 suite). 그런 PR은 새 PR로 다시 올린다.
 2. 지금 head가 H0면 승인이다(지금과 같다).
 3. 지금 head가 H0가 아니면 다음을 모두 만족할 때만 승인을 이어받는다. 하나라도 아니면 `제작자 head 승인 필요`로 실패한다.
    - H0가 지금 head의 조상이다(강제 push로 이력이 바뀌지 않았다).
@@ -97,13 +97,18 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-26 계획 검증 7회차(head `dddfcbf`): 두 검증자 승인(G1).
 - 2026-11-26 테스트 먼저: 새 파일 `scripts/test/risk-gate-approval.test.ts` 21건(`ownerApproval` 표 11, `ownerApprovalCarry` 실제 git 6, `patchId` 비교 끝 1, `readApprovalInputs` 읽기 경로 3). 구현 전에는 `ownerApproval`이 없어 파일 전체가 실패했다.
 - 2026-11-26 구현: `risk-gate.ts`에 `lastOwnerDecision`·`ownerApproval`(옛 `ownerApprovedHead`를 지웠다), `riskGate`가 승인 리뷰 → 승인 자료 → 판정 순으로 본다. `binding.ts`에 `ownerApprovalCarry`와 `patchId`의 비교 끝 인자. `gates.ts`에 `readApprovalInputs`와 `approvalInputs` 연결(위험도 높음이고 승인 리뷰가 있을 때만 읽는다, App id는 `ci/protection.ts`의 `ACTIONS_APP_ID`). `harness.ts`의 `gates`가 `GH_TOKEN`으로 만든 읽기 함수를 넘긴다. 있던 테스트: `risk-gate.test.ts`(승인 판정 표를 `ownerApproval`로 옮기고 단언 그대로, 자료 없음 error 둘 추가), `harness-guard.test.ts`(승인 자료 추가, 자료 없음 error 단언 추가), `ci.test.ts`(`gates` 통합 테스트: Actions App의 suite면 success, 다른 App이면 failure, 자료 없음 error, 승인 리뷰 없음·위험도 보통은 읽지 않음). 다섯 파일 109건 통과. 설계서 10.3·10.4절, 절차서 5절, 변경 조각.
+- 2026-11-26 step0 구현 판정(head `de30f41`): Claude 승인(지적 없음), Codex 수정 요청(P0 하나, P1 하나). 둘 다 받아들였다.
+  - F15(P0): A의 후손 B가 head였다가 A로 강제 push된 뒤 B의 suite가 늦게 생기면, B의 첫 suite가 강제 push보다 늦어 "H0 뒤 강제 push" 규칙에 걸리지 않고 B가 H0가 된다. 제작자가 A를 승인한 뒤 B로 fast-forward하면 승인하지 않은 B가 통과한다. suite 시각은 push 순서를 늘 지키지 않으므로(지연), 강제 push가 있었던 PR에서는 시각으로 승인 head를 정할 수 없다. 규칙을 "PR에 강제 push 이벤트가 하나라도 있으면(시각과 무관하게) 승인으로 보지 않는다"로 바꾼다(수용 기준 1, step0 작업 1과 테스트). 강제 push가 없으면 head는 fast-forward로만 바뀌어, 늦게 생긴 suite가 가리키는 커밋은 제출 때 head의 조상이고 이어받기 조건이 더 엄격해질 뿐이다. 하네스는 강제 push를 하지 않으므로(R2) 정상 흐름은 걸리지 않는다. 강제 push가 있었던 PR은 새 PR로 다시 올린다.
+  - F16(P1): check suite 쪽이 100개보다 적게 와도 모은 수가 `total_count`보다 적으면 목록이 빠진 것이다. 그때 null로 한다(step0 작업 4와 읽기 테스트). `total_count`는 쪽 나눔과 맞게 온다(`5027f12`: `per_page=2`로 두 쪽 각 2개, 총 4).
+  - 수용 기준이 바뀌므로 절차서 2절대로 구현 커밋(`97522cc`)을 되돌리는 커밋으로 PR의 변경을 계획만 남기고(계획 파일은 그대로) 계획 검증을 다시 받는다. step0 상태는 진행 중으로 돌렸다. 승인 뒤 되돌린 코드를 다시 올리고 두 지적을 고친다.
 
 ## 의사결정 로그
 
 - 결정(제작자, 2026-11-26): main 병합만 더한 갱신은 승인을 이어받는다. / 버린 대안: 어떤 새 커밋이든 다시 승인(병렬 위험도 높음 PR이 갱신마다 재승인을 기다린다).
 - 결정: 승인 head는 check suite 생성 시각으로 정한다. / 이유: 리뷰의 `commit_id`는 GitHub이 옮겨 보고한다. 리뷰 제출 시각과 check suite 생성 시각은 모두 GitHub 서버 시각이고, check suite는 PR head가 push될 때 Actions App이 만든다(봇이 만들 수 없다). 판정 job의 권한(`checks: read`)으로 읽을 수 있어 워크플로를 바꾸지 않는다. / 버린 대안: 승인 때 기록 job이 승인 head를 커밋 상태로 남기고 뒤에 읽는다(판정 job에 `statuses: read`를 더하는 워크플로 변경이 필요하다), 커밋 날짜로 정한다(봇이 정할 수 있다).
 - 결정: H0는 "커밋마다 가장 이른 suite 시각이 리뷰 제출보다 엄격히 앞선 것 중 가장 늦은 것"이고, 그 시각이 제출 60초 안이면 모호하다고 본다. 이어받기에는 H0가 지금 head의 조상이어야 한다. / 이유: 같은 초와 시계 차이로 승인하지 않은 head가 H0로 잡히지 않게 한다(계획 검증 F3). 승인 뒤 같은 커밋에 생긴 suite가 H0를 바꾸지 않는다. 강제 push로 head를 되돌렸다가 다시 올리는 꼴에서 옛 head가 승인 head로 잡혀도 조상 조건에서 걸린다. / 버린 대안: 리뷰가 부른 워크플로 실행(`review-trigger`)의 head로 정한다(실행과 리뷰를 잇는 것도 시각뿐이고 API 호출이 는다).
-- 결정: 강제 push가 H0 뒤에 있으면 승인 아님. / 이유: PR 커밋 목록은 지금 이력만 담아 강제 push로 사라진 승인 head를 후보로 못 본다(계획 검증 F9). 하네스는 강제 push를 하지 않으므로(R2) 정상 흐름에서는 걸리지 않는다. / 버린 대안: 리뷰 이벤트 때 head를 신뢰된 기록으로 남긴다(기록 job에 쓰기 권한이나 워크플로 변경이 필요하다), 브랜치의 워크플로 실행 목록으로 후보를 넓힌다(판정 job에 `actions: read`가 없다).
+- 결정(구현 판정 F15로 바꿈): PR에 강제 push가 하나라도 있으면 승인 아님. 처음에는 "H0 뒤에 있으면"이었으나, 강제 push 뒤 옛 head의 suite가 늦게 생기면 그 규칙을 비켜 간다. / 버린 대안: 강제 push 이벤트의 앞·뒤 커밋으로 사라진 커밋을 가려 그 커밋만 후보에서 뺀다(사라진 커밋은 판정 job 체크아웃에 없어 조상 관계를 볼 수 없다).
+- (옛 결정) 강제 push가 H0 뒤에 있으면 승인 아님. / 이유: PR 커밋 목록은 지금 이력만 담아 강제 push로 사라진 승인 head를 후보로 못 본다(계획 검증 F9). 하네스는 강제 push를 하지 않으므로(R2) 정상 흐름에서는 걸리지 않는다. / 버린 대안: 리뷰 이벤트 때 head를 신뢰된 기록으로 남긴다(기록 job에 쓰기 권한이나 워크플로 변경이 필요하다), 브랜치의 워크플로 실행 목록으로 후보를 넓힌다(판정 job에 `actions: read`가 없다).
 - 결정: 60초 창. / 이유: 하네스 흐름에서 승인은 판정이 끝난 뒤 `pr-ready`로 요청하므로 push와 승인 사이가 몇 분 이상이다(PR #226은 56분). 창에 걸리면 다시 승인받으면 된다.
 
 ## 발견 사항
@@ -117,10 +122,10 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 ## 검증 방법과 결과
 
 - step0: AC 명령과 `node scripts/harness.ts check`.
-- 2026-11-26 step0 head `97522cc`: AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 21건, 관련 다섯 파일 109건 통과.
+- 2026-11-26 step0 head `97522cc`(구현 판정 F15·F16으로 되돌림): AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 21건, 관련 다섯 파일 109건 통과.
 - step1: 테스트 리포 실측 결과(`lab/approval-binding/results/`).
 
 ## 다음 할 일
 
-1. step0 구현 판정을 받고 제작자 승인을 요청한다(이 PR 자체가 위험도 높음이라 지금 규칙의 제작자 head 승인이 필요하다).
+1. 고친 계획으로 계획 검증(G1)을 받고, 되돌린 코드를 다시 올려 F15·F16을 고친다. 구현 판정 뒤 제작자 승인을 요청한다(이 PR 자체가 위험도 높음이라 지금 규칙의 제작자 head 승인이 필요하다).
 2. 병합 뒤 step1(테스트 리포 실측)을 새 브랜치에서 한다.
