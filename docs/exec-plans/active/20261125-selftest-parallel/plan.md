@@ -2,7 +2,7 @@
 id: 20261125-selftest-parallel
 issue: 247 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -106,9 +106,6 @@ ADR-0008 묶음 "호스팅 유지"의 네 번째 수단 F2다(순서 A6 → B2 �
 - 2026-11-26 계획 검증 6라운드(head `085dda2`, 제작자 결정과 F5 반영, `origin/main` 병합): `review/claude` 승인(지적 없음). `review/codex` 수정 요청(P1 1: F6). F1·F5는 `fixed`.
   - F6(쓰지 않는 자식 stdout을 파이프로 열면 그것을 물려받은 고아가 실행기 프로세스를 붙든다. F5의 테스트는 stderr만 물려준다): 받아들였다. 자식의 stdin·stdout을 `ignore`로 띄운다는 것을 계획에 적고(구현은 이미 그렇다), F5 테스트의 손자가 stdout·stderr를 모두 물려받게 바꿨다. 자식 stdout을 파이프로 연 변형에서 그 테스트가 실패하는 것을 봤다.
 
-- 2026-11-26 계획 검증 7라운드(head `95603c3`): 두 검증자 승인(지적 없음). F6 `fixed`. 계획 승인 해시 `3d80a939adab`. step0을 구현해 커밋했다(`acbaa5f`).
-- 2026-11-26 시간 재기: --jobs 1 115.9초(부하 16.27), --jobs 2 49.1초(부하 13.05). 이 리포의 하네스, 최종 구현, 같은 머신에서 잇달아 돌렸다(10코어, 다른 세션이 돌아 부하가 높았다). 둘 다 통과, 다시 돌린 것 0개. 2026-11-25의 중간 구현에서는 183.4초(부하 5.97)와 98.1초(부하 16.18)였다.
-
 ## 의사결정 로그
 
 - 결정: 시나리오마다 자식 프로세스(`process.execPath`로 실행기 쪽 진입점 `scripts/selftest/child.ts`)를 띄운다. 결과는 자식이 임시 결과 파일에 JSON으로 쓴다. / 이유: 시나리오 도구가 `spawnSync`라 한 프로세스 안에서는 나란히 돌지 않는다. 진입점은 실행기 쪽 파일이라 `selftest` job에서는 main(`base`)의 것이 돈다(시나리오·가짜 에이전트와 같다). 시나리오가 표준 출력에 무엇을 써도 결과와 섞이지 않게 파일로 받는다. / 대안: `worker_threads`(한 프로세스라 시나리오 하나가 프로세스를 죽이면 나머지 결과도 잃는다). 시나리오를 비동기 도구로 고쳐 쓴다(시나리오 10개를 모두 바꾸고, main의 시나리오로 다른 버전의 하네스를 시험하는 구조와 무관한 변경이 커진다).
@@ -138,7 +135,5 @@ ADR-0008 묶음 "호스팅 유지"의 네 번째 수단 F2다(순서 A6 → B2 �
 
 ## 다음 할 일
 
-- step0의 AC와 `check`를 통과시키고 완료 처리해 push한다. 코드 판정을 받는다.
-- 승인 요청(`pr-ready`)은 2026-11-29 00:00 UTC 뒤에 한다. 그 전에는 초안으로 둔다.
-- 병합 뒤 새 실행기로 돈 `selftest` job 10개의 걸린 시간을 Issue #247에 남긴다(수용 기준 9).
+- 계획만 담은 head로 계획 검증(G1)을 받는다. 승인되면 step0을 구현한다.
 - 선점은 push마다 갱신된다(24시간마다 만료).

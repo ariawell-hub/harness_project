@@ -71,7 +71,7 @@ import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
 import { runWorkers, workerNames } from './runner/workers.ts';
 import { formatLive, LiveLaunchError, runLive } from './selftest/live.ts';
-import { formatSelfTest, runSelfTest, type SelfTestStats } from './selftest/run.ts';
+import { formatSelfTest, runSelfTest } from './selftest/run.ts';
 
 const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 
@@ -96,11 +96,9 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   plan-gate [--repo <dir>] [--config-root <dir>] [--base <sha>] [--head-ref <브랜치>] [--mode pr|plan]
   doc-lint | bypass-scan [--ci] [--base <sha>] | secret-scan [--ci] [--base <sha>]
   test-effect [--ci] [--base <sha>]         R5: 추가·수정한 테스트 파일이 변경 전 코드에서 실패하는가(설정 testEffect)
-  self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>] [--jobs <N>]
+  self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>]
                                            하네스 자체 테스트(12.4절): 대상 하네스(기본: 이 리포)를 임시 샘플 리포에 적용해
-                                           시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1.
-                                           --jobs: 동시에 돌리는 시나리오 수(기본: 코어 수). 나란히 돌 때 실패한
-                                           시나리오는 혼자 한 번 더 돌린다
+                                           시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1
   self-test --live [--harness <폴더>] [--runs <N>] [--only <id,id>] [--out <파일>]
                                            실제 세션 시나리오(scripts/selftest/live/): 대상 하네스 설정의 agents.claude로
                                            시나리오마다 N번(기본 3) 세션을 띄워 통과 수를 낸다. 구독 인증이 필요하다.
@@ -224,7 +222,6 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   write: { type: 'boolean' },
   live: { type: 'boolean' },
   runs: { type: 'string' },
-  jobs: { type: 'string' },
   base: { type: 'string' },
   only: { type: 'string' },
   harness: { type: 'string' },
@@ -1230,20 +1227,12 @@ async function main(argv: string[]): Promise<number> {
           );
         return 0;
       }
-      const jobsArg = str('jobs');
-      if (jobsArg !== undefined && !/^[1-9][0-9]*$/.test(jobsArg)) {
-        process.stderr.write(`self-test: --jobs는 1 이상의 정수여야 한다(받은 값: ${jobsArg})\n`);
-        return 2;
-      }
       let report;
-      let stats: SelfTestStats | undefined;
       try {
         report = await runSelfTest({
           harness: path.resolve(str('harness') ?? repoInfo(cwd).root),
           only: str('only')?.split(',').filter(Boolean),
           headSha: str('head-sha'),
-          jobs: jobsArg === undefined ? undefined : Number(jobsArg),
-          onStats: (s) => (stats = s),
         });
       } catch (e) {
         process.stderr.write(`self-test: ${(e as Error).message}\n`);
@@ -1253,12 +1242,7 @@ async function main(argv: string[]): Promise<number> {
       const out = str('out');
       if (out) writeFileSync(out, JSON.stringify(report, null, 2) + '\n');
       const bad = report.results.filter((r) => r.state !== 'pass').length;
-      const run = stats
-        ? `, 나란히 ${stats.jobs}개, 다시 돌린 것 ${stats.reruns}개, ${(stats.ms / 1000).toFixed(1)}초`
-        : '';
-      log(
-        `self-test: ${bad ? `실패 ${bad}건` : '통과'} (시나리오 ${report.results.length}개${run})`,
-      );
+      log(`self-test: ${bad ? `실패 ${bad}건` : '통과'} (시나리오 ${report.results.length}개)`);
       return bad ? 1 : 0;
     }
     case 'codeowners': {

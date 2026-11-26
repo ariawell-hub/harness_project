@@ -4,8 +4,7 @@
     {
       "step": 0,
       "name": "parallel",
-      "status": "completed",
-      "completed_at": "2026-11-26T10:02:32+09:00"
+      "status": "pending"
     }
   ]
 }
