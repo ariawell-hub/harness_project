@@ -127,9 +127,10 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 - step0: AC 명령과 `node scripts/harness.ts check`.
 - 2026-11-26 step0 head `97522cc`(구현 판정 F15·F16으로 되돌림): AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 21건, 관련 다섯 파일 109건 통과.
+- 2026-11-26 step0 head `3ba7855`(F15·F16·F17 반영, main 병합 `8e2dfe4`에서 다시 확인): AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 25건, 관련 다섯 파일 113건 통과.
 - step1: 테스트 리포 실측 결과(`lab/approval-binding/results/`).
 
 ## 다음 할 일
 
-1. 고친 계획으로 계획 검증(G1)을 받고, 되돌린 코드를 다시 올려 F15·F16을 고친다. 구현 판정 뒤 제작자 승인을 요청한다(이 PR 자체가 위험도 높음이라 지금 규칙의 제작자 head 승인이 필요하다).
+1. step0 구현 판정을 받고 제작자 승인을 요청한다(이 PR 자체가 위험도 높음이라 지금 규칙의 제작자 head 승인이 필요하다).
 2. 병합 뒤 step1(테스트 리포 실측)을 새 브랜치에서 한다.
