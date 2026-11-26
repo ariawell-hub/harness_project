@@ -1230,9 +1230,13 @@ async function main(argv: string[]): Promise<number> {
           );
         return 0;
       }
+      // 파서가 strict: false라 값이 빠진 --jobs는 문자열로 남지 않는다. 옵션 토큰으로 주었는지 본다
+      const jobsGiven = tokens.some((t) => t.kind === 'option' && t.name === 'jobs');
       const jobsArg = str('jobs');
-      if (jobsArg !== undefined && !/^[1-9][0-9]*$/.test(jobsArg)) {
-        process.stderr.write(`self-test: --jobs는 1 이상의 정수여야 한다(받은 값: ${jobsArg})\n`);
+      if (jobsGiven && (jobsArg === undefined || !/^[1-9][0-9]*$/.test(jobsArg))) {
+        process.stderr.write(
+          `self-test: --jobs는 1 이상의 정수여야 한다(받은 값: ${jobsArg ?? '없음'})\n`,
+        );
         return 2;
       }
       let report;

@@ -994,10 +994,11 @@ test(
     const dir = tmp('harness-selftest-scn-');
     const marks = tmp('harness-selftest-marks-');
     const pids = path.join(marks, 'pids');
-    // 중간 프로세스는 stderr를 물려받은 손자를 새 세션으로 띄우고 곧바로 끝난다: 손자는 부모 pid로 찾을 수 없다
+    // 중간 프로세스는 stderr를 물려받은 손자를 새 세션으로 띄우고 곧바로 끝난다(unref: 손자를 기다리지 않는다). 손자는 부모 pid로 찾을 수 없다
     const middle = `const { spawn } = require('node:child_process');
 const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] });
-require('node:fs').appendFileSync(${JSON.stringify(pids)}, g.pid + '\\n');`;
+require('node:fs').appendFileSync(${JSON.stringify(pids)}, g.pid + '\\n');
+g.unref();`;
     write(
       dir,
       'a-orphan.ts',
@@ -1013,12 +1014,22 @@ require('node:fs').appendFileSync(${JSON.stringify(pids)}, g.pid + '\\n');`;
     );
     write(dir, 'b-passes.ts', SCENARIO('b-passes', ''));
     try {
+      const started = Date.now();
       const r = await runSelfTest({
         harness: echoHarness(),
         scenarioDir: dir,
         jobs: 2,
         childGraceSec: 1,
       });
+      const took = Date.now() - started;
+      // 손자는 60초 동안 파이프를 쥔다: 실행기가 파이프가 닫히기를 기다렸다면 그 손자가 끝난 뒤에야 돌아온다
+      const orphans = lines(pids).map(Number);
+      assert.equal(orphans.length, 1, '손자가 뜨지 않았다');
+      assert.ok(took < 30_000, `실행기가 ${took}ms 뒤에야 돌아왔다`);
+      assert.doesNotThrow(
+        () => process.kill(orphans[0], 0),
+        '돌아온 때 손자가 이미 끝나 있다(파이프를 기다렸다)',
+      );
       assert.deepEqual(
         r.results.map((x) => [x.id, x.state]),
         [
@@ -1052,7 +1063,8 @@ test(
     // 중간 프로세스는 stdout·stderr를 물려받은 손자를 새 세션으로 띄우고 곧바로 끝난다(손자는 60초 동안 파이프를 쥔다)
     const middle = `const { spawn } = require('node:child_process');
 const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });
-require('node:fs').appendFileSync(${JSON.stringify(pids)}, g.pid + '\\n');`;
+require('node:fs').appendFileSync(${JSON.stringify(pids)}, g.pid + '\\n');
+g.unref();`;
     write(
       dir,
       'a-leaves.ts',
@@ -1158,14 +1170,23 @@ test('runSelfTest·self-test CLI: 동시 수와 여유의 잘못된 값은 거�
     runSelfTest({ harness: echoHarness(), scenarioDir: dir, childGraceSec: 0 }),
     /여유는 0보다 커야 한다/,
   );
-  for (const v of ['0', 'x', '1.5', '-2']) {
+  // 값이 빠진 --jobs(마지막 토큰)도 시나리오를 돌리지 않고 2로 끝난다
+  for (const v of [['0'], ['x'], ['1.5'], ['-2'], []]) {
     const bad = runSync(
       process.execPath,
-      [path.join(HARNESS_ROOT, 'scripts/harness.ts'), 'self-test', '--jobs', v],
+      [
+        path.join(HARNESS_ROOT, 'scripts/harness.ts'),
+        'self-test',
+        '--only',
+        'r20-owner-commands',
+        '--jobs',
+        ...v,
+      ],
       { cwd: HARNESS_ROOT },
     );
-    assert.equal(bad.code, 2, v);
+    assert.equal(bad.code, 2, `--jobs ${v.join('')}`);
     assert.match(bad.stderr, /--jobs는 1 이상의 정수여야 한다/);
+    assert.doesNotMatch(bad.stdout, /✓ r20-owner-commands/);
   }
   const r = selfTestCli(['--only', 'r20-owner-commands', '--jobs', '2']);
   assert.equal(r.code, 0);
