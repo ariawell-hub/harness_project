@@ -25,7 +25,7 @@
 
 ```bash
 node --test scripts/test/repo-info.test.ts scripts/test/metrics-command.test.ts
-grep -qF "'--abbrev-ref=loose', 'HEAD', '--'" scripts/test/metrics-allow.ts
+node -e "import('./scripts/test/metrics-allow.ts').then((m)=>{const r=m.GIT_READ_SHAPES.filter((s)=>s.args[0]==='rev-parse');const want=['rev-parse','--show-toplevel','--absolute-git-dir','--git-common-dir','--abbrev-ref=loose','HEAD','--'];process.exit(r.length===1&&JSON.stringify(r[0].args)===JSON.stringify(want)?0:1)})"
 test "$(grep -c '^test(' scripts/test/repo-info.test.ts)" = 8
 grep -qF "'--abbrev-ref=loose', 'HEAD', '--'" scripts/lib/git.ts
 grep -qF "abbrev-ref=loose HEAD --" docs/harness/architecture.md
