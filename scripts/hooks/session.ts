@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntry } from '../lib/entry.ts';
 import { runSync } from '../lib/exec.ts';
 import { getGitHub, type PullRequest } from '../lib/github.ts';
 
@@ -100,4 +101,5 @@ function main(): void {
   process.exit(0);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+// 링크를 거친 경로로 불려도 돈다(실제 경로로 견준다, Issue #237)
+if (isEntry(import.meta.url, process.argv[1])) main();

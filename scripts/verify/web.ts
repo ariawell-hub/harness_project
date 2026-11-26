@@ -22,8 +22,8 @@ import {
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
+import { isEntry } from '../lib/entry.ts';
 import { FORWARDED, killTree, tail } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { startDenyProxy, type DeniedRequest, type DenyProxy } from './deny-proxy.ts';
@@ -773,7 +773,8 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// 링크를 거친 경로로 불려도 돈다(실제 경로로 견준다, Issue #237). 그러지 않으면 판정 없이 0으로 끝나 통과로 보인다
+if (isEntry(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2)).then(
     (code) => {
       process.exitCode = code;
