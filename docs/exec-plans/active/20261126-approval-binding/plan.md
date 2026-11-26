@@ -10,68 +10,63 @@ owner: mac-session # 선점한 runner 작업자 또는 사람
 claimed_at: 2026-11-26T13:24:52+09:00 # new-task가 채운다
 ---
 
-# 제작자 승인을 하네스가 head에 직접 묶고, main 병합만 더한 갱신에는 이어받는다
+# 제작자 승인을 GitHub의 "오래된 승인 철회"로 head에 묶는다
 
 ## 목표와 수용 기준
 
-PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달렸다. 그 뒤 봇이 `origin/main` 병합 커밋 둘(`c5d5338`, `a1aae51`)을 올렸는데 두 head 모두 `risk-gate`가 "제작자 head 승인"으로 success였고, 제작자가 새 head를 승인하지 않은 채 병합됐다. REST `pulls/226/reviews`와 GraphQL `PullRequestReview.commit` 모두 그 리뷰의 커밋을 `a1aae51`로 돌려준다. GitHub이 리뷰의 커밋을 새 head로 옮겨 보고한다. `scripts/gates/risk-gate.ts`의 `ownerApprovedHead`는 "제작자의 마지막 판정 리뷰가 승인이고 `commitId === headSha`"로 보므로, 그 커밋 값에 따라 승인이 새 head로 넘어간다. 일반 커밋에서도 GitHub이 리뷰의 커밋을 옮기는지는 확인하지 못했다(최근 60개 PR에서 승인 뒤에 올라온 커밋은 #226의 main 병합 둘뿐이었다).
+PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달렸다. 그 뒤 봇이 `origin/main` 병합 커밋 둘(`c5d5338`, `a1aae51`)을 올렸는데 두 head 모두 `risk-gate`가 "제작자 head 승인"으로 success였고, 제작자가 새 head를 승인하지 않은 채 병합됐다. REST `pulls/226/reviews`와 GraphQL `PullRequestReview.commit` 모두 그 리뷰의 커밋을 `a1aae51`로 돌려준다. GitHub이 리뷰의 커밋을 새 head로 옮겨 보고한다. `scripts/gates/risk-gate.ts`의 `ownerApprovedHead`는 "제작자의 마지막 판정 리뷰가 승인이고 `commitId === headSha`"로 보므로, 그 커밋 값에 따라 승인이 새 head로 넘어간다. 일반 커밋에서도 GitHub이 리뷰의 커밋을 옮기는지는 확인하지 못했다.
 
-제작자 결정(2026-11-26 대화): 하네스가 승인을 직접 head에 묶는다. **승인받은 head와 PR 내용이 같고 main 병합만 더한 갱신은 승인을 이어받고**, 다른 커밋이 더해지면 다시 승인받는다(검증자 승인 이어받기, 설계서 10.3절과 같은 꼴).
+제작자 결정(2026-11-26 대화): 처음에는 "main 병합만 더한 갱신은 승인을 이어받는다"를 하네스가 check suite 시각으로 승인 head를 추정해 구현하려 했다. 계획 검증과 구현 판정에서 추정의 경계 사례가 이어서 나와(F15~F20) 제작자가 방향을 바꿨다: **GitHub 기본 기능 "새 커밋 push 시 오래된 승인 철회"(dismiss stale approvals)를 쓴다.** GitHub이 서버에서 승인을 철회하고(리뷰 상태 `DISMISSED`), 바뀐 내용이 없는 base 병합에서는 승인을 대부분 유지한다고 알려져 있다. 하네스는 시각 추정을 하지 않고 지금처럼 리뷰 상태로 판정하되, 그 규칙이 켜져 있는지 확인한다.
+
+기존 보호 규칙의 리뷰 설정은 관리자가 아닌 토큰으로 읽을 수 없다(`branches/main/protection/required_pull_request_reviews` 404, GraphQL `branchProtectionRule` null). 규칙 세트(ruleset)의 규칙은 읽기 권한으로 읽힌다(`GET rules/branches/main`, 지금은 `[]`). 그래서 이 규칙은 규칙 세트로 켠다.
 
 수용 기준:
 
-1. `risk-gate`는 리뷰가 보고하는 커밋(`commit_id`)에 기대지 않고, 제작자의 마지막 판정 리뷰(승인)가 **제출된 시각에 PR의 head였던 커밋**(승인 head, H0)을 하네스가 정한다. 후보는 이 PR의 커밋 가운데 GitHub Actions App(`ACTIONS_APP_ID`)이 PR head 브랜치에서 만든 check suite 가운데 **PR이 열린 시각 이후에 생긴 것**의 첫 생성 시각이 리뷰 제출 시각보다 엄격히 앞선 것이다(그 커밋은 이 PR이 열린 뒤, 제출 전에 이 PR의 head로 push됐다. check suite·PR의 생성 시각은 GitHub 서버 시각이고 봇이 만들 수 없다). PR이 열리기 전의 suite는 같은 이름의 옛 브랜치에서 생긴 것일 수 있어 세지 않는다. H0는 후보 가운데 나머지 후보 모두의 후손인 것(이력의 끝)이다. suite 시각의 순서는 push 순서와 뒤바뀔 수 있어(지연) 끝을 고르는 데 쓰지 않는다. 후보가 서로 모두 조상 관계(한 줄)가 아니거나 조상 관계를 읽지 못하면 승인으로 보지 않는다. H0의 첫 suite 시각이 제출 60초 안이면 승인 head가 모호하다고 보고 승인으로 보지 않는다(같은 초, 시계 차이, 승인 직전 push). PR에 head 강제 push 이벤트가 하나라도 있으면(시각과 무관하게) 승인으로 보지 않는다: 강제 push가 있으면 suite 시각(지연될 수 있다)으로 제출 때의 head를 복원할 수 없다(강제 push로 사라진 승인 head, 강제 push 뒤 늦게 생긴 옛 head의 suite). 그런 PR은 새 PR로 다시 올린다.
-2. 지금 head가 H0면 승인이다(지금과 같다).
-3. 지금 head가 H0가 아니면 다음을 모두 만족할 때만 승인을 이어받는다. 하나라도 아니면 `제작자 head 승인 필요`로 실패한다.
-   - H0가 지금 head의 조상이다(강제 push로 이력이 바뀌지 않았다).
-   - H0 이후 더한 커밋이 main 병합뿐이다: H0..head에서 main에 없는 커밋이 모두 병합 커밋이고, 각 병합의 첫째 부모를 뺀 부모가 main의 조상이다(빈 일반 커밋, 바꿨다 되돌린 일반 커밋, main이 아닌 브랜치 병합은 이어받지 않는다).
-   - H0와 지금 head의 patch-id(각자 main과의 merge-base에서 그 커밋까지의 diff)가 같다.
-   - PR이 바꾼 파일의 내용이 H0와 지금 head에서 바이트 단위로 같다.
-   - H0 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다.
-     이어받으면 상태 설명에 `제작자 head 승인 이어받음 <H0 12자리>`를 적는다.
-4. 리뷰·check suite·PR 커밋을 읽지 못하거나 H0를 정하지 못하면 승인으로 보지 않는다(fail-closed, `error` 또는 `failure`. 지금 리뷰를 못 읽을 때와 같은 꼴).
-5. 승인 뒤 일반 커밋이 더해진 head는 GitHub이 리뷰의 커밋을 무엇으로 보고하든 승인으로 보지 않는다(테스트로 단언). 이어받기 조건은 실제 git 이력을 만든 테스트로 본다.
-6. 설계서 10.3절과 절차서 5절("승인 요청 전 조건", "위험도 높음")의 승인 규칙을 위 규칙으로 맞춘다. 승인 요청 뒤 main 병합 갱신은 다시 승인받지 않아도 된다는 것을 적는다.
-7. 병합 뒤 테스트 리포(`ariawell-hub/harness-ops-lab`)에서 실제로 확인한다(step1): 승인 뒤 main 병합만 더한 head는 이어받고, 일반 커밋을 더한 head는 다시 승인을 요구하며, 그때 GitHub이 리뷰의 커밋을 무엇으로 보고하는지 기록한다.
+1. (step0) 제작자가 main에 규칙 세트를 만든다: "Require a pull request before merging", 필수 승인 0, "Dismiss stale pull request approvals when new commits are pushed" 켬. 봇 토큰으로 `GET repos/{repo}/rules/branches/main`이 `type: pull_request`이고 `parameters.dismiss_stale_reviews_on_push: true`인 규칙을 돌려준다.
+2. (step0) 이 리포의 버릴 시험 PR(위험도 높음, 병합하지 않는다)로 실제 동작을 잰다: 제작자 승인 뒤 (가) `origin/main` 병합만 더한 push와 (나) 내용을 바꾼 일반 커밋 push에서 리뷰 API의 상태(`state`)·커밋(`commit_id`)과 `risk-gate` 상태를 기록한다. 기대: (가) 승인 유지(`APPROVED`)이고 `risk-gate` success, (나) `DISMISSED`이고 `risk-gate` failure.
+3. (step0) 결과가 기대와 다르면 step1 전에 계획을 고친다(예: (가)에서도 철회되면 main 병합 뒤 다시 승인받는다고 문서에 적고, (나)에서 철회되지 않으면 이 방향을 다시 묻는다).
+4. (step1) `risk-gate`는 위험도 높음일 때 PR base 브랜치의 규칙(`GET rules/branches/<base>`)에 `dismiss_stale_reviews_on_push: true`인 `pull_request` 규칙이 있는지 확인한다. 없으면 failure(`위험도 높음: 오래된 승인 철회 규칙이 없어 제작자 승인을 head에 묶을 수 없다`), 읽지 못하면 error(fail-closed). 규칙이 있으면 지금 판정(제작자의 마지막 판정 리뷰가 승인이고 리뷰의 커밋이 head)을 그대로 쓴다. 규칙은 위험도 높음이고 승인 리뷰가 있을 때만 읽는다.
+5. (step1) `ops-check`가 같은 규칙을 봇 토큰으로 확인해 보여 준다.
+6. (step1) 설계서 0.2절(리포 설정)·10.3절(승인 결속 기준의 제작자 승인 행)·10.4절, 절차서 5절("위험도 높음", "승인 요청 전 조건"), SECURITY.md(제작자 설정 절차)를 이 규칙으로 맞춘다.
 
 ## 범위 / 비범위
 
 범위:
 
-- `scripts/gates/risk-gate.ts`(승인 head 결정과 이어받기 판정), `scripts/ci/gates.ts`(필요한 자료를 읽어 넘긴다. 판정 job의 `GH_TOKEN`은 `checks: read`·`pull-requests: read`가 있다), `scripts/ci/binding.ts`(이어받기 판정 함수를 더하고 `samePrContent`·`changedOnBaseSince`를 재사용. `patchId`에 비교 끝 인자를 더하되 기본 동작은 그대로), `scripts/harness.ts`의 `gates` 명령(읽기 함수를 만들어 넘긴다), `scripts/ci/protection.ts`의 `ACTIONS_APP_ID` 재사용(읽기만, `ci/gates.ts`가 가져와 판정 함수에 넘긴다).
-- 테스트: `scripts/test/risk-gate.test.ts`, 새 파일 `scripts/test/risk-gate-approval.test.ts`, `scripts/test/ci.test.ts`(`gates`가 위험도 높음일 때만 읽고 지금 설정으로 승인이 success가 되는지), `scripts/test/harness-guard.test.ts`의 `runGates` 승인 테스트 하나(리뷰의 `commitId`로 승인하던 입력에 승인 자료를 더한다. 단언은 그대로).
-- 문서: 설계서 10.3절·10.4절의 해당 문장, 절차서 5절, 변경 조각.
-- step1: `lab/approval-binding/`(실측 절차와 결과).
+- step0: 제작자 작업 요청(규칙 세트), 시험 PR의 실측, `lab/approval-binding/`(절차·결과), 변경 조각.
+- step1: `scripts/gates/risk-gate.ts`(규칙 확인), `scripts/ci/gates.ts`(규칙을 읽어 넘긴다), `scripts/harness.ts`(`gates`가 읽기 함수를 만든다), `scripts/commands/ops-check.ts`(규칙 확인 줄), 테스트(`scripts/test/risk-gate.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`, `scripts/test/ops-check.test.ts`), 설계서·절차서·SECURITY.md, 변경 조각.
 
 비범위:
 
-- 워크플로 파일(`.github/workflows/`). 판정 job의 권한과 리뷰 조회는 그대로 쓴다.
-- 브랜치 보호 설정(최신 상태 요구 등). 제작자만 바꿀 수 있다(R20).
-- 검증자 승인 이어받기(`review/*`)의 규칙. 위험도 높음은 지금처럼 다시 판정한다.
+- 워크플로 파일(`.github/workflows/`). 규칙 읽기는 판정 job의 지금 토큰(읽기 권한에 늘 있는 metadata)으로 한다.
+- 보호 설정·규칙 세트를 봇이 바꾸는 것(R20). 제작자가 한다.
+- 승인 head를 하네스가 추정하는 것(옛 방식, 버렸다).
+- 검증자 승인 이어받기(`review/*`)의 규칙.
 - 승인 요청 뒤 main 병합 push를 L1 훅이 막는 문제(Issue #243, PR #244가 다룬다).
 
 ## 관련 파일·문서
 
-- `scripts/gates/risk-gate.ts`
-- `scripts/ci/gates.ts`
-- `scripts/ci/binding.ts`
-- `scripts/harness.ts`
-- `scripts/test/risk-gate.test.ts`
-- `scripts/test/risk-gate-approval.test.ts`
-- `scripts/test/ci.test.ts`
-- `scripts/test/harness-guard.test.ts`(신호로 높음이 된 PR의 `runGates` 승인 테스트 하나)
-- `docs/harness/design.md`
-- `docs/harness/workflow.md`
+- `lab/approval-binding/**`
 - `docs/harness/changes/20261126-approval-binding-s0.md`
 - `docs/harness/changes/20261126-approval-binding-s1.md`
-- `lab/approval-binding/**`
+- `scripts/gates/risk-gate.ts`
+- `scripts/ci/gates.ts`
+- `scripts/harness.ts`
+- `scripts/commands/ops-check.ts`
+- `scripts/test/risk-gate.test.ts`
+- `scripts/test/ci.test.ts`
+- `scripts/test/harness-guard.test.ts`
+- `scripts/test/ops-check.test.ts`
+- `docs/harness/design.md`
+- `docs/harness/workflow.md`
+- `docs/SECURITY.md`
 - `docs/exec-plans/active/20261126-approval-binding/**`
-- 읽기만: `.github/workflows/gates.yml`, `scripts/ci/protection.ts`, `scripts/ci/review-plan.ts`, `scripts/lib/github.ts`, `docs/SECURITY.md`("테스트 리포 준비"), `lab/ops-transition/README.md`
+- 읽기만: `.github/workflows/gates.yml`, `scripts/ci/pr.ts`(`githubGet`), `scripts/ci/protection.ts`
 
 ## step 목록
 
-- step0 bind: 승인 head를 하네스가 정하고, main 병합만 더한 갱신에 이어받는다. 테스트 먼저.
-- step1 live: 병합 뒤 테스트 리포에서 두 경우(main 병합만, 일반 커밋)를 실제로 확인하고 GitHub의 리뷰 커밋 보고를 기록한다(제작자의 승인 두 번이 필요하다).
+- step0 measure: 제작자가 규칙 세트를 켜고, 버릴 시험 PR로 main 병합 push와 일반 커밋 push 뒤의 리뷰 상태와 `risk-gate`를 잰다(제작자 승인 한 번).
+- step1 rule: `risk-gate`와 `ops-check`가 규칙을 확인하고, 문서를 맞춘다. 테스트 먼저.
 
 ## 진행 로그
 
@@ -105,8 +100,14 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-26 계획 검증 9회차(head `6cc0ebf`, 계획만): 두 검증자 승인(G1). F15·F16은 구현 대기.
 - 2026-11-26 구현 다시 올림: 되돌렸던 코드(`97522cc`)를 가져오고 세 지적을 고쳤다. 테스트를 먼저 고쳐 옛 코드에서 실패하는 것을 확인했다(F15·F16: `97522cc` 코드에서 3건 실패, F17: 시각으로 고르는 코드에서 2건 실패). F15: PR에 강제 push가 하나라도 있으면 승인 아님. F16: check suite가 `total_count`만큼 오지 않으면 null. F17: H0는 후보 가운데 이력의 끝(`isAncestor`, `binding.ts`의 `isAncestorOf`). `risk-gate-approval.test.ts` 25건, 관련 다섯 파일 113건 통과. 설계서·절차서·변경 조각을 맞췄다. main에 #249가 병합돼 `origin/main`을 병합했다.
 - 2026-11-26 step0 구현 판정 2회차(head `17deac6`): Claude 승인(지적 없음), Codex 수정 요청(P0 하나, P1 하나). 둘 다 받아들였다. F18(P0): 같은 이름의 옛 브랜치에서 생긴 suite가 미승인 head의 근거가 된다 → PR이 열린 시각 이후의 suite만 센다. F19(P1): 갈라진 후보 A·B가 둘을 합친 M의 조상이면 "모두 끝의 조상" 검사를 통과한다 → 후보를 짝마다 조상 관계로 확인한다. 수용 기준 1이 바뀌므로 다시 구현 커밋(`3ba7855`)을 되돌려 계획만 남기고 계획 검증을 받는다. step0 상태는 진행 중으로 돌렸다.
+- 2026-11-26 방향 전환(제작자 결정): 시각 추정 방식은 계획 검증 9회와 구현 판정 2회에서 지적 20건(F1~F20)이 나왔고, 고칠 때마다 새 경계 사례가 나왔다(강제 push, suite 지연, 같은 이름의 옛 브랜치, PR을 열기 전의 suite). 제작자에게 묻자 "GitHub 기본 기능"을 골랐다. 확인한 것: main의 기존 보호 규칙은 이미 "PR 필수 + 코드 오너 리뷰 필수(승인 0)"이지만(SECURITY.md "코드 오너 리뷰 필수") 관리자가 아닌 토큰으로는 읽을 수 없다. 규칙 세트 규칙은 `GET rules/branches/main`으로 읽힌다(지금 `[]`). 테스트 리포 `harness-ops-lab`은 지금 봇 토큰으로 보이지 않아(404) 실측은 이 리포의 버릴 시험 PR로 한다. 수용 기준·범위·관련 파일·step을 새로 썼다(step0 measure, step1 rule). 옛 방식 코드는 커밋 `97522cc`·`3ba7855`에 남아 있고 되돌린 상태다. 계획 검증을 다시 받는다.
 
 ## 의사결정 로그
+
+- 결정(제작자, 2026-11-26 두 번째): 승인 결속을 GitHub의 "오래된 승인 철회"에 맡긴다. 하네스는 그 규칙이 켜져 있는지 확인하고 리뷰 상태로 판정한다. / 이유: 서버가 push마다 승인을 철회하므로 하네스가 승인 head를 추정할 필요가 없다. 추정은 경계 사례가 끝나지 않았다. / 버린 대안: 시각 추정을 더 고친다, 리뷰 이벤트 때 head를 검증 App 상태로 남긴다(판정 job에 `statuses: read`가 필요하다).
+- 결정: 규칙은 기존 보호 규칙이 아니라 규칙 세트로 켠다. / 이유: 기존 보호 규칙의 리뷰 설정은 관리자만 읽을 수 있어, 꺼져도 하네스가 알 수 없다. 규칙 세트는 읽기 권한으로 읽혀 `risk-gate`가 fail-closed로 확인한다. / 버린 대안: 기존 규칙의 체크박스만 켠다(제작자 작업은 적지만 확인할 수 없다).
+- 결정: 실측(step0)을 코드(step1)보다 먼저 한다. / 이유: 필수 승인 0에서도 철회가 일어나는지, main 병합에서 승인이 유지되는지를 확인한 뒤 그 위에 확인 코드를 둔다.
+- 아래는 옛 방식(시각 추정)의 결정이다. 버렸고 기록으로 둔다.
 
 - 결정(제작자, 2026-11-26): main 병합만 더한 갱신은 승인을 이어받는다. / 버린 대안: 어떤 새 커밋이든 다시 승인(병렬 위험도 높음 PR이 갱신마다 재승인을 기다린다).
 - 결정: 승인 head는 check suite 생성 시각으로 정한다. / 이유: 리뷰의 `commit_id`는 GitHub이 옮겨 보고한다. 리뷰 제출 시각과 check suite 생성 시각은 모두 GitHub 서버 시각이고, check suite는 PR head가 push될 때 Actions App이 만든다(봇이 만들 수 없다). 판정 job의 권한(`checks: read`)으로 읽을 수 있어 워크플로를 바꾸지 않는다. / 버린 대안: 승인 때 기록 job이 승인 head를 커밋 상태로 남기고 뒤에 읽는다(판정 job에 `statuses: read`를 더하는 워크플로 변경이 필요하다), 커밋 날짜로 정한다(봇이 정할 수 있다).
@@ -120,7 +121,8 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 ## 발견 사항
 
-- 승인 head를 check suite 시각으로 추정하는 방식의 남은 위험: suite가 아주 늦게 생기면(PR이 열린 뒤까지, 또는 승인 뒤까지 미뤄지면) 추정이 어긋날 수 있다. 어긋나는 쪽은 대부분 H0가 진짜 head의 조상이 되어 다시 승인을 요구하는 쪽이지만, 같은 이름의 옛 브랜치 suite가 PR이 열린 뒤까지 늦게 생기는 경우는 막지 못한다. 하네스는 브랜치 이름을 계획 id로 짓고 다시 쓰지 않는다. 더 강하게 묶으려면 리뷰 이벤트 때의 head를 검증 App 상태로 남기고 판정 job이 읽어야 한다(판정 job에 `statuses: read`가 필요해 제작자의 워크플로 변경이 있어야 한다). step1 실측 뒤 제작자에게 알린다.
+- 옛 방식(check suite 시각으로 승인 head 추정)의 남은 위험과 경계 사례는 진행 로그 F15~F20에 있다. 새 방식에서는 쓰지 않는다.
+- 테스트 리포 `ariawell-hub/harness-ops-lab`이 봇 토큰으로 보이지 않는다(2026-11-26, `GET repos` 404). 지운 것인지 권한이 바뀐 것인지 제작자에게 알린다.
 
 ## 열린 질문
 
@@ -128,12 +130,11 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 ## 검증 방법과 결과
 
-- step0: AC 명령과 `node scripts/harness.ts check`.
-- 2026-11-26 step0 head `97522cc`(구현 판정 F15·F16으로 되돌림): AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 21건, 관련 다섯 파일 109건 통과.
-- 2026-11-26 step0 head `3ba7855`(F15·F16·F17 반영, main 병합 `8e2dfe4`에서 다시 확인): AC 9줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `risk-gate-approval.test.ts` 25건, 관련 다섯 파일 113건 통과.
-- step1: 테스트 리포 실측 결과(`lab/approval-binding/results/`).
+- step0: 실측 결과(`lab/approval-binding/results/live.json`)와 AC, `node scripts/harness.ts check`.
+- step1: AC와 `node scripts/harness.ts check`.
+- 옛 방식 step0(되돌림): head `97522cc`·`3ba7855`에서 AC 9줄이 통과했었다.
 
 ## 다음 할 일
 
-1. step0 구현 판정을 받고 제작자 승인을 요청한다(이 PR 자체가 위험도 높음이라 지금 규칙의 제작자 head 승인이 필요하다).
-2. 병합 뒤 step1(테스트 리포 실측)을 새 브랜치에서 한다.
+1. 새 계획으로 계획 검증(G1)을 받는다.
+2. 제작자에게 규칙 세트 설정을 요청하고, 켜지면 시험 PR로 실측한다.

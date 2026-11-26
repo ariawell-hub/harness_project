@@ -3,13 +3,13 @@
   "steps": [
     {
       "step": 0,
-      "name": "bind",
+      "name": "measure",
       "status": "in_progress",
       "started_at": "2026-11-26T14:58:33+09:00"
     },
     {
       "step": 1,
-      "name": "live",
+      "name": "rule",
       "status": "pending"
     }
   ]
