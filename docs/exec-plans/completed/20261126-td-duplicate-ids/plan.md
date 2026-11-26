@@ -77,8 +77,8 @@ main의 `docs/exec-plans/tech-debt-tracker.md`에 같은 id가 두 행씩 있다
 ## 검증 방법과 결과
 
 - step0의 AC 명령과 `node scripts/harness.ts check`.
+- 2026-11-26 head `aa9960e`: AC 15줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `doc-lint-td-ids.test.ts` 4건 통과.
 
 ## 다음 할 일
 
-1. 계획만 담은 초안 PR로 계획 검증(G1)을 받는다.
-2. 승인 뒤 테스트를 먼저 쓰고 고친다.
+1. 구현 판정을 받고 승인을 요청한다.
