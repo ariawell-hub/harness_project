@@ -25,29 +25,23 @@ const TIME_ZONE_LIKE =
   /^(?:[A-Z]{2,5}(?![a-z])|[A-Z][A-Za-z_]+\/[A-Za-z_]|[+-]\d|[([{/]|(?:[A-Z][a-z]+ ){1,3}Time\b)/;
 /**
  * 대소문자를 가리지 않고 알아보는 시간대 약어와 이름(판정 F7: `pst`, `Pst`, `pacific time`). 약어는 낱말 하나로만 본다
- * (`pstx`는 아니다). 안내 문구의 흔한 낱말(`or`, `see`, `upgrade`)과 겹치지 않는 것만 둔다
+ * (`pstx`는 아니다). 영어 낱말과 겹치지 않는 약어는 뒤에 안내가 바로 이어져도 시간대다(판정 F10: `pst or upgrade`)
  */
-const TIME_ZONE_NAMED = new RegExp(
+const TIME_ZONE_STRONG = new RegExp(
   '^(?:(?:' +
     [
       'utc',
       'gmt',
       'pst',
       'pdt',
-      'pt',
       'mst',
       'mdt',
-      'mt',
       'cst',
       'cdt',
-      'ct',
-      'est',
       'edt',
-      'et',
       'akst',
       'akdt',
       'hst',
-      'ast',
       'adt',
       'nst',
       'ndt',
@@ -57,8 +51,6 @@ const TIME_ZONE_NAMED = new RegExp(
       'cest',
       'eet',
       'eest',
-      'wet',
-      'west',
       'msk',
       'sast',
       'kst',
@@ -75,11 +67,14 @@ const TIME_ZONE_NAMED = new RegExp(
       'nzst',
       'nzdt',
     ].join('|') +
-    // 약어는 홀로 붙었을 때만 본다(판정 F9): 글의 끝, 문장부호, 부호 오프셋이 이어질 때. 뒤에 낱말이 이어지면
-    // 안내 문장의 첫 낱말이다(`West Coast users …`)
-    ')(?=\\s*$|[.,;:!?)\\]]|\\s*[+-]\\d)|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?: standard| daylight)? time\\b)',
+    ')(?![a-z])|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?: standard| daylight)? time\\b)',
   'i',
 );
+/**
+ * 영어 낱말·흔한 줄임과 겹치는 약어(`west`, `est.`, `et`)는 홀로 붙었을 때만 시간대로 본다(판정 F9): 글의 끝,
+ * 문장부호, 부호 오프셋이 이어질 때. 뒤에 낱말이 이어지면 안내 문장의 첫 낱말이다(`West Coast users …`)
+ */
+const TIME_ZONE_WEAK = /^(?:west|wet|est|et|ct|mt|pt|ast)(?=\s*$|[.,;:!?)\]]|\s*[+-]\d)/i;
 const UNAVAILABLE_RE = /^usage-limit(?:@(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z)?$/;
 
 /** 그 UTC 시각이 실재하면 `YYYY-MM-DDTHH:MMZ`, 아니면 null */
@@ -107,7 +102,10 @@ export function usageLimitOutput(message: string): string | null {
   // 첫 낱말이 시간대처럼 생겼을 때만 시각을 모르는 것으로 본다. 안내 문구(`, or upgrade to Pro.`)는 시각을 지킨다
   const rest = message.slice(m.index + m[0].length);
   const head = rest.replace(/^[\s,;]*/, '');
-  if (!/^[.!?]/.test(rest) && (TIME_ZONE_LIKE.test(head) || TIME_ZONE_NAMED.test(head)))
+  if (
+    !/^[.!?]/.test(rest) &&
+    (TIME_ZONE_LIKE.test(head) || TIME_ZONE_STRONG.test(head) || TIME_ZONE_WEAK.test(head))
+  )
     return 'usage-limit';
   const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
   const h12 = Number(m[4]);
