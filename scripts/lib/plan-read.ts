@@ -57,15 +57,15 @@ export function planReader(root: string): PlanReader {
   /** 끝 자리가 있으면 true, 없으면 false. 어느 단계든 링크·서브모듈·다른 종류면 던진다 */
   const check = (rel: string, last: 'file' | 'dir'): boolean => {
     const steps = places(rel);
-    // 먼저 색인: 작업 트리에 그 자리가 없어도(색인에만 링크로 있어도) 거절한다
-    if (index === undefined) index = linkedInIndex(root);
-    for (const p of steps)
-      if (index?.has(p)) throw new PlanPathError(p, '색인에 심볼릭 링크·서브모듈로 있다');
-    // root 자체: 링크면 그 아래 자리의 lstat이 링크를 따라간다(자리 이름은 '.')
-    // 끝의 '/'를 떼어 본다(끝에 '/'가 붙은 경로의 lstat은 링크를 따라간다)
+    // 맨 먼저 root 자체: 링크면 git과 그 아래 자리의 lstat이 링크를 따라간다(자리 이름은 '.').
+    // git(색인 읽기)을 부르기 전에 본다. 끝의 '/'를 떼어 본다(끝에 '/'가 붙은 경로의 lstat은 링크를 따라간다)
     const top = lstatSync(path.resolve(root));
     if (top.isSymbolicLink()) throw new PlanPathError('.', '리포 폴더 자체가 심볼릭 링크다');
     if (!top.isDirectory()) throw new PlanPathError('.', '리포 폴더가 폴더가 아니다');
+    // 그다음 색인: 작업 트리에 그 자리가 없어도(색인에만 링크로 있어도) 거절한다
+    if (index === undefined) index = linkedInIndex(root);
+    for (const p of steps)
+      if (index?.has(p)) throw new PlanPathError(p, '색인에 심볼릭 링크·서브모듈로 있다');
     for (const [i, p] of steps.entries()) {
       let st;
       try {

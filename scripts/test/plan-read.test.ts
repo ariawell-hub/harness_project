@@ -220,6 +220,12 @@ test('리포 폴더 자체가 심볼릭 링크면 자리 "."를 적어 던진다
     placeOf(() => listPlanDir(link, DIR)),
     '.',
   );
+  // 링크 대상의 색인이 깨져 있어도 git을 부르기 전에 리포 폴더 자체를 본다
+  writeFileSync(path.join(root, '.git', 'index'), 'garbage');
+  assert.equal(
+    placeOf(() => planReader(link).read(`${DIR}/plan.md`)),
+    '.',
+  );
 });
 
 test('git 리포가 아닌 폴더에서는 lstat만으로 판정한다', () => {

@@ -300,6 +300,13 @@ test('리포 폴더 자체가 링크(정션)면 링크를 거쳐 계획을 읽�
   );
   assert.throws(() => planHash(link, DIR));
   assert.equal(planAuthor(link, BRANCH), '');
+  // 링크 대상의 색인이 깨져 있어도 리포 폴더 자체의 링크로 막는다(git 오류가 아니다)
+  writeFileSync(path.join(fx.root, '.git', 'index'), 'garbage');
+  const broken = planGate({ root: link, base: fx.base, branch: BRANCH, mode: 'plan', cfg: fx.cfg });
+  assert.ok(
+    broken.problems.some((p) => JSON.stringify(p).includes(LINK_PROBLEM)),
+    `링크 자리 문제가 없다: ${JSON.stringify(broken.problems)}`,
+  );
 });
 
 test('git 색인을 읽지 못하면 planReview는 던지지 않고 위험도 high·작성자 모름·두 검증자다', () => {
