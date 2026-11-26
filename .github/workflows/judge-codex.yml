@@ -32,7 +32,7 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -109,7 +109,7 @@ jobs:
     name: pubkey
     needs: plan
     if: needs.plan.outputs.skip == 'false' && needs.plan.outputs.codex == 'true' && needs.plan.outputs.carry == ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 5
     environment: codex-auth-store
     permissions: {}
@@ -273,7 +273,7 @@ jobs:
     name: store
     needs: [pubkey, judge]
     if: always() && needs.judge.outputs.sealed != ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 5
     environment: codex-auth-store
     permissions: {}
@@ -308,7 +308,7 @@ jobs:
     needs: [plan, judge]
     # 재현 테스트가 붙은 지적이 있을 때만 돈다. judge의 유출 검사 단계가 repro 출력으로 정하고, 값이 없으면 돈다(Issue #143)
     if: needs.judge.outputs.verdict != '' && needs.judge.outputs.repro != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 15
     # PR 코드를 실행한다: 비밀·environment·쓰기 권한이 없다(10.4절). 결과는 조작될 수 있는 값으로 다룬다
     permissions:
@@ -350,7 +350,7 @@ jobs:
     name: record
     needs: [plan, judge, repro]
     if: ${{ !cancelled() && needs.plan.result != 'skipped' && needs.plan.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 5
     environment: recorder
     # 두 판정 워크플로의 기록 job이 원장 댓글 하나를 읽고-고치고-쓴다. PR마다 하나씩 차례로 돈다
