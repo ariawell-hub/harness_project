@@ -784,6 +784,27 @@ test(
   },
 );
 
+test('runSelfTest: 다시 돌려 통과한 시나리오는 제목이 길어도 500자 안에 첫 시도의 상태와 다시 돌린 표시가 남는다', async () => {
+  const dir = tmp('harness-selftest-scn-');
+  const marks = tmp('harness-selftest-marks-');
+  // 첫 시도만 실패한다(표시 파일이 없을 때)
+  write(
+    dir,
+    'a-long.ts',
+    MARK_SCENARIO(
+      'a-long',
+      marks,
+      `if (!has('first')) { mark('first'); assert.fail('첫 시도 ' + 'y'.repeat(600)); }`,
+    ).replace("title: 'a-long 통과'", `title: '${'x'.repeat(500)}'`),
+  );
+  write(dir, 'b-passes.ts', SCENARIO('b-passes', ''));
+  const r = await runSelfTest({ harness: echoHarness(), scenarioDir: dir, jobs: 2 });
+  const a = r.results[0];
+  assert.equal(a.state, 'pass', formatSelfTest(r).join('\n'));
+  assert.ok(a.detail.length <= 500, `detail ${a.detail.length}자`);
+  assert.match(a.detail, /^x+ \(나란히 돌 때 fail: 첫 시도 y+, 혼자 다시 돌려 통과\)$/);
+});
+
 test(
   'runSelfTest: 결과 없이 스스로 끝난 자식은 error이고, 실행기 안에서 지금 방식으로 다시 돌린다',
   { timeout: 120_000 },

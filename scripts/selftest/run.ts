@@ -91,6 +91,8 @@ export interface SelfTestReport {
 /** 시나리오 하나가 쓸 수 있는 시간의 기본값(초). 자식 프로세스의 시간 제한은 남은 시간이다 */
 const SCENARIO_TIMEOUT_SEC = 120;
 const DETAIL_MAX = 500;
+/** 다시 돌려 통과한 시나리오의 detail에 남기는 첫 시도 설명의 최대 길이 */
+const RERUN_WHY_MAX = 200;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIO_DIR = path.join(HERE, 'scenarios');
 /** 가짜 에이전트와 API 서버는 대상 하네스의 것이 아니라 실행기 쪽 파일을 쓴다 */
@@ -701,10 +703,17 @@ async function runParallel(
       results.push(again);
       continue;
     }
-    const head = `${again.detail} (나란히 돌 때 ${r.state}: `;
-    const tail = ', 혼자 다시 돌려 통과)';
-    const room = Math.max(0, DETAIL_MAX - head.length - tail.length);
-    results.push({ ...again, detail: oneLine(head + oneLine(r.detail).slice(0, room) + tail) });
+    // 표시(첫 시도의 상태와 "혼자 다시 돌려 통과")가 500자 안에 남도록 그 길이를 먼저 잡고,
+    // 첫 시도의 설명(200자까지), 남은 길이에 제목을 맞춘다
+    const fixed = ` (나란히 돌 때 ${r.state}: , 혼자 다시 돌려 통과)`.length;
+    const why = oneLine(r.detail).slice(0, Math.min(RERUN_WHY_MAX, DETAIL_MAX - fixed));
+    const title = oneLine(again.detail)
+      .slice(0, Math.max(0, DETAIL_MAX - fixed - why.length))
+      .trimEnd();
+    results.push({
+      ...again,
+      detail: `${title} (나란히 돌 때 ${r.state}: ${why}, 혼자 다시 돌려 통과)`.trimStart(),
+    });
   }
   return { results, reruns };
 }
