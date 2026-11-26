@@ -2,7 +2,7 @@
 id: 20261125-selftest-parallel
 issue: 247 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: medium # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -113,6 +113,8 @@ ADR-0008 묶음 "호스팅 유지"의 네 번째 수단 F2다(순서 A6 → B2 �
   - 계획 검증(head `d3c126a`): `review/claude` 승인. `review/codex` 수정 요청(새 지적 없음, F3 `open`: `pipefail`이 켜져 있으면 없는 경로 때문에 `ls`가 실패해 `P` 대입이 실패한다). 받아들여 `plan.md`가 있는 쪽을 조건문(`test -f`)으로 고르게 고쳤다.
   - F7(긴 시나리오 제목이 "혼자 다시 돌려 통과" 표시를 500자 밖으로 밀어낸다, 재현 테스트 첨부): 받아들인다. 표시와 첫 시도의 상태가 들어갈 길이를 먼저 잡고 남은 길이에 제목과 첫 시도의 설명을 맞춘다. 구현을 다시 올릴 때 고친다(계획만 남긴 동안 이 지적은 `parked`다).
 
+- 2026-11-26 계획 검증(head `5e94a87`): 두 검증자 승인(지적 없음). F3 `fixed`. 계획 승인 해시 `d156b5af36f7`. 구현을 `acbaa5f`의 파일 그대로 다시 올리고(`f12c585`), F7을 고쳤다: 표시와 첫 시도의 설명(200자까지)의 길이를 먼저 잡고 남은 길이에 제목을 맞춘다. 500자 제목의 테스트를 더했고 검증자가 붙인 재현 테스트도 통과했다.
+
 ## 의사결정 로그
 
 - 결정: 시나리오마다 자식 프로세스(`process.execPath`로 실행기 쪽 진입점 `scripts/selftest/child.ts`)를 띄운다. 결과는 자식이 임시 결과 파일에 JSON으로 쓴다. / 이유: 시나리오 도구가 `spawnSync`라 한 프로세스 안에서는 나란히 돌지 않는다. 진입점은 실행기 쪽 파일이라 `selftest` job에서는 main(`base`)의 것이 돈다(시나리오·가짜 에이전트와 같다). 시나리오가 표준 출력에 무엇을 써도 결과와 섞이지 않게 파일로 받는다. / 대안: `worker_threads`(한 프로세스라 시나리오 하나가 프로세스를 죽이면 나머지 결과도 잃는다). 시나리오를 비동기 도구로 고쳐 쓴다(시나리오 10개를 모두 바꾸고, main의 시나리오로 다른 버전의 하네스를 시험하는 구조와 무관한 변경이 커진다).
@@ -142,7 +144,7 @@ ADR-0008 묶음 "호스팅 유지"의 네 번째 수단 F2다(순서 A6 → B2 �
 
 ## 다음 할 일
 
-- 계획만 남긴 head로 계획 검증(G1)을 다시 받는다(AC 여섯째 줄 수정). 승인되면 `cb2bdfa`를 되돌려 구현을 다시 올리고 F7을 고친 뒤 AC·`check`·완료 처리·push한다.
+- step0 AC·`check`·완료 처리·push 뒤 코드 판정을 받는다.
 - 승인 요청(`pr-ready`)은 2026-11-29 00:00 UTC 뒤에 한다. 그 전에는 초안으로 둔다.
 - 병합 뒤 새 실행기로 돈 `selftest` job 10개의 걸린 시간을 Issue #247에 남긴다(수용 기준 9).
 - 선점은 push마다 갱신된다(24시간마다 만료).
