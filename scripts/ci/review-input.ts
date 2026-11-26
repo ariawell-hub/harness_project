@@ -5,7 +5,8 @@ import { closeSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSy
 import path from 'node:path';
 import { changedFiles, type Risk } from '../gates/risk-gate.ts';
 import { git } from '../lib/git.ts';
-import { findPlan, parseBranch, stepFile } from '../lib/plan.ts';
+import { parseBranch, stepFile, type BranchInfo, type PlanRef } from '../lib/plan.ts';
+import { PlanPathError, planReader } from '../lib/plan-read.ts';
 
 export const REVIEW_DIR = '.harness-review';
 export const MAX_DIFF_BYTES = 400_000;
@@ -66,14 +67,12 @@ export function writeReviewInput(o: ReviewInputOptions): void {
   );
   const truncated = capFile(diff, o.maxDiffBytes ?? MAX_DIFF_BYTES);
 
-  const b = parseBranch(o.branch);
-  const ref = b ? findPlan(o.root, b.id) : null;
-  const step = ref?.dir && b && b.step !== null ? stepFile(ref, b.step) : null;
+  const where = planLines(o.root, parseBranch(o.branch));
   const lines = [
     '# 검증 입력 (base 스크립트가 만든 파일)',
     '',
-    `- 계획: ${ref ? ref.file : '찾지 못함'}`,
-    `- 이 PR의 step 파일: ${step ?? '없음(소규모 계획이거나 step 브랜치가 아니다)'}`,
+    `- 계획: ${where.plan}`,
+    `- 이 PR의 step 파일: ${where.step}`,
     `- 위험도: ${o.risk}`,
     ...(o.reasons.length ? o.reasons.map((r) => `  - ${r}`) : ['  - 해당 경로 규칙 없음']),
     `- 체크리스트: ${CHECKLIST}`,
@@ -81,4 +80,33 @@ export function writeReviewInput(o: ReviewInputOptions): void {
     `- diff: ${REVIEW_DIR}/diff.patch${truncated ? ' (잘렸다. 파일을 직접 읽어라)' : ''}`,
   ];
   writeFileSync(path.join(dir, 'context.md'), lines.join('\n') + '\n');
+}
+
+/**
+ * 검증 입력의 계획·step 줄. 계획 자리(계획 파일·폴더, index.json, step 파일)가 링크·서브모듈이면 그 경로를
+ * 안내하지 않는다: 검증자가 링크를 열어 링크 대상을 이 PR의 계획으로 읽지 않게 한다(Issue #194)
+ */
+function planLines(root: string, b: BranchInfo | null): { plan: string; step: string } {
+  const noStep = '없음(소규모 계획이거나 step 브랜치가 아니다)';
+  const unread = (e: PlanPathError) => `읽지 않음(일반 파일·폴더가 아니다: ${e.place})`;
+  if (!b) return { plan: '찾지 못함', step: noStep };
+  const reader = planReader(root);
+  let ref: PlanRef | null;
+  try {
+    ref = reader.find(b.id);
+  } catch (e) {
+    if (e instanceof PlanPathError) return { plan: unread(e), step: '없음' };
+    throw e;
+  }
+  if (!ref) return { plan: '찾지 못함', step: noStep };
+  if (!ref.dir || b.step === null) return { plan: ref.file, step: noStep };
+  const step = stepFile(ref, b.step);
+  try {
+    reader.read(`${ref.dir}/index.json`);
+    reader.read(step);
+  } catch (e) {
+    if (e instanceof PlanPathError) return { plan: ref.file, step: unread(e) };
+    throw e;
+  }
+  return { plan: ref.file, step };
 }
