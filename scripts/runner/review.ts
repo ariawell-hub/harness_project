@@ -189,8 +189,11 @@ export function failedResponses(state: ReviewState, ledger: Ledger): string[] {
 
 /** 대응한 뒤 닫힌 지적 ID(fixed·rejected·deferred. 아직 세지 않은 것). 그 실패 키는 0으로 돌아간다(9.2절) */
 export function settledResponses(state: ReviewState, ledger: Ledger): string[] {
+  // parked(구현 대기, Issue #212)는 닫힌 것이 아니다: 세지 않고 그 대응 기록을 남긴다. open으로 돌아와 판정받으면 센다
   return ledger.findings
-    .filter((e) => lastUncounted(state, e.id) !== null && e.status !== 'open')
+    .filter(
+      (e) => lastUncounted(state, e.id) !== null && e.status !== 'open' && e.status !== 'parked',
+    )
     .map((e) => e.id)
     .sort((a, b) => idNumber(a) - idNumber(b));
 }

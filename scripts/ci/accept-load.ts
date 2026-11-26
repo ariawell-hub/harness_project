@@ -1,7 +1,7 @@
 // 제작자 승인(10.2절 (4) accepted)을 원장에 잇는다: PR 댓글을 편집 이력과 함께 읽어(GraphQL) owner-accept.ts로 반영한다.
 // plan job(review-plan)과 기록 job(record-review)이 같은 함수 loadAccepted를 쓴다. 판별 규칙은 owner-accept.ts에만 있다.
 // 댓글은 외부 입력이다(14.6절). 이 파일의 예외·이유 문구에는 댓글 본문, 응답 본문, GitHub이 준 오류 문구를 넣지 않는다.
-import type { Ledger } from './ledger.ts';
+import { parkFor, type Ledger } from './ledger.ts';
 import { checkWhere, ledgerFromComments, listComments } from './ledger-store.ts';
 import {
   applyOwnerAccepts,
@@ -128,7 +128,8 @@ export async function loadAccepted(o: {
 /**
  * plan job이 판정 job에 넘길 원장과 반박을 읽는다(review-plan). 댓글 목록이나 원장을 읽지 못하면 예외다.
  * 승인(편집 이력)을 읽지 못하면 저장된 원장을 그대로 쓰고 이유를 돌려준다: 여기서 읽은 것은 검증자가 보는 입력이고,
- * 관문(review-ledger)은 기록 job이 같은 규칙으로 다시 계산해 정한다
+ * 관문(review-ledger)은 기록 job이 같은 규칙으로 다시 계산해 정한다.
+ * 구현 대기(Issue #212)는 기록 job과 같은 순서로 반영한다(parkFor → 제작자 승인 → parkFor). 저장하지 않는다
  */
 export async function readRoundLedger(o: {
   get: (path: string) => Promise<unknown>;
@@ -137,6 +138,8 @@ export async function readRoundLedger(o: {
   number: number;
   recorderBot: string;
   owner: string;
+  /** 이 head가 계획만 담고 있는가(mode=plan). 기록 job의 planOnly와 같은 뜻이다 */
+  planOnly: boolean;
 }): Promise<{
   ledger: Ledger | null;
   rebuttals: Rebuttal[];
@@ -150,6 +153,7 @@ export async function readRoundLedger(o: {
   if (!ledger) return { ledger: null, rebuttals: [], outcome: null, acceptError: null };
   let outcome: AcceptOutcome | null = null;
   let acceptError: string | null = null;
+  ledger = parkFor(ledger, o.planOnly);
   try {
     const a = await loadAccepted({ ...o, ledger });
     ledger = a.ledger;
@@ -157,7 +161,8 @@ export async function readRoundLedger(o: {
   } catch (e) {
     acceptError = acceptErrorText(e);
   }
-  // 반박(10.2절 (4)): PR 작성자의 댓글에서 형식에 맞는 것만 넘긴다. accepted인 지적은 열린 지적이 아니라 대상이 아니다
+  ledger = parkFor(ledger, o.planOnly);
+  // 반박(10.2절 (4)): PR 작성자의 댓글에서 형식에 맞는 것만 넘긴다. accepted·parked인 지적은 열린 지적이 아니라 대상이 아니다
   const pr = (await o.get(`repos/${o.repo}/pulls/${o.number}`)) as { user?: { login?: unknown } };
   const author = typeof pr?.user?.login === 'string' ? pr.user.login : '';
   const rebuttals = parseRebuttals({
