@@ -80,7 +80,7 @@ T=$(mktemp -d) && node scripts/harness.ts test-effect --ci > "$T/te" 2>&1 && gre
 git diff --quiet origin/main HEAD -- scripts/selftest/scenarios scripts/selftest/live scripts/selftest/live.ts scripts/selftest/fake-agent.ts scripts/selftest/api-stub.ts scripts/ci/selftest-result.ts .github && \
 T=$(mktemp -d) && node scripts/harness.ts self-test --jobs 1 > "$T/o1" 2>&1 && grep -qE "^self-test: 통과 \(시나리오 10개, 나란히 1개, 다시 돌린 것 0개, [0-9.]+초\)$" "$T/o1" && \
 node scripts/harness.ts self-test --jobs 2 --out "$T/r.json" > "$T/o" 2>&1 && grep -qE "^self-test: 통과 \(시나리오 10개, 나란히 2개, 다시 돌린 것 [0-9]+개, [0-9.]+초\)$" "$T/o" && test "$(jq -r '[.results[].id] | join(",")' "$T/r.json")" = "$(ls scripts/selftest/scenarios | sed 's/\.ts$//' | LC_ALL=C sort | paste -sd, -)" && test "$(jq -r 'keys | join(",")' "$T/r.json")" = "headSha,results,version" && \
-awk '/^## 진행 로그/{s=1;next} /^## /{s=0} s' docs/exec-plans/active/20261125-selftest-parallel/plan.md | grep -qE "^- [0-9]{4}-[0-9]{2}-[0-9]{2} 시간 재기: --jobs 1 [0-9.]+초\(부하 [0-9.]+\), --jobs 2 [0-9.]+초\(부하 [0-9.]+\)" && \
+P=$(ls -d docs/exec-plans/active/20261125-selftest-parallel docs/exec-plans/completed/20261125-selftest-parallel 2>/dev/null | head -1) && test -n "$P" && awk '/^## 진행 로그/{s=1;next} /^## /{s=0} s' "$P/plan.md" | grep -qE "^- [0-9]{4}-[0-9]{2}-[0-9]{2} 시간 재기: --jobs 1 [0-9.]+초\(부하 [0-9.]+\), --jobs 2 [0-9.]+초\(부하 [0-9.]+\)" && \
 T=$(mktemp -d) && (node scripts/harness.ts self-test --jobs 0 > "$T/o" 2>&1; test $? = 2) && \
 T=$(mktemp -d) && awk '/^### 12\.4 /{s=1;next} /^##+ /{s=0} s' docs/harness/design.md > "$T/s" && grep -qF -- "--jobs" "$T/s" && grep -qF "혼자 다시 돌린다" "$T/s" && grep -qF "child.ts" docs/harness/architecture.md && \
 grep -q "#247" docs/harness/changes/20261125-selftest-parallel-s0.md && grep -q "^## 설계서 변경 이력" docs/harness/changes/20261125-selftest-parallel-s0.md && git diff --quiet origin/main HEAD -- docs/harness/CHANGELOG.md && \
@@ -92,7 +92,7 @@ node scripts/harness.ts check
 - 첫째 줄: 실행기 테스트. 둘째 줄: 고친 테스트 파일이 merge-base의 코드에서 단언 실패로 실패한다(나란히 돌아야 통과하는 테스트가 있다).
 - 셋째 줄: 시나리오, 실제 세션 실행기, 가짜 에이전트·API 서버, 보고서 병합 코드, 워크플로가 main 그대로다.
 - 넷째·다섯째 줄: 이 리포의 하네스를 동시 수 1과 2로 잇달아 돌려 둘 다 통과하고, 요약 줄의 꼴이 수용 기준 5와 같고, 동시 수 2의 보고서의 결과가 파일 이름순(바이트 순)이고, 보고서의 최상위 키가 지금 그대로다.
-- 여섯째 줄: 진행 로그에 작업 5의 `시간 재기:` 줄(두 모드의 시간과 부하)이 있다.
+- 여섯째 줄: 진행 로그에 작업 5의 `시간 재기:` 줄(두 모드의 시간과 부하)이 있다. 계획 폴더는 완료 처리 전에는 `active/`, 뒤에는 `completed/`에 있으므로 둘 가운데 있는 쪽을 읽는다(완료 처리 뒤의 head에서도 AC가 돈다, 코드 판정 1라운드 F3).
 - 일곱째 줄: `--jobs 0`은 종료 코드 2다. 괄호 안의 `;`는 그 명령의 종료 코드를 `test`가 보게 하려는 것이고, 괄호 전체의 종료 코드는 `test`의 것이다.
 - 여덟째 줄: 설계서 12.4절에 `--jobs`와 다시 돌리기가 있고, 구조 문서에 자식 진입점이 있다.
 - 아홉째 줄: 변경 조각(#247, 설계서 변경 이력)이 있고 CHANGELOG는 main 그대로다. 조각의 형식은 마지막 줄의 `check`(`doc-lint`의 `R8 변경 조각`)가 본다.
