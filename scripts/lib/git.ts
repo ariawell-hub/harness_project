@@ -52,16 +52,13 @@ const REPO_DIRS_ARGS = ['rev-parse', '--show-toplevel', '--absolute-git-dir', '-
  * 부를 때마다 git으로 읽는다(담아 두지 않는다). 보통은 git 한 번이다(Issue #230: Windows에서 git 한 번이 55~94ms).
  * `--abbrev-ref=loose`는 `symbolic-ref --short`와 같은 규칙으로 줄인다(기본인 엄격한 규칙은 같은 짧은 이름의
  * 원격 추적 ref가 있으면 `heads/…`를 낸다). detached HEAD면 `HEAD`를 낸다.
- * 끝의 `--`는 앞의 `HEAD`를 리비전으로만 읽게 한다(Issue #252): 없으면 커밋이 없는 브랜치에서 작업 트리의 `HEAD` 파일을
- * 파일 인자로 읽어 그 글자를 브랜치로 냈다. 성공하면 넷째 줄(브랜치) 뒤에 다섯째 줄 `--`가 나온다. 그 꼴이 아니거나
- * 명령이 실패하면(커밋이 없는 브랜치는 128, 리포 아님) 예전 순서(rev-parse → symbolic-ref)로 읽는다.
+ * 그 명령이 실패하면(커밋이 없는 브랜치는 128, 리포 아님) 예전 순서(rev-parse → symbolic-ref)로 읽는다.
  * 그래서 돌려주는 값과 던지는 예외는 예전 두 번 읽기와 같다
  */
 export function repoInfo(cwd: string): RepoInfo {
-  const one = gitTry([...REPO_DIRS_ARGS, '--abbrev-ref=loose', 'HEAD', '--'], cwd);
+  const one = gitTry([...REPO_DIRS_ARGS, '--abbrev-ref=loose', 'HEAD'], cwd);
   const lines = one.stdout.replace(/\n$/, '').split('\n');
-  if (one.ok && lines.length === 5 && lines[4] === '--')
-    return toRepoInfo(cwd, lines, lines[3].trim());
+  if (one.ok && lines.length === 4) return toRepoInfo(cwd, lines, lines[3].trim());
   const out = git(REPO_DIRS_ARGS, cwd).split('\n');
   // 커밋이 없는 브랜치에서도 동작하도록 symbolic-ref를 쓴다. detached HEAD면 'HEAD'
   const sym = gitTry(['symbolic-ref', '--short', '-q', 'HEAD'], cwd);
