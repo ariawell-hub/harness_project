@@ -662,3 +662,76 @@ test('pr-state 명령: ci.requiredChecks가 빈 리포에서도 오래 열린 �
     fx.cleanup();
   }
 });
+
+// ---------- 구현 대기 지적 (Issue #212) ----------
+
+const PARKED =
+  /^- 구현 대기 지적: F1 — 계획만 담은 head라 판정하지 않는다\. 구현을 올리면 다시 열려 판정받는다\(절차서 2절\)$/m;
+/** 열린 P1(F1)을 구현 대기로 바꾼 원장 */
+const parkedLedger = (more: number): Ledger => {
+  const l = ledgerWithOpenP1(more);
+  return { ...l, findings: l.findings.map((e) => ({ ...e, status: 'parked' as const })) };
+};
+
+test('pr-state 명령: 구현 대기인 지적의 번호를 한 줄로 알린다. 오래 열린 지적으로는 내지 않는다(읽기만 한다)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    // 재판정 3회 뒤에도 닫히지 않았지만 구현 대기라 오래 열린 지적이 아니다
+    gh.commentAs(pr.number, BOT, renderLedger(parkedLedger(3)));
+    const before = readFileSync(state, 'utf8');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, PARKED);
+    assert.ok(!r.stdout.includes('오래 열린 지적'), r.stdout);
+    assert.ok(!r.stdout.includes('검증자가 쓴 제목이다'), r.stdout);
+    assert.ok(!r.stdout.includes('note.txt'), r.stdout);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.match(lines.at(-1)!, /^분류: /);
+    assert.ok(lines.findIndex((x) => PARKED.test(x)) < lines.length - 1);
+    assert.equal(readFileSync(state, 'utf8'), before);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('pr-state 명령: 구현 대기인 지적이 여럿이면 번호를 ID 순으로 잇고, 없으면 그 줄을 내지 않는다', async () => {
+  const many = await fixtureWithPR(CHECKS);
+  try {
+    const l = ledgerWithOpenP1(0);
+    const copy = (id: string, status: Ledger['findings'][number]['status']) => ({
+      ...l.findings[0],
+      id,
+      title: `지적 ${id}`,
+      status,
+    });
+    many.gh.commentAs(
+      many.pr.number,
+      BOT,
+      renderLedger({
+        ...l,
+        findings: [
+          copy('F1', 'open'),
+          copy('F2', 'parked'),
+          copy('F3', 'fixed'),
+          copy('F10', 'parked'),
+          copy('F9', 'parked'),
+        ],
+      }),
+    );
+    const r = cli(['pr-state'], many.t.worktree, many.state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^- 구현 대기 지적: F2, F9, F10 — 계획만 담은 head라 판정하지 않는다/m);
+  } finally {
+    many.fx.cleanup();
+  }
+  const none = await fixtureWithPR(CHECKS);
+  try {
+    none.gh.commentAs(none.pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], none.t.worktree, none.state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, LONG);
+    assert.ok(!r.stdout.includes('구현 대기'), r.stdout);
+  } finally {
+    none.fx.cleanup();
+  }
+});
