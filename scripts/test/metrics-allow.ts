@@ -150,6 +150,7 @@ export const GIT_READ_SHAPES: Shape[] = [
       '--git-common-dir',
       '--abbrev-ref=loose',
       'HEAD',
+      '--',
     ],
   },
   {
