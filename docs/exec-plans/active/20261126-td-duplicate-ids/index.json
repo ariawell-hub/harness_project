@@ -4,7 +4,8 @@
     {
       "step": 0,
       "name": "unique-ids",
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-11-26T14:25:51+09:00"
     }
   ]
 }
