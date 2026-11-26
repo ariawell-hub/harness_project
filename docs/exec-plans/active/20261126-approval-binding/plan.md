@@ -20,16 +20,17 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 수용 기준:
 
-1. `risk-gate`는 리뷰가 보고하는 커밋(`commit_id`)에 기대지 않고, 제작자의 마지막 판정 리뷰(승인)가 **제출된 시각에 PR의 head였던 커밋**(승인 head, H0)을 하네스가 정한다. H0는 이 PR의 커밋 가운데 GitHub Actions App이 PR head 브랜치에서 만든 check suite가 있고 그 생성 시각이 리뷰 제출 시각 이하인 것 중 가장 늦은 것이다(check suite의 생성 시각은 GitHub 서버 시각이고 봇이 만들 수 없다).
+1. `risk-gate`는 리뷰가 보고하는 커밋(`commit_id`)에 기대지 않고, 제작자의 마지막 판정 리뷰(승인)가 **제출된 시각에 PR의 head였던 커밋**(승인 head, H0)을 하네스가 정한다. H0는 이 PR의 커밋 가운데 GitHub Actions App(`ACTIONS_APP_ID`)이 PR head 브랜치에서 만든 check suite의 첫 생성 시각이 리뷰 제출 시각보다 엄격히 앞선 것 중 가장 늦은 것이다(check suite의 생성 시각은 GitHub 서버 시각이고 봇이 만들 수 없다). H0의 첫 suite 시각이 제출 60초 안이면 승인 head가 모호하다고 보고 승인으로 보지 않는다(같은 초, 시계 차이, 승인 직전 push).
 2. 지금 head가 H0면 승인이다(지금과 같다).
 3. 지금 head가 H0가 아니면 다음을 모두 만족할 때만 승인을 이어받는다. 하나라도 아니면 `제작자 head 승인 필요`로 실패한다.
    - H0가 지금 head의 조상이다(강제 push로 이력이 바뀌지 않았다).
-   - H0와 지금 head의 patch-id(각자 base와의 diff)가 같다.
+   - H0 이후 더한 커밋이 main 병합뿐이다: H0..head에서 main에 없는 커밋이 모두 병합 커밋이고, 각 병합의 첫째 부모를 뺀 부모가 main의 조상이다(빈 일반 커밋, 바꿨다 되돌린 일반 커밋, main이 아닌 브랜치 병합은 이어받지 않는다).
+   - H0와 지금 head의 patch-id(각자 main과의 merge-base에서 그 커밋까지의 diff)가 같다.
    - PR이 바꾼 파일의 내용이 H0와 지금 head에서 바이트 단위로 같다.
    - H0 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다.
      이어받으면 상태 설명에 `제작자 head 승인 이어받음 <H0 12자리>`를 적는다.
 4. 리뷰·check suite·PR 커밋을 읽지 못하거나 H0를 정하지 못하면 승인으로 보지 않는다(fail-closed, `error` 또는 `failure`. 지금 리뷰를 못 읽을 때와 같은 꼴).
-5. 승인 뒤 일반 커밋이 더해진 head는 GitHub이 리뷰의 커밋을 무엇으로 보고하든 승인으로 보지 않는다(테스트로 단언).
+5. 승인 뒤 일반 커밋이 더해진 head는 GitHub이 리뷰의 커밋을 무엇으로 보고하든 승인으로 보지 않는다(테스트로 단언). 이어받기 조건은 실제 git 이력을 만든 테스트로 본다.
 6. 설계서 10.3절과 절차서 5절("승인 요청 전 조건", "위험도 높음")의 승인 규칙을 위 규칙으로 맞춘다. 승인 요청 뒤 main 병합 갱신은 다시 승인받지 않아도 된다는 것을 적는다.
 7. 병합 뒤 테스트 리포(`ariawell-hub/harness-ops-lab`)에서 실제로 확인한다(step1): 승인 뒤 main 병합만 더한 head는 이어받고, 일반 커밋을 더한 head는 다시 승인을 요구하며, 그때 GitHub이 리뷰의 커밋을 무엇으로 보고하는지 기록한다.
 
@@ -37,8 +38,8 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 범위:
 
-- `scripts/gates/risk-gate.ts`(승인 head 결정과 이어받기 판정), `scripts/ci/gates.ts`(필요한 자료를 읽어 넘긴다. 판정 job의 `GH_TOKEN`은 `checks: read`·`pull-requests: read`가 있다), `scripts/ci/binding.ts`의 있는 함수(`patchId`, `samePrContent`, `changedOnBaseSince`) 재사용.
-- 테스트: `scripts/test/risk-gate.test.ts`, 새 파일 `scripts/test/risk-gate-approval.test.ts`.
+- `scripts/gates/risk-gate.ts`(승인 head 결정과 이어받기 판정), `scripts/ci/gates.ts`(필요한 자료를 읽어 넘긴다. 판정 job의 `GH_TOKEN`은 `checks: read`·`pull-requests: read`가 있다), `scripts/ci/binding.ts`(이어받기 판정 함수를 더하고 `samePrContent`·`changedOnBaseSince`를 재사용. `patchId`에 비교 끝 인자를 더하되 기본 동작은 그대로), `scripts/harness.ts`의 `gates` 명령(읽기 함수를 만들어 넘긴다), `scripts/ci/protection.ts`의 `ACTIONS_APP_ID` 재사용(읽기만).
+- 테스트: `scripts/test/risk-gate.test.ts`, 새 파일 `scripts/test/risk-gate-approval.test.ts`, `scripts/test/ci.test.ts`(`gates`가 위험도 높음일 때만 읽고 지금 설정으로 승인이 success가 되는지).
 - 문서: 설계서 10.3절·10.4절의 해당 문장, 절차서 5절, 변경 조각.
 - step1: `lab/approval-binding/`(실측 절차와 결과).
 
@@ -54,15 +55,17 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - `scripts/gates/risk-gate.ts`
 - `scripts/ci/gates.ts`
 - `scripts/ci/binding.ts`
+- `scripts/harness.ts`
 - `scripts/test/risk-gate.test.ts`
 - `scripts/test/risk-gate-approval.test.ts`
+- `scripts/test/ci.test.ts`
 - `docs/harness/design.md`
 - `docs/harness/workflow.md`
 - `docs/harness/changes/20261126-approval-binding-s0.md`
 - `docs/harness/changes/20261126-approval-binding-s1.md`
 - `lab/approval-binding/**`
 - `docs/exec-plans/active/20261126-approval-binding/**`
-- 읽기만: `.github/workflows/gates.yml`, `scripts/ci/review-plan.ts`, `scripts/lib/github.ts`, `docs/SECURITY.md`("테스트 리포 준비"), `lab/ops-transition/README.md`
+- 읽기만: `.github/workflows/gates.yml`, `scripts/ci/protection.ts`, `scripts/ci/review-plan.ts`, `scripts/lib/github.ts`, `docs/SECURITY.md`("테스트 리포 준비"), `lab/ops-transition/README.md`
 
 ## step 목록
 
@@ -73,12 +76,21 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 
 - 2026-11-26 접수: 제작자가 대화에서 남은 지적을 Issue로 열어 고치라고 지시했고 봇이 Issue #250을 등록했다. 방향은 대화에서 물어 "main 병합만은 이어받기"로 정해졌다. `new-task --issue 250 --slug approval-binding --type fix --size large --risk high`로 시작했다(main `4816af5`).
 - 2026-11-26 읽은 것: `risk-gate`는 `gates` 워크플로의 판정 job(`evaluate`)이 미리 읽은 리뷰 JSON(`gh api pulls/<N>/reviews`)으로 판정한다. 그 job의 `GH_TOKEN`은 `contents`·`pull-requests`·`checks` 읽기이고 PR 이력 전체(`fetch-depth: 0`)를 체크아웃한다. 커밋 상태 읽기(`statuses`)는 없어 검증자 이어받기(`fetchCandidates`)처럼 앞선 head의 상태를 읽을 수는 없다. 자체 테스트 시나리오에는 `risk-gate`가 없다.
+- 2026-11-26 계획 검증 1회차(head `20fb62c`): Claude 승인(P2 둘), Codex 수정 요청(P0 하나, P1 넷, P2 하나). 모두 받아들였다.
+  - F3(P0, 승인과 같은 초에 생긴 새 head의 suite가 H0로 잡힐 수 있다) → "이하"를 "엄격히 앞선"으로 바꾸고, 커밋마다 가장 이른 suite를 쓰며, H0의 첫 suite가 제출 60초 안이면 모호하다고 보고 다시 승인받게 했다(수용 기준 1, step0 작업 1과 테스트). suite 시각은 push 뒤에만 생기므로 H0는 제출 때의 진짜 head이거나 그보다 앞선 커밋이고, 앞선 커밋이면 이어받기 조건이 더 엄격해질 뿐이다. 남는 위험은 같은 초와 서비스 사이 시계 차이라 60초 창으로 막는다.
+  - F4(P1, 이어받기 조건이 main 병합만 더했는지 보지 않는다. 빈 일반 커밋이 통과한다) → 조건 "H0 이후 더한 커밋이 main 병합뿐"을 더했다(수용 기준 3, step0 작업 2 (나)). 빈 일반 커밋, 바꿨다 되돌린 커밋, main이 아닌 병합을 실제 git 테스트로 본다.
+  - F5(P1, Claude P2와 같은 지적. 설정에 Actions App id가 없다) → `scripts/ci/protection.ts`의 `ACTIONS_APP_ID`를 쓴다(필수 체크 출처 `actions`의 매핑과 같다). 지금 설정으로 정당한 승인이 success가 되는 테스트를 더했다.
+  - F6(P1, 있는 `patchId`는 비교 끝이 `HEAD`로 고정돼 H0의 patch를 못 구한다) → `patchId`에 비교 끝 인자(기본 `HEAD`)를 더하고 H0와 head를 각자의 merge-base에서 계산한다. 이어받기 판정을 `binding.ts`의 함수 하나로 모아 실제 git 이력으로 테스트한다.
+  - F7(P1, step1 AC가 두 사례의 결과와 리뷰 기록을 정확히 보지 않는다) → 사례마다 상태(success/failure)와 설명, head·리뷰 API 커밋(40자)·시각이 있는지 단언하게 고쳤다.
+  - F8(P2, Claude P2와 같은 지적. `scripts/harness.ts`, `scripts/test/ci.test.ts`가 관련 파일에 없다) → 범위와 관련 파일에 더했다.
+- 2026-11-26 PR #226 자료로 규칙을 맞춰 봤다: 승인 `2026-11-25T04:36:27Z`. Actions suite의 첫 시각은 `5027f12` `03:40:49Z`, `c5d5338` `2026-11-26T00:19:29Z`, `a1aae51` `2026-11-26T03:09:08Z`라 H0는 `5027f12`다. `5027f12`에는 승인 뒤 `04:36:30Z`에도 suite가 생겼다(리뷰 뒤 재판정). 그래서 커밋마다 가장 이른 suite를 쓴다.
 
 ## 의사결정 로그
 
 - 결정(제작자, 2026-11-26): main 병합만 더한 갱신은 승인을 이어받는다. / 버린 대안: 어떤 새 커밋이든 다시 승인(병렬 위험도 높음 PR이 갱신마다 재승인을 기다린다).
 - 결정: 승인 head는 check suite 생성 시각으로 정한다. / 이유: 리뷰의 `commit_id`는 GitHub이 옮겨 보고한다. 리뷰 제출 시각과 check suite 생성 시각은 모두 GitHub 서버 시각이고, check suite는 PR head가 push될 때 Actions App이 만든다(봇이 만들 수 없다). 판정 job의 권한(`checks: read`)으로 읽을 수 있어 워크플로를 바꾸지 않는다. / 버린 대안: 승인 때 기록 job이 승인 head를 커밋 상태로 남기고 뒤에 읽는다(판정 job에 `statuses: read`를 더하는 워크플로 변경이 필요하다), 커밋 날짜로 정한다(봇이 정할 수 있다).
-- 결정: H0는 "생성 시각이 리뷰 제출 이하인 것 중 가장 늦은 것"이고, 이어받기에는 H0가 지금 head의 조상이어야 한다. / 이유: 강제 push로 head를 되돌렸다가 다시 올리는 꼴에서 옛 check suite가 승인 head로 잡히지 않게 한다.
+- 결정: H0는 "커밋마다 가장 이른 suite 시각이 리뷰 제출보다 엄격히 앞선 것 중 가장 늦은 것"이고, 그 시각이 제출 60초 안이면 모호하다고 본다. 이어받기에는 H0가 지금 head의 조상이어야 한다. / 이유: 같은 초와 시계 차이로 승인하지 않은 head가 H0로 잡히지 않게 한다(계획 검증 F3). 승인 뒤 같은 커밋에 생긴 suite가 H0를 바꾸지 않는다. 강제 push로 head를 되돌렸다가 다시 올리는 꼴에서 옛 head가 승인 head로 잡혀도 조상 조건에서 걸린다. / 버린 대안: 리뷰가 부른 워크플로 실행(`review-trigger`)의 head로 정한다(실행과 리뷰를 잇는 것도 시각뿐이고 API 호출이 는다).
+- 결정: 60초 창. / 이유: 하네스 흐름에서 승인은 판정이 끝난 뒤 `pr-ready`로 요청하므로 push와 승인 사이가 몇 분 이상이다(PR #226은 56분). 창에 걸리면 다시 승인받으면 된다.
 
 ## 발견 사항
 
