@@ -7,7 +7,7 @@ import { runSync } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { findPlan } from '../lib/plan.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
-import { buildContext, normalize } from '../hooks/guard.ts';
+import { buildContext, normalize } from '../hooks/decide.ts';
 import { HARNESS_ROOT, commitAll, gitInit, sh, tmp, write } from './helpers.ts';
 import { readFileSync } from 'node:fs';
 
