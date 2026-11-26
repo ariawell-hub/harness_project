@@ -115,10 +115,10 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
 ## 검증 방법과 결과
 
 - step0의 AC 명령(새 테스트 두 파일, 기존 판정 테스트, `test-effect` 판정 줄, `check`).
-- 결과(2026-11-26, macOS, Node 22.23.3, 구현 검증 F8~F10 반영 뒤):
-  - AC의 `node --test` 열 파일: 테스트 153개 통과(새 테스트 `plan-read.test.ts` 10개, `plan-symlink.test.ts` 14개 포함). 기존 판정 테스트의 단언은 고치지 않았다. 머신 부하 평균이 24일 때 한 번 돌린 실행에서는 `scope.test.ts`의 시간 제한 테스트 둘(`scopePaths`의 긴 글 읽기, 8.6초·5.8초)이 시간을 넘겼다. 그 파일만 따로 돌리면 27개가 통과했고, 부하가 내려간 뒤(부하 평균 7) 목록 전체를 다시 돌린 결과가 위의 153개다. 이 변경은 `scope.ts`를 바꾸지 않았다.
+- 결과(2026-11-26, macOS, Node 22.23.3). 코드·테스트의 마지막 커밋 `a49158c`(구현 검증 F8~F10 반영)에서 돌렸다. 그 뒤의 커밋은 이 계획 파일만 바꾼다.
+  - AC의 `node --test` 열 파일: 테스트 153개 통과(새 테스트 `plan-read.test.ts` 10개, `plan-symlink.test.ts` 14개 포함). 기존 판정 테스트의 단언은 고치지 않았다. 앞선 커밋 `d82e4b7`에서 머신 부하 평균이 24일 때 한 번 돌린 실행에서는 `scope.test.ts`의 시간 제한 테스트 둘(`scopePaths`의 긴 글 읽기, 8.6초·5.8초)이 시간을 넘겼다. 그 파일만 따로 돌리면 27개가 통과했다. 이 변경은 `scope.ts`를 바꾸지 않았다.
   - `test-effect`: `scripts/test/plan-symlink.test.ts: effective(base에서 단언 실패, 종료 코드 1)`. `scripts/test/plan-read.test.ts: effective(base에서 실패(단언 실패 아님: 모듈 없음 등), 종료 코드 1)`: 새 모듈의 단위 테스트라 변경 전 코드에서는 불러오기에서 실패한다. 그 파일의 단언(경우마다 던짐·자리·없음·글)은 직접 확인했다.
-  - `check`: 완료 처리 직전에 돌린다(통과해야 `complete-step`을 한다).
+  - `node scripts/harness.ts check`(커밋 `a49158c`, 부하 평균 2~7): 통과. fmt·lint·test(테스트 파일 전체)·test-effect·doc-lint·bypass-scan·secret-scan 모두 통과, build는 해당 없음. 이 계획 파일을 고친 뒤에는 `check --only fmt,doc-lint,bypass-scan,secret-scan`을 다시 돌렸다.
 
 ## 다음 할 일
 
