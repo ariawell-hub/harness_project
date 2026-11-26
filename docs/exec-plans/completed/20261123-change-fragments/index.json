@@ -10,7 +10,8 @@
     {
       "step": 1,
       "name": "collect",
-      "status": "in_progress"
+      "status": "completed",
+      "completed_at": "2026-11-26T10:12:04+09:00"
     }
   ]
 }

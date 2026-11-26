@@ -2,7 +2,7 @@
 id: 20261123-change-fragments
 issue: 222 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -156,6 +156,7 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - 결과(step1, 2026-11-25): `node scripts/harness.ts check` 통과. `test-effect`: `changes-collect.test.ts` effective(base에서 단언 실패).
 - 결과(step1 재작업, 2026-11-25, head `6c731c9`. main `e183ae7` 병합과 F1~F4 고침 뒤): step1의 AC 20줄이 모두 통과했다. 클론에서의 모으기는 `changes-collect: 조각 5개, CHANGELOG 항목 5개, 설계서 v0.7.83, v0.7.84`(main에 #236의 조각이 더해졌다)였고 그 뒤 `doc-lint`가 통과했다. `node scripts/harness.ts check` 통과(첫 실행은 다른 세션의 `check`와 겹쳐 `test` 1건이 실패했는데 출력이 잘려 이름을 남기지 못했다. 혼자 다시 돌린 `test` 1350건과 `check`가 통과했다).
 - 결과(step1 재작업 2회차, 2026-11-25, head `c659256`. F1 2회차·F5 고침 뒤): step1의 AC 20줄이 모두 통과했다(클론 모으기는 위와 같다). `node scripts/harness.ts check` 통과.
+- 결과(step1 재작업 3회차, 2026-11-26, head `008893c`. main `821c280` 병합과 F6·F7 고침 뒤): step1의 AC 20줄이 모두 통과했다(클론 모으기: 조각 5개, CHANGELOG 항목 5개, 설계서 v0.7.84, v0.7.85). `node scripts/harness.ts check` 통과.
 
 ## 다음 할 일
 
