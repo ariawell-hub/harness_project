@@ -14,7 +14,7 @@
 
 결과 파일은 스크립트가 쓴다. 손으로 고치지 않는다. 기대와 다른 결과가 나오면 스크립트나 절차를 고치고 다시 돌린다.
 
-하네스 리포의 `tsconfig.json`·`check`는 `lab/`을 검사하지 않는다. `scripts/test/`의 테스트는 이 폴더에서 두 파일을 읽는다: 워크플로 패치(`q10-trial-workflow.test.ts`가 워크플로 파일과 글자 그대로 같은지 본다)와 `results/darwin-arm64.json`(`profile-web-db.test.ts`가 웹 프로파일 README의 DB 절에 적은 버전과 같은지 본다). `check`는 `lab/` 안의 파일만 바뀐 변경에서 `test`를 건너뛰지만(`testInertPaths`) 보호 경로는 건너뛰지 않는다. 워크플로 패치는 보호 경로라, 그것을 바꾼 변경은 `test`를 돌리고 제작자 승인이 필요하다. 결과 파일을 같게 다루는 일은 Issue #225다.
+하네스 리포의 `tsconfig.json`·`check`는 `lab/`을 검사하지 않는다. `scripts/test/`의 테스트는 이 폴더에서 두 파일을 읽는다: 워크플로 패치(`q10-trial-workflow.test.ts`가 워크플로 파일과 글자 그대로 같은지 본다)와 `results/darwin-arm64.json`(`profile-web-db.test.ts`가 웹 프로파일 README의 DB 절에 적은 버전과 같은지 본다). `check`는 `lab/` 안의 파일만 바뀐 변경에서 `test`를 건너뛰지만(`testInertPaths`) 보호 경로는 건너뛰지 않는다. 두 파일 모두 보호 경로라(결과 파일은 Issue #225), 그것을 바꾼 변경은 `test`를 돌리고 제작자 승인이 필요하다.
 
 ## 절차
 
