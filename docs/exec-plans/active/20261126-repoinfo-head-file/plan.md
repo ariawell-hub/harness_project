@@ -22,7 +22,9 @@ claimed_at: 2026-11-26T12:58:52+09:00 # new-task가 채운다
 
 1. 첫 커밋 전 브랜치(`main`)에서 작업 트리 루트에 `HEAD` 파일이 있을 때, 루트와 하위 폴더에서 부른 `repoInfo`의 값이 예전 두 번 읽기(`rev-parse` 세 경로 + `symbolic-ref --short -q HEAD`)와 같고 브랜치가 `main`이다.
 2. 커밋이 있는 리포의 보통 경우(메인 체크아웃, worktree, detached HEAD, 겹치는 짧은 이름, 작업 트리의 `HEAD` 파일)에 git을 한 번만 띄우고 값이 예전과 같다. `scripts/test/repo-info.test.ts`의 있던 테스트를 고치지 않고 통과한다.
-3. 빠른 경로가 다섯째 줄이 정확히 `--`일 때만 넷째 줄을 브랜치로 쓴다. 그 밖의 출력이면 예전 경로로 돌아간다(지금처럼 값과 예외가 예전과 같다).
+3. 빠른 경로가 다섯째 줄이 정확히 `--`일 때만 넷째 줄을 브랜치로 쓴다. 그 밖의 출력(종료 코드 0이어도 다섯째 줄이 다르거나 줄 수가 다름)이면 예전 경로로 돌아간다(지금처럼 값과 예외가 예전과 같다). 꾸민 출력으로 테스트한다.
+4. detached HEAD와 브랜치와 같은 짧은 이름의 ref가 있을 때도 git을 한 번만 띄운다(새 테스트로 실행 횟수를 단언).
+5. `docs/harness/architecture.md`의 `lib/git.ts` 줄이 적은 빠른 경로 명령이 실제와 같다.
 
 ## 범위 / 비범위
 
@@ -38,6 +40,7 @@ claimed_at: 2026-11-26T12:58:52+09:00 # new-task가 채운다
 
 - `scripts/lib/git.ts`
 - `scripts/test/repo-info.test.ts`
+- `docs/harness/architecture.md`
 - `docs/harness/changes/20261126-repoinfo-head-file-s0.md`
 - `docs/exec-plans/active/20261126-repoinfo-head-file/**`
 - 읽기만: `scripts/test/helpers.ts`, `docs/exec-plans/completed/20261123-windows-test-speed/`
@@ -50,6 +53,7 @@ claimed_at: 2026-11-26T12:58:52+09:00 # new-task가 채운다
 
 - 2026-11-26 접수: 제작자가 대화에서 남은 지적을 Issue로 열어 고치라고 지시했고 봇이 Issue #252를 등록했다. `new-task --issue 252 --slug repoinfo-head-file --type fix --size medium --risk high`로 시작했다(main `4816af5`).
 - 2026-11-26 재현(임시 리포, 첫 커밋 전 `main`, 루트에 `HEAD` 파일): 지금 빠른 경로는 종료 코드 0과 넷째 줄 `HEAD`. 인자 끝에 `--`를 붙이면 `fatal: bad revision 'HEAD'`, 종료 코드 128. 커밋 뒤에는 `--`를 붙여도 0이고 넷째 줄 `main`, 다섯째 줄 `--`.
+- 2026-11-26 계획 검증 1회차(head `1633e7f`): Claude 승인(지적 없음), Codex 수정 요청(P1 둘, P2 하나). 모두 받아들였다. F1(성공 응답의 다섯째 줄이 `--`가 아닐 때 예전 경로로 가는지 검증하지 않는다) → 꾸민 출력으로 보는 테스트 (나)를 작업과 수용 기준 3에 더했다. F2(detached HEAD와 겹치는 이름에서 git 실행 횟수를 보지 않는다) → 실행 횟수를 단언하는 테스트 (다)와 수용 기준 4를 더했다(AC의 테스트 수 6 → 8). F3(P2, 코드 구조 문서의 빠른 경로 명령) → 관련 파일과 작업 3, 수용 기준 5, AC 한 줄을 더했다. 그 사이 main에 #241이 병합돼 `origin/main`을 병합했다.
 
 ## 의사결정 로그
 
