@@ -30,8 +30,9 @@ grep -qE '^\| TD-76 +\| `lab/`의 스크립트 7개' docs/exec-plans/tech-debt-t
 grep -qE '^\| TD-77 +\| `scripts/test/wrapper-options.test.ts`의 시간 비율 테스트' docs/exec-plans/tech-debt-tracker.md
 grep -qE '^\| TD-70 +\| Windows에서 `check` 캐시 키' docs/exec-plans/tech-debt-tracker.md
 grep -qE '^\| TD-71 +\| Windows에서 하네스 테스트가 느린 몫' docs/exec-plans/tech-debt-tracker.md
-grep -qF '→ 처리: TD-76' docs/exec-plans/completed/20261125-symlink-main/plan.md && grep -qF '→ 처리: TD-77' docs/exec-plans/completed/20261125-symlink-main/plan.md
-grep -qF 'TD-76' docs/harness/changes/20261125-symlink-main-s0.md
+grep -qE '^- `lab/`의 스크립트 7개에 같은 직접 실행 판정이 남았다.*→ 처리: TD-76$' docs/exec-plans/completed/20261125-symlink-main/plan.md
+grep -qE '^- 최종 로컬 `check`에서 .*wrapper-options\.test\.ts.*→ 처리: TD-77$' docs/exec-plans/completed/20261125-symlink-main/plan.md
+grep -qF '`lab/` 스크립트의 같은 판정은 TD-76.' docs/harness/changes/20261125-symlink-main-s0.md
 test -z "$(grep -E 'TD-7[01]([^0-9]|$)' docs/harness/changes/20261125-symlink-main-s0.md docs/exec-plans/completed/20261125-symlink-main/plan.md)"
 git diff --quiet "$(git merge-base HEAD origin/main)" HEAD -- docs/exec-plans/completed/20261123-windows-test-speed
 grep -qF "'R8 기술 부채 id'" scripts/gates/doc-lint.ts
