@@ -1,0 +1,16 @@
+{
+  "plan": "20261124-slim-runner",
+  "steps": [
+    {
+      "step": 0,
+      "name": "switch",
+      "status": "completed",
+      "completed_at": "2026-11-25T10:46:03+09:00"
+    },
+    {
+      "step": 1,
+      "name": "slim-on",
+      "status": "pending"
+    }
+  ]
+}
