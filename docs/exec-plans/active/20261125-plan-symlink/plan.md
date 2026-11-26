@@ -36,7 +36,7 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
    - `planAuthor`는 `''`이다(작성자를 모르면 위험도 낮음에서도 Codex가 판정한다).
    - `writeReviewInput`의 `context.md`는 그 자리를 "읽지 않음(일반 파일·폴더가 아니다)"으로 적는다(계획 줄 또는 step 줄).
    - 어느 결과에도 링크 대상의 글(테스트가 링크 대상에 넣은 표식, `risk: low`, `author: codex`)이 나오지 않는다(테스트).
-3. 링크의 꼴: 계획 파일(`plan.md`) 링크, 계획 폴더 링크, `index.json` 링크, step 파일 링크, 계획 파일·계획 폴더 링크를 커밋한 뒤 `core.symlinks=false`로 받은 체크아웃, 그리고 step 파일이 작업 트리에는 없고 색인에만 링크로 있는 꼴. 링크 대상은 리포 밖의 "그럴듯한 계획"(`risk: low`, `author: codex`, 표식 글)이다(테스트, 새 파일 `scripts/test/plan-symlink.test.ts`. 변경 전 코드에서는 링크 대상을 읽어 단언으로 실패한다).
+3. 링크의 꼴: 계획 파일(`plan.md`) 링크, 계획 폴더 링크, `index.json` 링크, step 파일 링크, 계획 파일·계획 폴더 링크를 커밋한 뒤 `core.symlinks=false`로 받은 체크아웃, 그리고 step 파일이 작업 트리에는 없고 색인에만 링크로 있는 꼴(이름을 숫자로 바꾸면 달라지는 step 이름 포함: 계획 해시는 원래 경로를 적어 거절한다). 링크 대상은 리포 밖의 "그럴듯한 계획"(`risk: low`, `author: codex`, 표식 글)이다(테스트, 새 파일 `scripts/test/plan-symlink.test.ts`. 변경 전 코드에서는 링크 대상을 읽어 단언으로 실패한다).
 4. 기존 동작이 그대로다: 기존 테스트(`plan-gate.test.ts`, `plan-hash.test.ts`, `risk-gate.test.ts`, `gates.test.ts`, `ci.test.ts`, `scope.test.ts`, `runner-plan-review.test.ts`, `task.test.ts`)가 단언을 고치지 않고 통과한다. 이 리포의 `docs/exec-plans/`에 있는 계획 폴더마다 새 읽기로 계산한 `planHash`가 그 커밋의 `planHashAt(root, 'HEAD', …)`와 같다(테스트). 커밋하지 않은(추적되지 않은) 계획 파일도 전처럼 읽어 `plan-gate --mode plan`이 통과한다(테스트).
 5. 설계서 10.4절 "심볼릭 링크" 항목에 계획을 읽는 base 스크립트가 체크아웃 설정과 무관하게 링크를 따라가지 않는다는 것을 적는다. `docs/harness/architecture.md`의 라이브러리 목록과 변경 조각이 맞다. `node scripts/harness.ts check`가 통과하고, 그 안의 `test-effect`가 새 테스트(`scripts/test/plan-symlink.test.ts`)를 변경 전 코드에서 "단언 실패"로 판정한다.
 
@@ -84,6 +84,8 @@ PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate
 - 2026-11-25 계획 검증 3회차(head `daf6035`): Claude 승인, Codex는 사용 한도로 판정 없음(`review/codex` error, "You've hit your usage limit … try again at 3:00 PM"). 2026-11-26에 그 판정 실행(Actions run 45544969695)의 실패한 job을 다시 돌렸다: Codex가 F1·F5를 닫고 새 지적 하나(F6, P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
   - F6: 폴더 읽기가 그 폴더 아래의 색인 링크를 모두 거절하면, 계획 해시가 읽지 않는 같은 폴더의 참고 파일 링크도 해시·모드를 바꾼다(수용 기준 2의 "읽지 않는 자리의 링크는 결과를 바꾸지 않는다"와 어긋난다). → 폴더 읽기는 던지지 않고 색인에만 있는 바로 아래 항목의 이름을 목록에 더한다. 그 이름을 읽는 쪽이 거절한다(수용 기준 1, step0 작업 2). 읽지 않는 참고 파일 링크의 대조 테스트를 더했다(step0 작업 1).
   - 같은 push에 `origin/main` 병합(#217)을 함께 올린다.
+- 2026-11-26 계획 검증 4회차(head `b4d6cfa`): Claude 승인, Codex는 F6을 닫고 새 지적 하나(F7, P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
+  - F7: 해시 계산기는 step 이름의 번호를 숫자로 바꿔 경로를 다시 만든다. 색인에만 있는 `step9007199254740993.md` 링크는 목록에 들어가지만 계산기는 반올림된 `step9007199254740992.md`를 읽어, 원래 링크를 거절하지 못한다. → 해시를 계산하기 전에 목록의 원래 이름으로 step 파일 자리를 확인한다(해시 입력은 그대로, step0 작업 3). 그 꼴의 테스트를 더했다(step0 작업 1, 수용 기준 3).
 
 ## 의사결정 로그
 

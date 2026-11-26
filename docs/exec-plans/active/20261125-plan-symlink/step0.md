@@ -19,6 +19,7 @@
      - 경우마다 단언(모든 꼴): `planGate`(mode `pr`와 `plan`)의 문제 가운데 하나가 "계획 자리가 일반 파일·폴더가 아니다"와 그 자리의 경로를 담는다. `planHash`·`planHashes`가 던지고 `planMode`가 `{ mode: 'code', hash: '' }`다. `writeReviewInput`이 쓴 `context.md`에 "읽지 않음"이 있다. 결과(문제 글, 위험도 사유, `context.md`)를 이은 글에 `LINK-TARGET-MARKER`, `risk: low`, `codex`가 없다.
      - 계획 파일·계획 폴더의 꼴((가)·(나)·(마)·(바))에서만: `assessRisk`가 던지고, `riskGate`를 `gates`처럼(`guarded`와 같이 던지면 `error`로) 부른 결과가 통과가 아니다. `planAuthor`가 `''`다.
      - `index.json`·step 파일의 꼴((다)·(라)·(사))에서는: `assessRisk`의 위험도가 high(정상 계획의 `risk: high`)이고 `planAuthor`가 `claude-code`다(읽지 않는 자리의 링크가 결과를 바꾸지 않는다).
+     - 숫자로 바꾸면 이름이 달라지는 step 링크: `index.json`은 step0만 적고, `step9007199254740993.md`를 작업 트리에 두지 않고 색인에만 모드 120000으로 커밋한 리포에서 `planHash`·`planHashes`가 그 원래 경로(`…/step9007199254740993.md`)를 메시지에 담아 던지고 `planMode`가 `{ mode: 'code', hash: '' }`다.
      - 읽지 않는 자리의 링크(대조): 계획 폴더의 참고 파일 `notes.md`를 작업 트리에 두지 않고 색인에만 모드 120000으로 커밋한 리포에서 `planHash`가 `planHashAt(root, 'HEAD', 계획 폴더)`와 같고, `planMode`가 `{ mode: 'plan', hash: <그 해시> }`이며, `planGate` mode `plan`이 통과한다(링크를 만들 권한이 없어도 돈다).
      - 링크 없는 같은 픽스처(대조): `planGate` 통과, `assessRisk`의 위험도 high(계획 risk), `planAuthor`가 `claude-code`, `planHash`가 `planHashAt(root, 'HEAD', 계획 폴더)`와 같다.
      - 커밋하지 않은 계획: 계획 파일을 추적하지 않은 채(커밋 전) `planGate` mode `plan`이 통과하고 `planHash`가 계산된다.
@@ -33,7 +34,7 @@
 3. 호출자를 바꾼다(판정 규칙은 그대로):
    - `scripts/gates/plan-gate.ts`: `findPlan` → `findPlanSafe`, `read` → `readPlanFile`. `PlanPathError`를 잡아 문제 하나("계획 자리가 일반 파일·폴더가 아니다(심볼릭 링크·서브모듈): <자리>", 고치는 법: 계획 자리에 링크를 두지 말고 일반 파일로 커밋하라)로 돌려주고 그 뒤 검사를 하지 않는다.
    - `scripts/gates/risk-gate.ts`의 `planRisk`: `findPlanSafe`·`readPlanFile`. `PlanPathError`는 잡지 않는다(`assessRisk`가 던진다).
-   - `scripts/ci/plan-hash.ts`: `planHash`의 `read`·`list`를 `planReader`의 `read`·`list`로, `planHashes`·`planMode`의 `findPlan`을 `findPlanSafe`로. `planHash`는 해시 입력(`plan.md`, step 파일)을 그대로 두고, `index.json` 자리도 같은 읽기로 확인한다(있으면 일반 파일이어야 한다. 글은 해시에 넣지 않는다: 이 리포의 계획 해시가 그대로다). `planMode`는 던지면 `{ mode: 'code', hash: '' }`(지금 `planHash` 실패와 같다).
+   - `scripts/ci/plan-hash.ts`: `planHash`의 `read`·`list`를 `planReader`의 `read`·`list`로, `planHashes`·`planMode`의 `findPlan`을 `findPlanSafe`로. `planHash`는 해시 입력(`plan.md`, step 파일)을 그대로 두고, `index.json` 자리도 같은 읽기로 확인한다(있으면 일반 파일이어야 한다. 글은 해시에 넣지 않는다: 이 리포의 계획 해시가 그대로다). 또 해시를 계산하기 전에 폴더 목록에서 step 파일 이름(`step<N>.md`)에 맞는 이름마다 그 원래 이름의 자리를 읽어 확인한다: 해시 계산기(`hashFrom`)는 번호를 숫자로 바꿔 경로를 다시 만들어, 숫자로 바꾸면 달라지는 이름(`step9007199254740993.md`)의 링크를 읽지 않기 때문이다. 해시 입력은 바꾸지 않는다. `planMode`는 던지면 `{ mode: 'code', hash: '' }`(지금 `planHash` 실패와 같다).
    - `scripts/ci/review-plan.ts`의 `planAuthor`: `findPlanSafe`·`readPlanFile`. `PlanPathError`면 `''`.
    - `scripts/ci/review-input.ts`: `findPlanSafe`. `PlanPathError`면 계획 줄을 "읽지 않음(일반 파일·폴더가 아니다: <자리>)"로, step 줄을 "없음"으로 쓴다. 계획을 찾았고 step 브랜치면 `index.json` 자리와 step 파일 자리도 같은 판정(`readPlanFile`)으로 보고, 어느 쪽이든 링크면 step 줄을 "읽지 않음(일반 파일·폴더가 아니다: <자리>)"으로 쓴다(검증자가 그 경로를 열지 않게).
 4. 문서:
