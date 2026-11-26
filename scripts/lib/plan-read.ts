@@ -61,6 +61,11 @@ export function planReader(root: string): PlanReader {
     if (index === undefined) index = linkedInIndex(root);
     for (const p of steps)
       if (index?.has(p)) throw new PlanPathError(p, '색인에 심볼릭 링크·서브모듈로 있다');
+    // root 자체: 링크면 그 아래 자리의 lstat이 링크를 따라간다(자리 이름은 '.')
+    // 끝의 '/'를 떼어 본다(끝에 '/'가 붙은 경로의 lstat은 링크를 따라간다)
+    const top = lstatSync(path.resolve(root));
+    if (top.isSymbolicLink()) throw new PlanPathError('.', '리포 폴더 자체가 심볼릭 링크다');
+    if (!top.isDirectory()) throw new PlanPathError('.', '리포 폴더가 폴더가 아니다');
     for (const [i, p] of steps.entries()) {
       let st;
       try {

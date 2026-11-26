@@ -5,7 +5,7 @@ import type { RevertCheck } from '../gates/revert-check.ts';
 import { assessRisk, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import { parseBranch, parseDoc } from '../lib/plan.ts';
-import { PlanPathError, planReader } from '../lib/plan-read.ts';
+import { planReader } from '../lib/plan-read.ts';
 
 export function reviewersFor(risk: Risk, author: string): { claude: boolean; codex: boolean } {
   if (risk !== 'low') return { claude: true, codex: true };
@@ -13,7 +13,11 @@ export function reviewersFor(risk: Risk, author: string): { claude: boolean; cod
   return author === 'codex' ? { claude: true, codex: false } : { claude: false, codex: true };
 }
 
-/** PR 트리의 계획 frontmatter `author`. 없거나 계획 자리가 링크·서브모듈이면 ''(작성자를 모른다, Issue #194) */
+/**
+ * PR 트리의 계획 frontmatter `author`. 없거나 읽지 못하면 ''(작성자를 모른다, Issue #194): 계획 자리가
+ * 링크·서브모듈이거나 git 색인을 읽지 못한 경우다. 던지지 않는다. planReview가 위험도 계산의 catch(위험도 high)에
+ * 닿기 전에 부르기 때문이다. 같은 실패는 위험도 계산에서도 나서 high와 두 검증자가 된다
+ */
 export function planAuthor(root: string, branch: string): string {
   const b = parseBranch(branch);
   if (!b) return '';
@@ -22,9 +26,8 @@ export function planAuthor(root: string, branch: string): string {
     const reader = planReader(root);
     const ref = reader.find(b.id);
     text = ref ? reader.read(ref.file) : null;
-  } catch (e) {
-    if (e instanceof PlanPathError) return '';
-    throw e;
+  } catch {
+    return '';
   }
   if (text === null) return '';
   const a = parseDoc(text).frontmatter?.author;

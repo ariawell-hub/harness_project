@@ -1,12 +1,12 @@
 // PR 트리의 계획 자리에 심볼릭 링크가 있으면 계획을 읽는 판정 코드가 링크 대상을 읽지 않는다(Issue #194).
 // 판정 코드의 기존 함수만 부른다(새 모듈을 import하지 않는다): 변경 전 코드에서는 링크 대상을 읽어 단언으로 실패한다.
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { planHash, planHashAt, planHashes, planMode } from '../ci/plan-hash.ts';
 import { REVIEW_DIR, writeReviewInput } from '../ci/review-input.ts';
-import { planAuthor } from '../ci/review-plan.ts';
+import { planAuthor, planReview } from '../ci/review-plan.ts';
 import { planGate } from '../gates/plan-gate.ts';
 import { assessRisk, riskGate } from '../gates/risk-gate.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
@@ -287,6 +287,30 @@ test('읽지 않는 자리의 링크(대조): 계획 폴더의 참고 파일 링
   });
   const r = planGate({ root: fx.root, base: fx.base, branch: BRANCH, mode: 'plan', cfg: fx.cfg });
   assert.deepEqual(r.problems, []);
+});
+
+test('리포 폴더 자체가 링크(정션)면 링크를 거쳐 계획을 읽지 않는다', () => {
+  const fx = planRepo();
+  const link = path.join(tmp(), 'pr-link');
+  symlinkSync(fx.root, link, 'junction');
+  const r = planGate({ root: link, base: fx.base, branch: BRANCH, mode: 'plan', cfg: fx.cfg });
+  assert.ok(
+    r.problems.some((p) => JSON.stringify(p).includes(LINK_PROBLEM)),
+    `링크 자리 문제가 없다: ${JSON.stringify(r.problems)}`,
+  );
+  assert.throws(() => planHash(link, DIR));
+  assert.equal(planAuthor(link, BRANCH), '');
+});
+
+test('git 색인을 읽지 못하면 planReview는 던지지 않고 위험도 high·작성자 모름·두 검증자다', () => {
+  const fx = planRepo();
+  writeFileSync(path.join(fx.root, '.git', 'index'), 'garbage');
+  assert.equal(planAuthor(fx.root, BRANCH), '');
+  const r = planReview({ root: fx.root, cfg: fx.cfg, base: fx.base, branch: BRANCH });
+  assert.equal(r.risk, 'high');
+  assert.equal(r.author, '');
+  assert.equal(r.claude, true);
+  assert.equal(r.codex, true);
 });
 
 test('링크 없는 같은 계획(대조): 통과하고 정상 계획의 값을 읽는다', () => {

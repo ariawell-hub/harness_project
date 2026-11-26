@@ -200,6 +200,28 @@ test('폴더 바로 아래에 색인에만 링크로 있는 항목은 목록에 
   assert.equal(readPlanFile(root, `${DIR}/plan.md`), 'plan\n');
 });
 
+test('리포 폴더 자체가 심볼릭 링크면 자리 "."를 적어 던진다(끝에 "/"가 붙어도)', () => {
+  const { root } = repo();
+  const link = path.join(tmp(), 'repo-link');
+  symlinkSync(root, link, 'junction');
+  assert.equal(
+    placeOf(() => readPlanFile(link, `${DIR}/plan.md`)),
+    '.',
+  );
+  assert.equal(
+    placeOf(() => readPlanFile(`${link}/`, `${DIR}/plan.md`)),
+    '.',
+  );
+  assert.equal(
+    placeOf(() => findPlanSafe(link, ID)),
+    '.',
+  );
+  assert.equal(
+    placeOf(() => listPlanDir(link, DIR)),
+    '.',
+  );
+});
+
 test('git 리포가 아닌 폴더에서는 lstat만으로 판정한다', () => {
   const root = tmp();
   write(root, `${DIR}/plan.md`, 'plan\n');
