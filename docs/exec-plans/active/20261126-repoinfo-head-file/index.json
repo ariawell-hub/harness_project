@@ -1,0 +1,10 @@
+{
+  "plan": "20261126-repoinfo-head-file",
+  "steps": [
+    {
+      "step": 0,
+      "name": "end-of-revs",
+      "status": "pending"
+    }
+  ]
+}
