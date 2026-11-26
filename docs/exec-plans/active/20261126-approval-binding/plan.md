@@ -88,6 +88,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
   - F9(P0, 승인한 A가 강제 push로 PR 커밋 목록에서 사라지고 예전에 suite가 있던 B로 head가 돌아오면 B가 H0가 된다) → H0의 첫 suite 시각 이후에 강제 push 이벤트가 있으면 승인 아님(수용 기준 1, step0 작업 1·4와 테스트). 강제 push가 없으면 그 뒤의 head는 모두 지금 head의 조상이라 제출 때의 head가 후보에서 빠지지 않는다. 리뷰 이벤트에서 head를 기록해 두는 길은 워크플로 변경이 필요해 버렸다(의사결정 로그). suite 지연 사례 테스트도 더했다.
   - F10(P1, `gates/risk-gate.ts`가 `ci/protection.ts`를 가져오면 한 방향 의존을 어긴다) → `ci/gates.ts`가 `ACTIONS_APP_ID`를 넘긴다. AC의 상수 이름 grep을 `gates/`에서 `ci/`를 가져오지 않는지 보는 줄로 바꾸고, 판정에 쓰는 App id는 동작 테스트로 본다.
 - 2026-11-26 확인: 강제 push 이벤트는 GraphQL `timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT])`로 읽는다. #226에서 `nodes`는 비었고 `totalCount`는 39(거르기 전 수)라 `nodes`만 쓴다. `gates` 워크플로는 이미 같은 job 토큰으로 GraphQL PR 조회(`ci-pr`, `scripts/ci/pr.ts`)를 한다.
+- 2026-11-26 계획 검증 3회차(head `4ef98e1`): Claude 승인, Codex 수정 요청(P1 하나). 받아들였다. F11(강제 push 이력 등 실제 읽기 경로가 첫 쪽만 읽거나 뒤 쪽 오류를 빈 목록으로 다뤄도 테스트가 통과한다) → 읽기를 `gates.ts`의 내보낸 함수 `readApprovalInputs`로 두고 가짜 `api`·`graphql`로 여러 쪽 합치기, 뒤 쪽 오류·틀린 응답 꼴의 `null`, 250개 상한, `totalCount`를 쓰지 않는 것을 테스트하게 했다(step0 작업 4·5, AC 한 줄).
 
 ## 의사결정 로그
 
