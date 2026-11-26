@@ -9,10 +9,9 @@ import { validateResults, RECORDED_CONTEXTS } from '../ci/results.ts';
 import {
   assessRisk,
   changedFiles,
-  ownerApproval,
+  ownerApprovedHead,
   parseReviews,
   riskGate,
-  type ApprovalContext,
   type Review,
 } from '../gates/risk-gate.ts';
 import { commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
@@ -107,30 +106,14 @@ const rv = (user: string, state: string, commitId = H, at = '2026-11-14T00:00:00
   submittedAt: at,
 });
 
-/** H0가 sha가 되는 승인 자료(리뷰 하루 전에 생긴 Actions suite). carry는 늘 거부한다 */
-const approvalAt = (h0: string): ApprovalContext => ({
-  suites: { [h0]: [{ appId: 15368, headBranch: BRANCH, createdAt: '2026-11-13T00:00:00Z' }] },
-  forcePushedAt: [],
-  headBranch: BRANCH,
-  actionsAppId: 15368,
-  isAncestor: (a, d) => a === d,
-  carry: () => '일반 커밋',
-});
-const approved = (reviews: Review[], owner: string, head: string, h0 = head) =>
-  ownerApproval({ ...approvalAt(h0), reviews, owner, headSha: head }).approved;
-
-test('ownerApproval: 제작자의 마지막 판정 리뷰가 head 승인일 때만', () => {
-  assert.equal(approved([rv('maker', 'APPROVED')], 'maker', H), true);
-  assert.equal(approved([rv('Maker', 'APPROVED')], 'maker', H), true);
-  assert.equal(approved([], 'maker', H), false);
-  assert.equal(approved([rv('bot', 'APPROVED')], 'maker', H), false);
-  // 승인 head(H0)가 다른 커밋이고 이어받지 못하면 승인 아님(리뷰의 commitId는 보지 않는다)
+test('ownerApprovedHead: 제작자의 마지막 판정 리뷰가 head 승인일 때만', () => {
+  assert.equal(ownerApprovedHead([rv('maker', 'APPROVED')], 'maker', H), true);
+  assert.equal(ownerApprovedHead([rv('Maker', 'APPROVED')], 'maker', H), true);
+  assert.equal(ownerApprovedHead([], 'maker', H), false);
+  assert.equal(ownerApprovedHead([rv('bot', 'APPROVED')], 'maker', H), false);
+  assert.equal(ownerApprovedHead([rv('maker', 'APPROVED', 'b'.repeat(40))], 'maker', H), false);
   assert.equal(
-    approved([rv('maker', 'APPROVED', 'b'.repeat(40))], 'maker', H, 'b'.repeat(40)),
-    false,
-  );
-  assert.equal(
-    approved(
+    ownerApprovedHead(
       [rv('maker', 'APPROVED'), rv('maker', 'CHANGES_REQUESTED', H, '2026-11-14T01:00:00Z')],
       'maker',
       H,
@@ -138,7 +121,7 @@ test('ownerApproval: 제작자의 마지막 판정 리뷰가 head 승인일 때�
     false,
   );
   assert.equal(
-    approved(
+    ownerApprovedHead(
       [rv('maker', 'APPROVED'), rv('maker', 'COMMENTED', H, '2026-11-14T01:00:00Z')],
       'maker',
       H,
@@ -146,14 +129,14 @@ test('ownerApproval: 제작자의 마지막 판정 리뷰가 head 승인일 때�
     true,
   );
   assert.equal(
-    approved(
+    ownerApprovedHead(
       [rv('maker', 'APPROVED'), rv('maker', 'DISMISSED', H, '2026-11-14T01:00:00Z')],
       'maker',
       H,
     ),
     false,
   );
-  assert.equal(approved([rv('maker', 'APPROVED')], '', H), false);
+  assert.equal(ownerApprovedHead([rv('maker', 'APPROVED')], '', H), false);
 });
 
 test('parseReviews: API 원본(배열, --slurp 배열의 배열)을 바꾸고 깨진 값은 null', () => {
@@ -175,17 +158,9 @@ test('riskGate: 보통은 통과, 높음은 제작자 head 승인이 있어야 �
   const none = riskGate({ ...o, reviews: [] });
   assert.equal(none.state, 'failure');
   assert.match(none.description, /제작자 head 승인 필요/);
-  const ok = [rv('maker', 'APPROVED', hi.head)];
-  assert.equal(riskGate({ ...o, reviews: ok, approval: approvalAt(hi.head) }).state, 'success');
-  assert.equal(
-    riskGate({ ...o, reviews: [rv('maker', 'APPROVED', hi.base)], approval: approvalAt(hi.base) })
-      .state,
-    'failure',
-  );
+  assert.equal(riskGate({ ...o, reviews: [rv('maker', 'APPROVED', hi.head)] }).state, 'success');
+  assert.equal(riskGate({ ...o, reviews: [rv('maker', 'APPROVED', hi.base)] }).state, 'failure');
   assert.equal(riskGate({ ...o, reviews: null }).state, 'error');
-  // 승인 리뷰가 있는데 승인 자료를 읽지 못했으면 확인할 수 없다(Issue #250)
-  assert.equal(riskGate({ ...o, reviews: ok, approval: null }).state, 'error');
-  assert.equal(riskGate({ ...o, reviews: ok }).state, 'error');
 });
 
 test('runGates: risk-gate 결과와 risk를 담고 결과 검사를 통과한다', async () => {

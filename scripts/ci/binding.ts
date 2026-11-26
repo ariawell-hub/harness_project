@@ -8,8 +8,8 @@ import { spawnSync } from 'node:child_process';
 import { gitTry } from '../lib/git.ts';
 import { DESCRIPTION_MAX, SHA_RE } from './results.ts';
 
-/** merge-base 대비 diff(`base...tip`)의 patch-id. 변경이 없으면 ''. tip을 주지 않으면 HEAD */
-export function patchId(root: string, base: string, tip = 'HEAD'): string {
+/** merge-base 대비 diff의 patch-id. 변경이 없으면 '' */
+export function patchId(root: string, base: string): string {
   // 문자열로 바꾸지 않고 바이트 그대로 넘긴다(UTF-8이 아닌 텍스트의 차이가 사라지지 않게).
   // --binary --full-index: 바이너리 파일의 내용과 전체 blob id가 patch에 들어가게 한다
   const opts = { cwd: root, maxBuffer: 256 * 1024 * 1024, windowsHide: true } as const;
@@ -22,7 +22,7 @@ export function patchId(root: string, base: string, tip = 'HEAD'): string {
       '--no-color',
       '--binary',
       '--full-index',
-      `${base}...${tip}`,
+      `${base}...HEAD`,
     ],
     opts,
   );
@@ -88,59 +88,6 @@ export function samePrContent(root: string, oldHead: string, prFiles: string[]):
   if (!d.ok) return false;
   const mine = new Set(prFiles);
   return !d.stdout.split('\0').some((f) => f && mine.has(f));
-}
-
-/** a가 d의 조상(또는 같은 커밋)인가. SHA가 아니거나 git이 판정하지 못하면 null(종료 코드 1만 "아니다") */
-export function isAncestorOf(root: string, a: string, d: string): boolean | null {
-  if (!SHA_RE.test(a) || !SHA_RE.test(d)) return null;
-  const r = gitTry(['merge-base', '--is-ancestor', a, d], root);
-  if (r.ok) return true;
-  return r.code === 1 ? false : null;
-}
-
-/**
- * 제작자 승인 이어받기(10.3절, Issue #250). 승인 head(H0)에서 지금 head(체크아웃한 HEAD)까지 main 병합만 더했고
- * PR 내용이 같으면 null, 아니면 처음 어긋난 이유. baseRef는 지금 head와 main의 merge-base(판정 job의 `--base`)다.
- * 검증자 이어받기(`carryOver`)와 달리 위험도 높음 PR의 제작자 승인에 쓴다. git이 실패하면 이어받지 않는다
- */
-export function ownerApprovalCarry(
-  root: string,
-  baseRef: string,
-  h0: string,
-  prFiles: string[],
-): string | null {
-  if (!SHA_RE.test(h0)) return '승인 head가 SHA가 아니다';
-  try {
-    // (가) 강제 push로 이력이 바뀌지 않았다
-    if (!gitTry(['merge-base', '--is-ancestor', h0, 'HEAD'], root).ok)
-      return '승인 head가 지금 head의 조상이 아니다(강제 push 등)';
-    // (나) H0 뒤로 더한 커밋(main에 없는 것)이 모두 병합 커밋이고, 첫째 부모를 뺀 부모가 main의 조상이다
-    const added = gitTry(['rev-list', '--parents', `${h0}..HEAD`, '--not', baseRef], root);
-    if (!added.ok) return 'H0 뒤의 커밋 목록을 읽지 못했다';
-    for (const line of added.stdout.split('\n').filter(Boolean)) {
-      const [c, ...parents] = line.trim().split(' ');
-      if (parents.length < 2) return `승인 뒤 main 병합이 아닌 커밋 ${c.slice(0, 12)}이 있다`;
-      for (const p of parents.slice(1))
-        if (!gitTry(['merge-base', '--is-ancestor', p, baseRef], root).ok)
-          return `승인 뒤 병합 ${c.slice(0, 12)}이 main이 아닌 커밋 ${p.slice(0, 12)}을 들여왔다`;
-    }
-    // (다) 각자의 merge-base에서 잰 patch-id가 같다
-    const before = patchId(root, baseRef, h0);
-    const now = patchId(root, baseRef, 'HEAD');
-    if (!before || !now) return 'patch-id를 구하지 못했다';
-    if (before !== now) return '승인 head와 지금 head의 patch-id가 다르다';
-    // (라) PR 파일 내용이 바이트 단위로 같다
-    if (!samePrContent(root, h0, prFiles)) return 'PR 파일 내용이 승인 head와 다르다';
-    // (마) H0 뒤 main 변경이 PR 파일과 겹치지 않는다
-    const moved = changedOnBaseSince(root, baseRef, h0);
-    if (moved === null) return 'H0 뒤 main에서 바뀐 파일을 읽지 못했다';
-    const mine = new Set(prFiles);
-    const hit = moved.find((f) => mine.has(f));
-    if (hit !== undefined) return `H0 뒤 main 변경이 PR 파일과 겹친다: ${hit}`;
-    return null;
-  } catch (e) {
-    return `git 실패: ${(e instanceof Error ? e.message : String(e)).split('\n')[0].slice(0, 120)}`;
-  }
 }
 
 export interface CommitStatus {

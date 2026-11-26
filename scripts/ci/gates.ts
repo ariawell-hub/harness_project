@@ -16,20 +16,12 @@ import {
   type TargetCheck,
 } from '../gates/revert-check.ts';
 import {
-  assessRisk,
   changedFiles,
-  lastOwnerDecision,
   riskGate,
-  type ApprovalContext,
-  type ApprovalData,
   type Review,
   type Risk,
   type RiskSignal,
-  type Suite,
 } from '../gates/risk-gate.ts';
-import type { Graphql } from './accept-load.ts';
-import { isAncestorOf, ownerApprovalCarry } from './binding.ts';
-import { ACTIONS_APP_ID } from './protection.ts';
 import { REVIEWERS, type PlanReview } from './ledger.ts';
 import { planHashes } from './plan-hash.ts';
 import {
@@ -68,122 +60,6 @@ export interface RunGatesOptions {
    * 주지 않으면 조회하지 못한 것(null)으로 본다
    */
   targetCheck?: () => Promise<TargetCheck>;
-  /**
-   * 제작자 승인 판정 자료(PR 커밋별 check suite, 강제 push 이력, Issue #250). 위험도가 높음이고 제작자의 마지막
-   * 판정 리뷰가 승인일 때만 부른다. 주지 않거나 읽지 못하면(null) 승인을 확인할 수 없다(error)
-   */
-  approvalInputs?: () => Promise<ApprovalData | null>;
-}
-
-const REPO_RE = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
-const SHA40 = /^[0-9a-f]{40}$/;
-const PER_PAGE = 100;
-/** `pulls/{n}/commits`는 250개까지만 준다. 그 수에 닿으면 목록이 잘렸을 수 있다 */
-const PR_COMMITS_MAX = 250;
-const SUITE_PAGES = 10;
-const FORCE_PUSH_PAGES = 10;
-const FORCE_PUSH_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      timelineItems(first: 100, after: $after, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
-        pageInfo { hasNextPage endCursor }
-        nodes { ... on HeadRefForcePushedEvent { createdAt } }
-      }
-    }
-  }
-}`;
-
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
-/** 응답 꼴이 틀렸다(빈 목록으로 넘기지 않는다) */
-class ShapeError extends Error {}
-
-/**
- * 제작자 승인 판정 자료를 읽는다(Issue #250). PR 커밋(REST, 쪽 번호), 커밋마다 check suite(REST, 쪽 번호. 같은 커밋의
- * suite를 거르지 않고 모두), PR head 강제 push 이벤트(GraphQL, `pageInfo`. `totalCount`는 거르기 전 수라 쓰지 않는다).
- * 어느 쪽이든 실패하거나 응답 꼴이 틀리거나 check suite가 `total_count`만큼 오지 않으면 빈 목록이 아니라 null이다(fail-closed)
- */
-export async function readApprovalInputs(o: {
-  /** REST 경로를 받아 JSON을 돌려준다. 실패는 예외 */
-  api: (path: string) => Promise<unknown>;
-  graphql: Graphql;
-  /** owner/name */
-  repo: string;
-  pr: number;
-}): Promise<ApprovalData | null> {
-  const m = REPO_RE.exec(o.repo);
-  if (!m || !Number.isInteger(o.pr) || o.pr <= 0) return null;
-  try {
-    const shas: string[] = [];
-    for (let page = 1; ; page++) {
-      const list = await o.api(
-        `repos/${o.repo}/pulls/${o.pr}/commits?per_page=${PER_PAGE}&page=${page}`,
-      );
-      if (!Array.isArray(list)) throw new ShapeError();
-      for (const c of list) {
-        if (!isObj(c) || typeof c.sha !== 'string' || !SHA40.test(c.sha)) throw new ShapeError();
-        shas.push(c.sha);
-      }
-      if (shas.length >= PR_COMMITS_MAX) return null;
-      if (list.length < PER_PAGE) break;
-    }
-    const suites: Record<string, Suite[]> = {};
-    for (const sha of shas) {
-      const out: Suite[] = [];
-      let done = false;
-      for (let page = 1; page <= SUITE_PAGES && !done; page++) {
-        const r = await o.api(
-          `repos/${o.repo}/commits/${sha}/check-suites?per_page=${PER_PAGE}&page=${page}`,
-        );
-        if (!isObj(r) || !Array.isArray(r.check_suites) || typeof r.total_count !== 'number')
-          throw new ShapeError();
-        for (const x of r.check_suites) {
-          if (!isObj(x) || typeof x.created_at !== 'string') throw new ShapeError();
-          const app = x.app;
-          if (app !== null && !(isObj(app) && typeof app.id === 'number')) throw new ShapeError();
-          if (x.head_branch !== null && typeof x.head_branch !== 'string') throw new ShapeError();
-          out.push({
-            appId: isObj(app) ? (app.id as number) : 0,
-            headBranch: x.head_branch,
-            createdAt: x.created_at,
-          });
-        }
-        if (out.length >= r.total_count) done = true;
-        // 모은 수가 total_count에 닿기 전에 쪽이 덜 차면 목록이 빠진 것이다(구현 판정 F16)
-        else if (r.check_suites.length < PER_PAGE) return null;
-      }
-      if (!done) return null;
-      suites[sha] = out;
-    }
-    const forcePushedAt: string[] = [];
-    let after: string | null = null;
-    for (let page = 1; page <= FORCE_PUSH_PAGES; page++) {
-      const data = await o.graphql(FORCE_PUSH_QUERY, {
-        owner: m[1],
-        name: m[2],
-        number: o.pr,
-        after,
-      });
-      const repository = isObj(data) ? data.repository : null;
-      const pr = isObj(repository) ? repository.pullRequest : null;
-      const items = isObj(pr) ? pr.timelineItems : null;
-      const info = isObj(items) ? items.pageInfo : null;
-      const nodes = isObj(items) ? items.nodes : null;
-      if (!isObj(info) || typeof info.hasNextPage !== 'boolean' || !Array.isArray(nodes))
-        throw new ShapeError();
-      for (const n of nodes) {
-        if (!isObj(n) || typeof n.createdAt !== 'string') throw new ShapeError();
-        forcePushedAt.push(n.createdAt);
-      }
-      if (!info.hasNextPage) return { suites, forcePushedAt };
-      if (typeof info.endCursor !== 'string' || info.endCursor === '') throw new ShapeError();
-      after = info.endCursor;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 function firstLine(e: unknown): string {
@@ -327,38 +203,12 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
           });
         }
       },
-      'risk-gate': async () => {
-        // 승인 자료는 위험도 높음이고 제작자의 마지막 판정 리뷰가 승인일 때만 읽는다(API 사용량, Issue #250)
-        let approval: ApprovalContext | null = null;
-        try {
-          const reviews = o.reviews ?? null;
-          if (
-            o.approvalInputs &&
-            reviews &&
-            lastOwnerDecision(reviews, o.cfg.github.owner)?.state === 'APPROVED' &&
-            assessRisk({ ...o, signals }).risk === 'high'
-          ) {
-            const data = await o.approvalInputs();
-            if (data) {
-              const prFiles = changedFiles(o.root, o.base).map((f) => f.path);
-              approval = {
-                ...data,
-                headBranch: o.branch,
-                actionsAppId: ACTIONS_APP_ID,
-                isAncestor: (a, d) => isAncestorOf(o.root, a, d),
-                carry: (h0) => ownerApprovalCarry(o.root, o.base, h0, prFiles),
-              };
-            }
-          }
-        } catch {
-          approval = null;
-        }
-        return guarded('risk-gate', () => {
-          const r = riskGate({ ...o, signals, reviews: o.reviews ?? null, approval });
+      'risk-gate': () =>
+        guarded('risk-gate', () => {
+          const r = riskGate({ ...o, signals, reviews: o.reviews ?? null });
           risk = r.risk;
           return { state: r.state, description: r.description, details: r.details };
-        });
-      },
+        }),
     };
   const results: GateResult[] = [];
   for (const c of GATE_CONTEXTS) results.push(await byContext[c]());
