@@ -148,12 +148,19 @@ function repo(fragments: { rel: string; text: string }[] = [A, B]): string {
     'docs/index.md',
     `${FRONT}# 목차\n\n- [설계서](harness/design.md)\n- [변경 이력](harness/CHANGELOG.md)\n`,
   );
+  // 이 리포와 같은 줄 끝 정책(판정 F7): `core.autocrlf=true`인 환경에서도 꺼낸 파일이 LF다
+  write(root, '.gitattributes', '* text=auto eol=lf\n');
   write(root, DESIGN_PATH, FRONT + designText());
   write(root, CHANGELOG_PATH, FRONT + changelogText());
   for (const f of fragments) write(root, f.rel, f.text);
   commitAll(root, 'base');
   return root;
 }
+/** 출력에서 되돌리는 명령 줄을 찾아 git 인자로 */
+const restoreArgs = (out: string) => {
+  const line = out.split('\n').find((l) => l.includes(RESTORE)) ?? '';
+  return line.slice(line.indexOf(RESTORE)).trim().replace(/`/g, '').split(/\s+/).slice(1);
+};
 const read = (root: string, rel: string) => readFileSync(path.join(root, rel), 'utf8');
 /** 설계서·CHANGELOG·조각 폴더 안의 모든 파일과 extra(절대 경로)의 바이트(링크는 따라가 읽는다) */
 function snapshot(root: string, extra: string[] = []): Record<string, string> {
@@ -485,6 +492,8 @@ test('changes-collect: 심볼릭 링크(조각 폴더, 조각, 기록 파일)와
 
 test('changes-collect: 지우다 실패하면 1과 되돌리는 명령을 내고, 되돌리기 전에 다시 실행하면 막히며, 되돌린 뒤에는 한 번씩만 모은다', () => {
   const root = repo([A, B]);
+  // 판정 F7: Windows Git의 기본값처럼 줄 끝을 CRLF로 꺼내는 설정에서도 되돌린 뒤 다시 모을 수 있다
+  sh('git', ['config', 'core.autocrlf', 'true'], root);
   const first = direct(root, {
     fs: {
       unlink: (f: string) => {
@@ -502,9 +511,7 @@ test('changes-collect: 지우다 실패하면 1과 되돌리는 명령을 내고
   assert.equal(blocked.code, 1, blocked.out);
   assert.deepEqual(snapshot(root), after);
   // 출력의 되돌리는 명령으로 되돌린 뒤 다시 실행한다
-  const line = first.out.split('\n').find((l) => l.includes(RESTORE)) ?? '';
-  const args = line.slice(line.indexOf(RESTORE)).trim().replace(/`/g, '').split(/\s+/).slice(1);
-  sh('git', args, root);
+  sh('git', restoreArgs(first.out), root);
   const done = direct(root, { date: '2026-11-25' });
   assert.equal(done.code, 0, done.out);
   const changelog = read(root, CHANGELOG_PATH);
@@ -513,4 +520,56 @@ test('changes-collect: 지우다 실패하면 1과 되돌리는 명령을 내고
   assert.equal(read(root, DESIGN_PATH), FRONT + collectedDesign('2026-11-25'));
   assert.equal(existsSync(path.join(root, DIR)) ? readdirSync(path.join(root, DIR)).length : 0, 0);
   rmdirSync(path.join(root, DIR));
+
+  // 판정 F6(P0): 검사 뒤에 다른 프로세스가 조각을 저장하면 그 조각을 지우지 않고 멈춘다.
+  // 되돌리는 명령은 이 명령이 바꾸거나 지운 파일만 담아, 되돌려도 나중에 저장된 내용이 남는다
+  const racedFrag = repo([A, B]);
+  const newer = frag('20261124-b-s0', ['b 하나', 'b 둘(나중에 저장)'], ['b 설계 첫째']);
+  let saved = false;
+  const r1 = direct(racedFrag, {
+    fs: {
+      writeFile: (f: string, t: string) => {
+        writeFileSync(f, t);
+        if (!saved && f.endsWith('CHANGELOG.md')) {
+          saved = true;
+          writeFileSync(path.join(racedFrag, B.rel), newer);
+        }
+      },
+    },
+  });
+  assert.equal(r1.code, 1, r1.out);
+  assert.match(r1.out, /20261124-b-s0\.md: 읽은 뒤 바뀌었다/);
+  assert.equal(read(racedFrag, B.rel), newer, '나중에 저장된 조각은 지우지 않는다');
+  assert.doesNotMatch(restoreArgs(r1.out).join(' '), /20261124-b-s0/);
+  sh('git', restoreArgs(r1.out), racedFrag);
+  assert.equal(read(racedFrag, B.rel), newer, '되돌려도 나중에 저장된 내용이 남는다');
+  assert.equal(read(racedFrag, A.rel), A.text);
+  assert.equal(read(racedFrag, CHANGELOG_PATH), FRONT + changelogText());
+  assert.equal(read(racedFrag, DESIGN_PATH), FRONT + designText());
+
+  // 판정 F6(P0): 검사 뒤에 다른 프로세스가 CHANGELOG를 저장하면 덮어쓰지 않고 멈춘다(조각은 그대로)
+  const racedLog = repo([A, B]);
+  const concurrent = FRONT + changelogText(['있던 항목', '다른 세션이 더한 항목']);
+  let once = false;
+  const r2 = direct(racedLog, {
+    fs: {
+      writeFile: (f: string, t: string) => {
+        if (!once && f.endsWith('design.md')) {
+          once = true;
+          writeFileSync(path.join(racedLog, CHANGELOG_PATH), concurrent);
+        }
+        writeFileSync(f, t);
+      },
+    },
+  });
+  assert.equal(r2.code, 1, r2.out);
+  assert.match(r2.out, /CHANGELOG\.md: 읽은 뒤 바뀌었다/);
+  assert.equal(
+    read(racedLog, CHANGELOG_PATH),
+    concurrent,
+    '나중에 저장된 CHANGELOG를 덮어쓰지 않는다',
+  );
+  assert.equal(read(racedLog, A.rel), A.text);
+  assert.equal(read(racedLog, B.rel), B.text);
+  assert.deepEqual(restoreArgs(r2.out).slice(-1), [DESIGN_PATH]);
 });

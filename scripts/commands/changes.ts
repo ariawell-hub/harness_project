@@ -14,7 +14,12 @@ const CHANGELOG_DOC = 'docs/harness/CHANGELOG.md';
 /** 모으기가 읽고 바꾸는 자리(리포 루트 기준) */
 const RECORDS = [DESIGN_DOC, CHANGELOG_DOC, CHANGES_DIR];
 /** 도중에 실패한 모으기를 HEAD로 되돌리는 명령(출력만 한다. 실행하지 않는다) */
-export const RESTORE_COMMAND = `git restore --source=HEAD --staged --worktree -- ${RECORDS.join(' ')}`;
+export const RESTORE_COMMAND = restoreCommand(RECORDS);
+
+/** 그 자리들을 HEAD로 되돌리는 명령(출력만 한다) */
+function restoreCommand(paths: string[]): string {
+  return `git restore --source=HEAD --staged --worktree -- ${paths.join(' ')}`;
+}
 
 /** 테스트용: 쓰기·지우기. 기본은 `node:fs`의 `writeFileSync`, `unlinkSync` */
 export interface CollectFs {
@@ -161,30 +166,58 @@ export function runChangesCollect(
     }
     if (problems.length) return fail(problems, restore);
 
-    // 6. 읽고 계산한다(문제가 있으면 아무것도 쓰지 않는다)
-    const design = readFileSync(abs(DESIGN_DOC), 'utf8');
-    const changelog = readFileSync(abs(CHANGELOG_DOC), 'utf8');
-    const fragments = fragRels.map((rel) => ({ rel, text: readFileSync(abs(rel), 'utf8') }));
+    // 6. 읽고 계산한다(문제가 있으면 아무것도 쓰지 않는다). 읽은 바이트는 쓰기·지우기 직전의 확인에 쓴다
+    const readBytes = new Map<string, Buffer>();
+    const readText = (rel: string) => {
+      const b = readFileSync(abs(rel));
+      readBytes.set(rel, b);
+      return b.toString('utf8');
+    };
+    const design = readText(DESIGN_DOC);
+    const changelog = readText(CHANGELOG_DOC);
+    const fragments = fragRels.map((rel) => ({ rel, text: readText(rel) }));
     const r = collectFragments({ design, changelog, fragments, date: o.date ?? today() });
     if (!r.ok) return fail(r.problems, false);
 
-    // 8. 쓰고 지운다. 도중에 실패하면 그 자리에서 멈추고 되돌리는 명령을 낸다(다시 실행하면 5에서 막힌다)
+    // 8. 쓰고 지운다. 쓰기·지우기 직전마다 그 파일이 읽은 뒤 바뀌지 않았는지 다시 본다(판정 F6): 그 사이 다른
+    // 프로세스가 저장한 내용을 덮어쓰거나 지우지 않고 그 자리에서 멈춘다. 되돌리는 명령은 이 명령이 바꾸거나 지운
+    // 파일만 담는다(그 파일들은 4에서 HEAD와 바이트가 같았으므로 HEAD로 되돌려도 잃는 것이 없다)
+    const movedSince = (rel: string) => {
+      try {
+        return !readFileSync(abs(rel)).equals(readBytes.get(rel) ?? Buffer.alloc(0));
+      } catch {
+        return true;
+      }
+    };
+    const touched: string[] = [];
     let doing = '';
+    let moved: string | null = null;
+    const step = (rel: string, what: string, op: () => void) => {
+      if (movedSince(rel)) {
+        moved = rel;
+        throw new Error('moved');
+      }
+      doing = `${rel} ${what}`;
+      touched.push(rel);
+      op();
+    };
     try {
-      if (r.design !== design) {
-        doing = `${DESIGN_DOC} 쓰기`;
-        fs.writeFile(abs(DESIGN_DOC), r.design);
-      }
-      doing = `${CHANGELOG_DOC} 쓰기`;
-      fs.writeFile(abs(CHANGELOG_DOC), r.changelog);
-      for (const rel of fragRels) {
-        doing = `${rel} 지우기`;
-        fs.unlink(abs(rel));
-      }
+      if (r.design !== design)
+        step(DESIGN_DOC, '쓰기', () => fs.writeFile(abs(DESIGN_DOC), r.design));
+      step(CHANGELOG_DOC, '쓰기', () => fs.writeFile(abs(CHANGELOG_DOC), r.changelog));
+      for (const rel of fragRels) step(rel, '지우기', () => fs.unlink(abs(rel)));
     } catch (e) {
-      out(`${doing} 실패: ${(e as Error).message}`);
-      out('모으기가 중간에 멈췄다. 아래 명령으로 되돌린 뒤 다시 실행하라');
-      out(`되돌리는 명령: ${RESTORE_COMMAND}`);
+      if (moved)
+        out(`${moved}: 읽은 뒤 바뀌었다(다른 프로세스가 저장했다). 건드리지 않고 그대로 두었다`);
+      else out(`${doing} 실패: ${(e as Error).message}`);
+      if (touched.length === 0) {
+        out('실패 — 아무 파일도 바꾸지 않았다');
+        return 1;
+      }
+      out(
+        '모으기가 중간에 멈췄다. 아래 명령으로 이 명령이 바꾸거나 지운 파일만 되돌린 뒤 다시 실행하라',
+      );
+      out(`되돌리는 명령: ${restoreCommand(touched)}`);
       return 1;
     }
     out(
