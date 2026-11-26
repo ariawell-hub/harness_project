@@ -2,7 +2,7 @@
 id: 20261123-change-fragments
 issue: 222 # GitHub Issue 번호
 type: feat # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: completed # draft | active | blocked | completed | abandoned
+status: active # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -106,6 +106,7 @@ claimed_at: 2026-11-23T06:34:31+09:00 # new-task가 채운다
 - 2026-11-25T12:43:49+09:00 step1 재작업: 구현 판정 2회차(head 1cc9043): Claude 승인(지적 없음), Codex 수정 요청(P1 하나. F2·F3·F4는 고쳐졌다고 적었다). F1(P0)이 다시 열렸다: CRLF를 LF로 바꾼 바이트도 견주는 탓에 LF를 강제하는 리포에서 줄 끝만 CRLF로 바꾸고 숨긴 수정이 통과한다. F5: 8번 테스트가 mv 실행 파일에 기대 Windows 네이티브에서 깨질 수 있다. 둘 다 맞는 지적이다. 테스트를 먼저 더하고 고친다
 - 2026-11-25 F1 2회차·F5 테스트 먼저: 7번 테스트에 줄 끝만 CRLF로 바꾸고 `assume-unchanged`로 숨긴 조각 수정(g)을 더했고, 8번의 `mv` 호출을 `node:fs`의 `renameSync`(같은 임시 폴더 안)로 바꿨다. 고치기 전에 (g)가 실패했다(숨긴 CRLF 수정본을 모아 지웠다).
 - 2026-11-25 F1 2회차 고침: 파일 바이트를 HEAD의 blob과 바이트 그대로만 견준다(CRLF를 LF로 바꿔 보는 것을 뺐다). 이 리포는 `.gitattributes`(`* text=auto eol=lf`)로 작업 트리를 LF로 두어 같은 파일이면 바이트가 같다. 줄 끝을 바꿔 꺼내는 체크아웃에서는 다르다고 보아 모으지 않는다(막는 쪽). 문제 글에 "줄 끝 포함 바이트로 견준다"를 더했다. 9건 통과, `tsc` 통과.
+- 2026-11-26T09:58:33+09:00 step1 재작업: 구현 판정 3회차(head d2c9909): Claude 승인(지적 없음), Codex 수정 요청(P0 1, P1 1. F1~F5는 고쳐졌다고 적었다). F6(P0): 검사가 끝난 뒤 쓰기·지우기 전에 다른 프로세스가 조각이나 CHANGELOG를 저장하면 그 내용을 덮어쓰거나 지운다. F7: 테스트의 임시 리포가 core.autocrlf를 물려받아 CRLF로 꺼내는 환경에서 되돌린 뒤 다시 모으기가 실패한다. 둘 다 맞는 지적이다. 테스트를 먼저 더하고 고친다
 
 ## 의사결정 로그
 
