@@ -39,7 +39,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 범위:
 
 - `scripts/gates/risk-gate.ts`(승인 head 결정과 이어받기 판정), `scripts/ci/gates.ts`(필요한 자료를 읽어 넘긴다. 판정 job의 `GH_TOKEN`은 `checks: read`·`pull-requests: read`가 있다), `scripts/ci/binding.ts`(이어받기 판정 함수를 더하고 `samePrContent`·`changedOnBaseSince`를 재사용. `patchId`에 비교 끝 인자를 더하되 기본 동작은 그대로), `scripts/harness.ts`의 `gates` 명령(읽기 함수를 만들어 넘긴다), `scripts/ci/protection.ts`의 `ACTIONS_APP_ID` 재사용(읽기만, `ci/gates.ts`가 가져와 판정 함수에 넘긴다).
-- 테스트: `scripts/test/risk-gate.test.ts`, 새 파일 `scripts/test/risk-gate-approval.test.ts`, `scripts/test/ci.test.ts`(`gates`가 위험도 높음일 때만 읽고 지금 설정으로 승인이 success가 되는지).
+- 테스트: `scripts/test/risk-gate.test.ts`, 새 파일 `scripts/test/risk-gate-approval.test.ts`, `scripts/test/ci.test.ts`(`gates`가 위험도 높음일 때만 읽고 지금 설정으로 승인이 success가 되는지), `scripts/test/harness-guard.test.ts`의 `runGates` 승인 테스트 하나(리뷰의 `commitId`로 승인하던 입력에 승인 자료를 더한다. 단언은 그대로).
 - 문서: 설계서 10.3절·10.4절의 해당 문장, 절차서 5절, 변경 조각.
 - step1: `lab/approval-binding/`(실측 절차와 결과).
 
@@ -59,6 +59,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - `scripts/test/risk-gate.test.ts`
 - `scripts/test/risk-gate-approval.test.ts`
 - `scripts/test/ci.test.ts`
+- `scripts/test/harness-guard.test.ts`(신호로 높음이 된 PR의 `runGates` 승인 테스트 하나)
 - `docs/harness/design.md`
 - `docs/harness/workflow.md`
 - `docs/harness/changes/20261126-approval-binding-s0.md`
@@ -90,6 +91,8 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-26 확인: 강제 push 이벤트는 GraphQL `timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT])`로 읽는다. #226에서 `nodes`는 비었고 `totalCount`는 39(거르기 전 수)라 `nodes`만 쓴다. `gates` 워크플로는 이미 같은 job 토큰으로 GraphQL PR 조회(`ci-pr`, `scripts/ci/pr.ts`)를 한다.
 - 2026-11-26 계획 검증 3회차(head `4ef98e1`): Claude 승인, Codex 수정 요청(P1 하나). 받아들였다. F11(강제 push 이력 등 실제 읽기 경로가 첫 쪽만 읽거나 뒤 쪽 오류를 빈 목록으로 다뤄도 테스트가 통과한다) → 읽기를 `gates.ts`의 내보낸 함수 `readApprovalInputs`로 두고 가짜 `api`·`graphql`로 여러 쪽 합치기, 뒤 쪽 오류·틀린 응답 꼴의 `null`, 250개 상한, `totalCount`를 쓰지 않는 것을 테스트하게 했다(step0 작업 4·5, AC 한 줄).
 - 2026-11-26 계획 검증 4회차(head `fb5672c`): Claude 승인, Codex 수정 요청(P1 하나, F12: check suite 조회의 기본 `latest` 필터가 최초 suite를 빠뜨릴 수 있으니 `filter=all`을 쓰라). 반박한다. 확인(2026-11-26, `commits/5027f12…/check-suites`): 쿼리 없이, `?filter=latest`, `?filter=all` 세 경우 모두 Actions suite 넷(`03:40:49Z`, `03:40:51Z`, `04:18:30Z`, 승인 뒤 `04:36:30Z`)을 같게 돌려준다. `filter`는 check run 목록의 인자이고 check suite 목록은 같은 커밋의 suite를 모두 준다. 대신 읽기 경로 테스트에 "한 커밋의 suite 여럿(승인 전·후)을 거르지 않고 모두 넘긴다"를 더했다(step0 작업 5).
+- 2026-11-26 계획 검증 5회차(head `aa92dc4`): 두 검증자 승인(G1, F12 반박 받아들여짐).
+- 2026-11-26 구현 전에 읽다가 범위 밖 파일을 찾았다: `scripts/test/harness-guard.test.ts`의 "신호가 있으면 risk-gate가 높음 → 제작자 head 승인이 있어야 통과"가 리뷰의 `commitId`로 승인을 주고 success를 단언한다. 새 규칙에서는 승인 자료(suite)를 함께 줘야 한다. 관련 파일과 step0 작업 5에 더하고 계획만 다시 올린다(코드는 아직 커밋하지 않았다). `scripts/test/revert-check.test.ts`는 승인 리뷰가 없는 failure만 단언해, 승인 리뷰가 없으면 자료를 읽기 전에 failure로 끝내는 순서로 두면 그대로 통과한다.
 
 ## 의사결정 로그
 
