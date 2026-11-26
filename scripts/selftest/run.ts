@@ -2,6 +2,7 @@
 // 시나리오가 그 CLI와 L1 훅을 프로세스로 불러 규칙이 실제로 막는지 확인한다.
 // 실행기와 시나리오는 대상 하네스의 내부 모듈을 import하지 않는다. 다른 버전의 하네스(PR의 하네스)를
 // 시험할 수 있어야 하기 때문이다. 기대는 것은 CLI·훅의 입출력과 가짜 GitHub 상태 파일 형식뿐이다.
+// 시나리오의 도구가 spawnSync로 기다리므로 나란히 돌릴 때는 시나리오마다 자식 프로세스(child.ts)를 띄운다.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
@@ -14,7 +15,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -434,13 +435,309 @@ async function load(file: string): Promise<Scenario> {
   return s as Scenario;
 }
 
+type Result = SelfTestReport['results'][number];
+
+/**
+ * 시나리오 하나를 이 프로세스에서 돌린다. 차례로 돌 때, 나란히 돌다 실패해 다시 돌릴 때,
+ * 자식 프로세스(child.ts) 안에서 같은 함수를 쓴다. 시간 제한은 시나리오가 시작한 때부터 잰다
+ */
+export async function runScenario(harness: string, file: string): Promise<Result> {
+  const id = path.basename(file, '.ts');
+  let covers = '';
+  let close = () => {};
+  try {
+    const s = await load(file);
+    covers = s.covers;
+    const c = context(harness, Date.now() + (s.timeoutSec ?? SCENARIO_TIMEOUT_SEC) * 1000);
+    close = c.close;
+    await s.run(c.ctx);
+    return { id, covers, state: 'pass', detail: s.title };
+  } catch (e) {
+    const state = e instanceof assert.AssertionError ? 'fail' : 'error';
+    return { id, covers, state, detail: oneLine((e as Error)?.message ?? String(e)) };
+  } finally {
+    close();
+  }
+}
+
+/** 시나리오 하나를 돌리는 자식 프로세스의 진입점(실행기 쪽 파일) */
+const CHILD = path.join(HERE, 'child.ts');
+/** 자식 프로세스의 마지막 시간 제한: 시나리오의 시간 제한에 더하는 여유(기본). 시나리오 안의 제한이 듣지 않을 때만 쓴다 */
+const CHILD_GRACE_SEC = 30;
+/** 결과 없이 끝난 자식의 stderr에서 detail에 남기는 끝부분 */
+const STDERR_KEEP = 2000;
+
+/** 자식이 쓴 결과 파일을 읽는다. 없거나 형식이 틀리거나 다른 시나리오의 것이면 null */
+function readResult(file: string, id: string): Result | null {
+  try {
+    const r = JSON.parse(readFileSync(file, 'utf8')) as Partial<Result>;
+    if (
+      r.id === id &&
+      typeof r.covers === 'string' &&
+      typeof r.detail === 'string' &&
+      (r.state === 'pass' || r.state === 'fail' || r.state === 'error')
+    )
+      return { id, covers: r.covers, state: r.state, detail: r.detail };
+  } catch {
+    // 파일이 없거나 JSON이 아니다
+  }
+  return null;
+}
+
+/** 자손을 찾아 멈추기를 되풀이하는 최대 횟수 */
+const FREEZE_ROUNDS = 10;
+
+/** pid와 그 자손(부모 pid로 찾는다. 새 세션·그룹으로 띄운 것도 포함). ps를 읽지 못하면 pid만 */
+function descendants(pid: number): number[] {
+  const r = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], {
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  const children = new Map<number, number[]>();
+  for (const line of (r.stdout ?? '').split('\n')) {
+    const [p, pp] = line.trim().split(/\s+/).map(Number);
+    if (!Number.isInteger(p) || !Number.isInteger(pp)) continue;
+    children.set(pp, [...(children.get(pp) ?? []), p]);
+  }
+  const out: number[] = [];
+  const todo = [pid];
+  while (todo.length) {
+    const p = todo.pop()!;
+    if (out.includes(p)) continue;
+    out.push(p);
+    todo.push(...(children.get(p) ?? []));
+  }
+  return out;
+}
+
+/**
+ * 자식과 그 아래 프로세스를 모두 끝낸다. 대상 하네스의 runner는 에이전트 세션을 새 세션으로 띄우므로
+ * 프로세스 그룹이 아니라 부모 pid로 자손을 찾는다. POSIX는 찾은 것을 SIGSTOP으로 멈추고(그 사이 새로 띄우거나
+ * 부모가 끝나 고아가 되어 빠지지 않게) 새로 보이는 것이 없을 때까지 되풀이한 뒤 모두 SIGKILL한다.
+ * Windows는 taskkill /T가 프로세스 트리를 끝낸다
+ */
+function killTree(child: ChildProcess): void {
+  if (child.pid === undefined) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    return;
+  }
+  const stopped = new Set<number>();
+  for (let i = 0; i < FREEZE_ROUNDS; i++) {
+    const fresh = descendants(child.pid).filter((p) => !stopped.has(p));
+    if (!fresh.length) break;
+    for (const p of fresh) {
+      stopped.add(p);
+      try {
+        process.kill(p, 'SIGSTOP');
+      } catch {
+        // 이미 끝났다
+      }
+    }
+  }
+  for (const p of stopped) {
+    try {
+      process.kill(p, 'SIGKILL');
+    } catch {
+      // 이미 끝났다
+    }
+  }
+  child.kill('SIGKILL');
+}
+
+/**
+ * 자식 프로세스 한 번의 끝: 결과 파일이 있음(result), 시간 제한으로 끝냄(killed),
+ * 결과 파일 없이 스스로 끝남(noresult, 띄우지 못한 경우 포함). killed와 noresult의 결과는 error다
+ */
+type ChildEnd = { result: Result; ended: 'result' | 'killed' | 'noresult' };
+
+/**
+ * 시나리오 하나를 자식 프로세스로 돌린다. 자식을 띄운 때부터 시나리오의 시간 제한 + graceSec 안에
+ * 끝나지 않으면 자식과 그 아래 프로세스를 모두 끝낸다(대기열에서 기다린 시간은 셈하지 않는다)
+ */
+function runChild(
+  harness: string,
+  file: string,
+  timeoutSec: number,
+  graceSec: number,
+  out: string,
+): Promise<ChildEnd> {
+  const id = path.basename(file, '.ts');
+  const error = (detail: string): Result => ({
+    id,
+    covers: '',
+    state: 'error',
+    detail: oneLine(detail),
+  });
+  return new Promise((resolve) => {
+    let settled = false;
+    let closeWait: NodeJS.Timeout | undefined;
+    const settle = (e: ChildEnd) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(closeWait);
+      // 남은 프로세스가 파이프를 쥐고 있어도 실행기가 그 파이프를 기다리지 않는다
+      child.stderr?.destroy();
+      resolve(e);
+    };
+    const child = spawn(process.execPath, [CHILD, harness, file, out], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+    });
+    let stderr = '';
+    child.stderr!.on('data', (d: Buffer) => {
+      stderr = (stderr + String(d)).slice(-STDERR_KEEP);
+    });
+    let killed = false;
+    const limit = timeoutSec + graceSec;
+    const timer = setTimeout(() => {
+      // 이미 끝난 자식(close만 기다리는 중)은 끝내지 않는다: 거둔 pid는 다른 프로세스가 다시 쓸 수 있다
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      killed = true;
+      killTree(child);
+    }, limit * 1000);
+    const done = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (killed)
+        return settle({
+          result: error(`자식 프로세스가 ${limit}초 안에 끝나지 않아 끝냈다`),
+          ended: 'killed',
+        });
+      const r = readResult(out, id);
+      settle(
+        r
+          ? { result: r, ended: 'result' }
+          : {
+              result: error(
+                `자식 프로세스가 결과 없이 끝났다(종료 코드 ${code ?? signal}): ${stderr}`,
+              ),
+              ended: 'noresult',
+            },
+      );
+    };
+    child.once('error', (e) =>
+      settle({ result: error(`자식 프로세스를 띄우지 못했다: ${e.message}`), ended: 'noresult' }),
+    );
+    // 끝낸 자식은 exit로 바로 넘어가고, 스스로 끝난 자식은 stderr를 다 읽도록 close를 1초까지 기다린다
+    child.once('exit', (code, signal) => {
+      closeWait = setTimeout(() => done(code, signal), killed ? 0 : 1000);
+    });
+    child.once('close', (code, signal) => done(code, signal));
+  });
+}
+
+/**
+ * 시나리오를 자식 프로세스로 jobs개씩 나란히 돌린다. 시간 제한이 긴 것부터 띄운다(같으면 이름순).
+ * 나란히 돌 때 pass가 아닌 시나리오는 모두 끝난 뒤 이름순으로 하나씩(겹치지 않게) 한 번 더 돌린다(12.4절).
+ * 첫 시도가 결과 없이 스스로 끝났으면 자식 진입점이 깨졌을 수 있어 이 프로세스에서 지금 방식으로,
+ * 시나리오가 fail·error를 냈으면 자식 프로세스로 같은 시간 제한을 두고 돌린다.
+ * 시간 제한으로 끝낸 시도가 생기면 그 뒤로는 다시 돌리지 않는다
+ */
+async function runParallel(
+  harness: string,
+  dir: string,
+  ids: string[],
+  jobs: number,
+  graceSec: number,
+): Promise<{ results: Result[]; reruns: number }> {
+  const first = new Map<string, ChildEnd>();
+  const timeouts = new Map<string, number>();
+  const queue: { id: string; file: string; timeoutSec: number }[] = [];
+  for (const id of ids) {
+    const file = path.join(dir, `${id}.ts`);
+    try {
+      const s = await load(file);
+      timeouts.set(id, s.timeoutSec ?? SCENARIO_TIMEOUT_SEC);
+      queue.push({ id, file, timeoutSec: s.timeoutSec ?? SCENARIO_TIMEOUT_SEC });
+    } catch (e) {
+      const detail = oneLine((e as Error)?.message ?? String(e));
+      first.set(id, { result: { id, covers: '', state: 'error', detail }, ended: 'result' });
+    }
+  }
+  queue.sort((a, b) => b.timeoutSec - a.timeoutSec || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // 결과 파일을 두는 임시 폴더는 지우지 않는다(R14)
+  const outDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'harness-selftest-results-')));
+  let next = 0;
+  const lane = async () => {
+    while (next < queue.length) {
+      const q = queue[next++];
+      const out = path.join(outDir, `${q.id}.json`);
+      first.set(q.id, await runChild(harness, q.file, q.timeoutSec, graceSec, out));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, lane));
+
+  const results: Result[] = [];
+  let reruns = 0;
+  // 시간 제한으로 끝낸 시도가 생기면 그 뒤로는 다시 돌리지 않는다: 그 실행은 이미 error가 있어 판정이 바뀌지 않고,
+  // 다시 돌리는 시도가 끝낸 시도의 남은 프로세스와 겹치지 않게 한다(제작자 결정 2026-11-26)
+  let killed = [...first.values()].some((e) => e.ended === 'killed');
+  for (const id of ids) {
+    const { result: r, ended } = first.get(id)!;
+    if (r.state === 'pass' || killed) {
+      results.push(r);
+      continue;
+    }
+    reruns++;
+    const file = path.join(dir, `${id}.ts`);
+    let again: Result;
+    if (ended === 'noresult') {
+      again = await runScenario(harness, file);
+    } else {
+      const e = await runChild(
+        harness,
+        file,
+        timeouts.get(id) ?? SCENARIO_TIMEOUT_SEC,
+        graceSec,
+        path.join(outDir, `${id}.again.json`),
+      );
+      again = e.result;
+      if (e.ended === 'killed') killed = true;
+    }
+    if (again.state !== 'pass') {
+      results.push(again);
+      continue;
+    }
+    const head = `${again.detail} (나란히 돌 때 ${r.state}: `;
+    const tail = ', 혼자 다시 돌려 통과)';
+    const room = Math.max(0, DETAIL_MAX - head.length - tail.length);
+    results.push({ ...again, detail: oneLine(head + oneLine(r.detail).slice(0, room) + tail) });
+  }
+  return { results, reruns };
+}
+
+export interface SelfTestStats {
+  /** 실제로 쓴 동시 수(1이면 이 프로세스에서 차례로 돌았다) */
+  jobs: number;
+  /** 나란히 돌 때 pass가 아니어서 다시 돌린 시나리오 수 */
+  reruns: number;
+  /** runSelfTest 전체의 걸린 시간(ms) */
+  ms: number;
+}
+
 export async function runSelfTest(o: {
   harness: string;
   only?: string[];
   headSha?: string;
   /** 시나리오 폴더(기본: 실행기 옆의 scenarios/). 실행기 테스트가 쓴다 */
   scenarioDir?: string;
+  /** 동시에 돌리는 시나리오 수(기본: 코어 수). 시나리오 수를 넘지 않는다. 1이면 이 프로세스에서 차례로 돈다 */
+  jobs?: number;
+  /** 자식 프로세스의 시간 제한에 더하는 여유(초, 기본 30). 실행기 테스트가 줄인다 */
+  childGraceSec?: number;
+  /** 실행 정보(보고서에는 넣지 않는다) */
+  onStats?: (s: SelfTestStats) => void;
 }): Promise<SelfTestReport> {
+  const t0 = Date.now();
+  const want = o.jobs ?? availableParallelism();
+  if (!Number.isInteger(want) || want < 1)
+    throw new Error(`동시 수는 1 이상의 정수여야 한다(받은 값: ${want})`);
+  const graceSec = o.childGraceSec ?? CHILD_GRACE_SEC;
+  if (!Number.isFinite(graceSec) || graceSec <= 0)
+    throw new Error(`자식 프로세스의 여유는 0보다 커야 한다(받은 값: ${graceSec})`);
   const harness = path.resolve(o.harness);
   const dir = o.scenarioDir ?? SCENARIO_DIR;
   // 목록 파일을 두지 않는다: 폴더의 *.ts를 이름순으로 읽는다
@@ -456,24 +753,15 @@ export async function runSelfTest(o: {
   }
   if (!ids.length) throw new Error(`실행할 시나리오가 없다(${dir})`);
 
-  const results: SelfTestReport['results'] = [];
-  for (const id of ids) {
-    let covers = '';
-    let close = () => {};
-    try {
-      const s = await load(path.join(dir, `${id}.ts`));
-      covers = s.covers;
-      const c = context(harness, Date.now() + (s.timeoutSec ?? SCENARIO_TIMEOUT_SEC) * 1000);
-      close = c.close;
-      await s.run(c.ctx);
-      results.push({ id, covers, state: 'pass', detail: s.title });
-    } catch (e) {
-      const state = e instanceof assert.AssertionError ? 'fail' : 'error';
-      results.push({ id, covers, state, detail: oneLine((e as Error)?.message ?? String(e)) });
-    } finally {
-      close();
-    }
+  const jobs = Math.min(want, ids.length);
+  let results: Result[] = [];
+  let reruns = 0;
+  if (jobs === 1) {
+    for (const id of ids) results.push(await runScenario(harness, path.join(dir, `${id}.ts`)));
+  } else {
+    ({ results, reruns } = await runParallel(harness, dir, ids, jobs, graceSec));
   }
+  o.onStats?.({ jobs, reruns, ms: Date.now() - t0 });
   return { version: 1, headSha: o.headSha ?? '', results };
 }
 
