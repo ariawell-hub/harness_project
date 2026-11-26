@@ -1,6 +1,7 @@
 // 변경 조각(TD-39, Issue #222). 보호 경로를 바꾼 PR은 CHANGELOG 끝과 설계서 머리말·변경 이력 끝에 줄을 더하지 않고
 // PR(브랜치)마다 파일 하나(`docs/harness/changes/<브랜치 이름의 / 뒤>.md`)에 적는다. PR마다 새 파일이라 PR끼리 충돌하지 않는다.
-// 버전 번호를 매겨 CHANGELOG와 설계서로 옮기는 일은 모으기 PR이 한다.
+// 버전 번호를 매겨 CHANGELOG와 설계서로 옮기는 일은 모으기 PR이 한다(`collectFragments`, 명령 `changes-collect`).
+import { designVersionProblems, readDesignVersion } from './design-version.ts';
 
 /** 변경 조각을 두는 폴더(리포 루트 기준, `/` 구분) */
 export const CHANGES_DIR = 'docs/harness/changes';
@@ -107,4 +108,109 @@ export function parseFragment(rel: string, text: string): FragmentParse {
     ok: true,
     value: { name, changelog: items.CHANGELOG, design: items['설계서 변경 이력'] },
   };
+}
+
+export interface CollectInput {
+  /** `docs/harness/design.md`의 글 */
+  design: string;
+  /** `docs/harness/CHANGELOG.md`의 글 */
+  changelog: string;
+  /** 조각 폴더의 파일(리포 루트 기준 경로와 글). 차례는 함수가 정한다 */
+  fragments: { rel: string; text: string }[];
+  /** 모으는 날 `YYYY-MM-DD` */
+  date: string;
+}
+
+export type CollectResult =
+  | { ok: true; design: string; changelog: string; versions: string[]; items: number }
+  | { ok: false; problems: string[] };
+
+/** CHANGELOG에서 조각의 CHANGELOG 항목이 들어갈 절의 제목 줄 */
+export const CHANGELOG_NEXT = '## 다음 버전 (미배포)';
+const THREE_PART = /^(\d+)\.(\d+)\.(\d+)$/;
+
+/**
+ * 모으기 계산(순수 함수, 모으기 PR의 `changes-collect`가 쓴다). 조각을 경로의 글자 차례로 읽어
+ * CHANGELOG 항목은 "다음 버전 (미배포)" 절 끝에, 설계서 변경 이력 항목은 패치 번호를 하나씩 올린 버전과 `date`로
+ * 변경 이력 끝에 넣고 머리말을 맞춘다. 조각 하나라도 형식이 틀리거나 설계서·CHANGELOG를 읽지 못하면 문제를 모두 모아
+ * `ok: false`다(일부만 옮기지 않는다). 조각이 없으면 두 글을 그대로 돌려준다
+ */
+export function collectFragments(i: CollectInput): CollectResult {
+  if (i.fragments.length === 0)
+    return { ok: true, design: i.design, changelog: i.changelog, versions: [], items: 0 };
+  const problems: string[] = [];
+  const sorted = [...i.fragments].sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  const frags: Fragment[] = [];
+  for (const f of sorted) {
+    const r = parseFragment(f.rel, f.text);
+    if (r.ok) frags.push(r.value);
+    else for (const p of r.problems) problems.push(`${f.rel}: ${p}`);
+  }
+
+  // 설계서: 머리말·변경 이력이 맞아야 하고, 마지막 버전이 세 마디여야 패치 번호를 올릴 수 있다
+  const designNl = i.design.includes('\r\n') ? '\r' : '';
+  const designLines = i.design.split('\n');
+  let insertAt = -1;
+  let headLine = -1;
+  // 버전 비교(`compareVersions`)와 같은 정밀도로 올린다(판정 F4: 안전 정수를 넘는 패치 번호)
+  let next: bigint[] | null = null;
+  const versionProblems = designVersionProblems(i.design);
+  for (const p of versionProblems) problems.push(p.what);
+  const dv = readDesignVersion(i.design);
+  if (versionProblems.length === 0 && dv.ok) {
+    const last = dv.value.items[dv.value.items.length - 1].version;
+    const m = THREE_PART.exec(last);
+    if (!m)
+      problems.push(
+        `설계서 변경 이력의 마지막 버전 v${last}가 <정수>.<정수>.<정수>가 아니라 패치 번호를 올릴 수 없다`,
+      );
+    else next = [BigInt(m[1]), BigInt(m[2]), BigInt(m[3])];
+    insertAt = dv.value.end;
+    headLine = dv.value.head.line;
+  }
+
+  // CHANGELOG: "다음 버전 (미배포)" 절이 정확히 하나여야 한다
+  const logNl = i.changelog.includes('\r\n') ? '\r' : '';
+  const logLines = i.changelog.split('\n');
+  const strip = (l: string) => (l.endsWith('\r') ? l.slice(0, -1) : l);
+  const titles = logLines.flatMap((l, n) => (strip(l) === CHANGELOG_NEXT ? [n] : []));
+  if (titles.length !== 1)
+    problems.push(
+      `CHANGELOG에 \`${CHANGELOG_NEXT}\` 줄이 ${titles.length === 0 ? '없다' : `${titles.length}개다(하나여야 한다)`}`,
+    );
+  if (problems.length > 0 || !next) return { ok: false, problems };
+
+  // 설계서 변경 이력 항목
+  const versions: string[] = [];
+  const added: string[] = [];
+  for (const text of frags.flatMap((f) => f.design)) {
+    next[2] += 1n;
+    const v = `v${next.join('.')}`;
+    versions.push(v);
+    added.push(`  - ${v} (${i.date}): ${text}${designNl}`);
+  }
+  let design = i.design;
+  if (added.length > 0) {
+    const lines = [...designLines];
+    lines.splice(insertAt, 0, ...added);
+    // 머리말 파서가 읽는 자리만 바꾼다: 줄 머리의 버전과 줄 끝의 최종 갱신. 가운데 설명은 그대로 둔다(판정 F3)
+    lines[headLine] = lines[headLine]
+      .replace(/^> 버전 v\S+/, `> 버전 ${versions[versions.length - 1]}`)
+      .replace(/최종 갱신: \d{4}-\d{2}-\d{2}(\s*)$/, `최종 갱신: ${i.date}$1`);
+    design = lines.join('\n');
+    const after = designVersionProblems(design);
+    if (after.length > 0) return { ok: false, problems: after.map((p) => p.what) };
+  }
+
+  // CHANGELOG 항목: 절(다음 `## ` 제목이나 파일 끝까지)의 마지막 비지 않은 줄 바로 뒤
+  const items = frags.flatMap((f) => f.changelog).map((t) => `- ${t}${logNl}`);
+  const title = titles[0];
+  let sectionEnd = logLines.findIndex((l, n) => n > title && strip(l).startsWith('## '));
+  if (sectionEnd < 0) sectionEnd = logLines.length;
+  let lastText = title;
+  for (let n = title + 1; n < sectionEnd; n++) if (strip(logLines[n]).trim() !== '') lastText = n;
+  const lines = [...logLines];
+  // 절에 항목이 없으면 제목과 항목 사이에 빈 줄을 둔다
+  lines.splice(lastText + 1, 0, ...(lastText === title ? [logNl, ...items] : items));
+  return { ok: true, design, changelog: lines.join('\n'), versions, items: items.length };
 }
