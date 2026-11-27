@@ -502,6 +502,19 @@ function roundFn<K extends 'parseRoundChanged' | 'encodeRoundChanged'>(name: K) 
   return f as (typeof reviewRound)[K];
 }
 const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+/**
+ * `==`로 끝나는 base64의 마지막 데이터 문자를 위 2비트는 같고 아래 4비트가 0이 아닌 문자로 바꾼다(판정 F10). 디코딩하면
+ * 같은 바이트가 나오지만 표준 꼴이 아니다
+ */
+function unusedBits(v: string): string {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  assert.ok(v.endsWith('==') && !v.endsWith('===='), v);
+  const at = v.length - 3;
+  const out = `${v.slice(0, at)}${A[A.indexOf(v[at]) | 0b0001]}${v.slice(at + 1)}`;
+  assert.notEqual(out, v);
+  assert.deepEqual(Buffer.from(out, 'base64'), Buffer.from(v, 'base64'));
+  return out;
+}
 
 test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모두 모르는 것으로 본다(계획 검증 F3)', () => {
   const parse = roundFn('parseRoundChanged');
@@ -539,6 +552,7 @@ test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모
         .replace(/\//g, '_'),
     ],
     ['채움 없는 길이', b64({ changed: ['src/a.ts'], outside: ['b'] }).replace(/=+$/, '')],
+    ['쓰지 않는 비트가 0이 아님', unusedBits(b64({ changed: ['src/a.ts'], outside: ['b'] }))],
   ];
   for (const [name, value] of bad) assert.deepEqual(parse(value), unknown, name);
 });

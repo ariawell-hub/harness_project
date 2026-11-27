@@ -217,11 +217,14 @@ export function parseRoundChanged(value: string): {
   outside: string[];
 } {
   const unknown = { changed: null, outside: [] };
-  // 표준 base64만 받는다: Node의 디코더는 알파벳 밖 문자를 건너뛰어, 깨진 값도 읽혀 버린다(판정 F10)
+  // 표준 base64만 받는다: Node의 디코더는 알파벳 밖 문자와 마지막 묶음의 쓰지 않는 비트를 건너뛰어, 깨진 값도 읽혀
+  // 버린다. 꼴을 보고, 디코딩한 바이트를 다시 인코딩해 원문과 같을 때만 받는다(판정 F10)
   if (!BASE64_RE.test(value) || value.length % 4 !== 0) return unknown;
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.toString('base64') !== value) return unknown;
   let raw: unknown;
   try {
-    raw = JSON.parse(Buffer.from(value, 'base64').toString());
+    raw = JSON.parse(bytes.toString());
   } catch {
     return unknown;
   }
