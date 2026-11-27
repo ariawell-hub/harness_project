@@ -6,6 +6,7 @@ import { GATE_CONTEXTS, LEDGER_CONTEXT, REVIEW_CONTEXTS } from '../ci/results.ts
 import { CODEOWNERS_FILE, codeownersProblems } from '../gates/codeowners.ts';
 import type { HarnessConfig } from '../lib/config.ts';
 import type { GitHubPort } from '../lib/github.ts';
+import { dismissRuleOf } from '../lib/rules.ts';
 
 export interface OpsItem {
   /** 10.4절 체크리스트 번호 */
@@ -82,7 +83,25 @@ function codeowners({ root, cfg, gh }: Input): OpsItem {
     lines.push(
       '? 코드 오너 리뷰 필수 설정은 봇 토큰으로 읽을 수 없다. 설정은 시험 PR(protected-needs-owner, 체크리스트 6)로 확인한다',
     );
-  return { n: 2, state: problems.length || required === false ? 'fail' : 'ok', lines };
+  // 오래된 승인 철회 규칙 세트(Issue #250): risk-gate가 제작자 승인을 head에 묶는 근거다. 규칙 세트는 봇 토큰으로 읽힌다
+  const branch = cfg.github.defaultBranch;
+  let rule: boolean | null;
+  let why = '';
+  try {
+    rule = dismissRuleOf(gh.branchRules(branch));
+    if (rule === null) why = '응답 꼴이 다르다';
+  } catch (e) {
+    rule = null;
+    why = message(e);
+  }
+  if (rule === true) lines.push(`✓ ${branch} 규칙 세트에 오래된 승인 철회가 켜져 있다`);
+  else if (rule === false)
+    lines.push(
+      `✗ ${branch} 규칙 세트에 오래된 승인 철회가 없다. 고치는 법: docs/SECURITY.md "오래된 승인 철회 규칙 세트 (제작자)"`,
+    );
+  else lines.push(`? ${branch} 규칙 세트를 읽지 못했다: ${why}`);
+  const failed = problems.length > 0 || required === false || rule === false;
+  return { n: 2, state: failed ? 'fail' : rule === null ? 'unknown' : 'ok', lines };
 }
 
 /** 3번: 이 머신의 gh 계정이 봇이고, 그 토큰의 권한 범위에 workflow가 없다 */

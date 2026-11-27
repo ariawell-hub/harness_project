@@ -7,6 +7,7 @@ import { judge, keyFailures, stepTotals, type Attempt } from '../lib/attempts.ts
 import {
   ConfigError,
   DEFAULT_MCP_GUARD,
+  isIsoInstant,
   loadConfig,
   resolveDbCommands,
   resolveMcpGuard,
@@ -449,4 +450,33 @@ test('loadConfig: guard.dbCommands가 없는 옛 설정은 빈 목록으로 읽�
   );
   // 이 리포의 설정과 코어 프로파일에는 키가 있다(빈 목록)
   assert.deepEqual(loadConfig(HARNESS_ROOT).guard.dbCommands, []);
+});
+
+test('isIsoInstant와 github.dismissStaleSince: 시각을 가리고, 설정은 형식과 무관하게 그대로 읽는다(Issue #250)', () => {
+  for (const ok of ['2026-11-26T16:18:41Z', '2026-11-26T16:18:41.123Z'])
+    assert.equal(isIsoInstant(ok), true, ok);
+  for (const bad of [
+    '어제',
+    1764173921,
+    '2026-11-26',
+    '2026-13-40T99:00:00Z',
+    '2026-02-30T00:00:00Z',
+    '',
+    undefined,
+  ])
+    assert.equal(isIsoInstant(bad), false, String(bad));
+  // 설정 읽기는 형식을 검사하지 않는다: 잘못된 값도 판정(risk-gate의 failure)까지 간다
+  const dir = tmp('harness-lib-cfg-');
+  const put = (since?: unknown) => {
+    const c = fixtureConfig();
+    const github = { ...(c.github as Record<string, unknown>) };
+    if (since !== undefined) github.dismissStaleSince = since;
+    writeFileSync(path.join(dir, 'harness.config.json'), JSON.stringify({ ...c, github }));
+  };
+  put();
+  assert.equal(loadConfig(dir).github.dismissStaleSince, undefined);
+  put('2026-11-26T16:18:41Z');
+  assert.equal(loadConfig(dir).github.dismissStaleSince, '2026-11-26T16:18:41Z');
+  put('어제');
+  assert.equal(loadConfig(dir).github.dismissStaleSince, '어제');
 });
