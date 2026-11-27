@@ -360,6 +360,18 @@ export function runChangesCollect(
     const fragments = fragRels.map((rel) => ({ rel, text: textOf(rel) }));
     const r = collectFragments({ design, changelog, fragments, date: o.date ?? today() });
     if (!r.ok) return fail(r.problems, false);
+    // 게시할 결과도 읽기 상한 안이어야 한다: 넘으면 다음 실행이 자기가 만든 파일을 읽지 못하고, 조각은 이미 지워져
+    // 있다(Issue #264). 쓰거나 지우기 전에 멈춘다
+    const tooBig = [
+      ...(r.design !== design ? [[DESIGN_DOC, r.design] as const] : []),
+      [CHANGELOG_DOC, r.changelog] as const,
+    ]
+      .filter(([, text]) => Buffer.byteLength(text, 'utf8') > READ_MAX)
+      .map(
+        ([rel]) =>
+          `${rel}: 모은 결과가 ${READ_MAX}바이트보다 크다(다음 실행에서 읽을 수 없다. 기록 파일을 정리한 뒤 다시 실행하라)`,
+      );
+    if (tooBig.length) return fail(tooBig, false);
 
     // 8. 쓰고 지운다(Issue #257). 쓰기는 `docs/harness`를, 지우기는 조각 폴더를 작업 폴더로 고정해 이름으로 다룬다: 그 뒤
     // 폴더 경로가 링크로 바뀌어도 작업 폴더는 확인한 폴더 자체다(Node에 openat·unlinkat이 없다). 파일마다 (ㄱ) 이름으로
