@@ -1,0 +1,12 @@
+{
+  "plan": "20261127-round-pr-scope",
+  "steps": [
+    {
+      "step": 0,
+      "name": "scope",
+      "status": "completed",
+      "started_at": "2026-11-27T20:25:52+09:00",
+      "completed_at": "2026-11-27T21:56:05+09:00"
+    }
+  ]
+}
