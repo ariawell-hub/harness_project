@@ -8,6 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
   linkSync,
   lstatSync,
@@ -419,6 +420,8 @@ export function runChangesCollect(
         );
         try {
           made = fstatSync(fd, { bigint: true });
+          // 만들 때 준 권한은 umask로 줄어든다. 원래 파일의 권한 비트를 그 핸들에 다시 준다(판정 F23)
+          fchmodSync(fd, mode);
           hooks.beforeWrite?.(rel);
           fs.writeFile(rel, text, fd);
         } finally {
@@ -502,22 +505,27 @@ export function runChangesCollect(
         closeSync(fd);
       }
     };
-    const sortLeft = () => {
-      const auto: string[] = [];
-      const manual: string[] = [...forced];
-      for (const rel of touched) {
-        let ok = true;
+    /**
+     * 그 파일을 자동으로 되돌려도 되는가. 위 폴더부터 보고 바뀐 폴더를 만나면 그 아래는 보지 않는다(링크 너머이거나
+     * 폴더가 아닐 수 있다). 보는 동안의 오류(`ENOTDIR` 등)도 자동으로 되돌리지 않는 쪽으로 본다(판정 F22)
+     */
+    const restorable = (rel: string): boolean => {
+      try {
         for (const [d, want] of dirIdent) {
           if (!rel.startsWith(`${d}/`)) continue;
           const st = lstatSync(abs(d), { throwIfNoEntry: false, bigint: true });
-          if (!st || !st.isDirectory() || !sameIdent(st, want)) ok = false;
+          if (!st || !st.isDirectory() || !sameIdent(st, want)) return false;
         }
-        if (ok) {
-          const w = written.get(rel);
-          ok = w ? stillWritten(rel, w) : !lstatSync(abs(rel), { throwIfNoEntry: false });
-        }
-        (ok ? auto : manual).push(rel);
+        const w = written.get(rel);
+        return w ? stillWritten(rel, w) : !lstatSync(abs(rel), { throwIfNoEntry: false });
+      } catch {
+        return false;
       }
+    };
+    const sortLeft = () => {
+      const auto: string[] = [];
+      const manual: string[] = [...forced];
+      for (const rel of touched) (restorable(rel) ? auto : manual).push(rel);
       return { auto, manual };
     };
     try {

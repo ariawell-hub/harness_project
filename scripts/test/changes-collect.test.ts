@@ -3,6 +3,7 @@
 // 문제가 하나라도 있으면 아무 파일도 쓰지 않는다. 계획 20261123-change-fragments step1.
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   existsSync,
   ftruncateSync,
   openSync,
@@ -1174,3 +1175,64 @@ test('changes-collect #257 (차): 조각을 확인한 뒤 같은 이름으로 �
   assert.equal(read(root, A.rel), newer, '되돌려도 확인 뒤 저장한 내용이 남는다');
   assert.equal(read(root, B.rel), B.text);
 });
+
+// Issue #257 구현 판정 F22: 게시·지우기 뒤 상위 폴더(docs)가 일반 파일로 바뀌어도 목록을 다시 보다 죽지 않고,
+// 바꾼 파일을 "자동으로 되돌리지 않는 파일"로 알린다(아무 파일도 바꾸지 않았다고 하지 않는다)
+test('changes-collect #257 (더): 지우는 동안 docs가 일반 파일로 바뀌어도 바꾼 파일을 자동으로 되돌리지 않는 파일로 알린다', () => {
+  const root = repo([A, B]);
+  let called = false;
+  let moved = true;
+  const r = direct(root, {
+    hooks: {
+      beforeChange: (rel: string) => {
+        if (called || rel !== A.rel) return;
+        called = true;
+        try {
+          renameSync(path.join(root, 'docs'), path.join(root, 'docs-moved'));
+        } catch (e) {
+          // Windows는 작업 폴더의 위 폴더를 옮기지 못한다(그것으로 이 경쟁도 일어나지 않는다)
+          if (process.platform === 'win32') {
+            moved = false;
+            return;
+          }
+          throw e;
+        }
+        writeFileSync(path.join(root, 'docs'), '폴더 자리의 일반 파일\n');
+      },
+    },
+  });
+  assert.ok(called, `(더) 고리가 불렸다: ${r.out}`);
+  if (!moved) return;
+  assert.equal(r.code, 1, `(더): ${r.out}`);
+  assert.match(r.out, /changes-collect: docs: 처음 검사한 그 폴더가 아니다/);
+  assert.doesNotMatch(r.out, /아무 파일도 바꾸지 않았다/);
+  assert.doesNotMatch(r.out, /되돌리는 명령: /);
+  assert.match(
+    r.out,
+    new RegExp(
+      `자동으로 되돌리지 않는 파일: ${DESIGN_PATH}, ${CHANGELOG_PATH}, ${A.rel}, ${B.rel}\\(`,
+    ),
+  );
+  assert.equal(readFileSync(path.join(root, 'docs'), 'utf8'), '폴더 자리의 일반 파일\n');
+});
+
+// Issue #257 구현 판정 F23: 새 파일로 게시해도 원래 파일의 권한 비트를 지킨다(umask로 줄지 않는다)
+test(
+  'changes-collect #257 (러): 게시한 기록 파일은 원래 권한 비트를 지킨다',
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    chmodSync(cl, 0o664);
+    const old = process.umask(0o022);
+    let r: { code: number; out: string };
+    try {
+      r = direct(root, { date: '2026-11-25' });
+    } finally {
+      process.umask(old);
+    }
+    assert.equal(r.code, 0, r.out);
+    assert.equal(lstatSync(cl).mode & 0o777, 0o664, '(러) 그룹 쓰기 권한이 남는다');
+    assert.equal(lstatSync(path.join(root, DESIGN_PATH)).mode & 0o777, 0o644);
+  },
+);
