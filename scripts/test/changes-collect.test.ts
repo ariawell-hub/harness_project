@@ -1223,7 +1223,10 @@ test(
   () => {
     const root = repo([A, B]);
     const cl = path.join(root, CHANGELOG_PATH);
+    const dp = path.join(root, DESIGN_PATH);
     chmodSync(cl, 0o664);
+    // 설계서 권한은 테스트 프로세스의 umask로 만들어졌다: 그 값을 기록해 두고 견준다(판정 F24)
+    const designMode = lstatSync(dp).mode & 0o777;
     const old = process.umask(0o022);
     let r: { code: number; out: string };
     try {
@@ -1233,6 +1236,6 @@ test(
     }
     assert.equal(r.code, 0, r.out);
     assert.equal(lstatSync(cl).mode & 0o777, 0o664, '(러) 그룹 쓰기 권한이 남는다');
-    assert.equal(lstatSync(path.join(root, DESIGN_PATH)).mode & 0o777, 0o644);
+    assert.equal(lstatSync(dp).mode & 0o777, designMode, '(러) 설계서도 원래 권한 그대로다');
   },
 );
