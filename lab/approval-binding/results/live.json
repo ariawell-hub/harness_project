@@ -1,0 +1,122 @@
+{
+  "item": "approval-binding",
+  "summary": "main 규칙 세트의 \"오래된 승인 철회\"를 켠 뒤 시험 PR #256에서 잰 결과. main 병합만 더한 push는 승인이 유지되고(리뷰 커밋이 새 head로 옮겨짐) risk-gate success, 내용을 바꾼 일반 커밋 push는 승인이 DISMISSED로 바뀌고 risk-gate failure. 기대(계획 수용 기준 2)와 같다.",
+  "repo": "ariawell-hub/harness_project",
+  "rule": {
+    "type": "pull_request",
+    "parameters": {
+      "required_approving_review_count": 0,
+      "dismiss_stale_reviews_on_push": true,
+      "required_reviewers": [],
+      "require_code_owner_review": false,
+      "require_last_push_approval": false,
+      "required_review_thread_resolution": false,
+      "require_extra_approval_for_unattributed_changes": false,
+      "allowed_merge_methods": ["merge", "squash", "rebase"]
+    },
+    "ruleset_id": 28177521,
+    "source": "GET repos/ariawell-hub/harness_project/rules/branches/main (봇 토큰)",
+    "firstSeenAt": "2026-11-26T16:18:41Z",
+    "rulesetRead": {
+      "request": "GET repos/ariawell-hub/harness_project/rulesets/28177521 (봇 토큰)",
+      "status": 200,
+      "name": "approval-dismiss-stale",
+      "enforcement": "active",
+      "include": ["~DEFAULT_BRANCH"],
+      "current_user_can_bypass": "never",
+      "created_at": "2026-11-26T16:11:33Z"
+    }
+  },
+  "cases": [
+    {
+      "id": "approved",
+      "head": "b87c8b3080e8d9cd77301e2daae63ab8717f2a86",
+      "parents": 1,
+      "review": {
+        "state": "APPROVED",
+        "commitId": "b87c8b3080e8d9cd77301e2daae63ab8717f2a86",
+        "submittedAt": "2026-11-26T16:12:21Z"
+      },
+      "riskGate": {
+        "state": "success",
+        "description": "위험도 높음, 제작자 head 승인: 보호 경로(operation): docs/harness/approval-probe-250.md"
+      },
+      "observedAt": "2026-11-26T16:19:14Z",
+      "notes": "제작자 승인(리뷰 이벤트) 뒤 workflow_run으로 돈 gates가 risk-gate를 success로 바꿨다. 승인 전(같은 head, 11:38Z)에는 failure였다.",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/pull/256",
+        "https://github.com/ariawell-hub/harness_project/actions/runs/45856578875"
+      ]
+    },
+    {
+      "id": "main-merge",
+      "head": "8cd16416e8a3c85aef138a1449df0e9da4926176",
+      "parents": 2,
+      "mergedBase": "0db918f85b3f1f9bf4d46b77c7aea304f5cc877d",
+      "pushedAt": "2026-11-26T16:19:24Z",
+      "before": {
+        "head": "b87c8b3080e8d9cd77301e2daae63ab8717f2a86",
+        "reviewState": "APPROVED",
+        "riskGateState": "success"
+      },
+      "review": {
+        "state": "APPROVED",
+        "commitId": "8cd16416e8a3c85aef138a1449df0e9da4926176",
+        "submittedAt": "2026-11-26T16:12:21Z"
+      },
+      "riskGate": {
+        "state": "success",
+        "description": "위험도 높음, 제작자 head 승인: 보호 경로(operation): docs/harness/approval-probe-250.md"
+      },
+      "observedAt": "2026-11-26T16:24:14Z",
+      "notes": "부모는 직전 head b87c8b3과 origin/main 0db918f(#242 병합). 충돌 없음. 리뷰는 철회되지 않았고 리뷰 API의 commit_id가 새 head로 옮겨졌다. L1 훅은 막지 않았다(승인 요청 표시가 없는 브랜치).",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/pull/256",
+        "https://github.com/ariawell-hub/harness_project/actions/runs/45857680181"
+      ]
+    },
+    {
+      "id": "normal-commit",
+      "head": "511f2a5e0484be215bdda84f0b84225365e8cd23",
+      "parents": 1,
+      "pushedAt": "2026-11-26T16:24:16Z",
+      "before": {
+        "head": "8cd16416e8a3c85aef138a1449df0e9da4926176",
+        "reviewState": "APPROVED",
+        "riskGateState": "success"
+      },
+      "review": {
+        "state": "DISMISSED",
+        "commitId": "8cd16416e8a3c85aef138a1449df0e9da4926176",
+        "submittedAt": "2026-11-26T16:12:21Z"
+      },
+      "dismissal": {
+        "event": "review_dismissed",
+        "createdAt": "2026-11-26T16:24:17Z",
+        "dismissalCommitId": "511f2a5e0484be215bdda84f0b84225365e8cd23",
+        "actor": "push한 봇 계정"
+      },
+      "riskGate": {
+        "state": "failure",
+        "description": "위험도 높음: 제작자 head 승인 필요 — 보호 경로(operation): docs/harness/approval-probe-250.md"
+      },
+      "observedAt": "2026-11-26T16:26:08Z",
+      "notes": "시험 파일에 두 줄을 더한 일반 커밋. push 1초 뒤 GitHub이 승인을 철회했다. 리뷰의 commit_id는 마지막으로 승인이 유지된 head(8cd1641)에 남고 새 head로 옮겨지지 않았다. gates는 push(pull_request_target)와 철회 이벤트(workflow_run) 두 번 돌았고 둘 다 failure.",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/pull/256",
+        "https://github.com/ariawell-hub/harness_project/actions/runs/45858449778",
+        "https://github.com/ariawell-hub/harness_project/actions/runs/45858474654"
+      ]
+    }
+  ],
+  "extraObservations": [
+    {
+      "id": "pr-253-main-merge",
+      "description": "실제 PR #253(위험도 높음, 제작자 승인 a50c53c 2026-11-26T16:13:30Z)에 origin/main 병합 커밋 c77a1cd를 push했다. 리뷰는 APPROVED로 유지되고 commit_id가 c77a1cd로 옮겨졌으며 risk-gate가 success였다.",
+      "evidence": [
+        "https://github.com/ariawell-hub/harness_project/pull/253",
+        "https://github.com/ariawell-hub/harness_project/actions/runs/45858399986"
+      ]
+    }
+  ]
+}
