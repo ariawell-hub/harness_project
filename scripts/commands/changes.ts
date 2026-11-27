@@ -269,23 +269,36 @@ export function runChangesCollect(
      * 기대지 않아 읽는 도중 끝에 덧붙은 바이트도 보고, 계속 커지는 파일을 끝없이 쌓지 않는다(Issue #261 판정 F1·F2)
      */
     const readUpTo = (fd: number, max: number): Buffer | null => {
-      // 고정 크기 버퍼 하나를 다시 쓰고, 실제 읽은 바이트만 복사해 쌓는다: 상한만큼의 큰 버퍼를 잡지 않고, 짧은 읽기가
-      // 이어져도 읽은 양보다 큰 메모리를 쥐지 않는다(판정 F2·F5)
-      const buf = Buffer.alloc(Math.min(READ_CHUNK, max + 1));
-      const chunks: Buffer[] = [];
+      // 버퍼 하나에 바로 읽어 넣고, 차면 두 배로 늘린다(상한 max+1): 짧은 읽기가 이어져도 쌓이는 객체는 log 수준이고,
+      // 상한만큼의 큰 버퍼를 처음부터 잡지 않는다. 돌려줄 때 읽은 크기만큼 한 번 복사한다(판정 F2·F5)
+      let buf = Buffer.alloc(Math.min(READ_CHUNK, max + 1));
       let at = 0;
       while (at <= max) {
-        const n = readSync(fd, buf, 0, Math.min(buf.length, max + 1 - at), at);
+        if (at === buf.length) {
+          const next = Buffer.alloc(Math.min(buf.length * 2, max + 1));
+          buf.copy(next, 0, 0, at);
+          buf = next;
+        }
+        const n = readSync(fd, buf, at, buf.length - at, at);
         if (n === 0) break;
-        chunks.push(Buffer.from(buf.subarray(0, n)));
         at += n;
       }
-      return at > max ? null : Buffer.concat(chunks, at);
+      return at > max ? null : Buffer.from(buf.subarray(0, at));
     };
-    /** 핸들의 내용이 `want` 바이트와 같은가(더 길어도 다르다) */
+    /**
+     * 핸들의 내용이 `want` 바이트와 같은가(더 길어도 다르다). 고정 버퍼 하나로 읽자마자 그 자리의 기대 바이트와 견주고
+     * 쌓지 않는다(판정 F2)
+     */
     const sameBytes = (fd: number, want: Buffer): boolean => {
-      const got = readUpTo(fd, want.length);
-      return got !== null && got.equals(want);
+      const buf = Buffer.alloc(Math.min(READ_CHUNK, want.length + 1));
+      let at = 0;
+      for (;;) {
+        const n = readSync(fd, buf, 0, buf.length, at);
+        if (n === 0) return at === want.length;
+        if (at + n > want.length) return false;
+        if (!buf.subarray(0, n).equals(want.subarray(at, at + n))) return false;
+        at += n;
+      }
     };
     const readBytes = new Map<string, Buffer>();
     for (const rel of files) {
