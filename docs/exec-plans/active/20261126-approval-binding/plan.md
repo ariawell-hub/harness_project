@@ -35,7 +35,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 범위:
 
 - step0: 제작자 작업 요청(규칙 세트), 시험 PR의 실측, `lab/approval-binding/`(절차·결과), 변경 조각.
-- step1: `scripts/gates/risk-gate.ts`(규칙과 전환 시각 확인), `scripts/ci/gates.ts`(PR base와 규칙을 읽어 넘긴다), `scripts/harness.ts`(`gates`가 읽기 함수를 만든다), `scripts/commands/ops-check.ts`(규칙 확인과 항목 상태), `scripts/lib/config.ts`·`harness.config.json`(`github.dismissStaleSince`), 테스트(`scripts/test/risk-gate.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`, `scripts/test/ops-check.test.ts`, `scripts/test/lib.test.ts`), 설계서·절차서·SECURITY.md, 변경 조각.
+- step1: `scripts/gates/risk-gate.ts`(규칙과 전환 시각 확인), `scripts/ci/gates.ts`(PR base와 규칙을 읽어 넘긴다), `scripts/harness.ts`(`gates`가 읽기 함수를 만든다), `scripts/commands/ops-check.ts`(규칙 확인과 항목 상태), `scripts/lib/config.ts`·`harness.config.json`(`github.dismissStaleSince`), 테스트(`scripts/test/risk-gate.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`, `scripts/test/ops-check.test.ts`, `scripts/test/lib.test.ts`), 설계서·절차서·SECURITY.md, 변경 조각. GitHub 포트(`scripts/lib/github.ts`)와 가짜 포트(`scripts/lib/github-fake.ts`)에 규칙 읽기(`branchRules`, `GET rules/branches/<브랜치>` 원본)를 더한다(`ops-check`는 포트로 읽고 명령 테스트는 가짜 포트로 돈다).
 
 비범위:
 
@@ -54,6 +54,8 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - `scripts/ci/gates.ts`
 - `scripts/harness.ts`
 - `scripts/commands/ops-check.ts`
+- `scripts/lib/github.ts`
+- `scripts/lib/github-fake.ts`
 - `scripts/lib/config.ts`
 - `harness.config.json`
 - `scripts/test/lib.test.ts`
@@ -109,6 +111,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-26 계획 검증 11회차(head `ce4c1b8`): Claude 승인(P2 하나), Codex 수정 요청(F23 유지, F28 새로). 받아들였다. F23: 전환 시각과 같은 초에 제출된 승인은 활성화 직전일 수 있다 → 전환 시각보다 엄격히 뒤의 승인만 센다(수용 기준 5, step1 작업 2와 경계 테스트). F28: harness-guard의 성공 테스트가 새 전환 조건을 만족하는 입력을 갖지 않는다 → 그 테스트의 설정에 `github.dismissStaleSince`, 리뷰 제출 시각을 그보다 뒤의 ISO 시각으로 바꾸고, 같은 입력에서 `dismissRule`만 빼면 error임을 단언한다(step1 작업 5). Claude P2(설정을 PR이 바꿀 수 있다): 판정 job은 설정을 base에서 읽는다(`gates.yml`의 `--config-root ../base`). 의사결정 로그 문구를 그 근거로 고쳤다.
 - 2026-11-26 계획 검증 12회차(head `cd4f8a1`, 계획만): 두 검증자 승인(G1).
 - 2026-11-26 step0 실측: 제작자가 규칙 세트 `approval-dismiss-stale`(id 28177521, `created_at` 16:11:33Z)을 만들었고 봇이 16:18:41Z에 `rules/branches/main`과 `rulesets/28177521`로 읽었다. 시험 PR #256(플러밍 커밋 `b87c8b3`)을 제작자가 승인했고(`risk-gate` success), #242 병합 뒤 main 병합 커밋 `8cd1641`을 push했다(승인 유지, 리뷰 커밋이 `8cd1641`로 옮겨짐, success, L1 훅은 막지 않음). 이어 일반 커밋 `511f2a5`를 push했다(1초 뒤 `review_dismissed`, 리뷰 커밋은 `8cd1641`에 남음, failure). 기대(수용 기준 2)와 같아 step1을 계획대로 한다. 실제 PR #253의 main 병합 갱신(`c77a1cd`)에서도 승인이 유지되고 success였다. #256은 닫고 브랜치를 지웠다. 결과 `lab/approval-binding/results/live.json`·`README.md`, 변경 조각 s0.
+- 2026-11-27 step1 시작(브랜치 `fix/20261126-approval-binding-s1`): `ops-check`는 리포 설정을 GitHub 포트(`GitHubPort`)로 읽고, 명령 테스트(`ops-check.test.ts`의 `ops-check 명령`)는 가짜 포트(`FakeGitHub`)로 돈다. 규칙 세트를 읽으려면 두 포트에 메서드를 더해야 하는데 관련 파일에 없었다 → 관련 파일과 범위에 `scripts/lib/github.ts`·`scripts/lib/github-fake.ts`를 더했다(step1의 작업·AC·금지사항은 그대로). 절차서 2절대로 이 PR에서 계획만 먼저 올려 계획 검증을 받는다.
 
 ## 의사결정 로그
 
