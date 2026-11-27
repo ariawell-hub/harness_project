@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  closeSync,
   existsSync,
   ftruncateSync,
   openSync,
@@ -1237,5 +1238,82 @@ test(
     assert.equal(r.code, 0, r.out);
     assert.equal(lstatSync(cl).mode & 0o777, 0o664, '(러) 그룹 쓰기 권한이 남는다');
     assert.equal(lstatSync(dp).mode & 0o777, designMode, '(러) 설계서도 원래 권한 그대로다');
+  },
+);
+
+// Issue #261(PR #254 판정 F5): 게시하는 동안 원래 파일을 미리 열어 둔 다른 세션이 그 핸들로 저장하면, 임시 이름의 원래 파일을
+// 지우기 직전에 다시 견줘 지우지 않고 남긴다(그 저장을 잃지 않는다)
+test(
+  'changes-collect #261: 원래 CHANGELOG를 미리 연 핸들로 게시 사이에 저장하면 원래 파일을 지우지 않고 임시 이름에 남긴다',
+  // Windows는 열린 파일의 이름 바꾸기·지우기 규칙이 달라 이 경쟁을 같은 꼴로 재현하지 않는다
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    const other = FRONT + changelogText(['미리 연 핸들로 저장']);
+    let held: number | undefined;
+    let wrote = false;
+    const r = direct(root, {
+      hooks: {
+        afterRead: (rel: string) => {
+          if (rel === CHANGELOG_PATH && held === undefined) held = openSync(cl, 'r+');
+        },
+      },
+      fs: {
+        writeFile: (rel: string, t: string, fd: number) => {
+          writeAll(fd, t);
+          if (wrote || rel !== CHANGELOG_PATH || held === undefined) return;
+          wrote = true;
+          ftruncateSync(held, 0);
+          writeSync(held, other, 0);
+        },
+      },
+    });
+    if (held !== undefined) closeSync(held);
+    assert.ok(wrote, `미리 연 핸들로 썼다: ${r.out}`);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /CHANGELOG\.md: 게시한 뒤 원래 파일이 바뀌었다/);
+    const parked = tempOf(root, 'CHANGELOG.md', false);
+    assert.ok(parked, `원래 파일이 임시 이름에 남는다: ${r.out}`);
+    assert.equal(
+      read(root, `docs/harness/${parked}`),
+      other,
+      '미리 연 핸들로 저장한 내용이 남는다',
+    );
+    assert.ok(r.out.includes(`남긴 임시 파일: docs/harness/${parked}`), r.out);
+  },
+);
+
+// Issue #261 판정 F1: 처음 내용은 그대로 두고 끝에만 덧붙인 저장도 바뀐 것으로 본다(크기에 기대지 않고 EOF까지 읽어 견준다)
+test(
+  'changes-collect #261: 다시 견주는 도중(첫 fstat 뒤 읽기 전) 원래 CHANGELOG 끝에 덧붙여도 지우지 않고 임시 이름에 남긴다',
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    const original = readFileSync(cl);
+    const tail = '\n- 다시 견주는 도중 덧붙인 항목\n';
+    let held: number | undefined;
+    let wrote = false;
+    const r = direct(root, {
+      hooks: {
+        afterRead: (rel: string) => {
+          if (rel === CHANGELOG_PATH && held === undefined) held = openSync(cl, 'r+');
+        },
+        beforeRecheckRead: (rel: string) => {
+          if (wrote || rel !== CHANGELOG_PATH || held === undefined) return;
+          wrote = true;
+          writeSync(held, tail, original.length);
+        },
+      },
+    });
+    if (held !== undefined) closeSync(held);
+    assert.ok(wrote, `다시 견주는 도중에 덧붙였다: ${r.out}`);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /CHANGELOG\.md: 게시한 뒤 원래 파일이 바뀌었다/);
+    const parked = tempOf(root, 'CHANGELOG.md', false);
+    assert.ok(parked, r.out);
+    assert.equal(read(root, `docs/harness/${parked}`), original.toString('utf8') + tail);
+    assert.ok(r.out.includes(`남긴 임시 파일: docs/harness/${parked}`), r.out);
   },
 );
