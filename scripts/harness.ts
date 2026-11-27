@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
-import { gatesOutput, runGates, selfTestNeeded } from './ci/gates.ts';
+import { gatesOutput, readDismissRule, runGates, selfTestNeeded } from './ci/gates.ts';
 import { planCarry } from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
@@ -1047,6 +1047,17 @@ async function main(argv: string[]): Promise<number> {
               target,
             )
         : undefined;
+      // 오래된 승인 철회 규칙(Issue #250): PR의 실제 base 브랜치 규칙을 판정 job의 읽기 토큰으로 읽는다.
+      // PR 번호가 없으면 만들지 않는다(risk-gate는 위험도 높음 승인을 error로 낸다)
+      const dismissRule =
+        Number.isInteger(number) && number > 0
+          ? () =>
+              readDismissRule({
+                api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                repo: process.env.GITHUB_REPOSITORY ?? '',
+                pr: number,
+              })
+          : undefined;
       const r = await runGates({
         root,
         cfg,
@@ -1057,6 +1068,7 @@ async function main(argv: string[]): Promise<number> {
         prBody,
         planReview,
         targetCheck,
+        dismissRule,
       });
       // 결과 파일에는 크기를 맞춘 결과를, 요약에는 원래 결과를 쓴다(ci/gates.ts의 gatesOutput)
       const output = gatesOutput(r);

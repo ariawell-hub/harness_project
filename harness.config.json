@@ -11,7 +11,8 @@
     "collaborators": [],
     "botIssues": "exclude",
     "priorityLabels": ["priority:high", "priority:medium", "priority:low"],
-    "needsHumanLabel": "needs-human"
+    "needsHumanLabel": "needs-human",
+    "dismissStaleSince": "2026-11-26T16:18:41Z"
   },
   "paths": {
     "worktreeRoot": "../{repo}.worktrees",

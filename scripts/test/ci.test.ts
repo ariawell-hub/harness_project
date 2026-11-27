@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { reproJobViolations } from '../gates/harness-guard.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { runGates, summaryMarkdown } from '../ci/gates.ts';
+import { readDismissRule, runGates, summaryMarkdown } from '../ci/gates.ts';
 import { recordStatuses } from '../ci/record.ts';
 import { REVIEW_DIR, writeReviewInput } from '../ci/review-input.ts';
 import { planReview } from '../ci/review-plan.ts';
@@ -980,4 +980,187 @@ test('워크플로: gitleaks를 받는 job은 check와 selftest 둘뿐이다', (
   // 다른 job이 gitleaks를 받기 시작하면 여기서 실패한다. 그 job의 고정값을 그 테스트에 더한다
   const got = [...workflowJobs()].filter(([, block]) => /gitleaks_/i.test(block)).map(([id]) => id);
   assert.deepEqual(got.sort(), ['check/check', 'gates/selftest']);
+});
+
+// ---------- 오래된 승인 철회 규칙 세트(Issue #250 step1) ----------
+
+const RULE = (on: boolean) => ({
+  type: 'pull_request',
+  parameters: { dismiss_stale_reviews_on_push: on },
+});
+/** 경로 → 응답(Error면 던진다). 없는 경로는 HTTP 404처럼 던진다. 부른 경로를 남긴다 */
+function fakeApi(routes: Record<string, unknown>) {
+  const calls: string[] = [];
+  const api = async (p: string) => {
+    calls.push(p);
+    if (!(p in routes)) throw new Error(`GitHub 조회 실패: HTTP 404 ${p}`);
+    const v = routes[p];
+    if (v instanceof Error) throw v;
+    return v;
+  };
+  return { calls, api };
+}
+const PR_PATH = 'repos/o/r/pulls/7';
+const rulesPath = (base: string, page = 1) =>
+  `repos/o/r/rules/branches/${base}?per_page=100&page=${page}`;
+const readRule = (routes: Record<string, unknown>) => {
+  const f = fakeApi(routes);
+  return readDismissRule({ api: f.api, repo: 'o/r', pr: 7 }).then((v) => ({ v, calls: f.calls }));
+};
+
+test('readDismissRule: PR의 실제 base 브랜치 규칙에서 오래된 승인 철회가 켜진 pull_request 규칙을 찾는다', async () => {
+  const main = { base: { ref: 'main' } };
+  assert.deepEqual((await readRule({ [PR_PATH]: main, [rulesPath('main')]: [RULE(true)] })).v, {
+    base: 'main',
+    on: true,
+  });
+  const OFF = { base: 'main', on: false };
+  assert.deepEqual(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: [RULE(false)] })).v,
+    OFF,
+  );
+  assert.deepEqual((await readRule({ [PR_PATH]: main, [rulesPath('main')]: [] })).v, OFF);
+  assert.deepEqual(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: [{ type: 'deletion' }] })).v,
+    OFF,
+  );
+  // 두 쪽: 첫 쪽이 꽉 차면 다음 쪽을 읽는다(둘째 쪽에 규칙)
+  const full = Array.from({ length: 100 }, () => ({ type: 'deletion' }));
+  const two = await readRule({
+    [PR_PATH]: main,
+    [rulesPath('main', 1)]: full,
+    [rulesPath('main', 2)]: [RULE(true)],
+  });
+  assert.deepEqual(two.v, { base: 'main', on: true });
+  assert.deepEqual(two.calls, [PR_PATH, rulesPath('main', 1), rulesPath('main', 2)]);
+  // 꼴이 틀리거나 요청이 실패하면 null
+  assert.equal(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: { message: 'x' } })).v,
+    null,
+  );
+  assert.equal(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: [{ parameters: {} }] })).v,
+    null,
+  );
+  assert.equal((await readRule({ [PR_PATH]: main })).v, null);
+  assert.equal((await readRule({ [PR_PATH]: new Error('HTTP 502') })).v, null);
+  // PR의 base가 기본 브랜치가 아니면 그 브랜치의 규칙을 읽는다
+  const rel = await readRule({
+    [PR_PATH]: { base: { ref: 'release' } },
+    [rulesPath('release')]: [RULE(true)],
+  });
+  assert.deepEqual(rel.v, { base: 'release', on: true });
+  assert.deepEqual(rel.calls, [PR_PATH, rulesPath('release')]);
+  // 슬래시가 든 base는 경로 한 구간으로 읽는다(release%2F1.x)
+  const slash = await readRule({
+    [PR_PATH]: { base: { ref: 'release/1.x' } },
+    [rulesPath('release%2F1.x')]: [RULE(true)],
+  });
+  assert.deepEqual(slash.v, { base: 'release/1.x', on: true });
+  assert.deepEqual(slash.calls, [
+    PR_PATH,
+    'repos/o/r/rules/branches/release%2F1.x?per_page=100&page=1',
+  ]);
+  // base.ref가 없으면 null(규칙을 읽지 않는다)
+  const none = await readRule({ [PR_PATH]: { base: {} } });
+  assert.equal(none.v, null);
+  assert.deepEqual(none.calls, [PR_PATH]);
+});
+
+test('gates 진입점: 시각이 아닌 github.dismissStaleSince가 든 설정 파일이어도 판정을 만들고 risk-gate가 failure와 설정 안내를 낸다', async () => {
+  const { root, base, head } = prRepo(PLAN.replace('risk: normal', 'risk: high'));
+  const cfgFile = JSON.parse(readFileSync(path.join(root, 'harness.config.json'), 'utf8'));
+  cfgFile.github.dismissStaleSince = '어제';
+  write(root, 'harness.config.json', JSON.stringify(cfgFile));
+  const cfg = loadConfig(root);
+  const r = await runGates({
+    root,
+    cfg,
+    base,
+    branch: BRANCH,
+    headSha: head,
+    reviews: [
+      { user: 'maker', state: 'APPROVED', commitId: head, submittedAt: '2026-11-14T01:00:00Z' },
+    ],
+    dismissRule: async () => ({ base: 'main', on: true }),
+  });
+  const rg = r.results.find((x) => x.context === 'risk-gate')!;
+  assert.equal(rg.state, 'failure');
+  assert.match(rg.description, /github\.dismissStaleSince/);
+  assert.match(
+    rg.details.join('\n'),
+    /고치는 법: main의 harness\.config\.json에 github\.dismissStaleSince/,
+  );
+});
+
+test('runGates: 위험도 높음이고 제작자의 마지막 판정 리뷰가 승인일 때만 dismissRule을 부른다', async () => {
+  const run = async (
+    plan: string,
+    reviews: { user: string; state: string; commitId: string; submittedAt: string }[] | 'approve',
+    rule: { base: string; on: boolean } | null | Error | undefined,
+  ) => {
+    const { root, base, head } = prRepo(plan);
+    const cfg = loadConfig(root);
+    cfg.github.dismissStaleSince = '2026-11-14T00:00:00Z';
+    let n = 0;
+    const r = await runGates({
+      root,
+      cfg,
+      base,
+      branch: BRANCH,
+      headSha: head,
+      reviews:
+        reviews === 'approve'
+          ? [
+              {
+                user: 'maker',
+                state: 'APPROVED',
+                commitId: head,
+                submittedAt: '2026-11-14T01:00:00Z',
+              },
+            ]
+          : reviews,
+      dismissRule:
+        rule === undefined
+          ? undefined
+          : async () => {
+              n++;
+              if (rule instanceof Error) throw rule;
+              return rule;
+            },
+    });
+    return { n, rg: r.results.find((x) => x.context === 'risk-gate')! };
+  };
+  const HIGH = PLAN.replace('risk: normal', 'risk: high');
+  const ON = { base: 'main', on: true };
+  const yes = await run(HIGH, 'approve', ON);
+  assert.deepEqual([yes.n, yes.rg.state], [1, 'success'], yes.rg.description);
+  const no = await run(HIGH, 'approve', { base: 'main', on: false });
+  assert.deepEqual([no.n, no.rg.state], [1, 'failure']);
+  const unk = await run(HIGH, 'approve', null);
+  assert.deepEqual([unk.n, unk.rg.state], [1, 'error']);
+  const thrown = await run(HIGH, 'approve', new Error('HTTP 502'));
+  assert.deepEqual([thrown.n, thrown.rg.state], [1, 'error']);
+  // 읽기 함수가 없으면(PR 번호를 모른다) 확인하지 못한 것이다
+  assert.equal((await run(HIGH, 'approve', undefined)).rg.state, 'error');
+  // 승인 리뷰가 없거나 마지막 판정 리뷰가 승인이 아니면 부르지 않는다
+  const none = await run(HIGH, [], ON);
+  assert.deepEqual([none.n, none.rg.state], [0, 'failure']);
+  const changes = await run(
+    HIGH,
+    [
+      { user: 'maker', state: 'APPROVED', commitId: 'x', submittedAt: '2026-11-14T01:00:00Z' },
+      {
+        user: 'maker',
+        state: 'CHANGES_REQUESTED',
+        commitId: 'x',
+        submittedAt: '2026-11-14T02:00:00Z',
+      },
+    ],
+    ON,
+  );
+  assert.deepEqual([changes.n, changes.rg.state], [0, 'failure']);
+  // 위험도 보통은 부르지 않는다
+  const normal = await run(PLAN, 'approve', ON);
+  assert.deepEqual([normal.n, normal.rg.state], [0, 'success']);
 });

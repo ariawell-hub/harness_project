@@ -2,7 +2,7 @@
 id: 20261126-approval-binding
 issue: 250 # GitHub Issue 번호
 type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
-status: active # draft | active | blocked | completed | abandoned
+status: completed # draft | active | blocked | completed | abandoned
 size: large # small | medium | large (4.3절)
 risk: high # low | normal | high (10.1절)
 author: claude-code # claude-code | codex | <사람>
@@ -115,6 +115,9 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-27 step1 실행 PR #259(브랜치 `fix/20261126-approval-binding-s1`)의 첫 계획 커밋(관련 파일에 GitHub 포트 둘을 더함)에 계획 검증이 Claude 승인(P2 하나), Codex 수정 요청(P1 셋)을 냈다. 모두 step1 파일의 작업·AC를 고쳐야 하는 지적이라 절차서 2절 "실행 중인 step의 계획 수정"대로 완료된 step0 번호의 계획 수정 PR(`docs/20261126-approval-binding-s0`)로 먼저 고친다. #259는 초안으로 두고 커밋을 더 올리지 않는다. 받아들인 것: (1) `ops-check`의 포트가 규칙 목록을 끝까지 읽는 계약이 없다 → 쪽 경로·쪽 모으기·판정을 `scripts/lib/rules.ts`로 빼 판정 job과 실제 포트가 같은 함수로 끝까지 읽고, 끝까지 못 읽으면 던져 `unknown`이 되게 했다(쪽 모으기를 가짜 응답으로 테스트한다). (2) 슬래시가 든 base 브랜치(`release/1.x`)가 경로 두 구간으로 나뉜다 → 브랜치 이름을 경로 한 구간으로 인코딩(`release%2F1.x`)하고 판정 job·포트 모두 그 함수를 쓴다. (3) AC가 설계서·절차서 갱신을 보지 않는다 → 해당 문구 grep을 더했다. Claude P2(읽을 파일과 작업에 포트 메서드·순수 판정 함수가 없다) → 읽을 파일과 작업 4에 적었다.
 - 2026-11-27 같은 계획 수정에 PR #258의 main 병합 뒤 판정에서 나온 Codex 지적 F25(P1)도 받아들였다: 전환 시각은 main에서 잰 하나인데 다른 base 브랜치의 승인에도 적용돼, 그 브랜치에 규칙을 켜기 전에 받아 커밋이 옮겨진 승인이 통과할 수 있다 → 전환 시각은 기본 브랜치의 것으로 한정하고 base가 기본 브랜치가 아니면 failure(수용 기준 5, step1 작업 1·2·5). `readDismissRule`은 규칙과 함께 실제 base를 돌려준다.
 - 2026-11-27 계획 수정 PR #260의 계획 검증 1회차(head `965d390`): Claude 승인(지적 없음), Codex 수정 요청(P1 넷). 모두 받아들였다. (1) step1의 `harness-guard`·`gates` 테스트 문구가 옛 계약(`true`)으로 남았다(F25 대응 때 둘째 수정이 훅에 막힌 명령 안에 있어 실행되지 않았다) → `{ base: 'main', on: true }`로 고쳤다. (2) 잘못된 전환 시각을 설정 오류로 막으면 `gates`가 판정을 만들지 못해 수용 기준 5의 failure·설정 안내를 낼 수 없다 → 설정은 형만 두고 `risk-gate`가 failure로 내며, `gates` 진입점(설정 파일 → `loadConfig` → `runGates`) 테스트를 더했다. (3) 쪽 나눔 테스트가 실제 `GhCli`를 거치지 않는다 → 생성자에 `gh` 실행 함수를 받아 `new GhCli(dir, 가짜)`의 `branchRules`로 둘째 쪽 요청·감지·실패를 단언한다(AC에 그 테스트). (4) 전환 시각 AC가 모양만 본다 → `lab/approval-binding/results/live.json`의 `rule.firstSeenAt`과 같은지 본다.
+- 2026-11-27 계획 수정 PR #260 병합(계획 수정 검증 2회차에서 두 검증자 승인, 해시 `2cae4a1b5911`). #259에 main을 병합했다(계획 파일은 main 것으로 맞춰 해시가 같다).
+- 2026-11-27 step1 구현: 테스트 먼저. `risk-gate.test.ts`(riskGate의 순서: 승인 리뷰 → 규칙 `{ base, on }` → 기본 브랜치 → 전환 시각(같은 초·1초 뒤 경계, 다시 승인) → head, `dismissRuleOf`), `ci.test.ts`(`readDismissRule`: 두 쪽, `release`·`release/1.x` 경로, 꼴·실패는 null / `runGates`의 `dismissRule` 부른 횟수 / `gates` 진입점의 잘못된 전환 시각), `harness-guard.test.ts`(그 테스트의 전환 시각·제출 시각·규칙 입력과 "규칙 함수가 없으면 error"), `ops-check.test.ts`(2번 줄 ✓·✗·?와 상태, 명령 종료 코드, `readRulePagesSync`, 실제 `GhCli.branchRules`의 둘째 쪽 요청·감지·실패), `lib.test.ts`(`isIsoInstant`, 설정은 형식과 무관하게 읽음). 다섯 파일 모두 merge-base `34444e0` 코드에서 실패했다(risk-gate·ci·ops-check·lib는 새 이름을 가져오지 못해 파일 전체, harness-guard는 그 테스트 1건). 구현: `scripts/lib/rules.ts`(쪽 경로·쪽 모으기·판정), `risk-gate.ts`(`lastOwnerDecision`, `DismissRule`, 순서), `ci/gates.ts`(`readDismissRule`, `runGates`가 위험도 높음·승인 리뷰일 때만 부름), `harness.ts`(`gates`가 PR 번호로 읽기 함수를 만든다), GitHub 포트 `branchRules`(실제·가짜), `ops-check` 2번, 설정 형, `harness.config.json`(`2026-11-26T16:18:41Z`), 설계서 0.2·10.3·10.4절, 절차서 5절, SECURITY.md 새 절, 변경 조각 s1.
+- 2026-11-27 step1 구현 판정 1회차(head `3362b7d`): Claude 승인(지적 없음), Codex 수정 요청(P1 F5). 받아들였다. 설계서·절차서가 main 병합 갱신이면 승인이 유지된다고만 적어, 충돌을 풀며 PR 변경분이 바뀐 병합(재지 않았다)에서도 유지된다고 읽힌다 → 유지는 충돌 없이 변경분이 그대로인 병합(실측)으로 한정하고, 충돌 해결 병합은 철회될 수 있어 `risk-gate`가 실패하면 다시 승인한다고 적었다(설계서 10.3절 표와 절차 4, 절차서 5절, 변경 조각). AC의 문구 grep은 그대로 맞는다. main이 #258로 앞서 `origin/main`을 병합했다.
 
 ## 의사결정 로그
 
