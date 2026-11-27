@@ -531,7 +531,8 @@ async function main(argv: string[]): Promise<number> {
           for (const line of reviewLogLines(v)) log(line);
         },
         // 검증자 상태(Issue #267): 구현 판정은 원장이 미루는 새 P1(범위 밖, 동결, 근거 없음)만 있으면 통과다. 원장과 같은
-        // 등록 규칙(newEntryStatus)을 쓴다. 계획 전용 판정은 미루지 않는다. 라운드 수를 모르면 1라운드로 본다(동결하지 않는다)
+        // 등록 규칙(newEntryStatus)을 쓴다. 계획 전용 판정은 미루지 않는다. 라운드 수나 바뀐 파일 목록을 모르면 1라운드로
+        // 본다(동결로 통과시키지 않는다: 목록을 모르면 원장은 새 P1을 모두 동결하지만, 바뀐 파일의 P1까지 섞인다. 판정 F1)
         deferred: planOnlyRecord
           ? undefined
           : (f, i, v) => {
@@ -539,7 +540,7 @@ async function main(argv: string[]): Promise<number> {
               const result = repro?.find((x) => x.index === i)?.result ?? '';
               return (
                 newEntryStatus(f, {
-                  round: round.round ?? 1,
+                  round: round.round !== null && changedFiles !== null ? round.round : 1,
                   changed: new Set(changedFiles ?? []),
                   outside: new Set(outsideFiles),
                   repro: result,

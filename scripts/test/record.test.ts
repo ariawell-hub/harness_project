@@ -525,6 +525,12 @@ test('record-review(Issue #267): 2라운드 구현 판정의 차단 지적이 �
       [],
     ],
     [
+      '바뀐 파일 목록을 모름(라운드 수는 앎, 판정 F1)',
+      ['--round-changed', b64({ changed: null, outside: [], round: 2 })],
+      frozenOnly,
+      [],
+    ],
+    [
       '1라운드라고 받음',
       ['--round-changed', b64({ changed: ['src/a.ts'], outside: [], round: 1 })],
       frozenOnly,
