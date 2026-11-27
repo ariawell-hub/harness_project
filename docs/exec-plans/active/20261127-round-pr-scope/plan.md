@@ -20,12 +20,12 @@ claimed_at: 2026-11-27T20:25:52+09:00 # new-task가 채운다
 
 수용 기준:
 
-1. 라운드 입력의 "직전 판정 이후 바뀐 파일"(`round-changed.txt`, 반환값 `changed`)은 이 PR이 바꾼 파일(merge-base 대비) 가운데 직전 판정 head 이후 바뀐 것이다. 직전 판정 이후 바뀌었지만 이 PR이 바꾸지 않은 파일(main 병합으로만 바뀐 파일)은 `round-main.txt`에 "이 PR의 변경이 아니다"로 따로 적고(반환값 `outside`), `round-diff.patch`에는 넣지 않는다. 테스트: main 병합만 더한 갱신 뒤 main에서만 바뀐 파일이 `changed`·`round-diff.patch`에 없고 `outside`·`round-main.txt`에 있다. 병합 뒤 PR이 바꾼 파일은 `changed`와 diff에 있다.
+1. 라운드 입력의 "직전 판정 이후 바뀐 파일"(`round-changed.txt`, 반환값 `changed`)은 직전 판정 head 이후 바뀐 파일 가운데 이 PR의 파일이다. 이 PR의 파일은 지금 head가 바꾼 파일(`<merge-base>...HEAD`)과 직전 판정 head가 바꾼 파일(`<merge-base>...<직전 head>`)을 합친 것이다(뒤의 것이 없으면 PR이 직전 판정 뒤 되돌린 파일을 main 쪽으로 잘못 나눈다, 계획 검증 F1). 직전 판정 이후 바뀌었지만 어느 쪽에도 없는 파일(main 병합으로만 바뀐 파일)은 `round-main.txt`에 "이 PR의 변경이 아니다"로 따로 적고(반환값 `outside`), `round-diff.patch`에는 넣지 않는다. 둘 중 하나라도 읽지 못하면 나누지 않는다(수용 기준 2). 테스트: main 병합만 더한 갱신 뒤 main에서만 바뀐 파일이 `changed`·`round-diff.patch`에 없고 `outside`·`round-main.txt`에 있다. 병합 뒤 PR이 바꾼 파일은 `changed`와 diff에 있다. 직전 판정 head에서 바꿨다가 그 뒤 merge-base와 같게 되돌린 파일은 `changed`와 diff(되돌림)에 있고 `outside`에 없으며, 그 파일의 새 P1은 지금 규칙대로 `open`이다.
 2. merge-base를 모르면(인자가 없음) `changed`는 지금처럼 직전 판정 이후 바뀐 파일 전부이고 `outside`는 빈 목록이다(지금 동작).
-3. plan job 출력 `round_changed`는 `{ changed, outside }`의 base64 JSON이다. 기록 job(`record-review --round-changed`)은 이 꼴과 지금의 배열 꼴(`changed`만, `outside`는 빈 목록)을 받고, 깨졌거나 없으면 지금처럼 모르는 것으로 본다(`changed` null, `outside` 빈 목록). 100KB를 넘으면 지금처럼 빈 값이다.
+3. plan job 출력 `round_changed`는 `{ changed, outside }`의 base64 JSON이다(`encodeRoundChanged`). 인코딩한 값이 100,000자 이하면 내고, 넘으면 지금처럼 빈 값이다. 기록 job(`record-review --round-changed`, `parseRoundChanged`)은 이 꼴과 지금의 배열 꼴(`changed`만, `outside`는 빈 목록)을 받고, 그 밖(빈 값, base64·JSON이 아님, 배열·객체가 아님, `changed`가 문자열 배열·null이 아님, `outside`가 없거나 문자열 배열이 아님, 원소에 문자열이 아닌 값)은 모르는 것으로 본다(`changed` null, `outside` 빈 목록). 테스트: 각 꼴과 크기 경계(100,000자 그대로, 100,001자 빈 값).
 4. 원장 반영(`applyVerdict`): 새 P1의 위치가 `outside`에 있으면 재현 여부와 상관없이 `deferred`로 등록하고 처리 칸에 범위 밖 이유를 적는다. P0, `outside`에 없는 파일의 P1, P2·P3의 등록 규칙은 그대로다. `review-ledger`의 설명은 범위 밖 P1의 수를 따로 적는다(`그중 범위 밖 P1 N`).
-5. `pr-state`가 원장의 범위 밖 지적 번호를 한 줄로 알린다(`- 범위 밖 지적: F6 — …`). 절차서 8절에 "그 줄이 보이면 봇이 Issue로 등록한다"를 적는다.
-6. 검증 프롬프트(`scripts/cross-review/prompt.md`)가 `round-main.txt`의 뜻과 그 파일 문제의 처리(P0만 차단으로 적고 나머지는 P2)를 적는다. 설계서 10.2절 (4)·(5), `scripts/cross-review/ledger.md`가 구현과 같은 규칙을 적는다.
+5. `pr-state`가 원장의 범위 밖 지적 번호를 한 줄로 알린다(`- 범위 밖 지적: F6 — …`). 절차서 8절에 "그 줄이 보이면 봇이 Issue로 등록한다"를 적는다. 테스트는 판정을 원장에 반영한 결과(`applyVerdict`에 `outside`)로 원장 댓글을 만들어 그 줄을 본다(판정 → 원장 → 안내).
+6. 검증 프롬프트(`scripts/cross-review/prompt.md`)가 `round-main.txt`의 뜻과 그 파일 문제의 처리를 적는다: 그 파일에서 찾은 결함은 P2로 낮추지 말고 원래 등급으로 적는다(기계가 P1은 범위 밖으로 미뤄 Issue로 넘기고, P0은 막는다). 낮춰 적으면 Issue 안내에서 빠지기 때문이다(계획 검증 F2). 설계서 10.2절 (4)·(5), `scripts/cross-review/ledger.md`가 구현과 같은 규칙을 적는다.
 
 ## 범위 / 비범위
 
@@ -66,6 +66,7 @@ claimed_at: 2026-11-27T20:25:52+09:00 # new-task가 채운다
 ## 진행 로그
 
 - 2026-11-27 계획 작성. 계기: PR #254 판정 11라운드에서 Codex가 #263의 `changes.ts`에 F6(P1, 재현됨)을 냈다(→ Issue #264, PR #265).
+- 2026-11-27 계획 검증 1회차(head `33d3291`): Claude 승인(지적 없음), Codex 수정 요청(P1 F1~F3). 받아들였다. F1: 직전 판정 뒤 PR이 되돌린 파일이 지금 merge-base 대비 diff에 없어 main 쪽으로 나뉜다 → 이 PR의 파일에 직전 판정 head가 바꾼 파일(`<merge-base>...<직전 head>`)을 더하고 되돌림 테스트를 둔다. F2: 프롬프트가 범위 밖 결함을 P2로 적게 하면 Issue 안내에서 빠진다 → 원래 등급으로 적게 하고, 판정 → 원장 → `pr-state` 테스트를 둔다. F3: 전달 꼴의 오류와 크기 경계 테스트가 없다 → `parseRoundChanged`·`encodeRoundChanged`의 경우와 경계 테스트(수용 기준 3).
 
 ## 의사결정 로그
 
@@ -74,6 +75,8 @@ claimed_at: 2026-11-27T20:25:52+09:00 # new-task가 채운다
 - 데이터 전달 / plan job 출력 `round_changed`의 값 꼴을 바꾼다 / 워크플로를 고치지 않는다. 기록 job이 PR 파일 목록을 API로 읽는 대안은 실패 경로가 늘고 같은 실행 안의 plan job 계산과 어긋날 수 있어 버렸다.
 - 범위 밖 표시 / 처리 칸의 고정 문구(`OUTSIDE_NOTE`)로 가린다 / 원장 항목에 필드를 더하면 원장 자료 형식과 검사가 바뀐다. 처리 칸은 `deferred`가 된 뒤 판정으로 바뀌지 않고 기록 job만 쓴다.
 - 판정 대상 diff / 양쪽이 바꾼 파일은 직전 판정 head 대비 diff 전체를 준다 / 파일 안에서 main의 덩어리를 가려내는 일은 이 계획에서 하지 않는다.
+- 이 PR의 파일 / 지금 head와 직전 판정 head가 merge-base 대비 바꾼 파일의 합 / 지금 head만 보면 직전 판정 뒤 되돌린 파일이 main 쪽으로 나뉘어 그 회귀가 미뤄진다(계획 검증 F1). 직전 판정 head의 merge-base는 지금 merge-base와 직전 head의 merge-base(`<merge-base>...<직전 head>`)로 본다: main을 병합했으면 직전 판정 때의 main 지점이다. 버린 대안: main 쪽 커밋만 따로 diff(main 병합 커밋을 찾아야 하고 병합이 여럿이면 복잡하다).
+- 범위 밖 결함의 등급 / 검증자는 원래 등급으로 적는다 / 기계가 등급으로 미룸과 차단을 정하므로, 프롬프트가 등급을 낮추게 하면 Issue 안내에서 빠진다(계획 검증 F2).
 
 ## 발견 사항
 
