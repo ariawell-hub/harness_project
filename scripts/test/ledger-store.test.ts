@@ -410,10 +410,11 @@ test('writeRoundInput #262: main 병합으로만 바뀐 파일은 이 PR의 변�
   const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
   assert.match(md, /round-main\.txt \(1개\)/);
   assert.match(md, /이 PR의 변경이 아니다/);
-  // 고정된 옛 프롬프트를 쓰는 PR에도 처리 규칙이 간다: 원래 등급으로 적는다(판정 F11)
-  assert.match(md, /원래 등급으로 적어라/);
-  assert.match(md, /P0은 그대로 막는다/);
+  // 기록 job의 처리를 사실로 적는다(판정 F11). 원장 파일은 데이터라 검증자에게 지시하지 않는다(PR #254 판정)
+  assert.match(md, /새 P1을 범위 밖으로 미루고/);
+  assert.match(md, /P0은 막는다/);
   assert.doesNotMatch(md, /이 PR의 지적이 아니다/);
+  assert.doesNotMatch(md, /적어라/);
 });
 
 test('writeRoundInput #262: 직전 판정 뒤 main 병합만 더했으면 changed와 diff가 비고 main 쪽 파일은 round-main.txt에만 있다', () => {

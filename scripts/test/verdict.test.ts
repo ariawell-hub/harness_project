@@ -226,8 +226,14 @@ test('verdictStatus: 승인이고 P0·P1이 없을 때만 success', () => {
 test('verdictStatus(Issue #262·#267): 차단 지적이 모두 원장이 미루는 P1이고 resolutions에 open이 없으면 success', () => {
   // deferred: 원장의 등록 규칙이 미루는 지적인가(이 테스트는 src/main-only.ts의 지적과 1번 지적을 미룬다고 본다)
   const deferred = (f: { file: string }, i: number) => f.file === 'src/main-only.ts' || i === 1;
-  const st = (v: Record<string, unknown>, d?: (f: { file: string }, i: number) => boolean) =>
-    verdictStatus(v as unknown as Verdict, d);
+  // 변경 전 코드는 둘째 인자로 목록을 받아 함수를 넘기면 예외다: 단언 실패로 바꿔 알린다
+  const st = (v: Record<string, unknown>, d?: (f: { file: string }, i: number) => boolean) => {
+    try {
+      return verdictStatus(v as unknown as Verdict, d);
+    } catch (e) {
+      assert.fail(`verdictStatus가 판단 함수를 받지 않는다: ${(e as Error).message}`);
+    }
+  };
   const out = finding({ severity: 'P1', file: 'src/main-only.ts' });
   const inside = finding({ severity: 'P1', file: 'src/a.ts' });
   const p0 = finding({ severity: 'P0', file: 'src/main-only.ts' });
