@@ -1317,3 +1317,48 @@ test(
     assert.ok(r.out.includes(`남긴 임시 파일: docs/harness/${parked}`), r.out);
   },
 );
+
+/** 기록 파일 읽기 상한(changes.ts의 READ_MAX와 같은 값) */
+const READ_LIMIT = 16 * 1024 * 1024;
+/** 조각 A(설계서 항목 없음)를 모으면 CHANGELOG가 늘어나는 바이트 수 */
+const GROWTH_A =
+  Buffer.byteLength(changelogText(['있던 항목', 'a 하나', 'a 둘'])) -
+  Buffer.byteLength(changelogText());
+/** 조각 A 하나와 total바이트 CHANGELOG(머리 문장 뒤를 채운다)를 커밋한 리포 */
+function paddedRepo(total: number): string {
+  const root = repo([A]);
+  const base = FRONT + changelogText();
+  const pad = 'x'.repeat(total - Buffer.byteLength(base));
+  write(root, CHANGELOG_PATH, base.replace('머리 문장.', `머리 문장.${pad}`));
+  commitAll(root, 'pad');
+  return root;
+}
+
+test('changes-collect #264: 모은 CHANGELOG가 읽기 상한을 넘으면 쓰지도 조각을 지우지도 않고 1이다', () => {
+  const root = paddedRepo(READ_LIMIT);
+  const before = snapshot(root);
+  const r = direct(root, { date: '2026-11-24' });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`CHANGELOG\\.md: 모은 결과가 ${READ_LIMIT}바이트보다 크다`));
+  assert.match(r.out, /실패 — 아무 파일도 바꾸지 않았다/);
+  assert.deepEqual(snapshot(root), before);
+  assert.ok(existsSync(path.join(root, A.rel)));
+});
+
+test('changes-collect #264: 모은 CHANGELOG가 정확히 읽기 상한이면 모으고, 다음 실행은 그 파일을 읽은 뒤 결과 크기로 멈춘다', () => {
+  const root = paddedRepo(READ_LIMIT - GROWTH_A);
+  const r = direct(root, { date: '2026-11-24' });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(lstatSync(path.join(root, CHANGELOG_PATH)).size, READ_LIMIT);
+  assert.equal(existsSync(path.join(root, A.rel)), false);
+  // 다음 실행: 게시한 파일은 읽히고(읽기 상한 문제가 아니다), 더 모으면 상한을 넘어 멈춘다
+  const C = { rel: `${DIR}/20261124-c.md`, text: frag('20261124-c', ['c 하나']) };
+  write(root, C.rel, C.text);
+  commitAll(root, 'collected');
+  const before = snapshot(root);
+  const again = direct(root, { date: '2026-11-24' });
+  assert.equal(again.code, 1, again.out);
+  assert.doesNotMatch(again.out, /기록 파일로 읽지 않는다/);
+  assert.match(again.out, /CHANGELOG\.md: 모은 결과가/);
+  assert.deepEqual(snapshot(root), before);
+});
