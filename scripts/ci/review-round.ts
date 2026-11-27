@@ -101,7 +101,10 @@ export function writeRoundInput(o: {
           : null;
         // 나눈 결과를 기록 job에 그대로 넘길 수 없으면(상한) 나누지 않는다: 검증 입력과 기록 job이 같은 목록을 본다(계획 검증 F8)
         const usable =
-          split && (split.outside.length === 0 || fitsSplit(split, o.maxChars)) ? split : null;
+          split &&
+          (split.outside.length === 0 || encodeRoundChanged({ ...split, round }, o.maxChars))
+            ? split
+            : null;
         if (split && !usable)
           note =
             '이 PR의 파일과 main 병합으로 바뀐 파일을 나누면 기록 job에 넘길 값이 상한을 넘어 나누지 않았다';
@@ -183,22 +186,18 @@ export function writeRoundInput(o: {
  */
 export const MAX_ROUND_CHANGED_CHARS = 120_000;
 
-/** 나눈 결과({ changed, outside })를 객체 꼴 그대로 기록 job에 넘길 수 있는가 */
-function fitsSplit(r: { changed: string[]; outside: string[] }, max = MAX_ROUND_CHANGED_CHARS) {
-  return Buffer.from(JSON.stringify(r)).toString('base64').length <= max;
-}
-
 /**
- * plan job 출력 `round_changed`: `{ changed, outside }`의 base64 JSON(Issue #262). 출력 이름은 그대로라 워크플로를
- * 고치지 않는다. 상한을 넘으면 빈 값이다. 배열 꼴로 돌아가지 않는다(범위 구분을 잃는다, 계획 검증 F9)
+ * plan job 출력 `round_changed`: `{ changed, outside, round }`의 base64 JSON(Issue #262, #267). round는 이 검증자의 이번
+ * 판정 라운드(기록 job이 동결을 판단한다). 출력 이름은 그대로라 워크플로를 고치지 않는다. 상한을 넘으면 빈 값이다.
+ * 배열 꼴로 돌아가지 않는다(범위 구분을 잃는다, 계획 검증 F9)
  */
 export function encodeRoundChanged(
-  r: Pick<RoundInput, 'changed' | 'outside'>,
+  r: Pick<RoundInput, 'changed' | 'outside' | 'round'>,
   max = MAX_ROUND_CHANGED_CHARS,
 ): string {
-  const v = Buffer.from(JSON.stringify({ changed: r.changed, outside: r.outside })).toString(
-    'base64',
-  );
+  const v = Buffer.from(
+    JSON.stringify({ changed: r.changed, outside: r.outside, round: r.round }),
+  ).toString('base64');
   return v.length <= max ? v : '';
 }
 
@@ -208,15 +207,17 @@ const isStrings = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((x) => typeof x === 'string');
 
 /**
- * 기록 job이 받는 plan job 출력 `round_changed`(base64 JSON)를 읽는다. 꼴은 `{ changed, outside }`(Issue #262)이고,
- * 문자열 배열이면 예전 꼴(changed만)이다. 없거나 깨졌으면 모르는 것으로 본다(changed null: 2라운드부터 새 P1은 동결,
- * outside 빈 목록: 범위 밖으로 미루지 않는다)
+ * 기록 job이 받는 plan job 출력 `round_changed`(base64 JSON)를 읽는다. 꼴은 `{ changed, outside, round }`(Issue #262,
+ * #267)이고, 문자열 배열이면 예전 꼴(changed만)이다. round가 없으면 null이고, 있는데 1 이상의 정수가 아니면 깨진 것이다.
+ * 없거나 깨졌으면 모르는 것으로 본다(changed null: 2라운드부터 새 P1은 동결, outside 빈 목록: 범위 밖으로 미루지 않는다,
+ * round null: 기록 job이 동결을 판단하지 않는다)
  */
 export function parseRoundChanged(value: string): {
   changed: string[] | null;
   outside: string[];
+  round: number | null;
 } {
-  const unknown = { changed: null, outside: [] };
+  const unknown = { changed: null, outside: [], round: null };
   // 표준 base64만 받는다: Node의 디코더는 알파벳 밖 문자와 마지막 묶음의 쓰지 않는 비트를 건너뛰어, 깨진 값도 읽혀
   // 버린다. 꼴을 보고, 디코딩한 바이트를 다시 인코딩해 원문과 같을 때만 받는다(판정 F10)
   if (!BASE64_RE.test(value) || value.length % 4 !== 0) return unknown;
@@ -228,11 +229,17 @@ export function parseRoundChanged(value: string): {
   } catch {
     return unknown;
   }
-  if (isStrings(raw)) return { changed: raw, outside: [] };
+  if (isStrings(raw)) return { changed: raw, outside: [], round: null };
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return unknown;
-  const { changed, outside } = raw as { changed?: unknown; outside?: unknown };
+  const { changed, outside, round } = raw as {
+    changed?: unknown;
+    outside?: unknown;
+    round?: unknown;
+  };
   if ((changed !== null && !isStrings(changed)) || !isStrings(outside)) return unknown;
-  return { changed, outside };
+  if (round !== undefined && !(Number.isSafeInteger(round) && (round as number) >= 1))
+    return unknown;
+  return { changed, outside, round: round === undefined ? null : (round as number) };
 }
 
 /** 계획만 바꾼 PR(mode=plan)의 판정에 덧붙이는 계획 검증 항목(G1, 4.1절) */

@@ -87,7 +87,7 @@ PR마다 리뷰 지적의 등급과 처리 상태를 추적하는 PR 댓글이�
 - 새 지적은 P0·P1이면 `open`, P2·P3이면 `deferred`로 등록한다. 계획 전용 판정에서 새로 등록하는 지적에는 `planRound: true`를 적는다(등록 상태는 같은 규칙으로 정한다). 같은 검증자·위치·제목의 지적은 다시 등록하지 않는다. 그 지적이 `fixed`·`rejected`였으면 회귀로 보고 `open`으로 되돌린다.
 - 근거(`evidence`)나 위치(`file`)가 빈 P1은 P2로 내려 등록한다(처리 칸에 이유). P0은 내리지 않는다.
 - 동결: 그 검증자의 2라운드부터, 직전 판정 head 이후 바뀌지 않은 파일의 새 P1은 `deferred`로 등록한다. P0과 재현 job이 재현한 P1은 `open`으로 받는다.
-- 범위 밖(Issue #262): 직전 판정 head 이후 main 병합으로만 바뀐 파일(이 PR의 파일이 아니다. plan job 출력 `round_changed`의 `outside`)의 새 P1은 재현됐어도 `deferred`로 등록하고 처리 칸에 `범위 밖: …`을 적는다. P0은 `open`으로 받는다. `outside`를 모르면(값이 없거나 깨짐) 범위 밖으로 미루지 않는다. 계획 전용 판정(`mode` plan, G1)의 기록에는 쓰지 않는다. 판정의 차단 지적이 모두 범위 밖 P1이고 `resolutions`에 `open`이 없으면 `review/<검증자>`도 success다(설명 `승인 (범위 밖 P1 N 미룸, …)`). `pr-state`가 그 번호를 `- 범위 밖 지적: …` 줄로 알린다.
+- 범위 밖(Issue #262): 직전 판정 head 이후 main 병합으로만 바뀐 파일(이 PR의 파일이 아니다. plan job 출력 `round_changed`의 `outside`)의 새 P1은 재현됐어도 `deferred`로 등록하고 처리 칸에 `범위 밖: …`을 적는다. P0은 `open`으로 받는다. `outside`를 모르면(값이 없거나 깨짐) 범위 밖으로 미루지 않는다. 계획 전용 판정(`mode` plan, G1)의 기록에는 쓰지 않는다. 판정의 차단 지적이 모두 원장이 미루는 새 P1(범위 밖, 동결, 근거 없음)이고 `resolutions`에 `open`이 없으면 `review/<검증자>`도 success다(설명 `승인 (미룬 P1 N, …)`, Issue #267). 기록 job은 원장과 같은 등록 규칙(`newEntryStatus`)과 plan job이 넘긴 라운드 수(`round_changed`의 `round`)로 판단하고, 라운드 수를 모르면 동결로 통과시키지 않는다. `pr-state`가 그 번호를 `- 범위 밖 지적: …` 줄로 알린다.
 - 재현 칸은 재현 job의 결과다(`reproduced` 재현됨, `not-reproduced` 재현 안 됨, `error` 실행 못 함). PR 코드가 실행된 결과라 조작될 수 있다. "재현 안 됨"·"실행 못 함"은 상태를 바꾸지 않는다.
 - 검증자는 판정의 `resolutions`(`{ id, status, note }`)로 원장 지적의 상태를 낸다. 자기 지적의 `fixed`·`rejected`·`open`만 반영한다. 남의 지적에 대한 판정은 P0의 `rejected` 동의만 기록한다.
 - `deferred`·`accepted`·`parked` 지적은 판정으로 바뀌지 않는다.

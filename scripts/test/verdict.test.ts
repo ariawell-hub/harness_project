@@ -223,20 +223,25 @@ test('verdictStatus: 승인이고 P0·P1이 없을 때만 success', () => {
   );
 });
 
-test('verdictStatus(Issue #262): 차단 지적이 모두 범위 밖 파일의 P1이고 resolutions에 open이 없으면 success', () => {
-  const st = (v: Record<string, unknown>, outside: string[]) =>
-    verdictStatus(v as unknown as Verdict, outside);
+test('verdictStatus(Issue #262·#267): 차단 지적이 모두 원장이 미루는 P1이고 resolutions에 open이 없으면 success', () => {
+  // deferred: 원장의 등록 규칙이 미루는 지적인가(이 테스트는 src/main-only.ts의 지적과 1번 지적을 미룬다고 본다)
+  const deferred = (f: { file: string }, i: number) => f.file === 'src/main-only.ts' || i === 1;
+  const st = (v: Record<string, unknown>, d?: (f: { file: string }, i: number) => boolean) =>
+    verdictStatus(v as unknown as Verdict, d);
   const out = finding({ severity: 'P1', file: 'src/main-only.ts' });
   const inside = finding({ severity: 'P1', file: 'src/a.ts' });
   const p0 = finding({ severity: 'P0', file: 'src/main-only.ts' });
-  const only = st(verdict({ verdict: 'request_changes', findings: [out, finding()] }), [
-    'src/main-only.ts',
-  ]);
+  const only = st(verdict({ verdict: 'request_changes', findings: [out, finding()] }), deferred);
   assert.equal(only.state, 'success');
-  assert.match(only.description, /^승인 \(범위 밖 P1 1 미룸, P1 1, P2 1\)$/);
+  assert.match(only.description, /^승인 \(미룬 P1 1, P1 1, P2 1\)$/);
+  // 순번으로도 판단한다: 1번(src/a.ts)도 미룬다
+  assert.equal(
+    st(verdict({ verdict: 'request_changes', findings: [out, inside] }), deferred).state,
+    'success',
+  );
   const cases: [string, Record<string, unknown>][] = [
-    ['범위 안 P1이 함께', verdict({ verdict: 'request_changes', findings: [out, inside] })],
-    ['범위 밖 P0', verdict({ verdict: 'request_changes', findings: [out, p0] })],
+    ['미루지 않는 P1이 함께', verdict({ verdict: 'request_changes', findings: [inside, out] })],
+    ['P0은 미뤄도 막는다', verdict({ verdict: 'request_changes', findings: [out, p0] })],
     [
       'resolutions에 open',
       verdict({
@@ -245,11 +250,11 @@ test('verdictStatus(Issue #262): 차단 지적이 모두 범위 밖 파일의 P1
         resolutions: [{ id: 'F1', status: 'open', note: '' }],
       }),
     ],
-    ['범위 밖 파일 없이 request_changes', verdict({ verdict: 'request_changes' })],
+    ['차단 지적 없이 request_changes', verdict({ verdict: 'request_changes' })],
   ];
-  for (const [name, v] of cases) assert.equal(st(v, ['src/main-only.ts']).state, 'failure', name);
-  // 목록이 없으면 지금 규칙이다
-  assert.equal(st(verdict({ verdict: 'request_changes', findings: [out] }), []).state, 'failure');
+  for (const [name, v] of cases) assert.equal(st(v, deferred).state, 'failure', name);
+  // 판단 함수가 없으면 지금 규칙이다
+  assert.equal(st(verdict({ verdict: 'request_changes', findings: [out] })).state, 'failure');
 });
 
 test('reviewersFor: 낮음은 다른 도구 1명, 보통·높음은 둘 다(10.1절)', () => {

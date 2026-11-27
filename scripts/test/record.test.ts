@@ -303,7 +303,7 @@ test('record-review(Issue #262): 범위 밖 P1만 있는 판정은 review/*와 r
       ['review-ledger', 'success'],
     ],
   );
-  assert.match(ok[0][2], /범위 밖 P1 1 미룸.*patch:b{40}/);
+  assert.match(ok[0][2], /미룬 P1 1.*patch:b{40}/);
   assert.match(ok[1][2], /그중 범위 밖 P1 1/);
   const blocked: [string, Record<string, unknown>][] = [
     [
@@ -410,7 +410,7 @@ test('record-review(Issue #262): 예전 배열 꼴로 100,000자이던 목록은
     if (b64(list).length >= 100_000) break;
   }
   assert.equal(b64(list).length, 100_000);
-  const value = encode!({ changed: [step1], outside: [list[1]] });
+  const value = encode!({ changed: [step1], outside: [list[1]], round: 2 });
   assert.ok(value.length > 0, '전달 값이 비었다');
   const planArgs = [...ledgerArgs, '--mode', 'plan', '--plan-hash', 'c'.repeat(64)];
   const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
@@ -443,7 +443,7 @@ test('record-review(Issue #262): 예전 배열 꼴로 100,000자인 목록을 �
     if (b64(list).length >= 100_000) break;
   }
   assert.equal(b64(list).length, 100_000);
-  const value = encode!({ changed: [list[0], list[1]], outside: [list[2]] });
+  const value = encode!({ changed: [list[0], list[1]], outside: [list[2]], round: 2 });
   assert.ok(value.length > 100_000, '나눈 값은 예전 상한보다 길다');
   const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
   assert.equal((await run(recordArgs(v1, ledgerArgs), tokens)).code, 0);
@@ -474,6 +474,69 @@ test('record-review(Issue #262): 예전 배열 꼴로 100,000자인 목록을 �
       ['review-ledger', 'failure'],
     ],
   );
+});
+
+test('record-review(Issue #267): 2라운드 구현 판정의 차단 지적이 모두 동결된 P1이면 review/*와 review-ledger가 모두 success다', async () => {
+  const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+  /** 1라운드(P2 하나로 원장을 만든다) 뒤 2라운드 기록의 [context, state, description] */
+  const second = async (extra: string[], v2: Record<string, unknown>, mode: string[] = []) => {
+    reset();
+    const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
+    assert.equal((await run(recordArgs(v1, [...ledgerArgs, ...mode]), tokens)).code, 0);
+    const r = await run(recordArgs(verdictFile(v2), [...ledgerArgs, ...mode, ...extra]), tokens);
+    assert.equal(r.code, 0, r.out);
+    return state.statuses.slice(2).map((x) => [x.context, x.state, x.description]);
+  };
+  const frozenOnly = {
+    verdict: 'request_changes',
+    findings: [finding({ file: 'src/old.ts', title: '바뀌지 않은 파일의 결함' })],
+  };
+  const known = ['--round-changed', b64({ changed: ['src/a.ts'], outside: [], round: 2 })];
+  const ok = await second(known, frozenOnly);
+  assert.deepEqual(
+    ok.map(([c, st]) => [c, st]),
+    [
+      ['review/claude', 'success'],
+      ['review-ledger', 'success'],
+    ],
+  );
+  assert.match(ok[0][2], /미룬 P1 1.*patch:b{40}/);
+  assert.match(ok[1][2], /그중 동결 P1 1/);
+  assert.match(parseLedger(state.comments[0].body)?.findings[1].note ?? '', /^동결: /);
+  // 막는 경우: 재현됨, 바뀐 파일의 P1이 함께, 라운드 수를 모름, 1라운드라고 받음, 계획 전용 판정
+  const reproduced = Buffer.from(JSON.stringify([{ index: 0, result: 'reproduced' }])).toString(
+    'base64',
+  );
+  const blocked: [string, string[], Record<string, unknown>, string[]][] = [
+    ['재현됨', [...known, '--repro-results', reproduced], frozenOnly, []],
+    [
+      '바뀐 파일의 P1이 함께',
+      known,
+      {
+        verdict: 'request_changes',
+        findings: [...frozenOnly.findings, finding({ file: 'src/a.ts', title: '이 수정의 결함' })],
+      },
+      [],
+    ],
+    [
+      '라운드 수를 모름',
+      ['--round-changed', b64({ changed: ['src/a.ts'], outside: [] })],
+      frozenOnly,
+      [],
+    ],
+    [
+      '1라운드라고 받음',
+      ['--round-changed', b64({ changed: ['src/a.ts'], outside: [], round: 1 })],
+      frozenOnly,
+      [],
+    ],
+    ['계획 전용 판정', known, frozenOnly, ['--mode', 'plan', '--plan-hash', 'c'.repeat(64)]],
+  ];
+  for (const [name, extra, v2, mode] of blocked) {
+    const got = await second(extra, v2, mode);
+    assert.equal(got[0][0], 'review/claude', name);
+    assert.equal(got[0][1], 'failure', name);
+  }
 });
 
 test('record-review: 열린 P1이 있는 원장에서 편집 이력을 읽지 못하면 원장을 쓰지 않고 review-ledger가 error다', async () => {
@@ -585,10 +648,11 @@ test('review-plan: plan job은 원장을 읽어 출력으로 넘기고, 판정 j
   assert.equal(outputs.plan_hash, '');
   assert.equal(outputs.prompt_base, BASE);
   assert.deepEqual(parseLedgerData(outputs.ledger), stored);
-  // 직전 판정 head(HEAD)는 이 저장소에 없다: 바뀐 파일을 모른다. 출력은 { changed, outside } 꼴이다(Issue #262)
+  // 직전 판정 head(HEAD)는 이 저장소에 없다: 바뀐 파일을 모른다. 출력은 { changed, outside, round } 꼴이다(Issue #262·#267)
   assert.deepEqual(JSON.parse(Buffer.from(outputs.round_changed, 'base64').toString()), {
     changed: null,
     outside: [],
+    round: 2,
   });
   const md = path.join(root, '.harness-review/ledger.md');
   assert.match(readFileSync(md, 'utf8'), /F1 \| P1 \| claude \| open/);

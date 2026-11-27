@@ -24,7 +24,14 @@ import { RevertError, actRevert, parseRevertAction, planRevert } from './ci/reve
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
 import { readRoundLedger } from './ci/accept-load.ts';
-import { REVIEWERS, ledgerData, parseLedgerData, type Ledger, type Reviewer } from './ci/ledger.ts';
+import {
+  REVIEWERS,
+  ledgerData,
+  newEntryStatus,
+  parseLedgerData,
+  type Ledger,
+  type Reviewer,
+} from './ci/ledger.ts';
 import { githubLedgerApi, loadLedger, recordCiFailure, recordLedger } from './ci/ledger-store.ts';
 import { planHashes, planMode } from './ci/plan-hash.ts';
 import { PLAN_HASH_RE } from './ci/results.ts';
@@ -491,12 +498,12 @@ async function main(argv: string[]): Promise<number> {
       const repo = str('repo-slug') ?? '';
       const targetUrl = str('target-url') ?? '';
       let seen: Verdict | null = null;
-      // 라운드 전달 값(Issue #262): 판정 워크플로만 PR 번호와 함께 준다. 범위 밖 파일은 review/*와 원장 모두에 쓴다.
+      // 라운드 전달 값(Issue #262·#267): 판정 워크플로만 PR 번호와 함께 준다. 범위 밖 파일은 review/*와 원장 모두에 쓴다.
       // 계획 전용 판정(G1, --mode plan)은 범위 밖으로 미루지 않는다: 미루면 수정 요청이 계획 승인이 된다(계획 검증 F5)
       const round =
         str('pr-number') !== undefined
           ? parseRoundChanged(str('round-changed') ?? '')
-          : { changed: null, outside: [] };
+          : { changed: null, outside: [], round: null };
       const planOnlyRecord = str('mode') === 'plan';
       const outsideFiles = planOnlyRecord ? [] : round.outside;
       // 계획 전용 판정은 지금 규칙 그대로다: 동결 검사에는 나누기 전 목록을 쓴다(빼면 그 파일의 P1이 동결된다, 계획 검증 F6)
@@ -523,7 +530,22 @@ async function main(argv: string[]): Promise<number> {
           seen = v;
           for (const line of reviewLogLines(v)) log(line);
         },
-        outside: outsideFiles,
+        // 검증자 상태(Issue #267): 구현 판정은 원장이 미루는 새 P1(범위 밖, 동결, 근거 없음)만 있으면 통과다. 원장과 같은
+        // 등록 규칙(newEntryStatus)을 쓴다. 계획 전용 판정은 미루지 않는다. 라운드 수를 모르면 1라운드로 본다(동결하지 않는다)
+        deferred: planOnlyRecord
+          ? undefined
+          : (f, i, v) => {
+              const repro = parseReproResults(str('repro-results') ?? '', v.findings.length);
+              const result = repro?.find((x) => x.index === i)?.result ?? '';
+              return (
+                newEntryStatus(f, {
+                  round: round.round ?? 1,
+                  changed: new Set(changedFiles ?? []),
+                  outside: new Set(outsideFiles),
+                  repro: result,
+                }).status === 'deferred'
+              );
+            },
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
       // 지적 원장(10.2절 (4)). 판정 워크플로만 PR 번호를 준다. 원장 실패는 review-ledger = error로 남고 이 job은 실패시키지 않는다
