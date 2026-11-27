@@ -59,6 +59,8 @@ export interface CollectHooks {
   afterRead?: (rel: string) => void;
   beforeChange?: (rel: string) => void;
   beforeWrite?: (rel: string) => void;
+  /** 게시 뒤 원래 파일을 지우기 직전에 다시 견줄 때, 첫 `fstat` 뒤 읽기 전에 불린다(Issue #261 판정 F3) */
+  beforeRecheckRead?: (rel: string) => void;
 }
 
 /** 파일·폴더의 식별자(링크를 따라가지 않은 자리, Windows의 파일 색인 번호도 잃지 않게 bigint) */
@@ -67,6 +69,10 @@ interface Ident {
   ino: bigint;
 }
 const sameIdent = (a: Ident, b: Ident) => a.dev === b.dev && a.ino === b.ino;
+/** 기록 파일 하나를 읽는 상한(바이트). 설계서·CHANGELOG·조각은 이보다 훨씬 작다 */
+const READ_MAX = 16 * 1024 * 1024;
+/** 한 번에 읽는 크기 */
+const READ_CHUNK = 64 * 1024;
 /** 파일 이름 한도(바이트). 대부분의 파일 시스템이 이름 하나에 255바이트까지 받는다 */
 const NAME_MAX = 255;
 /**
@@ -258,16 +264,41 @@ export function runChangesCollect(
         throw e;
       }
     };
-    const readAll = (fd: number): Buffer => {
-      const size = Number(fstatSync(fd, { bigint: true }).size);
-      const b = Buffer.alloc(size);
+    /**
+     * 핸들의 처음부터 읽되 `max`바이트까지만 받는다. 그보다 더 있으면(EOF까지 `max`를 넘으면) null이다. 처음 `fstat`의 크기에
+     * 기대지 않아 읽는 도중 끝에 덧붙은 바이트도 보고, 계속 커지는 파일을 끝없이 쌓지 않는다(Issue #261 판정 F1·F2)
+     */
+    const readUpTo = (fd: number, max: number): Buffer | null => {
+      // 버퍼 하나에 바로 읽어 넣고, 차면 두 배로 늘린다(상한 max+1): 짧은 읽기가 이어져도 쌓이는 객체는 log 수준이고,
+      // 상한만큼의 큰 버퍼를 처음부터 잡지 않는다. 돌려줄 때 읽은 크기만큼 한 번 복사한다(판정 F2·F5)
+      let buf = Buffer.alloc(Math.min(READ_CHUNK, max + 1));
       let at = 0;
-      while (at < size) {
-        const n = readSync(fd, b, at, size - at, at);
+      while (at <= max) {
+        if (at === buf.length) {
+          const next = Buffer.alloc(Math.min(buf.length * 2, max + 1));
+          buf.copy(next, 0, 0, at);
+          buf = next;
+        }
+        const n = readSync(fd, buf, at, buf.length - at, at);
         if (n === 0) break;
         at += n;
       }
-      return at === size ? b : b.subarray(0, at);
+      return at > max ? null : Buffer.from(buf.subarray(0, at));
+    };
+    /**
+     * 핸들의 내용이 `want` 바이트와 같은가(더 길어도 다르다). 고정 버퍼 하나로 읽자마자 그 자리의 기대 바이트와 견주고
+     * 쌓지 않는다(판정 F2)
+     */
+    const sameBytes = (fd: number, want: Buffer): boolean => {
+      const buf = Buffer.alloc(Math.min(READ_CHUNK, want.length + 1));
+      let at = 0;
+      for (;;) {
+        const n = readSync(fd, buf, 0, buf.length, at);
+        if (n === 0) return at === want.length;
+        if (at + n > want.length) return false;
+        if (!buf.subarray(0, n).equals(want.subarray(at, at + n))) return false;
+        at += n;
+      }
     };
     const readBytes = new Map<string, Buffer>();
     for (const rel of files) {
@@ -275,7 +306,12 @@ export function runChangesCollect(
       try {
         const fd = openChecked(rel, abs(rel), constants.O_RDONLY);
         try {
-          readBytes.set(rel, readAll(fd));
+          const bytes = readUpTo(fd, READ_MAX);
+          if (bytes === null) {
+            problems.push(`${rel}: ${READ_MAX}바이트보다 크다(기록 파일로 읽지 않는다)`);
+            continue;
+          }
+          readBytes.set(rel, bytes);
         } finally {
           closeSync(fd);
         }
@@ -358,12 +394,36 @@ export function runChangesCollect(
       if (!st || !want || !st.isFile() || !sameIdent(st, want)) throw new Changed(rel, 'file');
       const fd = openChecked(rel, at, constants.O_RDONLY);
       try {
-        if (!readAll(fd).equals(readBytes.get(rel) ?? Buffer.alloc(0)))
+        if (!sameBytes(fd, readBytes.get(rel) ?? Buffer.alloc(0)))
           throw new Changed(rel, 'content');
       } finally {
         closeSync(fd);
       }
       return Number(st.mode & 0o777n);
+    };
+    /** 작업 폴더 안의 이름 `at`이 3에서 본 그 파일(식별자)이고 내용이 5의 바이트와 같은가(링크 수는 보지 않는다) */
+    const sameBytesAt = (rel: string, at: string): boolean => {
+      const want = fileIdent.get(rel);
+      const st = lstatSync(at, { throwIfNoEntry: false, bigint: true });
+      if (!st || !want || !st.isFile() || !sameIdent(st, want)) return false;
+      const fd = openSync(at, constants.O_RDONLY | OPEN_FLAGS);
+      try {
+        const before = fstatSync(fd, { bigint: true });
+        if (!before.isFile() || !sameIdent(before, want)) return false;
+        hooks.beforeRecheckRead?.(rel);
+        const want2 = readBytes.get(rel) ?? Buffer.alloc(0);
+        const same = sameBytes(fd, want2);
+        // 읽는 동안 바뀌었으면(크기·수정 시각) 같다고 보지 않는다(Issue #261 판정 F1)
+        const after = fstatSync(fd, { bigint: true });
+        return (
+          same &&
+          after.size === BigInt(want2.length) &&
+          after.size === before.size &&
+          after.mtimeNs === before.mtimeNs
+        );
+      } finally {
+        closeSync(fd);
+      }
     };
     /** 임시 이름의 것을 덮어쓰지 않고 제자리 이름으로 돌려놓는다(그 이름에 무엇이 있으면 실패하고 임시 이름에 남긴다) */
     const putBack = (rel: string, dirRel: string, parked: string, name: string, cause: unknown) => {
@@ -467,6 +527,17 @@ export function runChangesCollect(
       }
       written.set(rel, { ident: made, bytes: Buffer.from(text, 'utf8') });
       unlinkSync(fresh);
+      // 게시하는 동안 원래 파일을 미리 열어 둔 다른 세션이 그 핸들로 저장했을 수 있다: 지우기 직전에 식별자와 바이트를
+      // 다시 견주고, 어긋나면 지우지 않고 남긴다(Issue #261, PR #254 판정 F5). 링크 수는 보지 않는다: 하드 링크가 더해져도
+      // 지우는 것은 이 명령의 임시 이름 하나이고 내용은 그 링크에 남는다
+      try {
+        if (!sameBytesAt(rel, parked)) throw new Error('바뀌었다');
+      } catch {
+        leftovers.push(`${HARNESS_DIR}/${parked}`);
+        throw new Stop(
+          `${rel}: 게시한 뒤 원래 파일이 바뀌었다(미리 열어 둔 다른 세션이 저장했다). 원래 파일을 지우지 않고 ${HARNESS_DIR}/${parked}에 남겼다. 그 내용을 확인해 옮겨라`,
+        );
+      }
       unlinkSync(parked);
     };
     /** 조각을 임시 이름으로 옮겨 확인한 뒤 지운다(작업 폴더는 조각 폴더) */
@@ -500,7 +571,7 @@ export function runChangesCollect(
       }
       try {
         const f = fstatSync(fd, { bigint: true });
-        return f.isFile() && sameIdent(f, w.ident) && readAll(fd).equals(w.bytes);
+        return f.isFile() && sameIdent(f, w.ident) && sameBytes(fd, w.bytes);
       } finally {
         closeSync(fd);
       }

@@ -687,6 +687,8 @@ test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승�
   write(r.root, '.codex/config.toml', CODEX.replace('on-request', 'never'));
   write(r.root, LOG, '# 이력\n- 변경\n');
   const head = commitAll(r.root, 'change');
+  // 승인은 오래된 승인 철회 규칙 세트가 켜져 있고 전환 시각 뒤일 때만 head에 묶인다(Issue #250)
+  r.cfg.github.dismissStaleSince = '2026-11-14T00:00:00Z';
   const o = { ...r, branch: 'feat/20261114-demo-s0', headSha: head, prBody: BODY };
   const no = await runGates({ ...o, reviews: [] });
   const get = (x: typeof no, c: string) => x.results.find((g) => g.context === c)!;
@@ -694,11 +696,18 @@ test('runGates: 신호가 있으면 risk-gate가 높음 → 제작자 head 승�
   assert.match(get(no, 'harness-guard').description, /신호 1건/);
   assert.equal(no.risk, 'high');
   assert.equal(get(no, 'risk-gate').state, 'failure');
+  const approved = [
+    { user: 'maker', state: 'APPROVED', commitId: head, submittedAt: '2026-11-14T01:00:00Z' },
+  ];
   const yes = await runGates({
     ...o,
-    reviews: [{ user: 'maker', state: 'APPROVED', commitId: head, submittedAt: 't' }],
+    reviews: approved,
+    dismissRule: async () => ({ base: 'main', on: true }),
   });
   assert.equal(get(yes, 'risk-gate').state, 'success');
+  // 규칙을 읽는 함수를 주지 않으면 리뷰의 커밋이 head여도 error다(확인하지 못했다)
+  const unread = await runGates({ ...o, reviews: approved });
+  assert.equal(get(unread, 'risk-gate').state, 'error');
 });
 
 // ---------- 파일 이름을 글자 그대로 읽는다 (TD-28, Issue #218) ----------

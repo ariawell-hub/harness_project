@@ -11,7 +11,8 @@
     {
       "step": 1,
       "name": "rule",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-11-27T13:09:53+09:00"
     }
   ]
 }
