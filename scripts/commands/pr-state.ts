@@ -2,6 +2,7 @@
 // PR 화면의 체크 요약과 `gh pr checks`는 출처를 보지 않는다. 병합을 막는 것이 무엇인지는 이 명령으로 본다.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { isOutside } from '../ci/ledger.ts';
 import { worktreeOfBranch } from '../lib/approval.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
 import { gitTry, isBehind, repoInfo, showFile } from '../lib/git.ts';
@@ -91,6 +92,15 @@ function logLongOpen(gh: GitHubPort, cfg: HarnessConfig, pr: number): void {
     if (parked.length)
       log(
         `- 구현 대기 지적: ${parked.join(', ')} — 계획만 담은 head라 판정하지 않는다. 구현을 올리면 다시 열려 판정받는다(절차서 2절)`,
+      );
+    // 범위 밖으로 미룬 지적(Issue #262): 이 PR을 막지 않는다. 대화 세션·runner가 Issue로 등록할 신호다
+    const outside = (ledger?.findings ?? [])
+      .filter(isOutside)
+      .map((e) => e.id)
+      .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    if (outside.length)
+      log(
+        `- 범위 밖 지적: ${outside.join(', ')} — main 병합으로 들어온 다른 PR의 코드에 대한 P1이라 이 PR을 막지 않는다. Issue로 등록한다(절차서 8절)`,
       );
   } catch (e) {
     log(`- 오래 열린 지적 확인: 원장을 읽지 못했다(${(e as Error).message.split('\n')[0]})`);
