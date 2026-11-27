@@ -1,0 +1,18 @@
+{
+  "plan": "20261126-approval-binding",
+  "steps": [
+    {
+      "step": 0,
+      "name": "measure",
+      "status": "completed",
+      "started_at": "2026-11-26T14:58:33+09:00",
+      "completed_at": "2026-11-27T01:32:15+09:00"
+    },
+    {
+      "step": 1,
+      "name": "rule",
+      "status": "completed",
+      "completed_at": "2026-11-27T13:09:53+09:00"
+    }
+  ]
+}

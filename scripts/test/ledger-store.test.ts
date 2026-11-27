@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { applyVerdict, emptyLedger, parseLedger, renderLedger, type Ledger } from '../ci/ledger.ts';
+import {
+  applyVerdict,
+  emptyLedger,
+  parseLedger,
+  renderLedger,
+  type Entry,
+  type Ledger,
+} from '../ci/ledger.ts';
 import {
   loadLedger,
   recordCiFailure,
@@ -12,6 +19,7 @@ import {
   type LedgerApi,
 } from '../ci/ledger-store.ts';
 import type { StatusPayload } from '../ci/results.ts';
+import * as reviewRound from '../ci/review-round.ts';
 import { pinnedPrompt, writeRoundInput } from '../ci/review-round.ts';
 import type { Finding, Resolution, Verdict } from '../ci/verdict.ts';
 import { commitAll, gitInit, sh, tmp, write } from './helpers.ts';
@@ -194,6 +202,7 @@ async function record(
     headSha: H1,
     promptBase: BASE,
     changedSinceLastRound: null,
+    planOnly: false,
     api: f.api,
     post: async (s) => void posted.push(s),
     ...where,
@@ -307,7 +316,7 @@ function roundRepo() {
 test('writeRoundInput: 원장이 없으면 1라운드, 파일을 쓰지 않는다', () => {
   const { root } = roundRepo();
   const r = writeRoundInput({ root, ledger: null, reviewer: 'claude' });
-  assert.deepEqual(r, { round: 1, promptBase: '', changed: null });
+  assert.deepEqual(r, { round: 1, promptBase: '', changed: null, outside: [] });
   assert.equal(existsSync(path.join(root, '.harness-review/ledger.md')), false);
 });
 
@@ -353,6 +362,233 @@ test('writeRoundInput: 원장과 직전 판정 이후 바뀐 파일·diff를 검
   assert.equal(existsSync(path.join(dir, 'round-changed.txt')), false);
 });
 
+/**
+ * 직전 판정 뒤 PR 브랜치가 main을 병합한 리포(Issue #262). main은 PR이 바꾸지 않은 `src/main-only.ts`를 바꿨다.
+ * again이면 병합 뒤 PR이 `src/a.ts`를 한 번 더 바꾼다. base는 지금 head와 main의 merge-base
+ */
+function mergedRepo(again: boolean) {
+  const root = tmp();
+  gitInit(root);
+  write(root, 'src/a.ts', 'a1\n');
+  write(root, 'src/main-only.ts', 'm1\n');
+  commitAll(root, 'base');
+  sh('git', ['checkout', '-q', '-b', 'pr'], root);
+  write(root, 'src/a.ts', 'a1\npr1\n');
+  commitAll(root, 'pr1');
+  const last = sh('git', ['rev-parse', 'HEAD'], root);
+  sh('git', ['checkout', '-q', 'main'], root);
+  write(root, 'src/main-only.ts', 'm2\n');
+  commitAll(root, 'main');
+  sh('git', ['checkout', '-q', 'pr'], root);
+  sh('git', ['merge', '-q', '--no-edit', 'main'], root);
+  if (again) {
+    write(root, 'src/a.ts', 'a1\npr1\npr2\n');
+    commitAll(root, 'pr2');
+  }
+  const base = sh('git', ['merge-base', 'main', 'HEAD'], root);
+  const ledger = applyVerdict(emptyLedger(BASE), {
+    reviewer: 'claude',
+    verdict: verdict([finding()]),
+    headSha: last,
+    changedSinceLastRound: null,
+  });
+  return { root, base, ledger };
+}
+
+test('writeRoundInput #262: main 병합으로만 바뀐 파일은 이 PR의 변경(changed·diff)에 넣지 않고 round-main.txt에 따로 적는다', () => {
+  const { root, base, ledger } = mergedRepo(true);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base });
+  assert.equal(r.round, 2);
+  assert.deepEqual(r.changed, ['src/a.ts']);
+  assert.deepEqual(r.outside, ['src/main-only.ts']);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(readFileSync(path.join(dir, 'round-changed.txt'), 'utf8'), 'src/a.ts\n');
+  assert.equal(readFileSync(path.join(dir, 'round-main.txt'), 'utf8'), 'src/main-only.ts\n');
+  const diff = readFileSync(path.join(dir, 'round-diff.patch'), 'utf8');
+  assert.match(diff, /\+pr2/);
+  assert.doesNotMatch(diff, /main-only/);
+  const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
+  assert.match(md, /round-main\.txt \(1개\)/);
+  assert.match(md, /이 PR의 변경이 아니다/);
+  // 고정된 옛 프롬프트를 쓰는 PR에도 처리 규칙이 간다: 원래 등급으로 적는다(판정 F11)
+  assert.match(md, /원래 등급으로 적어라/);
+  assert.match(md, /P0은 그대로 막는다/);
+  assert.doesNotMatch(md, /이 PR의 지적이 아니다/);
+});
+
+test('writeRoundInput #262: 직전 판정 뒤 main 병합만 더했으면 changed와 diff가 비고 main 쪽 파일은 round-main.txt에만 있다', () => {
+  const { root, base, ledger } = mergedRepo(false);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base });
+  assert.deepEqual(r.changed, []);
+  assert.deepEqual(r.outside, ['src/main-only.ts']);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(readFileSync(path.join(dir, 'round-changed.txt'), 'utf8'), '');
+  assert.equal(readFileSync(path.join(dir, 'round-diff.patch'), 'utf8').trim(), '');
+  assert.equal(readFileSync(path.join(dir, 'round-main.txt'), 'utf8'), 'src/main-only.ts\n');
+});
+
+test('writeRoundInput #262: merge-base를 주지 않으면 지금처럼 직전 판정 이후 바뀐 파일 전부가 changed이고 round-main.txt가 없다', () => {
+  const { root, ledger } = mergedRepo(true);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude' });
+  assert.deepEqual([...(r.changed ?? [])].sort(), ['src/a.ts', 'src/main-only.ts']);
+  assert.deepEqual(r.outside, []);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(existsSync(path.join(dir, 'round-main.txt')), false);
+  assert.match(readFileSync(path.join(dir, 'round-diff.patch'), 'utf8'), /main-only/);
+  assert.doesNotMatch(readFileSync(path.join(dir, 'ledger.md'), 'utf8'), /round-main/);
+});
+
+test('writeRoundInput #262: 나눈 결과가 전달 상한을 넘으면 나누지 않는다. 검증 입력과 기록 job이 같은 목록을 본다(계획 검증 F8)', () => {
+  const { root, base, ledger } = mergedRepo(true);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base, maxChars: 10 });
+  assert.deepEqual([...(r.changed ?? [])].sort(), ['src/a.ts', 'src/main-only.ts']);
+  assert.deepEqual(r.outside, []);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(existsSync(path.join(dir, 'round-main.txt')), false);
+  assert.match(readFileSync(path.join(dir, 'round-diff.patch'), 'utf8'), /main-only/);
+  const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
+  assert.match(md, /나누지 않았다/);
+  assert.doesNotMatch(md, /round-main/);
+  // 같은 상한으로 만든 전달 값은 빈 값이다: 기록 job도 나누지 않는다(모른다)
+  assert.equal(roundFn('encodeRoundChanged')(r, 10), '');
+});
+
+test('writeRoundInput #262: 직전 판정 뒤 PR이 merge-base와 같게 되돌린 파일은 이 PR의 변경이다(계획 검증 F1)', () => {
+  const root = tmp();
+  gitInit(root);
+  write(root, 'src/a.ts', 'a1\n');
+  write(root, 'src/main-only.ts', 'm1\n');
+  commitAll(root, 'base');
+  sh('git', ['checkout', '-q', '-b', 'pr'], root);
+  write(root, 'src/a.ts', 'a1\ncompat\n');
+  commitAll(root, 'pr1');
+  const last = sh('git', ['rev-parse', 'HEAD'], root);
+  write(root, 'src/a.ts', 'a1\n');
+  commitAll(root, 'revert');
+  sh('git', ['checkout', '-q', 'main'], root);
+  write(root, 'src/main-only.ts', 'm2\n');
+  commitAll(root, 'main');
+  sh('git', ['checkout', '-q', 'pr'], root);
+  sh('git', ['merge', '-q', '--no-edit', 'main'], root);
+  const base = sh('git', ['merge-base', 'main', 'HEAD'], root);
+  const ledger = applyVerdict(emptyLedger(BASE), {
+    reviewer: 'claude',
+    verdict: verdict([finding()]),
+    headSha: last,
+    changedSinceLastRound: null,
+  });
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base });
+  assert.deepEqual(r.changed, ['src/a.ts']);
+  assert.deepEqual(r.outside, ['src/main-only.ts']);
+  assert.match(
+    readFileSync(path.join(root, '.harness-review/round-diff.patch'), 'utf8'),
+    /^-compat$/m,
+  );
+  // 그 파일의 새 P1은 지금 규칙대로 받는다(바뀐 파일이라 동결되지 않고, 범위 밖도 아니다)
+  const next = applyVerdict(ledger, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ title: '호환 처리를 되돌려 깨진다' })]),
+    headSha: sh('git', ['rev-parse', 'HEAD'], root),
+    changedSinceLastRound: r.changed,
+    outsideSinceLastRound: r.outside,
+  });
+  assert.equal(next.findings.at(-1)?.status, 'open');
+});
+
+/** 새 함수(Issue #262). 변경 전 코드에는 없어 단언으로 실패하게 한다 */
+function roundFn<K extends 'parseRoundChanged' | 'encodeRoundChanged'>(name: K) {
+  const f = (reviewRound as Partial<typeof reviewRound>)[name];
+  assert.equal(typeof f, 'function', `${name} 없음`);
+  return f as (typeof reviewRound)[K];
+}
+const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+/**
+ * `==`로 끝나는 base64의 마지막 데이터 문자를 위 2비트는 같고 아래 4비트가 0이 아닌 문자로 바꾼다(판정 F10). 디코딩하면
+ * 같은 바이트가 나오지만 표준 꼴이 아니다
+ */
+function unusedBits(v: string): string {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  assert.ok(v.endsWith('==') && !v.endsWith('===='), v);
+  const at = v.length - 3;
+  const out = `${v.slice(0, at)}${A[A.indexOf(v[at]) | 0b0001]}${v.slice(at + 1)}`;
+  assert.notEqual(out, v);
+  assert.deepEqual(Buffer.from(out, 'base64'), Buffer.from(v, 'base64'));
+  return out;
+}
+
+test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모두 모르는 것으로 본다(계획 검증 F3)', () => {
+  const parse = roundFn('parseRoundChanged');
+  assert.deepEqual(parse(b64(['src/a.ts'])), { changed: ['src/a.ts'], outside: [] });
+  assert.deepEqual(parse(b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })), {
+    changed: ['src/a.ts'],
+    outside: ['src/b.ts'],
+  });
+  assert.deepEqual(parse(b64({ changed: null, outside: [] })), { changed: null, outside: [] });
+  const unknown = { changed: null, outside: [] };
+  const bad: [string, string][] = [
+    ['빈 값', ''],
+    ['base64가 아님', '%%%'],
+    ['JSON이 아님', Buffer.from('{changed').toString('base64')],
+    ['숫자', b64(3)],
+    ['null', b64(null)],
+    ['outside 없음', b64({ changed: ['src/a.ts'] })],
+    ['outside가 문자열', b64({ changed: ['src/a.ts'], outside: 'src/b.ts' })],
+    ['outside에 숫자', b64({ changed: ['src/a.ts'], outside: ['src/b.ts', 1] })],
+    ['changed가 문자열', b64({ changed: 'src/a.ts', outside: [] })],
+    ['changed에 숫자', b64({ changed: ['src/a.ts', 2], outside: [] })],
+    ['changed 없음', b64({ outside: [] })],
+    ['배열에 숫자', b64(['src/a.ts', 1])],
+    // 디코딩되는 JSON이어도 표준 base64가 아니면 모른다(판정 F10): 알파벳 밖 문자, 공백, 줄바꿈, 4의 배수가 아닌 길이
+    [
+      '알파벳 밖 문자',
+      `${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] }).slice(0, 4)}%${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] }).slice(4)}`,
+    ],
+    ['공백', ` ${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })}`],
+    ['줄바꿈', `${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })}\n`],
+    [
+      'URL용 base64',
+      b64({ changed: ['src/a.ts'], outside: ['src/b.ts?>'] })
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_'),
+    ],
+    ['채움 없는 길이', b64({ changed: ['src/a.ts'], outside: ['b'] }).replace(/=+$/, '')],
+    ['쓰지 않는 비트가 0이 아님', unusedBits(b64({ changed: ['src/a.ts'], outside: ['b'] }))],
+  ];
+  for (const [name, value] of bad) assert.deepEqual(parse(value), unknown, name);
+});
+
+/** b64 길이가 정확히 n자가 되는 make(len)을 찾는다(base64 4자 = 3바이트). 없으면 null */
+function sizedTo<T>(n: number, make: (len: number) => T): T | null {
+  const fixed = b64(make(0)).length;
+  for (let len = Math.max(0, Math.floor(((n - fixed) * 3) / 4) - 3); ; len++) {
+    const v = make(len);
+    const k = b64(v).length;
+    if (k === n) return v;
+    if (k > n) return null;
+  }
+}
+
+test('encodeRoundChanged #262: 객체 꼴이 상한(120,000자) 안이면 그 값, 넘으면 빈 값이다. 예전 배열 꼴 100,000자 목록은 나눠도 전달된다(계획 검증 F3·F7·F9)', () => {
+  const encode = roundFn('encodeRoundChanged');
+  const parse = roundFn('parseRoundChanged');
+  const long = (len: number) => 'x'.repeat(len);
+  // 객체 꼴이 정확히 120,000자: 그대로 내고 되읽으면 같다
+  const at = sizedTo(120_000, (len) => ({ changed: [long(len)], outside: [] as string[] }));
+  assert.ok(at, '객체 꼴 120,000자');
+  assert.equal(encode(at), b64(at));
+  assert.deepEqual(parse(encode(at)), at);
+  // base64 길이는 4의 배수다: 상한을 처음 넘는 120,004자면 빈 값(모른다)이다
+  const over = sizedTo(120_004, (len) => ({ changed: ['src/a.ts'], outside: [long(len)] }));
+  assert.ok(over, '객체 꼴 120,004자');
+  assert.equal(encode(over), '');
+  // 예전 배열 꼴로 정확히 100,000자인 목록(예전에는 전달됐다)을 나눠도 객체 꼴로 전달되고 범위 구분이 남는다
+  const list = sizedTo(100_000, (len) => ['src/a.ts', long(len), 'src/main-only.ts']);
+  assert.ok(list, '배열 꼴 100,000자');
+  const split = { changed: [list[0], list[1]], outside: [list[2]] };
+  assert.deepEqual(parse(encode(split)), split);
+  assert.deepEqual(parse(encode({ changed: null, outside: [] })), { changed: null, outside: [] });
+});
+
 test('writeRoundInput: 직전 판정 head를 찾지 못하면 바뀐 파일을 모른다(null)', () => {
   const { root } = roundRepo();
   const l = ledgerWith([finding()]);
@@ -380,4 +616,334 @@ test('pinnedPrompt: 원장의 1라운드 base SHA의 프롬프트를 쓴다. 없
     () => pinnedPrompt({ baseDir: base, promptBase: old, files: ['../../x.md'] }),
     /파일 이름/,
   );
+});
+
+// ---------- 구현 대기(parked): 계획만 담은 head에서 판정할 수 없는 코드 지적 (Issue #212) ----------
+
+const PLAN_HASH = 'c'.repeat(64);
+const OPENED = '2026-11-22T01:00:00Z';
+const PARK_NOTE = '구현 대기: 계획만 담은 head에서는 판정하지 않는다';
+const entryOf = (over: Partial<Entry> = {}): Entry => ({
+  id: 'F1',
+  severity: 'P1',
+  reviewer: 'codex',
+  file: 'src/a.ts',
+  line: 3,
+  title: '코드 지적',
+  repro: '',
+  status: 'open',
+  note: '',
+  round: 1,
+  rejectedBy: [],
+  ...over,
+});
+const storedWith = (...findings: Entry[]) =>
+  fakeApi([
+    {
+      id: 1,
+      user: { login: BOT },
+      body: renderLedger({
+        ...emptyLedger(BASE),
+        rounds: [{ reviewer: 'codex', head: H1 }],
+        findings,
+      }),
+    },
+  ]);
+const storedOf = (f: ReturnType<typeof fakeApi>): Ledger => {
+  const l = parseLedger(f.comments[0].body);
+  assert.ok(l, '저장된 원장이 없다');
+  return l;
+};
+const planOnly = (approved: boolean | null = true) => ({
+  planOnly: true,
+  plan: { hash: PLAN_HASH, approved },
+});
+/** 편집 이력 GraphQL의 가짜. 부른 횟수를 센다 */
+function gqlOf(nodes: unknown[]) {
+  const g = {
+    calls: 0,
+    graphql: async () => {
+      g.calls++;
+      return {
+        repository: {
+          pullRequest: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+        },
+      };
+    },
+  };
+  return g;
+}
+/** 고쳐지지 않은 제작자의 승인 댓글(GraphQL 꼴). 지적이 게시된 뒤에 달렸다 */
+const acceptNode = (id: string) => ({
+  fullDatabaseId: '7000000005',
+  author: { login: 'maker' },
+  body: `/harness accept ${id}`,
+  createdAt: '2026-11-22T02:00:00Z',
+  lastEditedAt: null,
+  editor: null,
+  userContentEdits: { totalCount: 0 },
+});
+
+test('recordLedger(계획만 담은 head): 앞선 구현 판정의 열린 코드 지적을 구현 대기로 두고, 그 검증자의 계획 승인과 review-ledger를 막지 않는다', async () => {
+  const f = storedWith(entryOf({ openedAt: OPENED }));
+  // Codex가 그 지적에 대한 resolutions 없이 승인을 낸다
+  const p = await record(f, { reviewer: 'codex', verdict: verdict(), headSha: H2, ...planOnly() });
+  const l = storedOf(f);
+  assert.deepEqual(
+    l.findings.map((e) => [e.id, e.status, e.note, e.openedAt]),
+    [['F1', 'parked', PARK_NOTE, OPENED]],
+  );
+  assert.deepEqual(l.planReview, { hash: PLAN_HASH, head: H2, approvals: ['codex'] });
+  assert.equal(p.state, 'success');
+  assert.match(p.description, /구현 대기 1/);
+  // 같은 head에서 검증자가 구현 대기인 지적을 고쳐졌다고 해도 구현 대기로 남는다
+  const again = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'fixed', note: 'abc1234' }]),
+    headSha: H2,
+    ...planOnly(),
+  });
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.status, e.note]),
+    [['parked', PARK_NOTE]],
+  );
+  assert.equal(again.state, 'success');
+  // 판정이 없는 기록(해당 없음·이어받음)도 구현 대기로 둔다
+  const g = storedWith(entryOf({ openedAt: OPENED }));
+  const none = await record(g, { reviewer: 'claude', headSha: H2, ...planOnly(null) });
+  assert.equal(storedOf(g).findings[0].status, 'parked');
+  assert.equal(none.state, 'success');
+});
+
+test('recordLedger(코드가 섞인 head): 구현 대기를 판정 전에 열림으로 되돌린다. 해소되지 않으면 review-ledger가 막는다', async () => {
+  const parked = () => storedWith(entryOf({ status: 'parked', note: PARK_NOTE, openedAt: OPENED }));
+  // 그 판정이 고쳐졌다고 하면 닫힌다
+  const fixed = parked();
+  const ok = await record(fixed, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'fixed', note: 'abc1234' }]),
+    headSha: H2,
+    changedSinceLastRound: ['src/a.ts'],
+  });
+  assert.deepEqual(
+    storedOf(fixed).findings.map((e) => [e.status, e.note]),
+    [['fixed', 'abc1234']],
+  );
+  assert.equal(ok.state, 'success');
+  assert.doesNotMatch(ok.description, /구현 대기/);
+  // 열려 있다고 하거나 판정을 내지 않으면 열린 채로 막는다
+  for (const resolutions of [[{ id: 'F1', status: 'open' as const, note: '' }], []]) {
+    const f = parked();
+    const p = await record(f, {
+      reviewer: 'codex',
+      verdict: verdict([], resolutions),
+      headSha: H2,
+      changedSinceLastRound: ['src/a.ts'],
+    });
+    assert.equal(storedOf(f).findings[0].status, 'open');
+    assert.equal(storedOf(f).findings[0].openedAt, OPENED);
+    assert.equal(p.state, 'failure');
+    assert.match(p.description, /열린 차단 지적 1건: F1/);
+  }
+  // 판정이 없어도(해당 없음, 이어받음, error) 되돌려 저장하고 막는다
+  const f = parked();
+  const p = await record(f, { reviewer: 'claude', headSha: H2 });
+  assert.equal(storedOf(f).findings[0].status, 'open');
+  assert.equal(p.state, 'failure');
+  // 계획 승인을 기록하지 못한 계획 전용 head(--mode가 plan이 아니다)도 코드가 섞인 것으로 본다
+  const unknown = parked();
+  const q = await record(unknown, { reviewer: 'codex', verdict: verdict(), headSha: H2 });
+  assert.equal(storedOf(unknown).findings[0].status, 'open');
+  assert.equal(q.state, 'failure');
+});
+
+test('recordLedger: 구현 대기뿐인 원장도 코드가 섞인 head의 첫 기록에서 제작자 승인을 조회해 반영한다', async () => {
+  const parked = () => storedWith(entryOf({ status: 'parked', note: PARK_NOTE, openedAt: OPENED }));
+  const f = parked();
+  const g = gqlOf([acceptNode('F1')]);
+  const p = await record(f, {
+    reviewer: 'claude',
+    headSha: H2,
+    owner: 'maker',
+    api: { ...f.api, graphql: g.graphql },
+  });
+  assert.equal(g.calls, 1, '저장된 원장에 open·accepted가 없어도 조회한다');
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.status, e.note]),
+    [['accepted', '제작자 승인(댓글 7000000005)']],
+  );
+  assert.equal(p.state, 'success');
+  assert.match(p.description, /제작자 승인 1/);
+  // 계획만 담은 head의 기록에서는 구현 대기로 남고 승인되지 않는다
+  const h = parked();
+  const g2 = gqlOf([acceptNode('F1')]);
+  const q = await record(h, {
+    reviewer: 'claude',
+    headSha: H2,
+    owner: 'maker',
+    api: { ...h.api, graphql: g2.graphql },
+    ...planOnly(null),
+  });
+  assert.equal(storedOf(h).findings[0].status, 'parked');
+  assert.equal(q.state, 'success');
+  assert.match(q.description, /구현 대기 1/);
+  assert.doesNotMatch(q.description, /제작자 승인/);
+});
+
+test('recordLedger(계획만 담은 head): 승인 댓글이 지워진 accepted 코드 지적은 열림이 아니라 구현 대기로 저장된다', async () => {
+  const f = storedWith(
+    entryOf({ status: 'accepted', note: '제작자 승인(댓글 7000000005)', openedAt: OPENED }),
+  );
+  const g = gqlOf([]);
+  const p = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'fixed', note: 'abc1234' }]),
+    headSha: H2,
+    owner: 'maker',
+    api: { ...f.api, graphql: g.graphql },
+    ...planOnly(),
+  });
+  assert.equal(g.calls, 1);
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.status, e.note, e.openedAt]),
+    [['parked', PARK_NOTE, OPENED]],
+  );
+  assert.equal(p.state, 'success');
+  // 승인 댓글이 남아 있으면 accepted 그대로다
+  const kept = storedWith(
+    entryOf({ status: 'accepted', note: '제작자 승인(댓글 7000000005)', openedAt: OPENED }),
+  );
+  await record(kept, {
+    reviewer: 'codex',
+    verdict: verdict(),
+    headSha: H2,
+    owner: 'maker',
+    api: { ...kept.api, graphql: gqlOf([acceptNode('F1')]).graphql },
+    ...planOnly(),
+  });
+  assert.equal(storedOf(kept).findings[0].status, 'accepted');
+});
+
+test('recordLedger: 계획 전용 판정에서 등록된 지적은 구현 대기로 두지 않는다. 등록할 때의 규칙(동결)은 그대로다', async () => {
+  const f = fakeApi([]);
+  // 그 검증자의 1라운드: 위치가 코드 파일인 새 P1도 열림으로 등록되고 planRound가 붙는다
+  const r1 = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ title: '계획이 빠뜨린 것' })]),
+    ...planOnly(false),
+  });
+  assert.equal(r1.state, 'failure');
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.id, e.status, e.planRound]),
+    [['F1', 'open', true]],
+  );
+  // 다음 계획 전용 기록에서도 구현 대기가 되지 않는다(그 검증자가 닫을 때까지)
+  const other = await record(f, { reviewer: 'claude', headSha: H2, ...planOnly(null) });
+  assert.equal(storedOf(f).findings[0].status, 'open');
+  assert.equal(other.state, 'failure');
+  // 2라운드부터의 동결: 직전 판정 뒤 바뀌지 않은 파일의 재현되지 않은 새 P1은 deferred로 등록된다
+  const r2 = await record(f, {
+    reviewer: 'codex',
+    verdict: verdict(
+      [finding({ file: 'src/old.ts', title: '뒤늦은 P1' })],
+      [{ id: 'F1', status: 'fixed', note: 'abc1234' }],
+    ),
+    headSha: H2,
+    changedSinceLastRound: ['docs/exec-plans/active/20261122-demo/step0.md'],
+    ...planOnly(true),
+  });
+  assert.deepEqual(
+    storedOf(f).findings.map((e) => [e.id, e.status, e.planRound]),
+    [
+      ['F1', 'fixed', true],
+      ['F2', 'deferred', true],
+    ],
+  );
+  assert.equal(r2.state, 'success');
+  assert.doesNotMatch(r2.description, /구현 대기/);
+});
+
+test('recordLedger(계획만 담은 head): 그 판정이 다시 연 코드 지적도 같은 기록에서 구현 대기가 된다 (판정 지적 F7)', async () => {
+  // 앞선 구현 판정에서 고쳐진 코드 지적. 계획만 남긴 head에는 고친 코드도 없어 검증자가 다시 열 수 있다
+  const fixed = () => storedWith(entryOf({ status: 'fixed', note: 'abc1234', openedAt: OPENED }));
+  // (가) resolutions로 다시 연다
+  const a = fixed();
+  const pa = await record(a, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'open', note: '고친 코드가 없다' }]),
+    headSha: H2,
+    ...planOnly(false),
+  });
+  assert.deepEqual(
+    storedOf(a).findings.map((e) => [e.id, e.status, e.note]),
+    [['F1', 'parked', PARK_NOTE]],
+  );
+  assert.equal(pa.state, 'success');
+  assert.match(pa.description, /구현 대기 1/);
+  // (나) 같은 지적을 다시 등록한다(회귀로 다시 열린다)
+  const b = fixed();
+  const pb = await record(b, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ title: '코드 지적' })]),
+    headSha: H2,
+    ...planOnly(false),
+  });
+  assert.deepEqual(
+    storedOf(b).findings.map((e) => [e.id, e.status]),
+    [['F1', 'parked']],
+  );
+  assert.equal(pb.state, 'success');
+  // 계획 전용 판정에서 등록된 지적은 다시 열려도 구현 대기가 되지 않고 막는다
+  const c = storedWith(
+    entryOf({ status: 'fixed', note: 'abc1234', planRound: true, openedAt: OPENED }),
+  );
+  const pc = await record(c, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'open', note: '아직' }]),
+    headSha: H2,
+    ...planOnly(false),
+  });
+  assert.equal(storedOf(c).findings[0].status, 'open');
+  assert.equal(pc.state, 'failure');
+  // 코드가 섞인 head에서 다시 연 지적은 지금처럼 열린 채 막는다
+  const d = fixed();
+  const pd = await record(d, {
+    reviewer: 'codex',
+    verdict: verdict([], [{ id: 'F1', status: 'open', note: '아직' }]),
+    headSha: H2,
+    changedSinceLastRound: ['src/a.ts'],
+  });
+  assert.equal(storedOf(d).findings[0].status, 'open');
+  assert.equal(pd.state, 'failure');
+});
+
+const PARKED_LINE =
+  '- 상태 parked: 구현 대기. 이 head는 계획 파일만 담고 있어 그 지적이 가리키는 코드가 없다. 판정 대상이 아니고, 코드가 다시 올라온 head에서 open으로 돌아간다';
+
+test('writeRoundInput: 구현 대기인 지적이 있으면 원장 파일에 그 뜻을 한 줄 적는다. 없으면 적지 않는다', () => {
+  const { root } = roundRepo();
+  const file = path.join(root, '.harness-review/ledger.md');
+  const base = ledgerWith([finding(), finding({ title: '다른 지적' })], 'codex');
+  writeRoundInput({ root, ledger: base, reviewer: 'claude' });
+  assert.ok(
+    !readFileSync(file, 'utf8').includes('parked'),
+    '구현 대기가 없으면 지금의 출력과 같다',
+  );
+  const parked: Ledger = {
+    ...base,
+    findings: base.findings.map((e, i) =>
+      i === 0 ? { ...e, status: 'parked' as const, note: PARK_NOTE } : e,
+    ),
+  };
+  writeRoundInput({ root, ledger: parked, reviewer: 'claude' });
+  const md = readFileSync(file, 'utf8');
+  assert.equal(md.split(PARKED_LINE).length - 1, 1);
+  const lines = md.split('\n');
+  // 머리 항목들의 끝(표 앞의 빈 줄 바로 앞)에 있다
+  const at = lines.indexOf(PARKED_LINE);
+  assert.equal(lines[at + 1], '');
+  assert.match(lines[at + 2], /^ID \| 등급 \| 검증자 \| 상태 /);
+  assert.match(lines[at - 1], /^- /);
+  assert.match(md, /^F1 \| P1 \| codex \| parked \| src\/a\.ts:3 \| /m);
+  assert.match(md, /^F2 \| P1 \| codex \| open \| /m);
 });

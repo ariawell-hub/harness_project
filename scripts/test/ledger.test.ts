@@ -8,8 +8,10 @@ import {
   applyVerdict,
   emptyLedger,
   ledgerStatus,
+  parkFor,
   parseLedger,
   renderLedger,
+  type Entry,
   type Ledger,
 } from '../ci/ledger.ts';
 import type { Finding, Resolution, Verdict } from '../ci/verdict.ts';
@@ -478,6 +480,107 @@ test('재현 결과를 원장에 적는다. 재현된 P1은 동결하지 않고,
   assert.deepEqual([byId(again, 'F3').repro, byId(again, 'F3').status], ['reproduced', 'open']);
 });
 
+/** 범위 밖 미룸의 처리 칸(Issue #262). 새 상수를 정적으로 가져오면 변경 전 코드에서 파일이 단언 전에 죽는다 */
+const OUTSIDE = /^범위 밖: 직전 판정 이후 main 병합으로만 바뀐 파일의 새 P1이다/;
+
+test('범위 밖(Issue #262): main 병합으로만 바뀐 파일의 새 P1은 재현돼도 deferred, P0은 open, 그 밖은 지금 규칙', () => {
+  const l = applyVerdict(round1([]), {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P1, 재현됨' }),
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P1, 재현 안 됨' }),
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P0', severity: 'P0' }),
+      finding({ file: 'src/main-only.ts', title: '범위 밖 근거 없음', evidence: '' }),
+      finding({ file: 'src/fix.ts', title: '바뀐 파일 P1' }),
+      finding({ file: 'src/old.ts', title: '바뀌지 않은 파일, 재현됨' }),
+      finding({ file: 'src/old.ts', title: '바뀌지 않은 파일, 재현 안 됨' }),
+    ]),
+    headSha: H2,
+    changedSinceLastRound: ['src/fix.ts'],
+    outsideSinceLastRound: ['src/main-only.ts'],
+    repro: new Map([
+      [0, 'reproduced'],
+      [1, 'not-reproduced'],
+      [5, 'reproduced'],
+    ]),
+  });
+  assert.deepEqual(
+    l.findings.map((e) => [e.title, e.severity, e.status, OUTSIDE.test(e.note)]),
+    [
+      ['범위 밖 P1, 재현됨', 'P1', 'deferred', true],
+      ['범위 밖 P1, 재현 안 됨', 'P1', 'deferred', true],
+      ['범위 밖 P0', 'P0', 'open', false],
+      ['범위 밖 근거 없음', 'P2', 'deferred', false],
+      ['바뀐 파일 P1', 'P1', 'open', false],
+      ['바뀌지 않은 파일, 재현됨', 'P1', 'open', false],
+      ['바뀌지 않은 파일, 재현 안 됨', 'P1', 'deferred', false],
+    ],
+  );
+  assert.match(byId(l, 'F4').note, /근거 없음/);
+  assert.match(byId(l, 'F7').note, /동결/);
+  // 라운드와 상관없다: 그 검증자의 첫 판정이어도 목록에 있으면 범위 밖이다
+  const first = applyVerdict(l, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ file: 'src/main-only.ts', title: 'codex 첫 판정' })]),
+    headSha: H2,
+    changedSinceLastRound: null,
+    outsideSinceLastRound: ['src/main-only.ts'],
+  });
+  assert.equal(first.findings.at(-1)?.status, 'deferred');
+  assert.match(first.findings.at(-1)?.note ?? '', OUTSIDE);
+  // 목록을 주지 않으면 지금 규칙: 첫 판정의 P1은 open
+  const none = applyVerdict(l, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ file: 'src/main-only.ts', title: 'codex 목록 없음' })]),
+    headSha: H2,
+    changedSinceLastRound: null,
+  });
+  assert.equal(none.findings.at(-1)?.status, 'open');
+  // 이미 있는 지적은 바꾸지 않는다: 열린 F3(P0)·F5(P1)를 다시 내도 open 그대로다
+  const again = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P0', severity: 'P0' }),
+      finding({ file: 'src/fix.ts', title: '바뀐 파일 P1' }),
+    ]),
+    headSha: H3,
+    changedSinceLastRound: [],
+    outsideSinceLastRound: ['src/fix.ts', 'src/main-only.ts'],
+  });
+  assert.deepEqual([byId(again, 'F3').status, byId(again, 'F5').status], ['open', 'open']);
+  assert.equal(again.findings.length, l.findings.length);
+});
+
+test('ledgerStatus(Issue #262): 범위 밖 P1은 막지 않고 동결과 따로 센다', () => {
+  const l = applyVerdict(round1([]), {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/main-only.ts', title: '범위 밖' }),
+      finding({ file: 'src/old.ts', title: '동결' }),
+    ]),
+    headSha: H2,
+    changedSinceLastRound: [],
+    outsideSinceLastRound: ['src/main-only.ts'],
+    repro: new Map([[0, 'reproduced']]),
+  });
+  const ok = ledgerStatus(l);
+  assert.equal(ok.state, 'success');
+  assert.equal(
+    ok.description,
+    '차단 지적 없음 (전체 2, 미룸 2, 그중 동결 P1 1, 그중 범위 밖 P1 1)',
+  );
+  // 열린 지적이 있어 실패할 때도 적는다
+  const bad = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ file: 'src/fix.ts', title: '열림' })]),
+    headSha: H3,
+    changedSinceLastRound: ['src/fix.ts'],
+  });
+  const f = ledgerStatus(bad);
+  assert.equal(f.state, 'failure');
+  assert.match(f.description, /범위 밖 P1 1/);
+});
+
 // ---------- 계획 승인(G1, step4) ----------
 
 const PH1 = 'a1'.repeat(32);
@@ -554,4 +657,248 @@ test('planReview: 원장 댓글에 왕복하고 표에 보인다. 없는 옛 원
     'x',
   ])
     assert.equal(parseLedger(data({ ...l, planReview: bad })), null, JSON.stringify(bad));
+});
+
+// ---------- 구현 대기(parked): 계획만 담은 head에서 판정할 수 없는 코드 지적 (Issue #212) ----------
+
+const PLAN_FILE = 'docs/exec-plans/active/20261122-demo/step0.md';
+const OPENED = '2026-11-22T01:00:00Z';
+const PARK_NOTE = '구현 대기: 계획만 담은 head에서는 판정하지 않는다';
+const UNPARK_NOTE = '구현이 올라와 다시 열림';
+const entryOf = (over: Partial<Entry> = {}): Entry => ({
+  id: 'F1',
+  severity: 'P1',
+  reviewer: 'codex',
+  file: 'src/a.ts',
+  line: 3,
+  title: '코드 지적',
+  repro: '',
+  status: 'open',
+  note: '',
+  round: 1,
+  rejectedBy: [],
+  ...over,
+});
+const ledgerOf = (...findings: Entry[]): Ledger => ({
+  ...emptyLedger(BASE),
+  rounds: [
+    { reviewer: 'codex', head: H1 },
+    { reviewer: 'claude', head: H1 },
+  ],
+  findings,
+});
+const statuses = (l: Ledger) => l.findings.map((e) => `${e.id}:${e.status}`);
+/** 숨은 자료를 직접 만든 댓글 본문 */
+const rawBody = (raw: unknown) =>
+  `<!-- harness-ledger-data:${Buffer.from(JSON.stringify(raw)).toString('base64')} -->`;
+
+test('parkFor(계획만 담은 head): 계획 폴더 밖 파일에 대한 열린 지적만 구현 대기로 둔다', () => {
+  const l = ledgerOf(
+    entryOf({ id: 'F1', openedAt: OPENED }),
+    entryOf({
+      id: 'F2',
+      severity: 'P0',
+      rejectedBy: ['claude'],
+      openedAt: OPENED,
+      note: '전의 글',
+    }),
+    entryOf({ id: 'F3', file: PLAN_FILE }),
+    entryOf({ id: 'F4', planRound: true }),
+    entryOf({ id: 'F5', status: 'fixed' }),
+    entryOf({ id: 'F6', status: 'rejected' }),
+    entryOf({ id: 'F7', status: 'deferred' }),
+    entryOf({ id: 'F8', status: 'accepted' }),
+    // 계획 폴더와 이름만 비슷한 경로는 폴더 밖이다
+    entryOf({ id: 'F9', file: 'docs/exec-plans-old/x.md' }),
+    entryOf({ id: 'F10', file: 'xdocs/exec-plans/y.md' }),
+  );
+  const before = JSON.stringify(l);
+  const p = parkFor(l, true);
+  assert.deepEqual(statuses(p), [
+    'F1:parked',
+    'F2:parked',
+    'F3:open',
+    'F4:open',
+    'F5:fixed',
+    'F6:rejected',
+    'F7:deferred',
+    'F8:accepted',
+    'F9:parked',
+    'F10:parked',
+  ]);
+  assert.equal(byId(p, 'F1').note, PARK_NOTE);
+  assert.equal(byId(p, 'F2').note, PARK_NOTE);
+  // 그 밖의 필드는 그대로다
+  assert.equal(byId(p, 'F1').openedAt, OPENED);
+  assert.deepEqual(byId(p, 'F2').rejectedBy, ['claude']);
+  assert.deepEqual({ ...byId(p, 'F1'), status: 'open', note: '' }, byId(l, 'F1'));
+  assert.equal(JSON.stringify(parkFor(l, true).findings[2]), JSON.stringify(l.findings[2]));
+  assert.equal(JSON.stringify(l), before, '입력은 바꾸지 않는다');
+  // 둘 것이 없으면 내용이 같은 원장이다
+  assert.equal(JSON.stringify(parkFor(p, true)), JSON.stringify(p));
+  const none = ledgerOf(entryOf({ file: PLAN_FILE }), entryOf({ id: 'F2', status: 'fixed' }));
+  assert.equal(JSON.stringify(parkFor(none, true)), JSON.stringify(none));
+});
+
+test('parkFor(코드가 섞인 head): 구현 대기를 모두 열림으로 되돌린다. 구현 대기가 없으면 같은 원장이다', () => {
+  const l = ledgerOf(
+    entryOf({ id: 'F1', status: 'parked', note: PARK_NOTE, openedAt: OPENED }),
+    entryOf({ id: 'F2', severity: 'P0', status: 'parked', note: PARK_NOTE }),
+    entryOf({ id: 'F3', status: 'fixed', note: 'abc1234' }),
+    entryOf({ id: 'F4', status: 'deferred' }),
+    entryOf({ id: 'F5', status: 'accepted' }),
+  );
+  const before = JSON.stringify(l);
+  const u = parkFor(l, false);
+  assert.deepEqual(statuses(u), ['F1:open', 'F2:open', 'F3:fixed', 'F4:deferred', 'F5:accepted']);
+  assert.equal(byId(u, 'F1').note, UNPARK_NOTE);
+  assert.equal(byId(u, 'F1').openedAt, OPENED);
+  assert.equal(byId(u, 'F3').note, 'abc1234');
+  assert.equal(JSON.stringify(l), before, '입력은 바꾸지 않는다');
+  assert.equal(JSON.stringify(parkFor(u, false)), JSON.stringify(u));
+  // 열린 코드 지적을 코드가 섞인 head에서 구현 대기로 두지 않는다
+  const open = ledgerOf(entryOf({ openedAt: OPENED }));
+  assert.equal(JSON.stringify(parkFor(open, false)), JSON.stringify(open));
+});
+
+test('parkFor: 두었다가 되돌리면 상태와 게시 시각이 처음과 같다', () => {
+  const l = ledgerOf(
+    entryOf({ id: 'F1', openedAt: OPENED }),
+    entryOf({ id: 'F2', severity: 'P0' }),
+    entryOf({ id: 'F3', file: PLAN_FILE, openedAt: OPENED }),
+    entryOf({ id: 'F4', status: 'fixed' }),
+  );
+  const back = parkFor(parkFor(l, true), false);
+  assert.deepEqual(
+    back.findings.map((e) => [e.id, e.status, e.openedAt]),
+    l.findings.map((e) => [e.id, e.status, e.openedAt]),
+  );
+  assert.equal(ledgerStatus(parkFor(l, true)).state, 'failure', '계획 파일의 지적 F3은 막는다');
+  assert.equal(ledgerStatus(back).state, 'failure');
+});
+
+test('applyVerdict: 구현 대기인 지적은 판정(resolutions, 재등록)으로 바뀌지 않는다', () => {
+  const parked = ledgerOf(
+    entryOf({ id: 'F1', status: 'parked', note: PARK_NOTE, openedAt: OPENED }),
+    entryOf({ id: 'F2', severity: 'P0', status: 'parked', note: PARK_NOTE }),
+  );
+  const by = (reviewer: 'claude' | 'codex', v: Verdict) =>
+    applyVerdict(parked, { reviewer, verdict: v, headSha: H2, changedSinceLastRound: [] });
+  for (const status of ['fixed', 'rejected', 'open'] as const) {
+    const l = by('codex', verdict([], [{ id: 'F1', status, note: '판정' }]));
+    assert.deepEqual(
+      [byId(l, 'F1').status, byId(l, 'F1').note, byId(l, 'F1').openedAt],
+      ['parked', PARK_NOTE, OPENED],
+      status,
+    );
+  }
+  // 남의 P0에 대한 rejected(동의)도 적지 않는다
+  const agreed = by('claude', verdict([], [{ id: 'F2', status: 'rejected', note: '동의' }]));
+  assert.deepEqual(byId(agreed, 'F2').rejectedBy, []);
+  assert.equal(byId(agreed, 'F2').status, 'parked');
+  const own = by('codex', verdict([], [{ id: 'F2', status: 'rejected', note: '철회' }]));
+  assert.deepEqual([byId(own, 'F2').status, byId(own, 'F2').rejectedBy], ['parked', []]);
+  // 같은 검증자·위치·제목의 지적을 다시 내도 새로 등록되지 않고 구현 대기로 남는다
+  const again = by('codex', verdict([finding({ title: '코드 지적' })]));
+  assert.deepEqual(statuses(again), ['F1:parked', 'F2:parked']);
+  assert.equal(byId(again, 'F1').note, PARK_NOTE);
+});
+
+test('applyVerdict: 계획 전용 판정에서 새로 등록하는 지적에 planRound를 적는다. 등록 상태의 규칙은 그대로다', () => {
+  const v = verdict([
+    finding({ title: '새 P1' }),
+    finding({ severity: 'P2', title: '새 P2' }),
+    finding({ severity: 'P0', file: PLAN_FILE, title: '계획의 P0' }),
+  ]);
+  const o = { reviewer: 'claude' as const, verdict: v, headSha: H1, changedSinceLastRound: null };
+  const plan = applyVerdict(emptyLedger(BASE), { ...o, planOnly: true });
+  assert.deepEqual(
+    plan.findings.map((e) => [e.id, e.status, e.planRound]),
+    [
+      ['F1', 'open', true],
+      ['F2', 'deferred', true],
+      ['F3', 'open', true],
+    ],
+  );
+  for (const code of [
+    applyVerdict(emptyLedger(BASE), o),
+    applyVerdict(emptyLedger(BASE), { ...o, planOnly: false }),
+  ]) {
+    assert.deepEqual(statuses(code), ['F1:open', 'F2:deferred', 'F3:open']);
+    assert.ok(
+      code.findings.every((e) => !('planRound' in e)),
+      '코드가 섞인 판정의 지적에는 필드가 없다',
+    );
+  }
+  // 계획 전용 판정에서 등록된 지적은 위치가 코드 파일이어도 구현 대기로 두지 않는다
+  assert.deepEqual(statuses(parkFor(plan, true)), ['F1:open', 'F2:deferred', 'F3:open']);
+  // 2라운드부터의 동결은 계획 전용 판정에서도 같다: 바뀌지 않은 파일의 재현되지 않은 새 P1은 deferred다
+  const second = applyVerdict(plan, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ file: 'src/old.ts', title: '뒤늦은 P1' })]),
+    headSha: H2,
+    changedSinceLastRound: [],
+    planOnly: true,
+  });
+  assert.deepEqual(
+    [byId(second, 'F4').status, byId(second, 'F4').planRound, byId(second, 'F4').note],
+    ['deferred', true, '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'],
+  );
+  // 이미 있던 지적에는 적지 않는다
+  assert.equal(
+    'planRound' in byId(applyVerdict(round1([finding()]), { ...o, planOnly: true }), 'F1'),
+    false,
+  );
+});
+
+test('ledgerStatus: 구현 대기는 막지 않고 수를 적는다. 구현 대기가 없으면 설명이 전과 같다', () => {
+  const parked = ledgerOf(
+    entryOf({ id: 'F1', status: 'parked' }),
+    entryOf({ id: 'F2', severity: 'P0', status: 'parked' }),
+  );
+  const only = ledgerStatus(parked);
+  assert.equal(only.state, 'success');
+  assert.equal(only.description, '차단 지적 없음 (전체 2, 미룸 0, 구현 대기 2)');
+  const mixed = ledgerStatus(
+    ledgerOf(
+      entryOf({ id: 'F1', file: PLAN_FILE }),
+      entryOf({ id: 'F2', status: 'parked' }),
+      entryOf({ id: 'F3', status: 'accepted' }),
+    ),
+  );
+  assert.equal(mixed.state, 'failure');
+  assert.equal(mixed.description, '열린 차단 지적 1건: F1, 제작자 승인 1, 구현 대기 1');
+  // 구현 대기가 없는 원장의 설명은 글자 그대로 전과 같다
+  assert.equal(
+    ledgerStatus(ledgerOf(entryOf({ status: 'fixed' }), entryOf({ id: 'F2', status: 'deferred' })))
+      .description,
+    '차단 지적 없음 (전체 2, 미룸 1, 그중 동결 P1 1)',
+  );
+  assert.equal(
+    ledgerStatus(ledgerOf(entryOf({ status: 'accepted' }))).description,
+    '차단 지적 없음 (전체 1, 미룸 0, 제작자 승인 1)',
+  );
+  assert.equal(ledgerStatus(ledgerOf(entryOf())).description, '열린 차단 지적 1건: F1');
+});
+
+test('형식: parked와 planRound가 댓글에 실리고 다시 읽힌다. 다른 값의 planRound와 모르는 상태는 거부한다', () => {
+  const l = ledgerOf(
+    entryOf({ id: 'F1', status: 'parked', note: PARK_NOTE, openedAt: OPENED }),
+    entryOf({ id: 'F2', planRound: true }),
+    entryOf({ id: 'F3', status: 'fixed' }),
+  );
+  const body = renderLedger(l);
+  assert.deepEqual(parseLedger(body), l);
+  // 표의 상태 칸은 값 그대로 보인다
+  assert.match(body, /^\| F1 \| P1 \| codex \| .* \| parked \| /m);
+  const raw = (over: Record<string, unknown>) =>
+    rawBody({ ...l, findings: [{ ...entryOf(), ...over }] });
+  assert.ok(parseLedger(raw({})), '필드가 없는 지금의 원장은 그대로 읽힌다');
+  assert.ok(parseLedger(raw({ planRound: true })));
+  assert.ok(parseLedger(raw({ status: 'parked' })));
+  assert.equal(parseLedger(raw({ planRound: false })), null);
+  assert.equal(parseLedger(raw({ planRound: 1 })), null);
+  assert.equal(parseLedger(raw({ planRound: 'true' })), null);
+  assert.equal(parseLedger(raw({ planRound: null })), null);
+  assert.equal(parseLedger(raw({ status: 'paused' })), null);
 });

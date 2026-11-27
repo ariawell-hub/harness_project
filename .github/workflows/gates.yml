@@ -28,7 +28,7 @@ jobs:
   evaluate:
     name: evaluate
     if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -151,7 +151,7 @@ jobs:
     name: record
     needs: [evaluate, selftest]
     if: ${{ !cancelled() && needs.evaluate.result != 'skipped' && needs.evaluate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}
     timeout-minutes: 5
     environment: recorder
     permissions:

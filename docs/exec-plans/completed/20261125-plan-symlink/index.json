@@ -1,0 +1,11 @@
+{
+  "plan": "20261125-plan-symlink",
+  "steps": [
+    {
+      "step": 0,
+      "name": "safe-read",
+      "status": "completed",
+      "completed_at": "2026-11-26T10:24:17+09:00"
+    }
+  ]
+}

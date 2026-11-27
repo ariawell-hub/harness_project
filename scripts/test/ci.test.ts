@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { reproJobViolations } from '../gates/harness-guard.ts';
 import { loadConfig, type HarnessConfig } from '../lib/config.ts';
-import { runGates, summaryMarkdown } from '../ci/gates.ts';
+import { readDismissRule, runGates, summaryMarkdown } from '../ci/gates.ts';
 import { recordStatuses } from '../ci/record.ts';
 import { REVIEW_DIR, writeReviewInput } from '../ci/review-input.ts';
 import { planReview } from '../ci/review-plan.ts';
@@ -283,6 +283,56 @@ test('recordStatuses: repo·sha 형식이 틀리면 아무것도 쓰지 않고 �
   }
 });
 
+// 1분 미만 job의 러너 스위치(ADR-0008 B1, Issue #240). 리포 변수가 ubuntu-slim이면(대소문자는 가리지 않는다)
+// 1코어 러너, 없거나 다른 값이면 ubuntu-latest다. 변수 값을 그대로 러너로 쓰지 않아 두 GitHub 호스팅 러너 밖은 고를 수 없다
+const SHORT_JOB_RUNNER =
+  "${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}";
+// 스위치로 고르는 job. main의 정의로 돌아 병합 전에 확인할 수 없어 변수로 켜고 끈다(review-trigger는 PR 쪽 정의지만 같이 켠다)
+const SHORT_JOBS = [
+  'gates/evaluate',
+  'gates/record',
+  'judge-claude/plan',
+  'judge-claude/repro',
+  'judge-claude/record',
+  'judge-claude/failed',
+  'judge-claude/ci-failure',
+  'judge-codex/plan',
+  'judge-codex/pubkey',
+  'judge-codex/store',
+  'judge-codex/repro',
+  'judge-codex/record',
+  'review-trigger/trigger',
+];
+/**
+ * 비밀이 없는 job에 `vars.`가 없다는 단언에서 스위치 줄 하나만 뺀다. 그 변수는 GitHub이 러너를 고를 때만 읽고
+ * job의 단계에는 넘어가지 않는다. 글자 그대로 같은 줄(앞 공백 4칸, 줄 전체)만 빼고 다른 줄은 그대로 둔다
+ */
+const withoutSwitch = (text: string) =>
+  text
+    .split('\n')
+    .filter((l) => l !== `    runs-on: ${SHORT_JOB_RUNNER}`)
+    .join('\n');
+
+test('withoutSwitch: 스위치 줄 하나만 빼고 다른 vars. 줄은 남긴다', () => {
+  assert.doesNotMatch(
+    withoutSwitch(`    name: x\n    runs-on: ${SHORT_JOB_RUNNER}\n    steps:\n`),
+    /vars\./,
+  );
+  const kept = [
+    `      runs-on: ${SHORT_JOB_RUNNER}`, // 들여쓰기가 다르다
+    `    runs-on: ${SHORT_JOB_RUNNER} # 주석`, // 줄 전체가 같지 않다
+    "    runs-on: ${{ vars.SHORT_JOB_RUNNER == 'ubuntu-slim' && 'self-hosted' || 'ubuntu-latest' }}", // 러너가 다르다
+    "    runs-on: ${{ vars.OTHER_RUNNER == 'ubuntu-slim' && 'ubuntu-slim' || 'ubuntu-latest' }}", // 변수가 다르다
+    '    runs-on: ${{ vars.SHORT_JOB_RUNNER }}', // 값을 그대로 쓴다
+    '          RUNNER: ${{ vars.SHORT_JOB_RUNNER }}', // 단계의 환경 변수
+  ];
+  for (const line of kept) {
+    const out = withoutSwitch(`    name: x\n    runs-on: ${SHORT_JOB_RUNNER}\n${line}\n`);
+    assert.match(out, /vars\./, line);
+    assert.ok(out.includes(line), line);
+  }
+});
+
 // ---------- gates.yml 불변식 (10.4절) ----------
 
 const WF = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/gates.yml'), 'utf8');
@@ -341,7 +391,7 @@ test('gates.yml: 액션은 커밋 SHA로 고정, 최상위 권한 없음, 캐시
 test('gates.yml: recorder environment는 record job에만, 판정 job은 비밀이 없다', () => {
   const j = jobs(WF);
   assert.ok(j.has('evaluate') && j.has('record'), [...j.keys()].join(','));
-  assert.doesNotMatch(j.get('evaluate')!, /environment:|secrets\.|vars\./);
+  assert.doesNotMatch(withoutSwitch(j.get('evaluate')!), /environment:|secrets\.|vars\./);
   assert.match(j.get('record')!, /environment: recorder/);
   // 기록 job은 PR 트리를 받지 않는다(base의 scripts/만)
   assert.doesNotMatch(j.get('record')!, /path: pr\b|ref: \$\{\{ github\.event\.pull_request\.head/);
@@ -360,7 +410,7 @@ test('review-trigger.yml: PR 쪽 정의로 도므로 비밀·environment·권한
   const t = readFileSync(path.join(HARNESS_ROOT, '.github/workflows/review-trigger.yml'), 'utf8');
   assert.match(t, /^permissions: \{\}$/m);
   assert.match(t, /pull_request_review:/);
-  assert.doesNotMatch(t, /environment:|secrets\.|vars\.|^\s*(?:- )?uses:|: write/m);
+  assert.doesNotMatch(withoutSwitch(t), /environment:|secrets\.|vars\.|^\s*(?:- )?uses:|: write/m);
   assert.match(WF, /workflows: \[review-trigger\]/);
 });
 
@@ -461,7 +511,7 @@ test('judge-claude.yml: check 완료로 시작, SHA 고정, 최상위 권한 없
 test('judge-claude.yml: environment는 job마다 하나, 비밀은 자기 job에만', () => {
   const j = jobs(JUDGE_CLAUDE);
   assert.deepEqual([...j.keys()], ['plan', 'judge', 'repro', 'record', 'failed', 'ci-failure']);
-  assert.doesNotMatch(j.get('plan')!, /environment:|secrets\.|vars\./);
+  assert.doesNotMatch(withoutSwitch(j.get('plan')!), /environment:|secrets\.|vars\./);
   assert.match(j.get('judge')!, /^ {4}environment: judge-claude$/m);
   assert.match(j.get('record')!, /^ {4}environment: recorder$/m);
   const secretsOf = (b: string) => [...b.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]);
@@ -683,7 +733,7 @@ test('judge-claude.yml: check가 실패하면 기록 전용 job이 원장에 실
   assert.match(failed, /workflow_run\.conclusion == 'failure'/);
   assert.match(failed, /workflow_run\.event == 'pull_request'/);
   assert.match(failed, /head_repository\.full_name == github\.repository/);
-  assert.doesNotMatch(failed, /environment:|secrets\.|vars\.|: write|path: pr\b/);
+  assert.doesNotMatch(withoutSwitch(failed), /environment:|secrets\.|vars\.|: write|path: pr\b/);
   const ci = j.get('ci-failure')!;
   assert.match(ci, /^ {4}needs: failed$/m);
   assert.match(ci, /^ {4}if: needs\.failed\.outputs\.skip == 'false'$/m);
@@ -710,7 +760,7 @@ test('judge-*.yml: 재현 job은 비밀·environment·쓰기 권한 없이 base 
     const j = jobs(wf);
     const repro = j.get('repro')!;
     assert.doesNotMatch(
-      repro,
+      withoutSwitch(repro),
       /environment:|secrets\.|vars\.|: write|create-github-app-token|GH_TOKEN/,
     );
     assert.match(repro, /^ {4}permissions:\n {6}contents: read$/m);
@@ -817,7 +867,7 @@ test('gates.yml: 판정 job이 PR 번호를 넘겨 원장의 계획 승인을 �
   const evaluate = jobs(WF).get('evaluate')!;
   assert.match(evaluate, /^ {6}pull-requests: read$/m);
   assert.match(evaluate, /--pr-number "\$PR_NUMBER"/);
-  assert.doesNotMatch(evaluate, /: write|environment:|secrets\.|vars\./);
+  assert.doesNotMatch(withoutSwitch(evaluate), /: write|environment:|secrets\.|vars\./);
 });
 
 test('promptFiles·prompt-plan.md: mode=plan일 때만 계획 검증 프롬프트를 첫 파일 바로 뒤에 붙인다', () => {
@@ -873,32 +923,8 @@ const workflowJobs = (): Map<string, string> => {
   return out;
 };
 
-test('워크플로: check job만 arm64 2코어 러너로 돌고 나머지 job의 러너는 그대로다', () => {
-  // job이나 워크플로가 늘거나 줄면 여기서 실패한다. 새 job의 러너를 정해 이 표에 적는다.
-  // main의 정의로 도는 job(gates, judge-*, revert)은 병합 전에 실제 조건으로 돌려 볼 수 없어 옮기지 않았다.
-  // q10-trial은 제작자가 손으로 돌리는 실물 확인이다(OS 행렬. Issue #180)
-  const want: Record<string, string> = {
-    'check/check': 'ubuntu-24.04-arm',
-    'gates/evaluate': 'ubuntu-latest',
-    'gates/selftest': 'ubuntu-latest',
-    'gates/record': 'ubuntu-latest',
-    'judge-claude/plan': 'ubuntu-latest',
-    'judge-claude/judge': 'ubuntu-latest',
-    'judge-claude/repro': 'ubuntu-latest',
-    'judge-claude/record': 'ubuntu-latest',
-    'judge-claude/failed': 'ubuntu-latest',
-    'judge-claude/ci-failure': 'ubuntu-latest',
-    'judge-codex/plan': 'ubuntu-latest',
-    'judge-codex/pubkey': 'ubuntu-latest',
-    'judge-codex/judge': 'ubuntu-latest',
-    'judge-codex/store': 'ubuntu-latest',
-    'judge-codex/repro': 'ubuntu-latest',
-    'judge-codex/record': 'ubuntu-latest',
-    'q10-trial/trial': '${{ matrix.os }}',
-    'revert/plan': 'ubuntu-latest',
-    'revert/act': 'ubuntu-latest',
-    'review-trigger/trigger': 'ubuntu-latest',
-  };
+// 러너 스위치의 상수(SHORT_JOB_RUNNER, SHORT_JOBS)는 gates.yml 불변식 앞에 있다
+const runsOn = (): Record<string, string> => {
   const got: Record<string, string> = {};
   for (const [id, block] of workflowJobs()) {
     const lines = [...block.matchAll(/^\s*runs-on:(.*)$/gm)];
@@ -907,7 +933,46 @@ test('워크플로: check job만 arm64 2코어 러너로 돌고 나머지 job의
     assert.match(block, /^ {4}runs-on: \S/m, `${id}: runs-on이 job 바로 아래에 없다`);
     got[id] = lines[0][1].trim();
   }
-  assert.deepEqual(got, want);
+  return got;
+};
+
+test('워크플로: check job은 arm64 2코어 러너, 1분 미만 job은 러너 스위치로 돌고 나머지 job의 러너는 그대로다', () => {
+  // job이나 워크플로가 늘거나 줄면 여기서 실패한다. 새 job의 러너를 정해 이 표에 적는다.
+  // selftest·판정 job·revert는 VM 러너(ubuntu-latest)에 둔다. q10-trial은 제작자가 손으로 돌리는 실물 확인이다(OS 행렬. Issue #180)
+  const want: Record<string, string> = {
+    'check/check': 'ubuntu-24.04-arm',
+    'gates/selftest': 'ubuntu-latest',
+    'judge-claude/judge': 'ubuntu-latest',
+    'judge-codex/judge': 'ubuntu-latest',
+    'q10-trial/trial': '${{ matrix.os }}',
+    'revert/plan': 'ubuntu-latest',
+    'revert/act': 'ubuntu-latest',
+  };
+  for (const id of SHORT_JOBS) want[id] = SHORT_JOB_RUNNER;
+  assert.deepEqual(runsOn(), want);
+});
+
+test('워크플로: runs-on의 식은 러너 스위치 13개와 q10-trial의 행렬뿐이고, ubuntu-slim은 스위치 줄에만 나온다', () => {
+  const got = runsOn();
+  const withExpr = Object.keys(got)
+    .filter((id) => got[id].includes('${{'))
+    .sort();
+  assert.deepEqual(withExpr, [...SHORT_JOBS, 'q10-trial/trial'].sort(), '식을 쓰는 runs-on');
+  for (const id of SHORT_JOBS) assert.equal(got[id], SHORT_JOB_RUNNER, `${id}: 스위치 식이 다르다`);
+  const dir = path.join(HARNESS_ROOT, '.github/workflows');
+  const slimLines: string[] = [];
+  for (const f of readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
+    for (const line of readFileSync(path.join(dir, f), 'utf8').split('\n')) {
+      if (line.includes('ubuntu-slim')) slimLines.push(`${f}: ${line.trim()}`);
+    }
+  }
+  assert.equal(
+    slimLines.length,
+    SHORT_JOBS.length,
+    `ubuntu-slim이 나오는 줄:\n${slimLines.join('\n')}`,
+  );
+  for (const l of slimLines)
+    assert.ok(l.endsWith(`runs-on: ${SHORT_JOB_RUNNER}`), `스위치 밖의 ubuntu-slim: ${l}`);
 });
 
 test('워크플로: gitleaks를 받는 job은 check와 selftest 둘뿐이다', () => {
@@ -915,4 +980,187 @@ test('워크플로: gitleaks를 받는 job은 check와 selftest 둘뿐이다', (
   // 다른 job이 gitleaks를 받기 시작하면 여기서 실패한다. 그 job의 고정값을 그 테스트에 더한다
   const got = [...workflowJobs()].filter(([, block]) => /gitleaks_/i.test(block)).map(([id]) => id);
   assert.deepEqual(got.sort(), ['check/check', 'gates/selftest']);
+});
+
+// ---------- 오래된 승인 철회 규칙 세트(Issue #250 step1) ----------
+
+const RULE = (on: boolean) => ({
+  type: 'pull_request',
+  parameters: { dismiss_stale_reviews_on_push: on },
+});
+/** 경로 → 응답(Error면 던진다). 없는 경로는 HTTP 404처럼 던진다. 부른 경로를 남긴다 */
+function fakeApi(routes: Record<string, unknown>) {
+  const calls: string[] = [];
+  const api = async (p: string) => {
+    calls.push(p);
+    if (!(p in routes)) throw new Error(`GitHub 조회 실패: HTTP 404 ${p}`);
+    const v = routes[p];
+    if (v instanceof Error) throw v;
+    return v;
+  };
+  return { calls, api };
+}
+const PR_PATH = 'repos/o/r/pulls/7';
+const rulesPath = (base: string, page = 1) =>
+  `repos/o/r/rules/branches/${base}?per_page=100&page=${page}`;
+const readRule = (routes: Record<string, unknown>) => {
+  const f = fakeApi(routes);
+  return readDismissRule({ api: f.api, repo: 'o/r', pr: 7 }).then((v) => ({ v, calls: f.calls }));
+};
+
+test('readDismissRule: PR의 실제 base 브랜치 규칙에서 오래된 승인 철회가 켜진 pull_request 규칙을 찾는다', async () => {
+  const main = { base: { ref: 'main' } };
+  assert.deepEqual((await readRule({ [PR_PATH]: main, [rulesPath('main')]: [RULE(true)] })).v, {
+    base: 'main',
+    on: true,
+  });
+  const OFF = { base: 'main', on: false };
+  assert.deepEqual(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: [RULE(false)] })).v,
+    OFF,
+  );
+  assert.deepEqual((await readRule({ [PR_PATH]: main, [rulesPath('main')]: [] })).v, OFF);
+  assert.deepEqual(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: [{ type: 'deletion' }] })).v,
+    OFF,
+  );
+  // 두 쪽: 첫 쪽이 꽉 차면 다음 쪽을 읽는다(둘째 쪽에 규칙)
+  const full = Array.from({ length: 100 }, () => ({ type: 'deletion' }));
+  const two = await readRule({
+    [PR_PATH]: main,
+    [rulesPath('main', 1)]: full,
+    [rulesPath('main', 2)]: [RULE(true)],
+  });
+  assert.deepEqual(two.v, { base: 'main', on: true });
+  assert.deepEqual(two.calls, [PR_PATH, rulesPath('main', 1), rulesPath('main', 2)]);
+  // 꼴이 틀리거나 요청이 실패하면 null
+  assert.equal(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: { message: 'x' } })).v,
+    null,
+  );
+  assert.equal(
+    (await readRule({ [PR_PATH]: main, [rulesPath('main')]: [{ parameters: {} }] })).v,
+    null,
+  );
+  assert.equal((await readRule({ [PR_PATH]: main })).v, null);
+  assert.equal((await readRule({ [PR_PATH]: new Error('HTTP 502') })).v, null);
+  // PR의 base가 기본 브랜치가 아니면 그 브랜치의 규칙을 읽는다
+  const rel = await readRule({
+    [PR_PATH]: { base: { ref: 'release' } },
+    [rulesPath('release')]: [RULE(true)],
+  });
+  assert.deepEqual(rel.v, { base: 'release', on: true });
+  assert.deepEqual(rel.calls, [PR_PATH, rulesPath('release')]);
+  // 슬래시가 든 base는 경로 한 구간으로 읽는다(release%2F1.x)
+  const slash = await readRule({
+    [PR_PATH]: { base: { ref: 'release/1.x' } },
+    [rulesPath('release%2F1.x')]: [RULE(true)],
+  });
+  assert.deepEqual(slash.v, { base: 'release/1.x', on: true });
+  assert.deepEqual(slash.calls, [
+    PR_PATH,
+    'repos/o/r/rules/branches/release%2F1.x?per_page=100&page=1',
+  ]);
+  // base.ref가 없으면 null(규칙을 읽지 않는다)
+  const none = await readRule({ [PR_PATH]: { base: {} } });
+  assert.equal(none.v, null);
+  assert.deepEqual(none.calls, [PR_PATH]);
+});
+
+test('gates 진입점: 시각이 아닌 github.dismissStaleSince가 든 설정 파일이어도 판정을 만들고 risk-gate가 failure와 설정 안내를 낸다', async () => {
+  const { root, base, head } = prRepo(PLAN.replace('risk: normal', 'risk: high'));
+  const cfgFile = JSON.parse(readFileSync(path.join(root, 'harness.config.json'), 'utf8'));
+  cfgFile.github.dismissStaleSince = '어제';
+  write(root, 'harness.config.json', JSON.stringify(cfgFile));
+  const cfg = loadConfig(root);
+  const r = await runGates({
+    root,
+    cfg,
+    base,
+    branch: BRANCH,
+    headSha: head,
+    reviews: [
+      { user: 'maker', state: 'APPROVED', commitId: head, submittedAt: '2026-11-14T01:00:00Z' },
+    ],
+    dismissRule: async () => ({ base: 'main', on: true }),
+  });
+  const rg = r.results.find((x) => x.context === 'risk-gate')!;
+  assert.equal(rg.state, 'failure');
+  assert.match(rg.description, /github\.dismissStaleSince/);
+  assert.match(
+    rg.details.join('\n'),
+    /고치는 법: main의 harness\.config\.json에 github\.dismissStaleSince/,
+  );
+});
+
+test('runGates: 위험도 높음이고 제작자의 마지막 판정 리뷰가 승인일 때만 dismissRule을 부른다', async () => {
+  const run = async (
+    plan: string,
+    reviews: { user: string; state: string; commitId: string; submittedAt: string }[] | 'approve',
+    rule: { base: string; on: boolean } | null | Error | undefined,
+  ) => {
+    const { root, base, head } = prRepo(plan);
+    const cfg = loadConfig(root);
+    cfg.github.dismissStaleSince = '2026-11-14T00:00:00Z';
+    let n = 0;
+    const r = await runGates({
+      root,
+      cfg,
+      base,
+      branch: BRANCH,
+      headSha: head,
+      reviews:
+        reviews === 'approve'
+          ? [
+              {
+                user: 'maker',
+                state: 'APPROVED',
+                commitId: head,
+                submittedAt: '2026-11-14T01:00:00Z',
+              },
+            ]
+          : reviews,
+      dismissRule:
+        rule === undefined
+          ? undefined
+          : async () => {
+              n++;
+              if (rule instanceof Error) throw rule;
+              return rule;
+            },
+    });
+    return { n, rg: r.results.find((x) => x.context === 'risk-gate')! };
+  };
+  const HIGH = PLAN.replace('risk: normal', 'risk: high');
+  const ON = { base: 'main', on: true };
+  const yes = await run(HIGH, 'approve', ON);
+  assert.deepEqual([yes.n, yes.rg.state], [1, 'success'], yes.rg.description);
+  const no = await run(HIGH, 'approve', { base: 'main', on: false });
+  assert.deepEqual([no.n, no.rg.state], [1, 'failure']);
+  const unk = await run(HIGH, 'approve', null);
+  assert.deepEqual([unk.n, unk.rg.state], [1, 'error']);
+  const thrown = await run(HIGH, 'approve', new Error('HTTP 502'));
+  assert.deepEqual([thrown.n, thrown.rg.state], [1, 'error']);
+  // 읽기 함수가 없으면(PR 번호를 모른다) 확인하지 못한 것이다
+  assert.equal((await run(HIGH, 'approve', undefined)).rg.state, 'error');
+  // 승인 리뷰가 없거나 마지막 판정 리뷰가 승인이 아니면 부르지 않는다
+  const none = await run(HIGH, [], ON);
+  assert.deepEqual([none.n, none.rg.state], [0, 'failure']);
+  const changes = await run(
+    HIGH,
+    [
+      { user: 'maker', state: 'APPROVED', commitId: 'x', submittedAt: '2026-11-14T01:00:00Z' },
+      {
+        user: 'maker',
+        state: 'CHANGES_REQUESTED',
+        commitId: 'x',
+        submittedAt: '2026-11-14T02:00:00Z',
+      },
+    ],
+    ON,
+  );
+  assert.deepEqual([changes.n, changes.rg.state], [0, 'failure']);
+  // 위험도 보통은 부르지 않는다
+  const normal = await run(PLAN, 'approve', ON);
+  assert.deepEqual([normal.n, normal.rg.state], [0, 'success']);
 });

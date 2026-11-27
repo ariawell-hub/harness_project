@@ -9,6 +9,7 @@ import {
   applyVerdict,
   emptyLedger,
   ledgerStatus,
+  parkFor,
   parseLedger,
   renderLedger,
   type Ledger,
@@ -62,8 +63,10 @@ const validTime = (v: unknown): v is string =>
   typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v));
 
 /**
- * 게시 시각 채우기: open인데 openedAt이 없는 지적에 원장 댓글의 마지막 저장 시각(GitHub이 정한 updated_at)을 적는다.
- * 원장 댓글에 들어 있는 열린 지적은 그 시각이나 그 전에 게시됐으므로, 이 값은 실제 게시 시각보다 앞설 수 없다.
+ * 게시 시각 채우기: open이나 parked인데 openedAt이 없는 지적에 원장 댓글의 마지막 저장 시각(GitHub이 정한 updated_at)을
+ * 적는다. 원장 댓글에 들어 있는 지적은 그 시각이나 그 전에 게시됐으므로, 이 값은 실제 게시 시각보다 앞설 수 없다.
+ * parked도 채운다(Issue #212): 판정이 다시 연 지적은 openedAt 없이 같은 기록에서 parked로 저장된다. 채우지 않으면
+ * 코드가 돌아와 open으로 되돌아온 첫 기록에서 게시 시각이 없어, 그 번호가 게시된 뒤에 단 제작자 승인을 받지 못한다.
  * 한 번 채워진 값은 바꾸지 않는다(원장을 저장하는 경로가 채워진 원장을 저장하므로 뒤의 수정으로 늦춰지지 않는다).
  * 러너의 시계는 쓰지 않는다: 그 시각과 실제 게시 사이에 단 승인 댓글이 아직 보이지 않는 지적을 닫게 된다
  */
@@ -71,7 +74,7 @@ function stampOpened(l: Ledger, updatedAt: unknown): { ledger: Ledger; stamped: 
   if (!validTime(updatedAt)) return { ledger: l, stamped: 0 };
   let stamped = 0;
   const findings = l.findings.map((e) => {
-    if (e.status !== 'open' || e.openedAt !== undefined) return e;
+    if ((e.status !== 'open' && e.status !== 'parked') || e.openedAt !== undefined) return e;
     stamped++;
     return { ...e, openedAt: updatedAt };
   });
@@ -165,6 +168,8 @@ export interface RecordLedgerOptions extends Where {
   promptBase: string;
   /** 이 검증자의 직전 판정 head 이후 바뀐 파일(plan job이 계산). 모르면 null */
   changedSinceLastRound: readonly string[] | null;
+  /** 직전 판정 head 이후 main 병합으로만 바뀐 파일(plan job이 계산, Issue #262). 모르면 빈 목록이나 없음 */
+  outsideSinceLastRound?: readonly string[];
   /** 재현 job 결과(판정 findings 순번 → 결과). 없으면 재현 표시 없이 등록한다 */
   repro?: ReadonlyMap<number, ReproResult>;
   /**
@@ -172,6 +177,12 @@ export interface RecordLedgerOptions extends Where {
    * approved: 이 검증자의 review/*가 success면 true, failure면 false, error면 null
    */
   plan?: { hash: string; approved: boolean | null };
+  /**
+   * 이 head가 계획만 담고 있는가(mode=plan). `plan`과 따로다(`plan`은 계획 해시의 형식이 맞을 때만 온다).
+   * 참이면 그 head에 없는 코드에 대한 열린 지적을 구현 대기(parked)로 두고, 거짓이면 구현 대기를 모두 되돌린다.
+   * mode를 모르면 거짓으로 준다(코드가 섞인 것으로 본다: fail-closed)
+   */
+  planOnly: boolean;
   /** 원장 댓글을 읽고 쓸 API(Pull requests 쓰기 토큰). 토큰을 받지 못했으면 null */
   api: LedgerApi | null;
   post: (p: StatusPayload) => Promise<void>;
@@ -182,7 +193,10 @@ export interface RecordLedgerOptions extends Where {
  * 판정이 없어도 지금 원장으로 판정한다. 원장이 없고 지적도 계획 승인도 없으면 댓글을 만들지 않는다.
  * 제작자 승인: 읽은 원장에 반영하고, 판정을 적용한 뒤 같은 승인 목록으로 한 번 더 반영한다(GraphQL은 한 번).
  * 편집 이력을 읽지 못하면 원장을 쓰지 않고 error다. 이번 판정으로 등록되거나 다시 열린 지적은 게시 시각이 없어
- * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다
+ * 이 실행에서는 승인되지 않는다. 이 실행에서 승인이 철회돼 다시 열린 지적은 같은 실행의 판정으로 바뀌지 않는다.
+ * 구현 대기(parkFor, Issue #212): 승인을 조회하기 전과 반영한 뒤에 그 head에 맞추고, 그다음에 판정을 반영한다.
+ * 저장하기 전에 한 번 더 맞춘다(그 판정이 다시 연 코드 지적도 이 기록에서 구현 대기가 된다).
+ * 판정이 없어도 맞춘다. 맞춘 것만 달라도 저장한다
  */
 export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayload> {
   const done = async (state: StatusPayload['state'], description: string) => {
@@ -200,6 +214,8 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
     const before = ledger ? JSON.stringify(ledger) : '';
     // 게시 시각을 채운 것만 달라도 저장한다(before는 채운 뒤의 값이다)
     const stamped = !!stored.stamped;
+    // 승인을 조회하기 전: 코드가 섞인 head에서 되돌아온 지적이 승인 조회의 대상(open·accepted인 P0·P1)에 들어간다
+    if (ledger) ledger = parkFor(ledger, o.planOnly);
     let accepted: Awaited<ReturnType<typeof loadAccepted>> | null = null;
     if (ledger && o.owner && o.api.graphql) {
       try {
@@ -214,7 +230,8 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         // 확인하지 못한 승인을 유지하거나 새로 반영하지 않는다. 원래 예외의 문구(응답 본문일 수 있다)는 버린다
         throw new Error(acceptErrorText(e));
       }
-      ledger = accepted.ledger;
+      // 승인을 반영한 뒤: 계획만 담은 head에서 승인이 철회돼 open으로 돌아온 코드 지적도 구현 대기로 둔다
+      ledger = parkFor(accepted.ledger, o.planOnly);
     }
     const checkBase = () => {
       if (!SHA_RE.test(o.promptBase)) throw new Error('프롬프트 버전 SHA 형식 오류');
@@ -234,7 +251,9 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         verdict,
         headSha: o.headSha,
         changedSinceLastRound: o.changedSinceLastRound,
+        outsideSinceLastRound: o.outsideSinceLastRound,
         repro: o.repro,
+        planOnly: o.planOnly,
       });
     }
     if (o.plan && (ledger || planApproved)) {
@@ -253,6 +272,9 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
       // 로그에는 읽은 원장 기준의 결과를 낸다(다시 적용한 결과는 같은 승인 목록이라 반영·무시가 같다)
       o.onAccepts?.({ ...accepted.outcome, ledger });
     }
+    // 저장하기 전: 계획만 담은 head에서 이 판정이 다시 연 코드 지적(fixed였던 지적의 open 판정, 같은 지적의 재등록)도
+    // 이 기록에서 구현 대기로 둔다. 계획 전용 판정에서 등록된 지적은 대상이 아니다. 코드가 섞인 head에서는 바뀌는 것이 없다
+    if (ledger) ledger = parkFor(ledger, o.planOnly);
     if (ledger && (stamped || JSON.stringify(ledger) !== before))
       await saveLedger({ ...o, send: o.api.send, commentId: stored.commentId, ledger });
     if (!ledger) return done('success', '원장 없음(등록된 지적이 없다)');

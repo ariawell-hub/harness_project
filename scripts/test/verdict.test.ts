@@ -223,6 +223,35 @@ test('verdictStatus: 승인이고 P0·P1이 없을 때만 success', () => {
   );
 });
 
+test('verdictStatus(Issue #262): 차단 지적이 모두 범위 밖 파일의 P1이고 resolutions에 open이 없으면 success', () => {
+  const st = (v: Record<string, unknown>, outside: string[]) =>
+    verdictStatus(v as unknown as Verdict, outside);
+  const out = finding({ severity: 'P1', file: 'src/main-only.ts' });
+  const inside = finding({ severity: 'P1', file: 'src/a.ts' });
+  const p0 = finding({ severity: 'P0', file: 'src/main-only.ts' });
+  const only = st(verdict({ verdict: 'request_changes', findings: [out, finding()] }), [
+    'src/main-only.ts',
+  ]);
+  assert.equal(only.state, 'success');
+  assert.match(only.description, /^승인 \(범위 밖 P1 1 미룸, P1 1, P2 1\)$/);
+  const cases: [string, Record<string, unknown>][] = [
+    ['범위 안 P1이 함께', verdict({ verdict: 'request_changes', findings: [out, inside] })],
+    ['범위 밖 P0', verdict({ verdict: 'request_changes', findings: [out, p0] })],
+    [
+      'resolutions에 open',
+      verdict({
+        verdict: 'request_changes',
+        findings: [out],
+        resolutions: [{ id: 'F1', status: 'open', note: '' }],
+      }),
+    ],
+    ['범위 밖 파일 없이 request_changes', verdict({ verdict: 'request_changes' })],
+  ];
+  for (const [name, v] of cases) assert.equal(st(v, ['src/main-only.ts']).state, 'failure', name);
+  // 목록이 없으면 지금 규칙이다
+  assert.equal(st(verdict({ verdict: 'request_changes', findings: [out] }), []).state, 'failure');
+});
+
 test('reviewersFor: 낮음은 다른 도구 1명, 보통·높음은 둘 다(10.1절)', () => {
   assert.deepEqual(reviewersFor('low', 'claude-code'), { claude: false, codex: true });
   assert.deepEqual(reviewersFor('low', 'codex'), { claude: true, codex: false });

@@ -662,3 +662,166 @@ test('pr-state 명령: ci.requiredChecks가 빈 리포에서도 오래 열린 �
     fx.cleanup();
   }
 });
+
+// ---------- 구현 대기 지적 (Issue #212) ----------
+
+const PARKED =
+  /^- 구현 대기 지적: F1 — 계획만 담은 head라 판정하지 않는다\. 구현을 올리면 다시 열려 판정받는다\(절차서 2절\)$/m;
+/** 열린 P1(F1)을 구현 대기로 바꾼 원장 */
+const parkedLedger = (more: number): Ledger => {
+  const l = ledgerWithOpenP1(more);
+  return { ...l, findings: l.findings.map((e) => ({ ...e, status: 'parked' as const })) };
+};
+
+test('pr-state 명령: 구현 대기인 지적의 번호를 한 줄로 알린다. 오래 열린 지적으로는 내지 않는다(읽기만 한다)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    // 재판정 3회 뒤에도 닫히지 않았지만 구현 대기라 오래 열린 지적이 아니다
+    gh.commentAs(pr.number, BOT, renderLedger(parkedLedger(3)));
+    const before = readFileSync(state, 'utf8');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, PARKED);
+    assert.ok(!r.stdout.includes('오래 열린 지적'), r.stdout);
+    assert.ok(!r.stdout.includes('검증자가 쓴 제목이다'), r.stdout);
+    assert.ok(!r.stdout.includes('note.txt'), r.stdout);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.match(lines.at(-1)!, /^분류: /);
+    assert.ok(lines.findIndex((x) => PARKED.test(x)) < lines.length - 1);
+    assert.equal(readFileSync(state, 'utf8'), before);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('pr-state 명령: 구현 대기인 지적이 여럿이면 번호를 ID 순으로 잇고, 없으면 그 줄을 내지 않는다', async () => {
+  const many = await fixtureWithPR(CHECKS);
+  try {
+    const l = ledgerWithOpenP1(0);
+    const copy = (id: string, status: Ledger['findings'][number]['status']) => ({
+      ...l.findings[0],
+      id,
+      title: `지적 ${id}`,
+      status,
+    });
+    many.gh.commentAs(
+      many.pr.number,
+      BOT,
+      renderLedger({
+        ...l,
+        findings: [
+          copy('F1', 'open'),
+          copy('F2', 'parked'),
+          copy('F3', 'fixed'),
+          copy('F10', 'parked'),
+          copy('F9', 'parked'),
+        ],
+      }),
+    );
+    const r = cli(['pr-state'], many.t.worktree, many.state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^- 구현 대기 지적: F2, F9, F10 — 계획만 담은 head라 판정하지 않는다/m);
+  } finally {
+    many.fx.cleanup();
+  }
+  const none = await fixtureWithPR(CHECKS);
+  try {
+    none.gh.commentAs(none.pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], none.t.worktree, none.state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, LONG);
+    assert.ok(!r.stdout.includes('구현 대기'), r.stdout);
+  } finally {
+    none.fx.cleanup();
+  }
+});
+
+// ---------- 범위 밖 지적 (Issue #262) ----------
+
+/** 기록 job이 범위 밖 P1의 처리 칸에 적는 글(scripts/ci/ledger.ts의 OUTSIDE_NOTE와 같다) */
+const OUTSIDE_TEXT =
+  '범위 밖: 직전 판정 이후 main 병합으로만 바뀐 파일의 새 P1이다. 이 PR을 막지 않고 Issue로 넘긴다(10.2절 (5))';
+
+test('pr-state 명령: 범위 밖으로 미룬 지적의 번호를 한 줄로 알린다. 다른 미룸은 내지 않는다(읽기만 한다)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    const l = ledgerWithOpenP1(0);
+    const copy = (id: string, note: string) => ({
+      ...l.findings[0],
+      id,
+      title: `지적 ${id}`,
+      status: 'deferred' as const,
+      note,
+    });
+    gh.commentAs(
+      pr.number,
+      BOT,
+      renderLedger({
+        ...l,
+        findings: [
+          copy('F1', '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'),
+          copy('F10', OUTSIDE_TEXT),
+          copy('F6', OUTSIDE_TEXT),
+        ],
+      }),
+    );
+    const before = readFileSync(state, 'utf8');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(
+      r.stdout,
+      /^- 범위 밖 지적: F6, F10 — main 병합으로 들어온 다른 PR의 코드에 대한 P1이라 이 PR을 막지 않는다\. Issue로 등록한다\(절차서 8절\)$/m,
+    );
+    assert.ok(!r.stdout.includes('지적 F6'), r.stdout);
+    assert.match(r.stdout.trimEnd().split('\n').at(-1)!, /^분류: /);
+    assert.equal(readFileSync(state, 'utf8'), before);
+  } finally {
+    fx.cleanup();
+  }
+  const none = await fixtureWithPR(CHECKS);
+  try {
+    none.gh.commentAs(none.pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], none.t.worktree, none.state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(!r.stdout.includes('범위 밖'), r.stdout);
+  } finally {
+    none.fx.cleanup();
+  }
+});
+
+test('pr-state 명령: round-main.txt의 파일에 원래 등급(P1)으로 낸 판정이 원장에서 범위 밖이 되고 그 줄에 나온다(계획 검증 F2)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    const first = ledgerWithOpenP1(0);
+    const l = applyVerdict(first, {
+      reviewer: 'codex',
+      verdict: {
+        verdict: 'approve',
+        risk: 'normal',
+        summary: '요약',
+        findings: [
+          {
+            severity: 'P1',
+            file: 'src/main-only.ts',
+            line: 2,
+            title: 'main에서 온 결함',
+            evidence: '근거',
+            suggestion: '제안',
+            repro: { path: '', content: '' },
+          },
+        ],
+        resolutions: [{ id: 'F1', status: 'fixed', note: '' }],
+      },
+      headSha: '9'.repeat(40),
+      changedSinceLastRound: ['note.txt'],
+      outsideSinceLastRound: ['src/main-only.ts'],
+    });
+    gh.commentAs(pr.number, BOT, renderLedger(l));
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^- 범위 밖 지적: F2 — /m);
+    assert.ok(!r.stdout.includes('main에서 온 결함'), r.stdout);
+  } finally {
+    fx.cleanup();
+  }
+});
