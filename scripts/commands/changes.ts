@@ -269,14 +269,15 @@ export function runChangesCollect(
      * 기대지 않아 읽는 도중 끝에 덧붙은 바이트도 보고, 계속 커지는 파일을 끝없이 쌓지 않는다(Issue #261 판정 F1·F2)
      */
     const readUpTo = (fd: number, max: number): Buffer | null => {
-      // 작은 청크로 읽고 실제 읽은 크기만큼만 새로 복사해 돌려준다: 상한만큼의 큰 버퍼를 잡거나 쥐지 않는다(판정 F5)
+      // 고정 크기 버퍼 하나를 다시 쓰고, 실제 읽은 바이트만 복사해 쌓는다: 상한만큼의 큰 버퍼를 잡지 않고, 짧은 읽기가
+      // 이어져도 읽은 양보다 큰 메모리를 쥐지 않는다(판정 F2·F5)
+      const buf = Buffer.alloc(Math.min(READ_CHUNK, max + 1));
       const chunks: Buffer[] = [];
       let at = 0;
       while (at <= max) {
-        const b = Buffer.alloc(Math.min(READ_CHUNK, max + 1 - at));
-        const n = readSync(fd, b, 0, b.length, at);
+        const n = readSync(fd, buf, 0, Math.min(buf.length, max + 1 - at), at);
         if (n === 0) break;
-        chunks.push(b.subarray(0, n));
+        chunks.push(Buffer.from(buf.subarray(0, n)));
         at += n;
       }
       return at > max ? null : Buffer.concat(chunks, at);
