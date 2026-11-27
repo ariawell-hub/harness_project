@@ -365,6 +365,23 @@ export function runChangesCollect(
       }
       return Number(st.mode & 0o777n);
     };
+    /** 작업 폴더 안의 이름 `at`이 3에서 본 그 파일(식별자)이고 내용이 5의 바이트와 같은가(링크 수는 보지 않는다) */
+    const sameBytesAt = (rel: string, at: string): boolean => {
+      const want = fileIdent.get(rel);
+      const st = lstatSync(at, { throwIfNoEntry: false, bigint: true });
+      if (!st || !want || !st.isFile() || !sameIdent(st, want)) return false;
+      const fd = openSync(at, constants.O_RDONLY | OPEN_FLAGS);
+      try {
+        const f = fstatSync(fd, { bigint: true });
+        return (
+          f.isFile() &&
+          sameIdent(f, want) &&
+          readAll(fd).equals(readBytes.get(rel) ?? Buffer.alloc(0))
+        );
+      } finally {
+        closeSync(fd);
+      }
+    };
     /** 임시 이름의 것을 덮어쓰지 않고 제자리 이름으로 돌려놓는다(그 이름에 무엇이 있으면 실패하고 임시 이름에 남긴다) */
     const putBack = (rel: string, dirRel: string, parked: string, name: string, cause: unknown) => {
       try {
@@ -467,6 +484,17 @@ export function runChangesCollect(
       }
       written.set(rel, { ident: made, bytes: Buffer.from(text, 'utf8') });
       unlinkSync(fresh);
+      // 게시하는 동안 원래 파일을 미리 열어 둔 다른 세션이 그 핸들로 저장했을 수 있다: 지우기 직전에 식별자와 바이트를
+      // 다시 견주고, 어긋나면 지우지 않고 남긴다(Issue #261, PR #254 판정 F5). 링크 수는 보지 않는다: 하드 링크가 더해져도
+      // 지우는 것은 이 명령의 임시 이름 하나이고 내용은 그 링크에 남는다
+      try {
+        if (!sameBytesAt(rel, parked)) throw new Error('바뀌었다');
+      } catch {
+        leftovers.push(`${HARNESS_DIR}/${parked}`);
+        throw new Stop(
+          `${rel}: 게시한 뒤 원래 파일이 바뀌었다(미리 열어 둔 다른 세션이 저장했다). 원래 파일을 지우지 않고 ${HARNESS_DIR}/${parked}에 남겼다. 그 내용을 확인해 옮겨라`,
+        );
+      }
       unlinkSync(parked);
     };
     /** 조각을 임시 이름으로 옮겨 확인한 뒤 지운다(작업 폴더는 조각 폴더) */
