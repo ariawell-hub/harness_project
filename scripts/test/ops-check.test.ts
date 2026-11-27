@@ -10,10 +10,14 @@ import { CODEOWNERS_FILE, codeownersText } from '../gates/codeowners.ts';
 import { loadConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { FakeGitHub, initFakeState, type FakeState } from '../lib/github-fake.ts';
-import { parseScopes, type GitHubPort } from '../lib/github.ts';
-import { HARNESS_ROOT, fixtureConfig, makeFixture, write, type Fixture } from './helpers.ts';
+import { GhCli, parseScopes, type GitHubPort } from '../lib/github.ts';
+import { dismissRuleOf, readRulePagesSync, rulesPath } from '../lib/rules.ts';
+import { HARNESS_ROOT, fixtureConfig, makeFixture, tmp, write, type Fixture } from './helpers.ts';
 
 const APP = 4242;
+/** 기본 브랜치의 규칙 세트(오래된 승인 철회 켬, Issue #250) */
+const RULE_ON = { type: 'pull_request', parameters: { dismiss_stale_reviews_on_push: true } };
+const RULE_OFF = { type: 'pull_request', parameters: { dismiss_stale_reviews_on_push: false } };
 const REQUIRED = [
   { context: 'check', source: 'actions' as const },
   { context: 'revert-check', source: 'recorder' as const },
@@ -56,6 +60,7 @@ function setup(
     remote: fx.remote,
     requiredChecks: REGISTERED,
     tokenScopes: ['read:org', 'repo'],
+    branchRules: [[RULE_ON]],
     ...over,
   });
   return { fx, state, gh: new FakeGitHub(state) };
@@ -196,6 +201,96 @@ test('opsCheck 2번: CODEOWNERS 파일이 맞으면 ok다. 리포 설정은 읽�
   assert.match(text(edited), /✗ .*만든 내용과 다르다/);
 });
 
+test('opsCheck 2번: 기본 브랜치의 오래된 승인 철회 규칙 세트를 확인한다(Issue #250)', () => {
+  const on = item(check(), 2);
+  assert.equal(on.state, 'ok');
+  assert.match(text(on), /✓ main 규칙 세트에 오래된 승인 철회가 켜져 있다/);
+  // 규칙이 없거나 꺼져 있으면 fail, 고치는 법은 SECURITY.md의 절차
+  for (const branchRules of [[[RULE_OFF]], [[]], [[{ type: 'deletion' }]]]) {
+    const off = item(check({ branchRules }), 2);
+    assert.equal(off.state, 'fail', JSON.stringify(branchRules));
+    assert.match(text(off), /✗ main 규칙 세트에 오래된 승인 철회가 없다.*docs\/SECURITY\.md/);
+  }
+  // 읽지 못하면 `?`이고 다른 실패가 없으면 unknown
+  const unread = item(check({ branchRules: null }), 2);
+  assert.equal(unread.state, 'unknown');
+  assert.match(text(unread), /\? main 규칙 세트를 읽지 못했다/);
+  // 다른 실패가 있으면 fail은 그대로다
+  const both = item(check({ branchRules: null, codeOwnerReview: false }), 2);
+  assert.equal(both.state, 'fail');
+});
+
+test('readRulePagesSync: 쪽이 덜 찰 때까지 읽고(둘째 쪽에만 규칙), 끝까지 못 읽으면 던진다(실제 포트가 쓴다, Issue #250)', () => {
+  const full = Array.from({ length: 100 }, () => ({ type: 'deletion' }));
+  const calls: string[] = [];
+  const get = (pages: Record<number, unknown>) => (p: string) => {
+    calls.push(p);
+    const n = Number(/[?&]page=(\d+)/.exec(p)?.[1]);
+    if (!(n in pages)) throw new Error(`gh api 실패: HTTP 502 ${p}`);
+    return pages[n];
+  };
+  const two = readRulePagesSync(get({ 1: full, 2: [RULE_ON] }), '{owner}/{repo}', 'main');
+  assert.equal(two.length, 2);
+  assert.equal(dismissRuleOf(two), true);
+  assert.deepEqual(calls, [
+    rulesPath('{owner}/{repo}', 'main', 1),
+    rulesPath('{owner}/{repo}', 'main', 2),
+  ]);
+  assert.match(
+    calls[1],
+    /^repos\/\{owner\}\/\{repo\}\/rules\/branches\/main\?per_page=100&page=2$/,
+  );
+  // 둘째 쪽 읽기가 실패하면 던진다(첫 쪽만 보고 "규칙 없음"으로 판정하지 않는다)
+  assert.throws(() => readRulePagesSync(get({ 1: full }), 'o/r', 'main'), /HTTP 502/);
+  assert.throws(
+    () => readRulePagesSync(get({ 1: { message: 'x' } }), 'o/r', 'main'),
+    /배열이 아니다/,
+  );
+  // 슬래시가 든 브랜치는 경로 한 구간
+  assert.equal(
+    rulesPath('o/r', 'release/1.x', 1),
+    'repos/o/r/rules/branches/release%2F1.x?per_page=100&page=1',
+  );
+  // 그 포트를 쓰는 ops-check 2번은 던지면 `?`와 unknown이다
+  const throwing = (gh: GitHubPort) =>
+    Object.assign(Object.create(gh) as GitHubPort, {
+      branchRules: () => readRulePagesSync(get({ 1: full }), 'o/r', 'main'),
+    });
+  const unread = item(check({}, {}, throwing), 2);
+  assert.equal(unread.state, 'unknown');
+  assert.match(text(unread), /\? main 규칙 세트를 읽지 못했다: gh api 실패: HTTP 502/);
+});
+
+test('GhCli.branchRules: 실제 포트가 gh api로 쪽이 덜 찰 때까지 읽고, 둘째 쪽 실패는 ops-check 2번의 unknown이 된다(Issue #250)', () => {
+  const full = Array.from({ length: 100 }, () => ({ type: 'deletion' }));
+  const seen: string[][] = [];
+  /** gh 실행 경계의 가짜: `gh api <경로>`만 받고 쪽 번호로 응답한다. 없는 쪽은 gh 실패처럼 던진다 */
+  const fakeGh = (pages: Record<number, unknown>) => (args: string[]) => {
+    seen.push(args);
+    assert.equal(args[0], 'api');
+    const n = Number(/[?&]page=(\d+)/.exec(args[1])?.[1]);
+    if (!(n in pages)) throw new Error(`gh api 실패: HTTP 502 (${n}쪽)`);
+    return JSON.stringify(pages[n]);
+  };
+  const real = new GhCli(tmp(), fakeGh({ 1: full, 2: [RULE_ON] }));
+  const pages = real.branchRules('main');
+  assert.equal(dismissRuleOf(pages), true);
+  assert.deepEqual(seen, [
+    ['api', 'repos/{owner}/{repo}/rules/branches/main?per_page=100&page=1'],
+    ['api', 'repos/{owner}/{repo}/rules/branches/main?per_page=100&page=2'],
+  ]);
+  // 둘째 쪽 실행이 실패하면 던지고, 그 포트를 쓰는 ops-check 2번은 `?`와 unknown이다
+  const broken = new GhCli(tmp(), fakeGh({ 1: full }));
+  assert.throws(() => broken.branchRules('main'), /HTTP 502 \(2쪽\)/);
+  const viaReal = (gh: GitHubPort) =>
+    Object.assign(Object.create(gh) as GitHubPort, {
+      branchRules: (b: string) => broken.branchRules(b),
+    });
+  const unread = item(check({}, {}, viaReal), 2);
+  assert.equal(unread.state, 'unknown');
+  assert.match(text(unread), /\? main 규칙 세트를 읽지 못했다: gh api 실패: HTTP 502 \(2쪽\)/);
+});
+
 test('opsCheck 3번: 권한 범위에 workflow가 있으면 fail, 머리말이 없으면 unknown, 봇 계정이 아니면 fail이다', () => {
   const wf = item(check({ tokenScopes: ['read:org', 'repo', 'workflow'] }), 3);
   assert.equal(wf.state, 'fail');
@@ -231,6 +326,16 @@ test('ops-check 명령: 모두 맞으면 종료 코드 0, 하나라도 fail·unk
   const forced = cli(['ops-check', '--allow-unknown'], unknown.fx.root, unknown.state);
   assert.notEqual(forced.code, 0);
 
+  // 2번의 규칙 세트: 없으면 ✗와 1, 읽지 못하면 ?와 1(Issue #250)
+  const noRule = setup({ branchRules: [[RULE_OFF]] });
+  const d = cli(['ops-check'], noRule.fx.root, noRule.state);
+  assert.equal(d.code, 1, d.stdout + d.stderr);
+  assert.match(d.stdout, /^✗ 2\. /m);
+  const unreadRule = setup({ branchRules: null });
+  const e = cli(['ops-check'], unreadRule.fx.root, unreadRule.state);
+  assert.equal(e.code, 1, e.stdout + e.stderr);
+  assert.match(e.stdout, /^\? 2\. /m);
+
   const fail = setup({ requiredChecks: REGISTERED.slice(0, 3) });
   const c = cli(['ops-check'], fail.fx.root, fail.state);
   assert.equal(c.code, 1, c.stdout + c.stderr);
@@ -245,4 +350,6 @@ test('가짜 GitHub: 권한 범위와 코드 오너 리뷰 설정은 상태 파�
   const gh: GitHubPort = new FakeGitHub(state);
   assert.equal(gh.tokenScopes(), null);
   assert.equal(gh.codeOwnerReviewRequired('main'), null);
+  // 규칙 세트가 상태 파일에 없으면 읽지 못한 것이다(던진다)
+  assert.throws(() => gh.branchRules('main'), /규칙 세트/);
 });

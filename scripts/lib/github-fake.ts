@@ -112,6 +112,8 @@ export interface FakeState {
   tokenScopes?: string[] | null;
   /** codeOwnerReviewRequired가 돌려줄 값(선택). 없거나 null이면 읽지 못한 것이다 */
   codeOwnerReview?: boolean | null;
+  /** branchRules가 돌려줄 규칙 목록의 쪽들(선택). 없거나 null이면 읽지 못한 것이다(던진다) */
+  branchRules?: unknown;
   /** 커밋 SHA → 그 커밋의 커밋 상태·check run 기록(setCheck가 쓴다) */
   checks?: Record<string, CommitCheck[]>;
   /** repoSlug가 돌려줄 저장소 이름(선택). 없으면 `fake/repo` */
@@ -255,6 +257,12 @@ export class FakeGitHub implements GitHubPort {
   }
   codeOwnerReviewRequired(): boolean | null {
     return this.load().codeOwnerReview ?? null;
+  }
+  branchRules(): unknown {
+    const r = this.load().branchRules;
+    if (r === undefined || r === null)
+      throw new Error('가짜 GitHub: 상태 파일에 규칙 세트(branchRules)가 없다');
+    return r;
   }
   tokenScopes(): string[] | null {
     return this.load().tokenScopes ?? null;

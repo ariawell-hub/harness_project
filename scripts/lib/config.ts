@@ -48,6 +48,12 @@ export interface HarnessConfig {
     botIssues: BotIssuesMode;
     priorityLabels: string[];
     needsHumanLabel: string;
+    /**
+     * 기본 브랜치에 "오래된 승인 철회" 규칙 세트를 켠 시각(ISO, 선택. Issue #250). `risk-gate`는 이 시각보다 엄격히 뒤(초 단위)에
+     * 제출된 제작자 승인만 센다. 없거나 시각이 아니면 위험도 높음 PR의 승인을 세지 않는다(failure). 읽을 때 형식을 검사하지
+     * 않는다: 설정 오류로 `gates`가 죽으면 판정 결과가 없다(docs/SECURITY.md "오래된 승인 철회 규칙 세트")
+     */
+    dismissStaleSince?: string;
   };
   paths: { worktreeRoot: string; devEnvFile: string };
   limits: {
@@ -227,6 +233,17 @@ export const DEFAULT_PR_SIZE: PrSizeConfig = {
 };
 
 export class ConfigError extends Error {}
+
+/** `YYYY-MM-DDTHH:MM:SS(.sss)Z` 꼴이고 실제로 있는 시각인가(UTC만 받는다) */
+export function isIsoInstant(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,3})?Z$/.exec(v);
+  if (!m) return false;
+  const t = Date.parse(v);
+  if (Number.isNaN(t)) return false;
+  // Date.parse가 넘치는 값(예: 13월)을 다음 달로 옮기지 않았는지 본다
+  return new Date(t).toISOString().slice(0, 19) === v.slice(0, 19);
+}
 
 /** MCP 도구 호출의 L1 규칙(13.1절). 막는 것만 적는다: 그 밖의 MCP 도구는 통과한다 */
 export interface McpGuardConfig {

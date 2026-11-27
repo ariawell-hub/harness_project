@@ -178,6 +178,20 @@ revert 워크플로(`.github/workflows/revert.yml`)의 `act` job이 쓰는 봇 �
 
 revert PR도 예외가 아니다. 이 설정을 켠 리포에서 main을 깬 커밋이 보호 경로를 바꿨다면, 그것을 되돌리는 `revert/<SHA>` PR도 보호 경로를 바꾸므로 제작자 승인 전에는 병합되지 않는다(봇이 PR을 만들 때 제작자에게 리뷰 요청이 간다). 보호 경로 밖만 바꾼 커밋의 revert는 그대로 자동 병합된다. 하네스 리포 자신은 대부분의 변경이 보호 경로라, 운영 단계에서는 revert가 제작자 승인으로 끝난다.
 
+## 오래된 승인 철회 규칙 세트 (제작자)
+
+위험도 높음 PR의 제작자 승인은 head 커밋에 묶여야 한다(설계서 10.3절). GitHub은 리뷰의 커밋을 main 병합 뒤 새 head로 옮겨 보고하므로(PR #226), 하네스는 승인 head를 추정하지 않고 GitHub의 "새 커밋 push 때 오래된 승인 철회"에 맡긴다(Issue #250). 기존 보호 규칙의 같은 설정은 관리자가 아닌 봇 토큰으로 읽을 수 없어, 규칙 세트로 켠다. `risk-gate`는 PR base 브랜치에 이 규칙이 없으면 위험도 높음 PR을 failure로, 읽지 못하면 error로 막는다.
+
+1. GitHub → 리포 → Settings → Rules → Rulesets → New ruleset → New branch ruleset.
+2. 이름 `approval-dismiss-stale`, Enforcement status `Active`, Bypass list는 비운다, Target branches `Include default branch`.
+3. Rules에서 "Require a pull request before merging"을 켜고 그 아래 Required approvals `0`, "Dismiss stale pull request approvals when new commits are pushed"를 켠다. 나머지 하위 항목은 끈다("Require approval of the most recent reviewable push"는 끈다, 설계서 0.2절). 새 규칙 세트에 기본으로 켜져 있는 "Restrict deletions"·"Block force pushes"는 그대로 둔다.
+4. Create.
+5. 처음 켠 때만: main의 `harness.config.json`에 `github.dismissStaleSince`를 봇이 규칙을 처음 본 ISO 시각으로 넣는다(이 리포는 `2026-11-26T16:18:41Z`, `lab/approval-binding/results/live.json`의 `rule.firstSeenAt`). 그 시각과 같은 초이거나 앞선 승인은 세지 않으므로, 그때 열려 있던 위험도 높음 PR은 다시 승인한다.
+
+확인: 봇 토큰으로 `gh api repos/<리포>/rules/branches/main`이 `type: pull_request`이고 `parameters.dismiss_stale_reviews_on_push: true`인 규칙을 돌려준다. `node scripts/harness.ts ops-check`의 2번에 `✓ main 규칙 세트에 오래된 승인 철회가 켜져 있다`가 나온다. 실제 동작(main 병합만 더한 push는 승인 유지, 일반 커밋 push는 `DISMISSED`)은 시험 PR #256으로 쟀다(`lab/approval-binding/README.md`).
+
+`risk-gate`가 `오래된 승인 철회 규칙을 확인하지 못해`로 error면: 판정 job이 PR이나 규칙을 읽지 못한 것이다. 일시적인 API 오류면 판정을 다시 돌린다. 계속되면 위 확인 명령으로 규칙이 보이는지, 판정 job의 토큰(`github.token`, metadata 읽기)이 바뀌지 않았는지 본다. 규칙 세트를 지우거나 끄면 위험도 높음 PR이 모두 막힌다(fail-closed).
+
 ## 봇 토큰의 `workflow` 권한 회수 (제작자, 운영 전환)
 
 구축 단계의 봇 PAT에는 워크플로 파일을 push하기 위한 `workflow` 권한이 있다([ADR-0003](decisions/ADR-0003-bot-token-classic-pat.md)). 운영 단계에서는 뺀다(설계서 10.4절 운영 전환 체크리스트 3). 옛 토큰의 권한을 줄여 저장하지 않고, 새 토큰을 발급한 뒤 옛 토큰을 지운다.

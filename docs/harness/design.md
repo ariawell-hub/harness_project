@@ -142,8 +142,8 @@ review_cycle: quarterly
     - 기대하는 등록(`harness.config.json`의 `ci.requiredChecks`, 검증 App ID는 `ci.recorderAppId`)과 실제 등록은 `node scripts/harness.ts required-checks`로 비교한다. 읽기만 하고 바꾸지 않는다. 이미 다른 출처로 등록된 체크(1단계의 `plan-gate`)는 검증 App이 같은 이름을 보고한 뒤 제작자가 출처를 바꾸고, 그다음에 옛 job을 지운다. 순서가 바뀌면 그 체크를 아무도 채우지 못해 모든 PR이 막힌다(Issue #53)
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
-  - "Dismiss stale approvals"(새 커밋이 push되면 기존 승인 무효화)
-  - "Require approval of the most recent reviewable push"는 **끈다(구축·운영 단계 모두)**. 필수 승인이 0이어도 마지막 push를 다른 사람이 승인해야 병합되게 해서, 모든 PR의 자동 병합을 막는다(PR #2에서 확인). 제작자 승인을 head에 묶는 일은 위의 "Dismiss stale approvals"와 `risk-gate`(승인 커밋이 head인지 확인, 10.3절)가 맡는다
+  - **규칙 세트 `approval-dismiss-stale`**(Settings → Rules → Rulesets, 대상 기본 브랜치, 우회 없음): "Require a pull request before merging" + 필수 승인 0 + "Dismiss stale pull request approvals when new commits are pushed"(새 커밋이 push되면 기존 승인 철회). 기존 보호 규칙의 같은 설정은 관리자가 아닌 토큰으로 읽을 수 없어, 꺼져도 하네스가 알 수 없다. 규칙 세트의 규칙은 읽기 권한으로 `GET rules/branches/<브랜치>`에서 읽혀 `risk-gate`·`ops-check`가 확인한다(Issue #250). 절차는 docs/SECURITY.md "오래된 승인 철회 규칙 세트 (제작자)"
+  - "Require approval of the most recent reviewable push"는 **끈다(구축·운영 단계 모두)**. 필수 승인이 0이어도 마지막 push를 다른 사람이 승인해야 병합되게 해서, 모든 PR의 자동 병합을 막는다(PR #2에서 확인). 제작자 승인을 head에 묶는 일은 위의 규칙 세트(오래된 승인 철회)와 `risk-gate`(규칙 확인과 승인 커밋이 head인지 확인, 10.3절)가 맡는다
 - **Actions**
   - 워크플로 기본 권한은 읽기 전용
   - "Actions가 PR을 만들고 승인하도록 허용" 끔
@@ -977,7 +977,7 @@ pnpm test src/auth/login-guard.spec.ts
 | `plan-gate` | 계획 파일·필수 섹션·`size`·`risk`. 중·대는 코드 없는 커밋에서 받은 계획 검증 결과와 핵심 섹션 해시 일치. 이 PR이 맡은 step이 `completed`(마지막 step이면 계획 전체, 8.3절). 자기 step 파일의 작업·AC·금지사항을 바꾸지 않았는지, "발견 사항"마다 처리가 적혀 있는지(8.2~8.3절) | R1 |
 | `review/claude`, `review/codex` | 위험도에 맞는 검증자의 승인(아래 결속 기준) | R12 |
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
-| `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
+| `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고, PR base 브랜치에 오래된 승인 철회 규칙 세트가 있고, 승인이 전환 시각(`github.dismissStaleSince`) 뒤이며, 승인 커밋이 head | R13, R20 |
 | `deps-guard` | lockfile 전체 변경 검사 | R17 |
 | `harness-guard` | 보호 경로 변경 시 체크리스트·변경 기록(`CHANGELOG` 또는 그 PR의 변경 조각. 설계서를 바꿨으면 설계서 기록도)·하네스 자체 테스트(`gates` 워크플로의 `selftest` job 결과를 기록 job이 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 success가 아니다. 10.4절), PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한 탐지, 기존 자체 테스트 파일의 수정·삭제 표시, 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
@@ -996,7 +996,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다, PR이 바꾼 파일의 내용이 옛 head와 바이트 단위로 같다. 위험도 높음은 patch-id가 같아도 다시 검증 |
 | 계획 전용 커밋 | — | 진행 로그·상태·위치만 바뀌었으면 LLM 재검증 없이 `plan-gate`만 실행 |
 | 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC·금지사항 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
-| 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
+| 제작자 승인(위험도 높음) | head SHA + GitHub의 오래된 승인 철회 규칙 세트(0.2절, `risk-gate`가 PR base 브랜치의 규칙을 확인) | `origin/main` 병합만 더한 갱신은 GitHub이 승인을 유지하고 리뷰의 커밋을 새 head로 옮긴다(실측, `lab/approval-binding`). 그 밖의 새 커밋은 GitHub이 승인을 철회해(`DISMISSED`) 다시 승인한다. 전환 시각(`github.dismissStaleSince`)보다 엄격히 뒤(초 단위)의 승인만 센다 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
 - **계획 검증(G1) 구현**(`scripts/ci/plan-hash.ts`, `scripts/gates/plan-gate.ts`)
@@ -1025,7 +1025,7 @@ pnpm test src/auth/login-guard.spec.ts
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).
 2. 필수 체크가 모두 통과하면 GitHub이 squash merge 한다. 커밋 메시지에 계획 id를 넣는다.
 3. 위험도에 맞는 검증자가 모두 승인하면 계획 전용 커밋으로 계획을 완료 처리한다(8.3절). 위험도 높음이면 그 뒤에 제작자가 head를 승인한다.
-4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 5회 실패하면 병합을 취소한 채 `needs-human`으로 넘긴다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증하고, 위험도 높음이면 제작자도 새 head를 다시 승인한다.
+4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 5회 실패하면 병합을 취소한 채 `needs-human`으로 넘긴다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증한다. 위험도 높음의 제작자 승인은 main 병합만 더한 갱신에서 유지되고(규칙 세트), 그 밖의 새 커밋이면 다시 승인한다.
 5. 병합되면 head 브랜치는 리포 설정으로 삭제되고, worktree는 runner의 다음 바퀴나 다음 세션 시작 시 정리한다(4.5절, 7.1절). 마지막 step이 병합되면 Issue가 자동으로 닫히고 `claim/<issue>` 브랜치도 정리한다. 남은 step이 있으면 runner가 다음 step을 시작한다. `merge` 스크립트는 이 정리를 수동으로 할 때 쓰는 편의 도구이며 강제 장치가 아니다.
 
 **병합 후 main CI가 실패하면**
@@ -1062,6 +1062,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
 
 - 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
+- `risk-gate`의 규칙 세트 확인(Issue #250, `scripts/ci/gates.ts`의 `readDismissRule`): 위험도 높음이고 제작자의 마지막 판정 리뷰가 승인일 때만, 판정 job의 읽기 토큰으로 PR(`GET pulls/<번호>`)의 실제 base 브랜치를 읽고 그 브랜치의 규칙(`GET rules/branches/<base>`, 쪽 번호)에 `dismiss_stale_reviews_on_push: true`인 `pull_request` 규칙이 있는지 본다. 규칙이 없으면 failure, 읽지 못하면 error다(fail-closed). 전환 시각(`github.dismissStaleSince`)은 main 설정이라(판정 job은 설정을 base에서 읽는다) PR이 바꿔도 판정에 쓰이지 않는다. 전환 시각은 기본 브랜치에서 잰 것이라, PR의 실제 base가 기본 브랜치가 아니면 위험도 높음 승인을 세지 않는다(failure). 같은 규칙을 `ops-check` 2번이 봇 토큰으로 확인한다.
   - **자체 테스트 합치기**(12.4절): 판정 job은 PR이 보호 경로를 바꿨는지를 job 출력 `selftest`(`true`·`false`. 판단하지 못하면 `true`)로 낸다. `true`면 `selftest` job이 `node base/scripts/harness.ts self-test --harness pr`로 main의 실행기·시나리오를 PR의 하네스에 대해 돌리고, 종료 코드와 무관하게 보고서(시나리오별 결과)를 job 출력으로 넘긴다. 이 job은 하네스의 의존성을 설치하지 않지만 gitleaks는 `check` 워크플로와 같은 버전·체크섬으로 설치한다. runner 시나리오가 샘플 리포에서 `check`를 돌리고 그 시크릿 스캔에 gitleaks가 필요하기 때문이다(없으면 그 시나리오들이 실패한다). 기록 job은 그 보고서를 형식·head SHA·시나리오 id 형식(`[a-z0-9-]{1,40}`)으로 검사해 `harness-guard` 결과에 합친다(`scripts/ci/selftest-result.ts`). 보고서가 없거나 깨졌거나 시나리오가 0개면 `error`, 통과하지 못한 시나리오가 있으면 `failure`, 모두 통과면 설명 끝에 `자체 테스트 통과 <N>`을 붙인다. `harness-guard` 자신의 실패·오류는 그대로 남는다. 판정 job이 `selftest` 값을 남기지 못했으면(빈 값) 필요한 것으로 본다. 보고서는 PR 코드를 실행한 job이 쓴 값이라, 상태 설명에는 형식 검사를 통과한 시나리오 id와 개수만 넣고 보고서의 글은 넣지 않는다.
   - **커밋 상태 쓰기의 다시 시도**: 기록 job은 커밋 상태 쓰기가 GitHub API의 일시 오류로 실패하면 같은 내용을 다시 보낸다(`scripts/ci/record.ts`의 `STATUS_RETRY`, Issue #220). 다시 보내는 오류는 HTTP 5xx와 응답 없음(연결 끊김, 요청의 시간 제한)이다. 요청은 상태 하나에 4번까지 보내고, 사이에 2초, 6초, 15초를 기다린다. 다시 시도가 더하는 시간(대기와 둘째부터의 요청)은 poster 하나에 60초까지다: 상한까지 남은 시간이 5초보다 적으면 보내지 않는다. 남은 시간은 대기 전과 대기 뒤에 본다(대기가 예정보다 길어질 수 있다). 다시 보내는 요청의 시간 제한은 30초와 남은 시간 가운데 작은 값이다. record job의 시간 제한(5분) 안에 끝나게 하는 값이다. 한 poster의 다시 시도(상한 확인부터 다시 보낸 요청이 끝날 때까지)는 한 번에 하나씩 한다: 같은 poster로 동시에 쓰는 상태들도 상한을 함께 쓴다. HTTP 4xx는 다시 보내지 않는다(권한·형식 오류는 다시 보내도 같고, 사용량 제한은 기다릴 시간이 상한을 넘는다). 모두 실패하면 전처럼 job이 실패한다(fail-closed): 필수 체크가 비고 실행을 다시 돌려야 풀린다. 다시 시도는 로그에 `record: 커밋 상태 기록 다시 시도(<context>): <HTTP 상태 코드 | 응답 없음(오류 이름)>, <N>초 뒤 <몇 번째>/4번째` 줄로 남는다. 이 줄에 토큰과 응답 본문은 넣지 않는다. 같은 상태가 두 번 기록돼도 해가 없다(GitHub은 context마다 가장 최근 상태를 쓰고 두 기록의 내용이 같다).
 
