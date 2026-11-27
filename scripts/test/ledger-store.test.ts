@@ -410,6 +410,10 @@ test('writeRoundInput #262: main 병합으로만 바뀐 파일은 이 PR의 변�
   const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
   assert.match(md, /round-main\.txt \(1개\)/);
   assert.match(md, /이 PR의 변경이 아니다/);
+  // 고정된 옛 프롬프트를 쓰는 PR에도 처리 규칙이 간다: 원래 등급으로 적는다(판정 F11)
+  assert.match(md, /원래 등급으로 적어라/);
+  assert.match(md, /P0은 그대로 막는다/);
+  assert.doesNotMatch(md, /이 PR의 지적이 아니다/);
 });
 
 test('writeRoundInput #262: 직전 판정 뒤 main 병합만 더했으면 changed와 diff가 비고 main 쪽 파일은 round-main.txt에만 있다', () => {
@@ -521,6 +525,20 @@ test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모
     ['changed에 숫자', b64({ changed: ['src/a.ts', 2], outside: [] })],
     ['changed 없음', b64({ outside: [] })],
     ['배열에 숫자', b64(['src/a.ts', 1])],
+    // 디코딩되는 JSON이어도 표준 base64가 아니면 모른다(판정 F10): 알파벳 밖 문자, 공백, 줄바꿈, 4의 배수가 아닌 길이
+    [
+      '알파벳 밖 문자',
+      `${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] }).slice(0, 4)}%${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] }).slice(4)}`,
+    ],
+    ['공백', ` ${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })}`],
+    ['줄바꿈', `${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })}\n`],
+    [
+      'URL용 base64',
+      b64({ changed: ['src/a.ts'], outside: ['src/b.ts?>'] })
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_'),
+    ],
+    ['채움 없는 길이', b64({ changed: ['src/a.ts'], outside: ['b'] }).replace(/=+$/, '')],
   ];
   for (const [name, value] of bad) assert.deepEqual(parse(value), unknown, name);
 });

@@ -36,9 +36,12 @@ const oneLine = (s: string) =>
 export const PARKED_NOTE =
   '- 상태 parked: 구현 대기. 이 head는 계획 파일만 담고 있어 그 지적이 가리키는 코드가 없다. 판정 대상이 아니고, 코드가 다시 올라온 head에서 open으로 돌아간다';
 
-/** 원장 파일에 적는 round-main.txt의 뜻(Issue #262). 그 파일이 있을 때만 적는다 */
+/**
+ * 원장 파일에 적는 round-main.txt의 뜻과 그 파일 결함의 처리(Issue #262). 그 파일이 있을 때만 적는다. 원장이 있는 PR은
+ * 1라운드의 프롬프트를 계속 쓰므로(10.2절 (2)) 처리 규칙을 고정되지 않는 이 안내에도 적는다(판정 F11)
+ */
 export const ROUND_MAIN_NOTE =
-  '직전 판정 이후 main 병합으로만 바뀐 파일. 이 PR의 변경이 아니다(round-diff.patch에 없다). 그 파일의 문제는 이 PR의 지적이 아니다';
+  '직전 판정 이후 main 병합으로만 바뀐 파일. 이 PR의 변경이 아니다(round-diff.patch에 없다). 그 파일에서 결함을 찾았으면 낮추지 말고 원래 등급으로 적어라: 구현 판정의 기록은 그 파일의 새 P1을 범위 밖으로 미뤄 Issue로 넘기고(이 PR을 막지 않는다), P0은 그대로 막는다';
 
 /**
  * 이 PR의 파일: 지금 head와 직전 판정 head가 merge-base 대비 바꾼 파일의 합. 직전 판정 뒤 되돌린 파일도 이 PR의 것이다
@@ -199,6 +202,8 @@ export function encodeRoundChanged(
   return v.length <= max ? v : '';
 }
 
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
 const isStrings = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((x) => typeof x === 'string');
 
@@ -212,6 +217,8 @@ export function parseRoundChanged(value: string): {
   outside: string[];
 } {
   const unknown = { changed: null, outside: [] };
+  // 표준 base64만 받는다: Node의 디코더는 알파벳 밖 문자를 건너뛰어, 깨진 값도 읽혀 버린다(판정 F10)
+  if (!BASE64_RE.test(value) || value.length % 4 !== 0) return unknown;
   let raw: unknown;
   try {
     raw = JSON.parse(Buffer.from(value, 'base64').toString());
