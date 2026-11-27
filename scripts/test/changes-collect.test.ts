@@ -3,7 +3,11 @@
 // 문제가 하나라도 있으면 아무 파일도 쓰지 않는다. 계획 20261123-change-fragments step1.
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   existsSync,
+  ftruncateSync,
+  openSync,
+  writeSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -199,6 +203,11 @@ function direct(
     process.stdout.write = w;
     process.stderr.write = e;
   }
+}
+/** 쓰기 주입 콜백이 새 파일의 핸들에 끝까지 쓴다(Issue #257: 주입은 경로가 아니라 핸들에 쓴다) */
+function writeAll(fd: number, text: string): void {
+  const b = Buffer.from(text, 'utf8');
+  for (let at = 0; at < b.length;) at += writeSync(fd, b, at, b.length - at, at);
 }
 /** 링크를 만든다. 권한이 없는 환경(Windows)이면 false */
 function tryLink(make: () => void): boolean {
@@ -528,9 +537,9 @@ test('changes-collect: 지우다 실패하면 1과 되돌리는 명령을 내고
   let saved = false;
   const r1 = direct(racedFrag, {
     fs: {
-      writeFile: (f: string, t: string) => {
-        writeFileSync(f, t);
-        if (!saved && f.endsWith('CHANGELOG.md')) {
+      writeFile: (rel: string, t: string, fd: number) => {
+        writeAll(fd, t);
+        if (!saved && rel.endsWith('CHANGELOG.md')) {
           saved = true;
           writeFileSync(path.join(racedFrag, B.rel), newer);
         }
@@ -553,12 +562,12 @@ test('changes-collect: 지우다 실패하면 1과 되돌리는 명령을 내고
   let once = false;
   const r2 = direct(racedLog, {
     fs: {
-      writeFile: (f: string, t: string) => {
-        if (!once && f.endsWith('design.md')) {
+      writeFile: (rel: string, t: string, fd: number) => {
+        if (!once && rel.endsWith('design.md')) {
           once = true;
           writeFileSync(path.join(racedLog, CHANGELOG_PATH), concurrent);
         }
-        writeFileSync(f, t);
+        writeAll(fd, t);
       },
     },
   });
@@ -573,3 +582,660 @@ test('changes-collect: 지우다 실패하면 1과 되돌리는 명령을 내고
   assert.equal(read(racedLog, B.rel), B.text);
   assert.deepEqual(restoreArgs(r2.out).slice(-1), [DESIGN_PATH]);
 });
+
+// Issue #257(PR #254 판정 F4, 계획 검증 F2~F7, 구현 판정 F10~F13, 계획 검증 F4·F13~F15): 시작 검사 뒤 쓰기·지우기
+// 전에 기록 파일이나 상위 폴더가 링크(또는 하드 링크)로 바뀌거나 다른 세션이 저장하면, 링크 너머와 그 저장을 건드리지
+// 않고 멈추며 되돌리는 명령은 이 명령이 남긴 그대로인 파일만 담는다. 경우마다 test 하나다(앞 경우가 실패해도 뒤 경우가
+// 돈다). 시험용 고리(afterRead·beforeChange·beforeWrite)와 핸들에 쓰는 주입으로 확인과 변경 사이를 재현한다
+/** 정한 파일의 결과를 핸들에 쓴 직후 한 번 swap한다 */
+const afterWrite = (which: string, swap: () => void) => {
+  let done = false;
+  return {
+    writeFile: (rel: string, t: string, fd: number) => {
+      writeAll(fd, t);
+      if (!done && rel.endsWith(which)) {
+        done = true;
+        swap();
+      }
+    },
+  };
+};
+/** 되돌리는 명령의 경로들 */
+const restorePaths = (out: string) => {
+  const a = restoreArgs(out);
+  return a.slice(a.indexOf('--') + 1);
+};
+const restoreLine = (out: string) => out.split('\n').find((l) => l.includes(RESTORE));
+/** 고리를 정한 파일에서 한 번만 부른다 */
+const once = (which: string, act: () => void) => {
+  let done = false;
+  return (rel: string) => {
+    if (!done && rel === which) {
+      done = true;
+      act();
+    }
+  };
+};
+/** docs/harness 안의 임시 이름(새 파일이면 new-) 가운데 그 이름으로 끝나는 것 */
+const tempOf = (root: string, name: string, fresh: boolean) =>
+  readdirSync(path.join(root, 'docs/harness')).find(
+    (n) => n.startsWith('.collect-') && n.endsWith(name) && n.includes('-new-') === fresh,
+  );
+/** 심볼릭 링크를 만들 수 있는 환경인가(아니면 링크 경우를 건너뛴다) */
+const canLink = (() => {
+  const probe = tmp();
+  writeFileSync(path.join(probe, 'f'), '');
+  return tryLink(() => symlinkSync(path.join(probe, 'f'), path.join(probe, 'l')));
+})();
+
+test(
+  'changes-collect #257 (가): CHANGELOG를 쓰기 전에 같은 바이트의 리포 밖 파일로 가는 링크로 바꾸면 쓰지 않는다(O_NOFOLLOW를 꺼도)',
+  { skip: !canLink },
+  () => {
+    // (가) 설계서를 쓴 직후 CHANGELOG를 같은 바이트의 리포 밖 파일로 가는 링크로 바꾼다.
+    // O_NOFOLLOW를 끈 경우(Windows 경로)도 식별자가 달라 쓰지 않는다
+    for (const noFollow of [true, false]) {
+      const root = repo([A, B]);
+      const cl = path.join(root, CHANGELOG_PATH);
+      const same = readFileSync(cl);
+      const outFile = path.join(tmp(), 'CHANGELOG.md');
+      writeFileSync(outFile, same);
+      const fs = afterWrite('design.md', () => {
+        unlinkSync(cl);
+        symlinkSync(outFile, cl);
+      });
+      const r = direct(root, noFollow ? { fs } : { fs, noFollow: false });
+      const name = `(가) noFollow=${noFollow}`;
+      assert.equal(r.code, 1, `${name}: ${r.out}`);
+      assert.match(r.out, /CHANGELOG\.md: 처음 검사한 그 파일이 아니다/, name);
+      assert.ok(readFileSync(outFile).equals(same), `${name}: 리포 밖 파일은 그대로다`);
+      assert.deepEqual(restorePaths(r.out), [DESIGN_PATH], name);
+      assert.equal(read(root, A.rel), A.text, name);
+      assert.equal(read(root, B.rel), B.text, name);
+    }
+  },
+);
+
+test(
+  'changes-collect #257 (나): 쓰는 동안 docs/harness를 리포 밖 사본 폴더로 가는 링크로 바꾸면 사본을 건드리지 않고 자동으로 되돌리지 않는다',
+  { skip: !canLink },
+  () => {
+    // (나) 설계서를 쓰는 동안 docs/harness를 옆으로 옮기고, 같은 바이트의 사본이 든 리포 밖 폴더로 가는 링크를 둔다.
+    // 작업 폴더가 확인한 폴더 자체라 리포 밖 사본은 그대로이고, 끝난 뒤 폴더 확인으로 멈춘다. 바꾼 파일은 폴더가 바뀌어
+    // 자동으로 되돌리지 않는다(설계서는 쓰는 동안 임시 이름에 있어 사본을 만들지 않는다)
+    {
+      const root = repo([A, B]);
+      const outDir = path.join(tmp(), 'harness');
+      const copies: [string, Buffer][] = [];
+      const fs = afterWrite('design.md', () => {
+        const real = path.join(root, 'docs/harness');
+        for (const rel of ['CHANGELOG.md', 'changes/20261124-a.md', 'changes/20261124-b-s0.md']) {
+          const to = path.join(outDir, ...rel.split('/'));
+          mkdirSync(path.dirname(to), { recursive: true });
+          const b = readFileSync(path.join(real, ...rel.split('/')));
+          writeFileSync(to, b);
+          copies.push([to, b]);
+        }
+        renameSync(real, path.join(root, 'docs/harness-moved'));
+        symlinkSync(outDir, real, 'dir');
+      });
+      const r = direct(root, { fs });
+      assert.equal(r.code, 1, `(나): ${r.out}`);
+      assert.match(r.out, /docs\/harness: 처음 검사한 그 폴더가 아니다/);
+      assert.match(r.out, /제자리/);
+      assert.equal(copies.length, 3);
+      for (const [to, b] of copies) assert.ok(readFileSync(to).equals(b), `(나) 리포 밖 ${to}`);
+      assert.doesNotMatch(r.out, /되돌리는 명령: /, '(나) 폴더가 바뀌어 자동으로 되돌리지 않는다');
+      assert.match(
+        r.out,
+        /자동으로 되돌리지 않는 파일: docs\/harness\/design\.md, docs\/harness\/CHANGELOG\.md\(/,
+      );
+    }
+  },
+);
+
+test('changes-collect #257 (다): 설계서를 쓴 뒤 CHANGELOG에 리포 밖 하드 링크가 생기면 쓰지 않는다', () => {
+  // (다) 설계서를 쓴 직후 CHANGELOG에 리포 밖 이름의 하드 링크를 더한다(하드 링크는 Windows에서도 만든다)
+  {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    const same = readFileSync(cl);
+    const twin = path.join(tmp(), 'twin.md');
+    let made = false;
+    let called = false;
+    const fs = afterWrite('design.md', () => {
+      called = true;
+      made = tryLink(() => linkSync(cl, twin));
+    });
+    const r = direct(root, { fs });
+    assert.ok(called, `(다) 고리가 불렸다: ${r.out}`);
+    if (made) {
+      assert.equal(r.code, 1, `(다): ${r.out}`);
+      assert.match(r.out, /CHANGELOG\.md: 처음 검사한 그 파일이 아니다/);
+      assert.ok(readFileSync(twin).equals(same), '(다) 리포 밖 이름의 바이트는 그대로다');
+      assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+    }
+  }
+});
+
+test(
+  'changes-collect #257 (라): CHANGELOG를 쓰는 동안 조각 폴더를 리포 밖 폴더로 가는 링크로 바꾸면 리포 밖 조각을 지우지 않는다',
+  { skip: !canLink },
+  () => {
+    // (라) CHANGELOG를 쓴 직후 조각 폴더를 옆으로 옮기고, 같은 이름·바이트의 조각이 든 리포 밖 폴더로 가는 링크를 둔다
+    {
+      const root = repo([A, B]);
+      const outDir = path.join(tmp(), 'changes');
+      const fs = afterWrite('CHANGELOG.md', () => {
+        const real = path.join(root, DIR);
+        mkdirSync(outDir);
+        for (const f of [A, B]) writeFileSync(path.join(outDir, path.basename(f.rel)), f.text);
+        renameSync(real, path.join(root, 'docs/harness/changes-moved'));
+        symlinkSync(outDir, real, 'dir');
+      });
+      const r = direct(root, { fs });
+      assert.equal(r.code, 1, `(라): ${r.out}`);
+      assert.match(r.out, /docs\/harness\/changes: 처음 검사한 그 폴더가 아니다/);
+      for (const f of [A, B])
+        assert.equal(
+          readFileSync(path.join(outDir, path.basename(f.rel)), 'utf8'),
+          f.text,
+          `(라) 리포 밖 조각 ${f.rel}은 지우지 않는다`,
+        );
+      assert.deepEqual(restorePaths(r.out), [DESIGN_PATH, CHANGELOG_PATH]);
+    }
+  },
+);
+
+test(
+  'changes-collect #257 (마): CHANGELOG를 확인한 뒤 옮기기 직전에 링크로 바꾸면 링크로 돌려놓고 쓰지 않는다',
+  { skip: !canLink },
+  () => {
+    // (마) CHANGELOG를 이름으로 확인한 뒤 옮기기 직전에 그 경로를 같은 바이트의 리포 밖 파일로 가는 링크로 바꾼다.
+    // 옮긴 것을 다시 보면 링크라 제자리로 돌려놓고 멈춘다. 리포 밖 파일은 그대로다(경로로 쓰면 리포 밖 파일이 바뀐다)
+    {
+      const root = repo([A, B]);
+      const cl = path.join(root, CHANGELOG_PATH);
+      const same = readFileSync(cl);
+      const outFile = path.join(tmp(), 'CHANGELOG.md');
+      writeFileSync(outFile, same);
+      const beforeChange = once(CHANGELOG_PATH, () => {
+        unlinkSync(cl);
+        symlinkSync(outFile, cl);
+      });
+      const r = direct(root, { hooks: { beforeChange } });
+      assert.equal(r.code, 1, `(마): ${r.out}`);
+      assert.match(r.out, /CHANGELOG\.md: 처음 검사한 그 파일이 아니다/);
+      assert.ok(readFileSync(outFile).equals(same), '(마) 리포 밖 파일은 그대로다');
+      assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+      assert.ok(lstatSync(cl).isSymbolicLink(), '(마) CHANGELOG 경로는 링크로 돌려놓아진다');
+      assert.equal(read(root, A.rel), A.text);
+    }
+  },
+);
+
+test('changes-collect #257 (바): 읽은 직후 제자리에서 저장한 조각은 지우지 않고, 모으기는 처음 읽은 바이트로 한다', () => {
+  // (바) 조각 B를 읽은 직후 제자리에서 다른 내용으로 저장한다. 한 번 읽은 바이트로 HEAD 확인과 모으기를 하므로
+  // 지우기 직전에 바뀐 것이 걸려 B를 지우지 않는다(나중에 저장한 내용이 남고, 되돌리기 목록에 B가 없다)
+  {
+    const root = repo([A, B]);
+    const newer = frag('20261124-b-s0', ['b 하나', 'b 둘(읽은 뒤 저장)'], ['b 설계 첫째']);
+    const afterRead = once(B.rel, () => writeFileSync(path.join(root, B.rel), newer));
+    const r = direct(root, { hooks: { afterRead } });
+    assert.equal(r.code, 1, `(바): ${r.out}`);
+    assert.match(r.out, /20261124-b-s0\.md: 읽은 뒤 바뀌었다/);
+    assert.equal(read(root, B.rel), newer, '(바) 나중에 저장한 조각은 지우지 않는다');
+    // 모으기는 처음 읽은 바이트로 했다: CHANGELOG에 B의 처음 항목만 있고 나중 항목은 없다
+    const cl = read(root, CHANGELOG_PATH);
+    assert.match(cl, /^- b 하나$/m);
+    assert.doesNotMatch(cl, /읽은 뒤 저장/);
+    assert.deepEqual(restorePaths(r.out), [DESIGN_PATH, CHANGELOG_PATH, A.rel]);
+    sh('git', restoreArgs(r.out), root);
+    assert.equal(read(root, B.rel), newer, '(바) 되돌려도 나중에 저장한 내용이 남는다');
+  }
+});
+
+test(
+  'changes-collect #257 (사): 조각을 확인한 뒤 조각 폴더를 리포 밖 폴더로 가는 링크로 바꿔도 작업 폴더 안에서 지워 리포 밖 조각이 남는다',
+  { skip: !canLink },
+  () => {
+    // (사) 조각 A를 지우기 직전에 조각 폴더를 옆으로 옮기고 같은 이름·바이트의 조각이 든 리포 밖 폴더로 가는 링크를 둔다.
+    // 작업 폴더가 확인한 폴더 자체라 리포 밖 조각은 남고, 끝난 뒤 폴더 확인으로 멈춘다
+    {
+      const root = repo([A, B]);
+      const outDir = path.join(tmp(), 'changes');
+      let moved = true;
+      const beforeChange = once(A.rel, () => {
+        mkdirSync(outDir);
+        for (const f of [A, B]) writeFileSync(path.join(outDir, path.basename(f.rel)), f.text);
+        try {
+          renameSync(path.join(root, DIR), path.join(root, 'docs/harness/changes-moved'));
+        } catch (e) {
+          // Windows는 작업 폴더인 폴더를 옮기지 못한다(그것으로 이 경쟁도 일어나지 않는다)
+          if (process.platform === 'win32') {
+            moved = false;
+            return;
+          }
+          throw e;
+        }
+        symlinkSync(outDir, path.join(root, DIR), 'dir');
+      });
+      const r = direct(root, { hooks: { beforeChange } });
+      if (moved) {
+        assert.equal(r.code, 1, `(사): ${r.out}`);
+        assert.match(r.out, /docs\/harness\/changes: 처음 검사한 그 폴더가 아니다/);
+        for (const f of [A, B])
+          assert.equal(
+            readFileSync(path.join(outDir, path.basename(f.rel)), 'utf8'),
+            f.text,
+            `(사) 리포 밖 조각 ${f.rel}은 지우지 않는다`,
+          );
+        assert.deepEqual(restorePaths(r.out), [DESIGN_PATH, CHANGELOG_PATH]);
+        assert.match(r.out, new RegExp(`자동으로 되돌리지 않는 파일: ${A.rel}, ${B.rel}\\(`));
+      }
+    }
+  },
+);
+
+test(
+  'changes-collect #257 (아): 마지막 읽기 직후 설계서를 링크로 바꾸면 아무것도 바꾸지 않는다',
+  { skip: !canLink },
+  () => {
+    // (아) 마지막 읽기 직후 설계서를 같은 바이트의 리포 밖 파일로 가는 링크로 바꾼다. 아무것도 바꾸지 않고 멈춘다
+    {
+      const root = repo([A, B]);
+      const dp = path.join(root, DESIGN_PATH);
+      const same = readFileSync(dp);
+      const outFile = path.join(tmp(), 'design.md');
+      writeFileSync(outFile, same);
+      const afterRead = once(B.rel, () => {
+        unlinkSync(dp);
+        symlinkSync(outFile, dp);
+      });
+      const r = direct(root, { hooks: { afterRead } });
+      assert.equal(r.code, 1, `(아): ${r.out}`);
+      assert.match(r.out, /design\.md: 처음 검사한 그 파일이 아니다/);
+      assert.match(r.out, /아무 파일도 바꾸지 않았다/);
+      assert.equal(restoreLine(r.out), undefined, '(아) 되돌리는 명령이 없다');
+      assert.ok(readFileSync(outFile).equals(same), '(아) 리포 밖 파일은 그대로다');
+      assert.equal(read(root, CHANGELOG_PATH), FRONT + changelogText());
+    }
+  },
+);
+
+test('changes-collect #257 (자): CHANGELOG를 새 파일에 쓰다가 실패하면 원래 파일을 돌려놓고 목록에 넣지 않는다', () => {
+  // (자) CHANGELOG를 새 파일에 쓰다가 실패한다. 원래 파일을 제자리로 돌려놓아 CHANGELOG는 그대로이고 목록에 없다
+  {
+    const root = repo([A, B]);
+    const r = direct(root, {
+      fs: {
+        writeFile: (rel: string, t: string, fd: number) => {
+          if (rel.endsWith('CHANGELOG.md')) {
+            ftruncateSync(fd, 0);
+            throw new Error('쓰기 막힘');
+          }
+          writeAll(fd, t);
+        },
+      },
+    });
+    assert.equal(r.code, 1, `(자): ${r.out}`);
+    assert.match(r.out, /CHANGELOG\.md 쓰기 실패: 쓰기 막힘/);
+    assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+    assert.equal(read(root, CHANGELOG_PATH), FRONT + changelogText());
+    // 새 파일은 지우지 않고 남긴 임시 파일로 알린다(계획 검증 F19). 원래 파일의 임시 이름은 남지 않는다
+    const left = readdirSync(path.join(root, 'docs/harness')).filter((n) =>
+      n.startsWith('.collect-'),
+    );
+    assert.equal(left.length, 1, r.out);
+    assert.ok(left[0].includes('-new-'), left[0]);
+    assert.ok(r.out.includes(`남긴 임시 파일: docs/harness/${left[0]}`), r.out);
+    assert.equal(read(root, A.rel), A.text);
+  }
+});
+
+test('changes-collect #257 (자2): 새 파일 열기가 실패하면(그 이름을 다른 프로세스가 먼저 만들었다) 그 파일을 지우지 않고 원래 파일을 돌려놓는다', () => {
+  const root = repo([A, B]);
+  const original = read(root, CHANGELOG_PATH);
+  let taken = '';
+  const r = direct(root, {
+    fs: {
+      openNew: (name: string, flags: number, mode: number) => {
+        if (!taken && name.endsWith('CHANGELOG.md')) {
+          taken = name;
+          writeFileSync(name, '다른 프로세스가 먼저 만든 파일\n');
+        }
+        return openSync(name, flags, mode);
+      },
+    },
+  });
+  assert.equal(r.code, 1, `(자2): ${r.out}`);
+  assert.match(r.out, /CHANGELOG\.md 쓰기 실패: EEXIST/);
+  assert.equal(read(root, CHANGELOG_PATH), original, '(자2) CHANGELOG는 원래 바이트로 돌아온다');
+  assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+  assert.ok(taken, '(자2) 열기 주입이 불렸다');
+  assert.equal(
+    read(root, `docs/harness/${taken}`),
+    '다른 프로세스가 먼저 만든 파일\n',
+    '(자2) 먼저 있던 파일은 지우지 않는다',
+  );
+});
+
+test('changes-collect #257 (카): 지우기가 실패하고 원래 이름에 새 조각이 저장되면 원래 바이트를 임시 이름에 남기고 목록에서 뺀다', () => {
+  // (카)
+  const root = repo([A, B]);
+  const newer = frag('20261124-a', ['a 하나', 'a 둘', 'a 셋(지우기 실패 사이 저장)']);
+  const r = direct(root, {
+    fs: {
+      unlink: (f: string) => {
+        if (f.endsWith('20261124-a.md')) {
+          writeFileSync(path.join(root, A.rel), newer);
+          throw new Error('지우기 막힘');
+        }
+        unlinkSync(f);
+      },
+    },
+  });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /20261124-a\.md: 확인이 어긋나 제자리로 돌려놓으려 했으나 못 해/);
+  const left = readdirSync(path.join(root, DIR)).filter((n) => n.startsWith('.collect-'));
+  assert.equal(left.length, 1, r.out);
+  assert.ok(r.out.includes(`${DIR}/${left[0]}`), '임시 이름의 경로를 알린다');
+  assert.equal(read(root, `${DIR}/${left[0]}`), A.text, '원래 바이트는 임시 이름에 남는다');
+  const a = restoreArgs(r.out);
+  assert.deepEqual(a.slice(a.indexOf('--') + 1), [DESIGN_PATH, CHANGELOG_PATH]);
+  sh('git', a, root);
+  assert.equal(read(root, A.rel), newer, '되돌려도 새 조각이 남는다');
+});
+
+test('changes-collect #257 (타): 255바이트 이름의 조각도 끝까지 모은다', () => {
+  // (타) 255바이트 이름의 조각(만들 수 없는 환경이면 건너뛴다)
+  const stem = `20261124-${'a'.repeat(255 - '20261124-'.length - '.md'.length)}`;
+  const long = { rel: `${DIR}/${stem}.md`, text: frag(stem, ['긴 이름 조각']) };
+  let longRoot = '';
+  try {
+    longRoot = repo([A, long]);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== 'ENAMETOOLONG' && code !== 'ENOENT') throw e;
+  }
+  if (longRoot) {
+    const done = direct(longRoot, { date: '2026-11-25' });
+    assert.equal(done.code, 0, done.out);
+    assert.deepEqual(readdirSync(path.join(longRoot, DIR)), []);
+    assert.match(read(longRoot, CHANGELOG_PATH), /- 긴 이름 조각/);
+  }
+});
+
+test('changes-collect #257 (파): CHANGELOG를 확인한 뒤 옮기기 직전에 리포 밖 하드 링크가 생기면 쓰지 않는다', () => {
+  // (파) CHANGELOG를 이름으로 확인한 뒤 옮기기 직전에 리포 밖 이름의 하드 링크를 더한다
+  {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    const same = readFileSync(cl);
+    const twin = path.join(tmp(), 'twin.md');
+    let made = false;
+    let called = false;
+    const r = direct(root, {
+      hooks: {
+        beforeChange: (rel: string) => {
+          if (called || rel !== CHANGELOG_PATH) return;
+          called = true;
+          made = tryLink(() => linkSync(cl, twin));
+        },
+      },
+    });
+    assert.ok(called, `(파) 고리가 불렸다: ${r.out}`);
+    if (made) {
+      assert.equal(r.code, 1, `(파): ${r.out}`);
+      assert.match(r.out, /CHANGELOG\.md: 처음 검사한 그 파일이 아니다/);
+      assert.ok(readFileSync(twin).equals(same), '(파) 리포 밖 이름의 바이트는 그대로다');
+      assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+    }
+  }
+});
+
+test('changes-collect #257 (하): 새 파일에 쓰는 동안 다른 세션이 같은 이름으로 저장하면 게시하지 않고 그 저장을 남긴다', () => {
+  // (하) CHANGELOG를 새 파일에 쓰는 동안 다른 세션이 CHANGELOG 이름으로 새 파일을 저장한다
+  {
+    const root = repo([A, B]);
+    const original = read(root, CHANGELOG_PATH);
+    const other = FRONT + changelogText(['있던 항목', '다른 세션이 게시 사이에 저장']);
+    const r = direct(root, {
+      fs: {
+        writeFile: (rel: string, t: string, fd: number) => {
+          writeAll(fd, t);
+          if (rel.endsWith('CHANGELOG.md')) writeFileSync(path.join(root, CHANGELOG_PATH), other);
+        },
+      },
+    });
+    assert.equal(r.code, 1, `(하): ${r.out}`);
+    assert.match(
+      r.out,
+      /CHANGELOG\.md: 그 사이 다른 세션이 이 이름으로 새 파일을 저장해 결과를 쓰지 않았다/,
+    );
+    assert.equal(read(root, CHANGELOG_PATH), other, '(하) 다른 세션의 저장이 남는다');
+    const m = /원래 파일은 (docs\/harness\/\.collect-[^ ]+)에 남겼다/.exec(r.out);
+    assert.ok(m, r.out);
+    assert.equal(read(root, m[1]), original, '(하) 원래 파일은 임시 이름에 남는다');
+    const fresh = tempOf(root, 'CHANGELOG.md', true);
+    assert.ok(fresh, '(하) 결과를 쓴 새 파일도 임시 이름에 남는다');
+    assert.ok(r.out.includes(`남긴 임시 파일: docs/harness/${fresh}`), r.out);
+    assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+  }
+});
+
+test('changes-collect #257 (거): 게시 뒤 다른 세션이 새 파일로 바꿔 저장하면 되돌리는 명령에서 뺀다', () => {
+  // (거) CHANGELOG를 게시한 뒤 조각 A를 확인한 직후 다른 세션이 CHANGELOG를 새 파일로 바꿔 저장하고, A의 지우기가 실패한다
+  {
+    const root = repo([A, B]);
+    const other = FRONT + changelogText(['다른 세션이 게시 뒤에 저장']);
+    let done = false;
+    const r = direct(root, {
+      hooks: {
+        beforeChange: (rel: string) => {
+          if (done || rel !== A.rel) return;
+          done = true;
+          const saving = path.join(root, 'docs/harness/saving.tmp');
+          writeFileSync(saving, other);
+          renameSync(saving, path.join(root, CHANGELOG_PATH));
+        },
+      },
+      fs: {
+        unlink: (f: string) => {
+          if (f.endsWith('20261124-a.md')) throw new Error('지우기 막힘');
+          unlinkSync(f);
+        },
+      },
+    });
+    assert.equal(r.code, 1, `(거): ${r.out}`);
+    assert.match(r.out, /20261124-a\.md 지우기 실패: 지우기 막힘/);
+    assert.deepEqual(restorePaths(r.out), [DESIGN_PATH], '(거) 되돌리는 명령에 CHANGELOG가 없다');
+    assert.match(r.out, /자동으로 되돌리지 않는 파일: docs\/harness\/CHANGELOG\.md\(/);
+    sh('git', restoreArgs(r.out), root);
+    assert.equal(read(root, CHANGELOG_PATH), other, '(거) 되돌려도 다른 세션의 저장이 남는다');
+    assert.equal(read(root, A.rel), A.text);
+  }
+});
+
+test('changes-collect #257 (거2): 게시 뒤 다른 세션이 제자리에서 저장하면 되돌리는 명령에서 뺀다', () => {
+  // (거2) (거)와 같되 다른 세션이 게시된 CHANGELOG를 제자리에서(같은 inode) 다른 내용으로 저장한다
+  {
+    const root = repo([A, B]);
+    const other = FRONT + changelogText(['다른 세션이 게시 뒤 제자리에 저장']);
+    let done = false;
+    const r = direct(root, {
+      hooks: {
+        beforeChange: (rel: string) => {
+          if (done || rel !== A.rel) return;
+          done = true;
+          writeFileSync(path.join(root, CHANGELOG_PATH), other);
+        },
+      },
+      fs: {
+        unlink: (f: string) => {
+          if (f.endsWith('20261124-a.md')) throw new Error('지우기 막힘');
+          unlinkSync(f);
+        },
+      },
+    });
+    assert.equal(r.code, 1, `(거2): ${r.out}`);
+    assert.deepEqual(restorePaths(r.out), [DESIGN_PATH], '(거2) 되돌리는 명령에 CHANGELOG가 없다');
+    assert.match(r.out, /자동으로 되돌리지 않는 파일: docs\/harness\/CHANGELOG\.md\(/);
+    sh('git', restoreArgs(r.out), root);
+    assert.equal(read(root, CHANGELOG_PATH), other, '(거2) 되돌려도 제자리 저장이 남는다');
+  }
+});
+
+test(
+  'changes-collect #257 (너): 새 파일을 연 뒤 쓰기 전에 그 이름을 리포 밖 링크로 바꿔도 핸들로 써서 리포 밖 파일이 그대로다',
+  { skip: !canLink },
+  () => {
+    // (너) CHANGELOG의 새 파일을 연 뒤 쓰기 직전에 그 이름을 리포 밖 파일로 가는 링크로 바꾼다(기본 쓰기).
+    // 핸들로 쓰므로 리포 밖 파일은 그대로이고, 새 파일 이름이 바뀌어 게시하지 않는다(경로로 쓰면 리포 밖 파일이 바뀐다)
+    const root = repo([A, B]);
+    const original = read(root, CHANGELOG_PATH);
+    const outFile = path.join(tmp(), 'outside.md');
+    writeFileSync(outFile, '리포 밖\n');
+    let done = false;
+    const r = direct(root, {
+      hooks: {
+        beforeWrite: (rel: string) => {
+          if (done || rel !== CHANGELOG_PATH) return;
+          done = true;
+          const fresh = tempOf(root, 'CHANGELOG.md', true);
+          assert.ok(fresh, '(너) 새 파일이 있다');
+          const at = path.join(root, 'docs/harness', fresh);
+          unlinkSync(at);
+          symlinkSync(outFile, at);
+        },
+      },
+    });
+    assert.equal(r.code, 1, `(너): ${r.out}`);
+    assert.match(r.out, /CHANGELOG\.md: 결과를 쓴 새 파일\(.*\)이 그 사이 바뀌어 게시하지 않았다/);
+    assert.equal(readFileSync(outFile, 'utf8'), '리포 밖\n', '(너) 리포 밖 파일은 그대로다');
+    assert.equal(read(root, CHANGELOG_PATH), original, '(너) CHANGELOG는 그대로다');
+    assert.deepEqual(restorePaths(r.out), [DESIGN_PATH]);
+  },
+);
+
+test('changes-collect #257 (파2): 새 파일에 쓰는 동안 옮겨 둔 원래 파일에 리포 밖 하드 링크가 생겨도 원래 inode에 쓰지 않는다', () => {
+  // (파2) CHANGELOG의 새 파일에 쓰는 동안, 임시 이름에 옮겨 둔 원래 파일에 리포 밖 이름의 하드 링크를 더한다.
+  // 원래 inode에는 쓰지 않으므로 모으기는 끝나고 리포 밖 이름의 바이트는 원래 그대로다(원래 inode에 쓰면 바뀐다)
+  {
+    const root = repo([A, B]);
+    const original = readFileSync(path.join(root, CHANGELOG_PATH));
+    const twin = path.join(tmp(), 'twin2.md');
+    let made = false;
+    let called = false;
+    const r = direct(root, {
+      fs: {
+        writeFile: (rel: string, t: string, fd: number) => {
+          writeAll(fd, t);
+          if (called || rel !== CHANGELOG_PATH) return;
+          called = true;
+          const parked = tempOf(root, 'CHANGELOG.md', false);
+          assert.ok(parked, '(파2) 임시 이름의 원래 파일이 있다');
+          made = tryLink(() => linkSync(path.join(root, 'docs/harness', parked), twin));
+        },
+      },
+    });
+    assert.ok(called, `(파2) 주입한 쓰기가 불렸다: ${r.out}`);
+    if (made) {
+      assert.equal(r.code, 0, `(파2): ${r.out}`);
+      assert.ok(readFileSync(twin).equals(original), '(파2) 리포 밖 이름의 바이트는 원래 그대로다');
+      assert.match(read(root, CHANGELOG_PATH), /^- a 하나$/m);
+    }
+  }
+});
+
+// Issue #257 계획 검증 F5: 조각의 확인과 지우기 사이에 다른 세션이 같은 이름으로 저장하면(편집기의 원자적 저장)
+// 새 파일을 지우지 않고 제자리에 남긴 채 멈춘다. 되돌리기 목록에 없고, 임시 이름 파일도 남지 않는다
+test('changes-collect #257 (차): 조각을 확인한 뒤 같은 이름으로 새 파일이 저장되면 그 파일을 지우지 않고 1이다', () => {
+  const root = repo([A, B]);
+  const newer = frag('20261124-a', ['a 하나', 'a 둘', 'a 셋(확인 뒤 저장)']);
+  let done = false;
+  const r = direct(root, {
+    hooks: {
+      beforeChange: (rel: string) => {
+        if (done || rel !== A.rel) return;
+        done = true;
+        const saving = path.join(root, DIR, 'saving.tmp');
+        writeFileSync(saving, newer);
+        renameSync(saving, path.join(root, A.rel));
+      },
+    },
+  });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /20261124-a\.md: 처음 검사한 그 파일이 아니다/);
+  assert.equal(read(root, A.rel), newer, '확인 뒤 저장한 조각은 지우지 않는다');
+  assert.deepEqual(readdirSync(path.join(root, DIR)).sort(), ['20261124-a.md', '20261124-b-s0.md']);
+  const a = restoreArgs(r.out);
+  assert.deepEqual(a.slice(a.indexOf('--') + 1), [DESIGN_PATH, CHANGELOG_PATH]);
+  sh('git', a, root);
+  assert.equal(read(root, A.rel), newer, '되돌려도 확인 뒤 저장한 내용이 남는다');
+  assert.equal(read(root, B.rel), B.text);
+});
+
+// Issue #257 구현 판정 F22: 게시·지우기 뒤 상위 폴더(docs)가 일반 파일로 바뀌어도 목록을 다시 보다 죽지 않고,
+// 바꾼 파일을 "자동으로 되돌리지 않는 파일"로 알린다(아무 파일도 바꾸지 않았다고 하지 않는다)
+test('changes-collect #257 (더): 지우는 동안 docs가 일반 파일로 바뀌어도 바꾼 파일을 자동으로 되돌리지 않는 파일로 알린다', () => {
+  const root = repo([A, B]);
+  let called = false;
+  let moved = true;
+  const r = direct(root, {
+    hooks: {
+      beforeChange: (rel: string) => {
+        if (called || rel !== A.rel) return;
+        called = true;
+        try {
+          renameSync(path.join(root, 'docs'), path.join(root, 'docs-moved'));
+        } catch (e) {
+          // Windows는 작업 폴더의 위 폴더를 옮기지 못한다(그것으로 이 경쟁도 일어나지 않는다)
+          if (process.platform === 'win32') {
+            moved = false;
+            return;
+          }
+          throw e;
+        }
+        writeFileSync(path.join(root, 'docs'), '폴더 자리의 일반 파일\n');
+      },
+    },
+  });
+  assert.ok(called, `(더) 고리가 불렸다: ${r.out}`);
+  if (!moved) return;
+  assert.equal(r.code, 1, `(더): ${r.out}`);
+  assert.match(r.out, /changes-collect: docs: 처음 검사한 그 폴더가 아니다/);
+  assert.doesNotMatch(r.out, /아무 파일도 바꾸지 않았다/);
+  assert.doesNotMatch(r.out, /되돌리는 명령: /);
+  assert.match(
+    r.out,
+    new RegExp(
+      `자동으로 되돌리지 않는 파일: ${DESIGN_PATH}, ${CHANGELOG_PATH}, ${A.rel}, ${B.rel}\\(`,
+    ),
+  );
+  assert.equal(readFileSync(path.join(root, 'docs'), 'utf8'), '폴더 자리의 일반 파일\n');
+});
+
+// Issue #257 구현 판정 F23: 새 파일로 게시해도 원래 파일의 권한 비트를 지킨다(umask로 줄지 않는다)
+test(
+  'changes-collect #257 (러): 게시한 기록 파일은 원래 권한 비트를 지킨다',
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    const dp = path.join(root, DESIGN_PATH);
+    chmodSync(cl, 0o664);
+    // 설계서 권한은 테스트 프로세스의 umask로 만들어졌다: 그 값을 기록해 두고 견준다(판정 F24)
+    const designMode = lstatSync(dp).mode & 0o777;
+    const old = process.umask(0o022);
+    let r: { code: number; out: string };
+    try {
+      r = direct(root, { date: '2026-11-25' });
+    } finally {
+      process.umask(old);
+    }
+    assert.equal(r.code, 0, r.out);
+    assert.equal(lstatSync(cl).mode & 0o777, 0o664, '(러) 그룹 쓰기 권한이 남는다');
+    assert.equal(lstatSync(dp).mode & 0o777, designMode, '(러) 설계서도 원래 권한 그대로다');
+  },
+);
