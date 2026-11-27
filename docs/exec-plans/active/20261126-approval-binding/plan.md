@@ -26,7 +26,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 2. (step0) 이 리포의 버릴 시험 PR(위험도 높음, 병합하지 않는다)로 실제 동작을 잰다: 제작자 승인 뒤 (가) `origin/main` 병합만 더한 push와 (나) 내용을 바꾼 일반 커밋 push에서 리뷰 API의 상태(`state`)·커밋(`commit_id`)과 `risk-gate` 상태를 기록한다. 기대: (가) 승인 유지(`APPROVED`)이고 `risk-gate` success, (나) `DISMISSED`이고 `risk-gate` failure.
 3. (step0) 결과가 기대와 다르면 step1 전에 계획을 고친다(예: (가)에서도 철회되면 main 병합 뒤 다시 승인받는다고 문서에 적고, (나)에서 철회되지 않으면 이 방향을 다시 묻는다).
 4. (step1) `risk-gate`는 위험도 높음일 때 PR의 실제 base 브랜치(PR API `GET pulls/<n>`의 `base.ref`. 기본 브랜치 설정을 쓰지 않는다)의 규칙(`GET rules/branches/<base>`)에 `dismiss_stale_reviews_on_push: true`인 `pull_request` 규칙이 있는지 확인한다. 없으면 failure(`위험도 높음: 오래된 승인 철회 규칙이 없어 제작자 승인을 head에 묶을 수 없다`), 읽지 못하면 error(fail-closed). 규칙이 있으면 지금 판정(제작자의 마지막 판정 리뷰가 승인이고 리뷰의 커밋이 head)을 그대로 쓴다. 규칙은 위험도 높음이고 승인 리뷰가 있을 때만 읽는다. 읽기 실패의 error 설명에는 복구 방법(SECURITY.md)을 적는다.
-5. (step1) 전환: 규칙을 켜기 전에 받은 승인은 세지 않는다. main 설정 `github.dismissStaleSince`(ISO 시각, step0에서 기록한 규칙 활성화 시각)보다 엄격히 뒤(초 단위)에 제출된 승인만 센다. 같은 초이거나 앞선 승인은 승인이 아니다(failure, 고치는 법: 현재 head를 다시 승인). 키가 없거나 시각이 아니면 failure. 규칙 활성화 전에 승인받고 GitHub이 리뷰 커밋을 옮겨 둔 열린 PR(#226 꼴)이 활성화 뒤 push 없이 통과하지 않게 한다(계획 검증 F23).
+5. (step1) 전환: 규칙을 켜기 전에 받은 승인은 세지 않는다. main 설정 `github.dismissStaleSince`(ISO 시각, step0에서 기록한 규칙 활성화 시각)보다 엄격히 뒤(초 단위)에 제출된 승인만 센다. 같은 초이거나 앞선 승인은 승인이 아니다(failure, 고치는 법: 현재 head를 다시 승인). 키가 없거나 시각이 아니면 failure. 규칙 활성화 전에 승인받고 GitHub이 리뷰 커밋을 옮겨 둔 열린 PR(#226 꼴)이 활성화 뒤 push 없이 통과하지 않게 한다(계획 검증 F23). 전환 시각은 기본 브랜치(`github.defaultBranch`)의 것이다: PR의 실제 base가 기본 브랜치가 아니면 그 브랜치에서 규칙이 언제 켜졌는지 모르므로 위험도 높음 승인을 세지 않는다(failure, `위험도 높음: 기본 브랜치가 아닌 base(<base>)에는 승인 전환 시각이 없어 제작자 승인을 셀 수 없다`).
 6. (step1) `ops-check`가 같은 규칙을 봇 토큰으로 확인한다. 규칙이 없으면 2번 항목이 실패(`fail`), 읽지 못하면 다른 실패가 없을 때 `unknown`이고, 명령의 종료 코드가 그에 따른다.
 7. (step1) 설계서 0.2절(리포 설정)·10.3절(승인 결속 기준의 제작자 승인 행)·10.4절, 절차서 5절("위험도 높음", "승인 요청 전 조건"), SECURITY.md(제작자 설정 절차)를 이 규칙으로 맞춘다.
 
@@ -35,7 +35,7 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 범위:
 
 - step0: 제작자 작업 요청(규칙 세트), 시험 PR의 실측, `lab/approval-binding/`(절차·결과), 변경 조각.
-- step1: `scripts/gates/risk-gate.ts`(규칙과 전환 시각 확인), `scripts/ci/gates.ts`(PR base와 규칙을 읽어 넘긴다), `scripts/harness.ts`(`gates`가 읽기 함수를 만든다), `scripts/commands/ops-check.ts`(규칙 확인과 항목 상태), `scripts/lib/config.ts`·`harness.config.json`(`github.dismissStaleSince`), 테스트(`scripts/test/risk-gate.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`, `scripts/test/ops-check.test.ts`, `scripts/test/lib.test.ts`), 설계서·절차서·SECURITY.md, 변경 조각.
+- step1: `scripts/gates/risk-gate.ts`(규칙과 전환 시각 확인), `scripts/ci/gates.ts`(PR base와 규칙을 읽어 넘긴다), `scripts/harness.ts`(`gates`가 읽기 함수를 만든다), `scripts/commands/ops-check.ts`(규칙 확인과 항목 상태), `scripts/lib/config.ts`·`harness.config.json`(`github.dismissStaleSince`), 테스트(`scripts/test/risk-gate.test.ts`, `scripts/test/ci.test.ts`, `scripts/test/harness-guard.test.ts`, `scripts/test/ops-check.test.ts`, `scripts/test/lib.test.ts`), 설계서·절차서·SECURITY.md, 변경 조각. 규칙 목록의 쪽 경로·쪽 모으기·규칙 판정은 새 모듈 `scripts/lib/rules.ts`에 두고 판정 job(`readDismissRule`)과 GitHub 포트가 함께 쓴다. GitHub 포트(`scripts/lib/github.ts`)와 가짜 포트(`scripts/lib/github-fake.ts`)에 규칙 읽기(`branchRules`)를 더한다(`ops-check`는 포트로 읽고 명령 테스트는 가짜 포트로 돈다).
 
 비범위:
 
@@ -54,6 +54,9 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - `scripts/ci/gates.ts`
 - `scripts/harness.ts`
 - `scripts/commands/ops-check.ts`
+- `scripts/lib/rules.ts`
+- `scripts/lib/github.ts`
+- `scripts/lib/github-fake.ts`
 - `scripts/lib/config.ts`
 - `harness.config.json`
 - `scripts/test/lib.test.ts`
@@ -109,6 +112,9 @@ PR #226에서 제작자 승인은 2026-11-25T04:36:27Z에 head `5027f12`에 달�
 - 2026-11-26 계획 검증 11회차(head `ce4c1b8`): Claude 승인(P2 하나), Codex 수정 요청(F23 유지, F28 새로). 받아들였다. F23: 전환 시각과 같은 초에 제출된 승인은 활성화 직전일 수 있다 → 전환 시각보다 엄격히 뒤의 승인만 센다(수용 기준 5, step1 작업 2와 경계 테스트). F28: harness-guard의 성공 테스트가 새 전환 조건을 만족하는 입력을 갖지 않는다 → 그 테스트의 설정에 `github.dismissStaleSince`, 리뷰 제출 시각을 그보다 뒤의 ISO 시각으로 바꾸고, 같은 입력에서 `dismissRule`만 빼면 error임을 단언한다(step1 작업 5). Claude P2(설정을 PR이 바꿀 수 있다): 판정 job은 설정을 base에서 읽는다(`gates.yml`의 `--config-root ../base`). 의사결정 로그 문구를 그 근거로 고쳤다.
 - 2026-11-26 계획 검증 12회차(head `cd4f8a1`, 계획만): 두 검증자 승인(G1).
 - 2026-11-26 step0 실측: 제작자가 규칙 세트 `approval-dismiss-stale`(id 28177521, `created_at` 16:11:33Z)을 만들었고 봇이 16:18:41Z에 `rules/branches/main`과 `rulesets/28177521`로 읽었다. 시험 PR #256(플러밍 커밋 `b87c8b3`)을 제작자가 승인했고(`risk-gate` success), #242 병합 뒤 main 병합 커밋 `8cd1641`을 push했다(승인 유지, 리뷰 커밋이 `8cd1641`로 옮겨짐, success, L1 훅은 막지 않음). 이어 일반 커밋 `511f2a5`를 push했다(1초 뒤 `review_dismissed`, 리뷰 커밋은 `8cd1641`에 남음, failure). 기대(수용 기준 2)와 같아 step1을 계획대로 한다. 실제 PR #253의 main 병합 갱신(`c77a1cd`)에서도 승인이 유지되고 success였다. #256은 닫고 브랜치를 지웠다. 결과 `lab/approval-binding/results/live.json`·`README.md`, 변경 조각 s0.
+- 2026-11-27 step1 실행 PR #259(브랜치 `fix/20261126-approval-binding-s1`)의 첫 계획 커밋(관련 파일에 GitHub 포트 둘을 더함)에 계획 검증이 Claude 승인(P2 하나), Codex 수정 요청(P1 셋)을 냈다. 모두 step1 파일의 작업·AC를 고쳐야 하는 지적이라 절차서 2절 "실행 중인 step의 계획 수정"대로 완료된 step0 번호의 계획 수정 PR(`docs/20261126-approval-binding-s0`)로 먼저 고친다. #259는 초안으로 두고 커밋을 더 올리지 않는다. 받아들인 것: (1) `ops-check`의 포트가 규칙 목록을 끝까지 읽는 계약이 없다 → 쪽 경로·쪽 모으기·판정을 `scripts/lib/rules.ts`로 빼 판정 job과 실제 포트가 같은 함수로 끝까지 읽고, 끝까지 못 읽으면 던져 `unknown`이 되게 했다(쪽 모으기를 가짜 응답으로 테스트한다). (2) 슬래시가 든 base 브랜치(`release/1.x`)가 경로 두 구간으로 나뉜다 → 브랜치 이름을 경로 한 구간으로 인코딩(`release%2F1.x`)하고 판정 job·포트 모두 그 함수를 쓴다. (3) AC가 설계서·절차서 갱신을 보지 않는다 → 해당 문구 grep을 더했다. Claude P2(읽을 파일과 작업에 포트 메서드·순수 판정 함수가 없다) → 읽을 파일과 작업 4에 적었다.
+- 2026-11-27 같은 계획 수정에 PR #258의 main 병합 뒤 판정에서 나온 Codex 지적 F25(P1)도 받아들였다: 전환 시각은 main에서 잰 하나인데 다른 base 브랜치의 승인에도 적용돼, 그 브랜치에 규칙을 켜기 전에 받아 커밋이 옮겨진 승인이 통과할 수 있다 → 전환 시각은 기본 브랜치의 것으로 한정하고 base가 기본 브랜치가 아니면 failure(수용 기준 5, step1 작업 1·2·5). `readDismissRule`은 규칙과 함께 실제 base를 돌려준다.
+- 2026-11-27 계획 수정 PR #260의 계획 검증 1회차(head `965d390`): Claude 승인(지적 없음), Codex 수정 요청(P1 넷). 모두 받아들였다. (1) step1의 `harness-guard`·`gates` 테스트 문구가 옛 계약(`true`)으로 남았다(F25 대응 때 둘째 수정이 훅에 막힌 명령 안에 있어 실행되지 않았다) → `{ base: 'main', on: true }`로 고쳤다. (2) 잘못된 전환 시각을 설정 오류로 막으면 `gates`가 판정을 만들지 못해 수용 기준 5의 failure·설정 안내를 낼 수 없다 → 설정은 형만 두고 `risk-gate`가 failure로 내며, `gates` 진입점(설정 파일 → `loadConfig` → `runGates`) 테스트를 더했다. (3) 쪽 나눔 테스트가 실제 `GhCli`를 거치지 않는다 → 생성자에 `gh` 실행 함수를 받아 `new GhCli(dir, 가짜)`의 `branchRules`로 둘째 쪽 요청·감지·실패를 단언한다(AC에 그 테스트). (4) 전환 시각 AC가 모양만 본다 → `lab/approval-binding/results/live.json`의 `rule.firstSeenAt`과 같은지 본다.
 
 ## 의사결정 로그
 
