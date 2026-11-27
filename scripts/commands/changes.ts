@@ -71,6 +71,8 @@ interface Ident {
 const sameIdent = (a: Ident, b: Ident) => a.dev === b.dev && a.ino === b.ino;
 /** 기록 파일 하나를 읽는 상한(바이트). 설계서·CHANGELOG·조각은 이보다 훨씬 작다 */
 const READ_MAX = 16 * 1024 * 1024;
+/** 한 번에 읽는 크기 */
+const READ_CHUNK = 64 * 1024;
 /** 파일 이름 한도(바이트). 대부분의 파일 시스템이 이름 하나에 255바이트까지 받는다 */
 const NAME_MAX = 255;
 /**
@@ -267,14 +269,17 @@ export function runChangesCollect(
      * 기대지 않아 읽는 도중 끝에 덧붙은 바이트도 보고, 계속 커지는 파일을 끝없이 쌓지 않는다(Issue #261 판정 F1·F2)
      */
     const readUpTo = (fd: number, max: number): Buffer | null => {
-      const b = Buffer.alloc(max + 1);
+      // 작은 청크로 읽고 실제 읽은 크기만큼만 새로 복사해 돌려준다: 상한만큼의 큰 버퍼를 잡거나 쥐지 않는다(판정 F5)
+      const chunks: Buffer[] = [];
       let at = 0;
       while (at <= max) {
-        const n = readSync(fd, b, at, max + 1 - at, at);
+        const b = Buffer.alloc(Math.min(READ_CHUNK, max + 1 - at));
+        const n = readSync(fd, b, 0, b.length, at);
         if (n === 0) break;
+        chunks.push(b.subarray(0, n));
         at += n;
       }
-      return at > max ? null : b.subarray(0, at);
+      return at > max ? null : Buffer.concat(chunks, at);
     };
     /** 핸들의 내용이 `want` 바이트와 같은가(더 길어도 다르다) */
     const sameBytes = (fd: number, want: Buffer): boolean => {
