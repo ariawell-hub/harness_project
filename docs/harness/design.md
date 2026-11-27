@@ -996,7 +996,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다, PR이 바꾼 파일의 내용이 옛 head와 바이트 단위로 같다. 위험도 높음은 patch-id가 같아도 다시 검증 |
 | 계획 전용 커밋 | — | 진행 로그·상태·위치만 바뀌었으면 LLM 재검증 없이 `plan-gate`만 실행 |
 | 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC·금지사항 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
-| 제작자 승인(위험도 높음) | head SHA + GitHub의 오래된 승인 철회 규칙 세트(0.2절, `risk-gate`가 PR base 브랜치의 규칙을 확인) | `origin/main` 병합만 더한 갱신은 GitHub이 승인을 유지하고 리뷰의 커밋을 새 head로 옮긴다(실측, `lab/approval-binding`). 그 밖의 새 커밋은 GitHub이 승인을 철회해(`DISMISSED`) 다시 승인한다. 전환 시각(`github.dismissStaleSince`)보다 엄격히 뒤(초 단위)의 승인만 센다 |
+| 제작자 승인(위험도 높음) | head SHA + GitHub의 오래된 승인 철회 규칙 세트(0.2절, `risk-gate`가 PR base 브랜치의 규칙을 확인) | 충돌 없이 `origin/main` 병합만 더한 갱신(PR 변경분이 그대로)은 GitHub이 승인을 유지하고 리뷰의 커밋을 새 head로 옮긴다(실측, `lab/approval-binding`, #253). 충돌을 풀며 PR 변경분이 바뀐 병합과 그 밖의 새 커밋은 GitHub이 승인을 철회할 수 있고(`DISMISSED`, 충돌 해결 병합은 재지 않았다), 철회되면 `risk-gate`가 실패하므로 현재 head를 다시 승인한다. 전환 시각(`github.dismissStaleSince`)보다 엄격히 뒤(초 단위)의 승인만 센다 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
 - **계획 검증(G1) 구현**(`scripts/ci/plan-hash.ts`, `scripts/gates/plan-gate.ts`)
@@ -1025,7 +1025,7 @@ pnpm test src/auth/login-guard.spec.ts
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).
 2. 필수 체크가 모두 통과하면 GitHub이 squash merge 한다. 커밋 메시지에 계획 id를 넣는다.
 3. 위험도에 맞는 검증자가 모두 승인하면 계획 전용 커밋으로 계획을 완료 처리한다(8.3절). 위험도 높음이면 그 뒤에 제작자가 head를 승인한다.
-4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 5회 실패하면 병합을 취소한 채 `needs-human`으로 넘긴다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증한다. 위험도 높음의 제작자 승인은 main 병합만 더한 갱신에서 유지되고(규칙 세트), 그 밖의 새 커밋이면 다시 승인한다.
+4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 5회 실패하면 병합을 취소한 채 `needs-human`으로 넘긴다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증한다. 위험도 높음의 제작자 승인은 충돌 없이 main 병합만 더한 갱신에서 유지되고(규칙 세트), 충돌 해결로 PR 변경분이 바뀌었거나 그 밖의 새 커밋이면 GitHub이 승인을 철회할 수 있어 그때는 다시 승인한다.
 5. 병합되면 head 브랜치는 리포 설정으로 삭제되고, worktree는 runner의 다음 바퀴나 다음 세션 시작 시 정리한다(4.5절, 7.1절). 마지막 step이 병합되면 Issue가 자동으로 닫히고 `claim/<issue>` 브랜치도 정리한다. 남은 step이 있으면 runner가 다음 step을 시작한다. `merge` 스크립트는 이 정리를 수동으로 할 때 쓰는 편의 도구이며 강제 장치가 아니다.
 
 **병합 후 main CI가 실패하면**
