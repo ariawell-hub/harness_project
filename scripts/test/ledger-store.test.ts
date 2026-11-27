@@ -19,6 +19,7 @@ import {
   type LedgerApi,
 } from '../ci/ledger-store.ts';
 import type { StatusPayload } from '../ci/results.ts';
+import * as reviewRound from '../ci/review-round.ts';
 import { pinnedPrompt, writeRoundInput } from '../ci/review-round.ts';
 import type { Finding, Resolution, Verdict } from '../ci/verdict.ts';
 import { commitAll, gitInit, sh, tmp, write } from './helpers.ts';
@@ -315,7 +316,7 @@ function roundRepo() {
 test('writeRoundInput: 원장이 없으면 1라운드, 파일을 쓰지 않는다', () => {
   const { root } = roundRepo();
   const r = writeRoundInput({ root, ledger: null, reviewer: 'claude' });
-  assert.deepEqual(r, { round: 1, promptBase: '', changed: null });
+  assert.deepEqual(r, { round: 1, promptBase: '', changed: null, outside: [] });
   assert.equal(existsSync(path.join(root, '.harness-review/ledger.md')), false);
 });
 
@@ -359,6 +360,233 @@ test('writeRoundInput: 원장과 직전 판정 이후 바뀐 파일·diff를 검
   assert.deepEqual([first.round, first.changed], [1, null]);
   assert.match(readFileSync(path.join(dir, 'ledger.md'), 'utf8'), /1라운드/);
   assert.equal(existsSync(path.join(dir, 'round-changed.txt')), false);
+});
+
+/**
+ * 직전 판정 뒤 PR 브랜치가 main을 병합한 리포(Issue #262). main은 PR이 바꾸지 않은 `src/main-only.ts`를 바꿨다.
+ * again이면 병합 뒤 PR이 `src/a.ts`를 한 번 더 바꾼다. base는 지금 head와 main의 merge-base
+ */
+function mergedRepo(again: boolean) {
+  const root = tmp();
+  gitInit(root);
+  write(root, 'src/a.ts', 'a1\n');
+  write(root, 'src/main-only.ts', 'm1\n');
+  commitAll(root, 'base');
+  sh('git', ['checkout', '-q', '-b', 'pr'], root);
+  write(root, 'src/a.ts', 'a1\npr1\n');
+  commitAll(root, 'pr1');
+  const last = sh('git', ['rev-parse', 'HEAD'], root);
+  sh('git', ['checkout', '-q', 'main'], root);
+  write(root, 'src/main-only.ts', 'm2\n');
+  commitAll(root, 'main');
+  sh('git', ['checkout', '-q', 'pr'], root);
+  sh('git', ['merge', '-q', '--no-edit', 'main'], root);
+  if (again) {
+    write(root, 'src/a.ts', 'a1\npr1\npr2\n');
+    commitAll(root, 'pr2');
+  }
+  const base = sh('git', ['merge-base', 'main', 'HEAD'], root);
+  const ledger = applyVerdict(emptyLedger(BASE), {
+    reviewer: 'claude',
+    verdict: verdict([finding()]),
+    headSha: last,
+    changedSinceLastRound: null,
+  });
+  return { root, base, ledger };
+}
+
+test('writeRoundInput #262: main 병합으로만 바뀐 파일은 이 PR의 변경(changed·diff)에 넣지 않고 round-main.txt에 따로 적는다', () => {
+  const { root, base, ledger } = mergedRepo(true);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base });
+  assert.equal(r.round, 2);
+  assert.deepEqual(r.changed, ['src/a.ts']);
+  assert.deepEqual(r.outside, ['src/main-only.ts']);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(readFileSync(path.join(dir, 'round-changed.txt'), 'utf8'), 'src/a.ts\n');
+  assert.equal(readFileSync(path.join(dir, 'round-main.txt'), 'utf8'), 'src/main-only.ts\n');
+  const diff = readFileSync(path.join(dir, 'round-diff.patch'), 'utf8');
+  assert.match(diff, /\+pr2/);
+  assert.doesNotMatch(diff, /main-only/);
+  const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
+  assert.match(md, /round-main\.txt \(1개\)/);
+  assert.match(md, /이 PR의 변경이 아니다/);
+  // 고정된 옛 프롬프트를 쓰는 PR에도 처리 규칙이 간다: 원래 등급으로 적는다(판정 F11)
+  assert.match(md, /원래 등급으로 적어라/);
+  assert.match(md, /P0은 그대로 막는다/);
+  assert.doesNotMatch(md, /이 PR의 지적이 아니다/);
+});
+
+test('writeRoundInput #262: 직전 판정 뒤 main 병합만 더했으면 changed와 diff가 비고 main 쪽 파일은 round-main.txt에만 있다', () => {
+  const { root, base, ledger } = mergedRepo(false);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base });
+  assert.deepEqual(r.changed, []);
+  assert.deepEqual(r.outside, ['src/main-only.ts']);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(readFileSync(path.join(dir, 'round-changed.txt'), 'utf8'), '');
+  assert.equal(readFileSync(path.join(dir, 'round-diff.patch'), 'utf8').trim(), '');
+  assert.equal(readFileSync(path.join(dir, 'round-main.txt'), 'utf8'), 'src/main-only.ts\n');
+});
+
+test('writeRoundInput #262: merge-base를 주지 않으면 지금처럼 직전 판정 이후 바뀐 파일 전부가 changed이고 round-main.txt가 없다', () => {
+  const { root, ledger } = mergedRepo(true);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude' });
+  assert.deepEqual([...(r.changed ?? [])].sort(), ['src/a.ts', 'src/main-only.ts']);
+  assert.deepEqual(r.outside, []);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(existsSync(path.join(dir, 'round-main.txt')), false);
+  assert.match(readFileSync(path.join(dir, 'round-diff.patch'), 'utf8'), /main-only/);
+  assert.doesNotMatch(readFileSync(path.join(dir, 'ledger.md'), 'utf8'), /round-main/);
+});
+
+test('writeRoundInput #262: 나눈 결과가 전달 상한을 넘으면 나누지 않는다. 검증 입력과 기록 job이 같은 목록을 본다(계획 검증 F8)', () => {
+  const { root, base, ledger } = mergedRepo(true);
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base, maxChars: 10 });
+  assert.deepEqual([...(r.changed ?? [])].sort(), ['src/a.ts', 'src/main-only.ts']);
+  assert.deepEqual(r.outside, []);
+  const dir = path.join(root, '.harness-review');
+  assert.equal(existsSync(path.join(dir, 'round-main.txt')), false);
+  assert.match(readFileSync(path.join(dir, 'round-diff.patch'), 'utf8'), /main-only/);
+  const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
+  assert.match(md, /나누지 않았다/);
+  assert.doesNotMatch(md, /round-main/);
+  // 같은 상한으로 만든 전달 값은 빈 값이다: 기록 job도 나누지 않는다(모른다)
+  assert.equal(roundFn('encodeRoundChanged')(r, 10), '');
+});
+
+test('writeRoundInput #262: 직전 판정 뒤 PR이 merge-base와 같게 되돌린 파일은 이 PR의 변경이다(계획 검증 F1)', () => {
+  const root = tmp();
+  gitInit(root);
+  write(root, 'src/a.ts', 'a1\n');
+  write(root, 'src/main-only.ts', 'm1\n');
+  commitAll(root, 'base');
+  sh('git', ['checkout', '-q', '-b', 'pr'], root);
+  write(root, 'src/a.ts', 'a1\ncompat\n');
+  commitAll(root, 'pr1');
+  const last = sh('git', ['rev-parse', 'HEAD'], root);
+  write(root, 'src/a.ts', 'a1\n');
+  commitAll(root, 'revert');
+  sh('git', ['checkout', '-q', 'main'], root);
+  write(root, 'src/main-only.ts', 'm2\n');
+  commitAll(root, 'main');
+  sh('git', ['checkout', '-q', 'pr'], root);
+  sh('git', ['merge', '-q', '--no-edit', 'main'], root);
+  const base = sh('git', ['merge-base', 'main', 'HEAD'], root);
+  const ledger = applyVerdict(emptyLedger(BASE), {
+    reviewer: 'claude',
+    verdict: verdict([finding()]),
+    headSha: last,
+    changedSinceLastRound: null,
+  });
+  const r = writeRoundInput({ root, ledger, reviewer: 'claude', base });
+  assert.deepEqual(r.changed, ['src/a.ts']);
+  assert.deepEqual(r.outside, ['src/main-only.ts']);
+  assert.match(
+    readFileSync(path.join(root, '.harness-review/round-diff.patch'), 'utf8'),
+    /^-compat$/m,
+  );
+  // 그 파일의 새 P1은 지금 규칙대로 받는다(바뀐 파일이라 동결되지 않고, 범위 밖도 아니다)
+  const next = applyVerdict(ledger, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ title: '호환 처리를 되돌려 깨진다' })]),
+    headSha: sh('git', ['rev-parse', 'HEAD'], root),
+    changedSinceLastRound: r.changed,
+    outsideSinceLastRound: r.outside,
+  });
+  assert.equal(next.findings.at(-1)?.status, 'open');
+});
+
+/** 새 함수(Issue #262). 변경 전 코드에는 없어 단언으로 실패하게 한다 */
+function roundFn<K extends 'parseRoundChanged' | 'encodeRoundChanged'>(name: K) {
+  const f = (reviewRound as Partial<typeof reviewRound>)[name];
+  assert.equal(typeof f, 'function', `${name} 없음`);
+  return f as (typeof reviewRound)[K];
+}
+const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+/**
+ * `==`로 끝나는 base64의 마지막 데이터 문자를 위 2비트는 같고 아래 4비트가 0이 아닌 문자로 바꾼다(판정 F10). 디코딩하면
+ * 같은 바이트가 나오지만 표준 꼴이 아니다
+ */
+function unusedBits(v: string): string {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  assert.ok(v.endsWith('==') && !v.endsWith('===='), v);
+  const at = v.length - 3;
+  const out = `${v.slice(0, at)}${A[A.indexOf(v[at]) | 0b0001]}${v.slice(at + 1)}`;
+  assert.notEqual(out, v);
+  assert.deepEqual(Buffer.from(out, 'base64'), Buffer.from(v, 'base64'));
+  return out;
+}
+
+test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모두 모르는 것으로 본다(계획 검증 F3)', () => {
+  const parse = roundFn('parseRoundChanged');
+  assert.deepEqual(parse(b64(['src/a.ts'])), { changed: ['src/a.ts'], outside: [] });
+  assert.deepEqual(parse(b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })), {
+    changed: ['src/a.ts'],
+    outside: ['src/b.ts'],
+  });
+  assert.deepEqual(parse(b64({ changed: null, outside: [] })), { changed: null, outside: [] });
+  const unknown = { changed: null, outside: [] };
+  const bad: [string, string][] = [
+    ['빈 값', ''],
+    ['base64가 아님', '%%%'],
+    ['JSON이 아님', Buffer.from('{changed').toString('base64')],
+    ['숫자', b64(3)],
+    ['null', b64(null)],
+    ['outside 없음', b64({ changed: ['src/a.ts'] })],
+    ['outside가 문자열', b64({ changed: ['src/a.ts'], outside: 'src/b.ts' })],
+    ['outside에 숫자', b64({ changed: ['src/a.ts'], outside: ['src/b.ts', 1] })],
+    ['changed가 문자열', b64({ changed: 'src/a.ts', outside: [] })],
+    ['changed에 숫자', b64({ changed: ['src/a.ts', 2], outside: [] })],
+    ['changed 없음', b64({ outside: [] })],
+    ['배열에 숫자', b64(['src/a.ts', 1])],
+    // 디코딩되는 JSON이어도 표준 base64가 아니면 모른다(판정 F10): 알파벳 밖 문자, 공백, 줄바꿈, 4의 배수가 아닌 길이
+    [
+      '알파벳 밖 문자',
+      `${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] }).slice(0, 4)}%${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] }).slice(4)}`,
+    ],
+    ['공백', ` ${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })}`],
+    ['줄바꿈', `${b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })}\n`],
+    [
+      'URL용 base64',
+      b64({ changed: ['src/a.ts'], outside: ['src/b.ts?>'] })
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_'),
+    ],
+    ['채움 없는 길이', b64({ changed: ['src/a.ts'], outside: ['b'] }).replace(/=+$/, '')],
+    ['쓰지 않는 비트가 0이 아님', unusedBits(b64({ changed: ['src/a.ts'], outside: ['b'] }))],
+  ];
+  for (const [name, value] of bad) assert.deepEqual(parse(value), unknown, name);
+});
+
+/** b64 길이가 정확히 n자가 되는 make(len)을 찾는다(base64 4자 = 3바이트). 없으면 null */
+function sizedTo<T>(n: number, make: (len: number) => T): T | null {
+  const fixed = b64(make(0)).length;
+  for (let len = Math.max(0, Math.floor(((n - fixed) * 3) / 4) - 3); ; len++) {
+    const v = make(len);
+    const k = b64(v).length;
+    if (k === n) return v;
+    if (k > n) return null;
+  }
+}
+
+test('encodeRoundChanged #262: 객체 꼴이 상한(120,000자) 안이면 그 값, 넘으면 빈 값이다. 예전 배열 꼴 100,000자 목록은 나눠도 전달된다(계획 검증 F3·F7·F9)', () => {
+  const encode = roundFn('encodeRoundChanged');
+  const parse = roundFn('parseRoundChanged');
+  const long = (len: number) => 'x'.repeat(len);
+  // 객체 꼴이 정확히 120,000자: 그대로 내고 되읽으면 같다
+  const at = sizedTo(120_000, (len) => ({ changed: [long(len)], outside: [] as string[] }));
+  assert.ok(at, '객체 꼴 120,000자');
+  assert.equal(encode(at), b64(at));
+  assert.deepEqual(parse(encode(at)), at);
+  // base64 길이는 4의 배수다: 상한을 처음 넘는 120,004자면 빈 값(모른다)이다
+  const over = sizedTo(120_004, (len) => ({ changed: ['src/a.ts'], outside: [long(len)] }));
+  assert.ok(over, '객체 꼴 120,004자');
+  assert.equal(encode(over), '');
+  // 예전 배열 꼴로 정확히 100,000자인 목록(예전에는 전달됐다)을 나눠도 객체 꼴로 전달되고 범위 구분이 남는다
+  const list = sizedTo(100_000, (len) => ['src/a.ts', long(len), 'src/main-only.ts']);
+  assert.ok(list, '배열 꼴 100,000자');
+  const split = { changed: [list[0], list[1]], outside: [list[2]] };
+  assert.deepEqual(parse(encode(split)), split);
+  assert.deepEqual(parse(encode({ changed: null, outside: [] })), { changed: null, outside: [] });
 });
 
 test('writeRoundInput: 직전 판정 head를 찾지 못하면 바뀐 파일을 모른다(null)', () => {

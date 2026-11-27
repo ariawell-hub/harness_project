@@ -44,7 +44,13 @@ import {
 import { parseReproResults, reproOutputValue, reproResultsData, runRepro } from './ci/repro.ts';
 import { targetCheckOf } from './ci/revert-evidence.ts';
 import { decodeSelfTest } from './ci/selftest-result.ts';
-import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
+import {
+  encodeRoundChanged,
+  parseRoundChanged,
+  pinnedPrompt,
+  promptFiles,
+  writeRoundInput,
+} from './ci/review-round.ts';
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
@@ -485,6 +491,17 @@ async function main(argv: string[]): Promise<number> {
       const repo = str('repo-slug') ?? '';
       const targetUrl = str('target-url') ?? '';
       let seen: Verdict | null = null;
+      // 라운드 전달 값(Issue #262): 판정 워크플로만 PR 번호와 함께 준다. 범위 밖 파일은 review/*와 원장 모두에 쓴다.
+      // 계획 전용 판정(G1, --mode plan)은 범위 밖으로 미루지 않는다: 미루면 수정 요청이 계획 승인이 된다(계획 검증 F5)
+      const round =
+        str('pr-number') !== undefined
+          ? parseRoundChanged(str('round-changed') ?? '')
+          : { changed: null, outside: [] };
+      const planOnlyRecord = str('mode') === 'plan';
+      const outsideFiles = planOnlyRecord ? [] : round.outside;
+      // 계획 전용 판정은 지금 규칙 그대로다: 동결 검사에는 나누기 전 목록을 쓴다(빼면 그 파일의 P1이 동결된다, 계획 검증 F6)
+      const changedFiles =
+        planOnlyRecord && round.changed ? [...round.changed, ...round.outside] : round.changed;
       const p = await recordReview({
         context: str('context') ?? '',
         needed: needed === 'true',
@@ -506,6 +523,7 @@ async function main(argv: string[]): Promise<number> {
           seen = v;
           for (const line of reviewLogLines(v)) log(line);
         },
+        outside: outsideFiles,
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
       // 지적 원장(10.2절 (4)). 판정 워크플로만 PR 번호를 준다. 원장 실패는 review-ledger = error로 남고 이 job은 실패시키지 않는다
@@ -513,13 +531,7 @@ async function main(argv: string[]): Promise<number> {
         // 기록 job은 scripts와 설정 파일만 체크아웃한다. 설정 위치는 --config-root로 받는다
         const cfg = loadConfig(path.resolve(str('config-root') ?? '.'));
         const ledgerToken = process.env.LEDGER_TOKEN ?? '';
-        let changed: string[] | null = null;
-        try {
-          const raw = JSON.parse(Buffer.from(str('round-changed') ?? '', 'base64').toString());
-          if (Array.isArray(raw) && raw.every((x) => typeof x === 'string')) changed = raw;
-        } catch {
-          // 목록이 없거나 깨졌으면 모르는 것으로 본다(2라운드부터 새 P1은 동결된다)
-        }
+        const changed = changedFiles;
         // 재현 job 결과(10.2절 (3)). PR 코드가 만든 값이라 순번과 값만 받는다. 형식이 다르면 없는 것으로 본다
         const v = seen as Verdict | null;
         const outcomes = v ? parseReproResults(str('repro-results') ?? '', v.findings.length) : [];
@@ -561,6 +573,7 @@ async function main(argv: string[]): Promise<number> {
           },
           promptBase: str('prompt-base') ?? '',
           changedSinceLastRound: changed,
+          outsideSinceLastRound: outsideFiles,
           repro: reproMap,
           plan,
           // 구현 대기(Issue #212): --mode가 plan일 때만 계획만 담은 head다. 없거나 다른 값이면 코드가 섞인 것으로 본다
@@ -703,21 +716,18 @@ async function main(argv: string[]): Promise<number> {
           }
           rebuttals = parsed;
         }
-        const round = writeRoundInput({ root, ledger, reviewer: reviewer as Reviewer });
+        const round = writeRoundInput({ root, ledger, reviewer: reviewer as Reviewer, base });
         writeRebuttalInput(root, rebuttals);
         if (rebuttals.length)
           log(`review-plan: 반박 ${rebuttals.length}건(${rebuttals.map((r) => r.id).join(', ')})`);
-        // 명령 인자 하나의 길이 한도(약 128KB) 안에서만 넘긴다. 넘으면 모르는 것으로 본다(새 P1은 동결된다)
-        const encoded = round.changed
-          ? Buffer.from(JSON.stringify(round.changed)).toString('base64')
-          : '';
-        const changed = encoded.length <= 100_000 ? encoded : '';
+        // { changed, outside }의 base64 JSON(Issue #262). 상한을 넘으면 빈 값이라 모르는 것으로 본다(새 P1은 동결된다)
+        const changed = encodeRoundChanged(round);
         appendFileSync(
           output,
           `round=${round.round}\nprompt_base=${round.promptBase}\nround_changed=${changed}\n`,
         );
         log(
-          `review-plan: ${reviewer} ${round.round}라운드, 프롬프트 버전 ${round.promptBase.slice(0, 12) || '지금'}, 직전 판정 이후 바뀐 파일 ${round.changed ? round.changed.length : '알 수 없음'}`,
+          `review-plan: ${reviewer} ${round.round}라운드, 프롬프트 버전 ${round.promptBase.slice(0, 12) || '지금'}, 직전 판정 이후 바뀐 파일 ${round.changed ? round.changed.length : '알 수 없음'}, main 병합으로만 바뀐 파일 ${round.outside.length}`,
         );
       }
       log(
