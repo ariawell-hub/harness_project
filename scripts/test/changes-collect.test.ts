@@ -1283,3 +1283,38 @@ test(
     assert.ok(r.out.includes(`남긴 임시 파일: docs/harness/${parked}`), r.out);
   },
 );
+
+// Issue #261 판정 F1: 처음 내용은 그대로 두고 끝에만 덧붙인 저장도 바뀐 것으로 본다(크기에 기대지 않고 EOF까지 읽어 견준다)
+test(
+  'changes-collect #261: 원래 CHANGELOG 끝에만 덧붙인 저장도 지우지 않고 임시 이름에 남긴다',
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = repo([A, B]);
+    const cl = path.join(root, CHANGELOG_PATH);
+    const original = readFileSync(cl);
+    const tail = '\n- 끝에 덧붙인 항목\n';
+    let held: number | undefined;
+    let wrote = false;
+    const r = direct(root, {
+      hooks: {
+        afterRead: (rel: string) => {
+          if (rel === CHANGELOG_PATH && held === undefined) held = openSync(cl, 'r+');
+        },
+      },
+      fs: {
+        writeFile: (rel: string, t: string, fd: number) => {
+          writeAll(fd, t);
+          if (wrote || rel !== CHANGELOG_PATH || held === undefined) return;
+          wrote = true;
+          writeSync(held, tail, original.length);
+        },
+      },
+    });
+    if (held !== undefined) closeSync(held);
+    assert.ok(wrote, r.out);
+    assert.equal(r.code, 1, r.out);
+    const parked = tempOf(root, 'CHANGELOG.md', false);
+    assert.ok(parked, r.out);
+    assert.equal(read(root, `docs/harness/${parked}`), original.toString('utf8') + tail);
+  },
+);

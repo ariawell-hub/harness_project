@@ -258,16 +258,21 @@ export function runChangesCollect(
         throw e;
       }
     };
+    /**
+     * 핸들의 처음부터 EOF까지 읽는다. 처음 `fstat`의 크기에 기대지 않는다: 읽는 도중 끝에 덧붙은 바이트도 읽어 견준다
+     * (Issue #261 판정 F1)
+     */
     const readAll = (fd: number): Buffer => {
-      const size = Number(fstatSync(fd, { bigint: true }).size);
-      const b = Buffer.alloc(size);
+      const chunks: Buffer[] = [];
       let at = 0;
-      while (at < size) {
-        const n = readSync(fd, b, at, size - at, at);
+      for (;;) {
+        const b = Buffer.alloc(64 * 1024);
+        const n = readSync(fd, b, 0, b.length, at);
         if (n === 0) break;
+        chunks.push(n === b.length ? b : b.subarray(0, n));
         at += n;
       }
-      return at === size ? b : b.subarray(0, at);
+      return Buffer.concat(chunks, at);
     };
     const readBytes = new Map<string, Buffer>();
     for (const rel of files) {
@@ -372,11 +377,16 @@ export function runChangesCollect(
       if (!st || !want || !st.isFile() || !sameIdent(st, want)) return false;
       const fd = openSync(at, constants.O_RDONLY | OPEN_FLAGS);
       try {
-        const f = fstatSync(fd, { bigint: true });
+        const before = fstatSync(fd, { bigint: true });
+        if (!before.isFile() || !sameIdent(before, want)) return false;
+        const bytes = readAll(fd);
+        // 읽는 동안 바뀌었으면(크기·수정 시각) 같다고 보지 않는다(Issue #261 판정 F1)
+        const after = fstatSync(fd, { bigint: true });
         return (
-          f.isFile() &&
-          sameIdent(f, want) &&
-          readAll(fd).equals(readBytes.get(rel) ?? Buffer.alloc(0))
+          after.size === BigInt(bytes.length) &&
+          after.size === before.size &&
+          after.mtimeNs === before.mtimeNs &&
+          bytes.equals(readBytes.get(rel) ?? Buffer.alloc(0))
         );
       } finally {
         closeSync(fd);
