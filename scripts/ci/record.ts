@@ -3,6 +3,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { log } from '../lib/util.ts';
 import { patchOf, withPatch } from './binding.ts';
+import { isUnavailableValue } from './codex-scan.ts';
 import { mergeSelfTest } from './selftest-result.ts';
 import {
   highEntropy,
@@ -120,10 +121,39 @@ export interface RecordReviewOptions {
   /** 형식 검사와 시크릿 스캔을 통과한 판정을 받는다(로그 출력용) */
   onVerdict?: (v: Verdict) => void;
   /**
+   * 판정 job이 넘긴 사용 한도 값(`usage-limit`, `usage-limit@YYYY-MM-DDTHH:MMZ`. Issue #223). 판정이 없을 때만 보고,
+   * `isUnavailableValue`를 통과할 때만 설명을 바꾼다. 상태는 그대로 error다
+   */
+  unavailable?: string;
+  /**
    * 원장이 미루는 새 지적인가(Issue #262·#267, 원장의 등록 규칙으로 만든다). 차단 지적이 모두 미뤄지는 P1이고
    * resolutions에 open이 없으면 통과다. 없으면 지금 규칙(승인이고 차단 지적이 없을 때만 통과)이다
    */
   deferred?: (f: Finding, index: number, v: Verdict) => boolean;
+}
+
+const LIMIT_PREFIX = '판정 없음: 검증자 사용 한도(';
+const LIMIT_SUFFIX = '). 풀린 뒤 판정 워크플로를 다시 실행한다';
+const LIMIT_UNKNOWN = '풀리는 시각 모름';
+const LIMIT_DESC_RE =
+  /^판정 없음: 검증자 사용 한도\((?:풀림 (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}) UTC|풀리는 시각 모름)\)\. 풀린 뒤 판정 워크플로를 다시 실행한다$/;
+
+/** 한도 값의 설명(140자 안). 값은 `isUnavailableValue`를 통과한 것이다 */
+function usageLimitDescription(value: string): string {
+  const at = /@(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})Z$/.exec(value);
+  return `${LIMIT_PREFIX}${at ? `풀림 ${at[1]} ${at[2]} UTC` : LIMIT_UNKNOWN}${LIMIT_SUFFIX}`;
+}
+
+/**
+ * `recordReview`가 사용 한도로 쓴 설명인가. 그렇다면 풀리는 시각(`YYYY-MM-DD HH:MM`, UTC. 모르면 null)을 돌려준다.
+ * 이 모듈이 만든 설명만 알아본다(runner의 CI 대기 알림이 쓴다. Issue #223)
+ */
+export function usageLimitOf(description: string): { at: string | null } | null {
+  const m = LIMIT_DESC_RE.exec(description);
+  if (!m) return null;
+  if (m[1] === undefined) return { at: null };
+  const value = `usage-limit@${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}Z`;
+  return isUnavailableValue(value) ? { at: `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}` } : null;
 }
 
 /** 검증자 판정을 검사한 뒤 review/* 상태 하나를 쓴다. 판정이 없거나 깨졌거나 비밀이 보이면 error(fail-closed) */
@@ -145,8 +175,12 @@ export async function recordReview(o: RecordReviewOptions): Promise<StatusPayloa
     if (patchOf(d) === null) return done('error', '이어받기에 patch가 없다');
     return done('success', d);
   }
-  if (o.raw === null || o.raw.trim() === '')
+  if (o.raw === null || o.raw.trim() === '') {
+    // 사용 한도: 상태는 그대로 error(fail-closed)이고 설명만 이유와 풀리는 시각을 적는다(Issue #223)
+    if (o.unavailable !== undefined && isUnavailableValue(o.unavailable))
+      return done('error', usageLimitDescription(o.unavailable));
     return done('error', '판정 없음(판정 job 실패 또는 유출 검사 불통과)');
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(o.raw);

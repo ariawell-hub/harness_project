@@ -59,6 +59,7 @@ import {
 } from '../commands/task.ts';
 import { planGate } from '../gates/plan-gate.ts';
 import { planMode } from '../ci/plan-hash.ts';
+import { usageLimitOf } from '../ci/record.ts';
 import { resolveAgentCommand, runSession, type AgentTool, type SessionResult } from './agents.ts';
 import {
   BOT_ISSUE_ACCEPT,
@@ -2132,13 +2133,27 @@ function doReportStall(ctx: Ctx, l: LocalPlan, pr: PullRequest, waiting: string[
     return `  - \`${c}\`: ${r.state}${r.description ? ` — ${r.description}` : ''}${r.targetUrl ? ` (${r.targetUrl})` : ''}`;
   });
   const mention = ctx.cfg.github.owner ? `@${ctx.cfg.github.owner} ` : '';
+  // 기다리는 체크가 기록 job의 사용 한도 설명이면 추천을 바꾼다(Issue #223). 시각은 `YYYY-MM-DD HH:MM`이라 글자 차례가 시간 차례다
+  const limits = waiting.flatMap((c) => {
+    const u = usageLimitOf(known.get(c)?.description ?? '');
+    return u ? [u] : [];
+  });
+  const latest = limits
+    .flatMap((u) => (u.at ? [u.at] : []))
+    .sort()
+    .at(-1);
+  const recommend = latest
+    ? `A) 풀리는 시각(${latest} UTC) 뒤에 판정 워크플로를 다시 실행한다(추천). 판정이 기록되면 runner가 이어 간다.`
+    : limits.length
+      ? 'A) 검증자 사용 한도가 풀렸는지 확인한 뒤(`docs/SECURITY.md`) 판정 워크플로를 다시 실행한다(추천). 판정이 기록되면 runner가 이어 간다.'
+      : 'A) Actions에서 멈춘 워크플로를 다시 실행한다(추천). 판정이 기록되면 runner가 이어 간다.';
   const body = `${mention}PR #${pr.number}의 CI 대기가 ${hours}시간을 넘었다(기준 ${ctx.cfg.limits.ciStallHours}시간).
 
 - PR: #${pr.number} (브랜치 \`${l.branch}\`), head \`${pr.headSha.slice(0, 12)}\`
 - 기다리는 것:
 ${lines.join('\n')}
 - 사람이 결정할 것:
-  - A) Actions에서 멈춘 워크플로를 다시 실행한다(추천). 판정이 기록되면 runner가 이어 간다.
+  - ${recommend}
   - B) 검증자 인증·사용량 한도를 확인한다(\`docs/SECURITY.md\`).
   - C) 포기한다(PR을 닫는다).
 - 이 Issue에 제작자 계정으로 답을 달면 \`needs-human\`을 뗀다. runner는 판정 워크플로를 다시 실행하지 않는다.`;

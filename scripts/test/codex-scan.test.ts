@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { authTokenValues, codexOutputSchema, scanCodexRun } from '../ci/codex-scan.ts';
+import {
+  authTokenValues,
+  codexOutputSchema,
+  isUnavailableValue,
+  scanCodexRun,
+  usageLimitOutput,
+} from '../ci/codex-scan.ts';
 import { HARNESS_ROOT } from './helpers.ts';
 
 const fake = (name: string) => [name, 'FAKEFAKE', 'fakefake', '0123456789'].join('-');
@@ -68,6 +74,174 @@ test('turn.failed: 판정 없이 실패, 오류 문구는 비밀을 가려 돌�
   assert.equal(!limit.ok && limit.errorText, 'You have hit your usage limit. Try again later');
   const secret = failed(`bad ${ACCESS}`);
   assert.equal(!secret.ok && secret.errorText, '<redacted>');
+});
+
+// Codex CLI의 사용 한도 문구(시각은 실행한 기계의 시각, 시간대 표기 없음)
+const LIMIT =
+  "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again at Nov 21st, 2026 8:36 AM.";
+
+test('usageLimitOutput: 한도 문구와 풀리는 시각을 정한 형식으로 읽는다 (Issue #223)', () => {
+  assert.equal(usageLimitOutput(LIMIT), 'usage-limit@2026-11-21T08:36Z');
+  // 대소문자, 서수 접미사, 한 자리 날짜, 12시 표기
+  assert.equal(
+    usageLimitOutput('USAGE LIMIT reached. Try again at Mar 2nd, 2027 12:05 AM'),
+    'usage-limit@2027-03-02T00:05Z',
+  );
+  assert.equal(
+    usageLimitOutput('usage limit; try again at Dec 3rd, 2026 12:05 PM.'),
+    'usage-limit@2026-12-03T12:05Z',
+  );
+  assert.equal(
+    usageLimitOutput('usage limit, try again at Jan 1st, 2027 11:59 PM'),
+    'usage-limit@2027-01-01T23:59Z',
+  );
+  // 시각이 없다
+  assert.equal(usageLimitOutput('You have hit your usage limit.\nTry again later'), 'usage-limit');
+  // 날짜 없이 시각만 있다(실제 문구, 2026-11-25 PR #242의 판정 실행 45545579256): 어느 날인지 몰라 시각을 모르는 것으로 본다
+  assert.equal(
+    usageLimitOutput(
+      'You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:00 PM.',
+    ),
+    'usage-limit',
+  );
+  // 없는 날짜·시각
+  for (const at of [
+    'Feb 30th, 2027 8:36 AM',
+    'Nov 21st, 2026 13:05 PM',
+    'Nov 21st, 2026 0:05 AM',
+    'Nov 21st, 2026 8:60 AM',
+    'Nov 32nd, 2026 8:36 AM',
+  ])
+    assert.equal(usageLimitOutput(`usage limit. try again at ${at}.`), 'usage-limit', at);
+  // 다른 표기와 시간대가 붙은 표기는 시각을 모르는 것으로 본다(UTC로 읽을 근거가 없다)
+  for (const at of [
+    '2026-11-21 08:36',
+    'Nov 21, 2026 8:36 AM',
+    'Nov 21st 2026 8:36 AM',
+    'Nov 21st, 2026 8:36',
+    'Nov 21st, 2026 8:36 AM PST',
+    'Nov 21st, 2026 8:36 AM UTC',
+    'Nov 21st, 2026 8:36 AM +09:00',
+    'Nov 21st, 2026 8:36 AM (KST)',
+    // 판정 F5: 2~5자가 아닌 시간대 이름, 붙여 쓴 표기, 쉼표 뒤의 시간대
+    'Nov 21st, 2026 8:36 AM America/Los_Angeles',
+    'Nov 21st, 2026 8:36 AM Pacific Time',
+    'Nov 21st, 2026 8:36 AM Coordinated Universal Time',
+    'Nov 21st, 2026 8:36 AM/PST',
+    'Nov 21st, 2026 8:36 AM-08:00',
+    'Nov 21st, 2026 8:36 AM [UTC]',
+    'Nov 21st, 2026 8:36 AM, PST',
+    'Nov 21st, 2026 8:36 AM; UTC+9',
+    'Nov 21st, 2026 8:36 AM\nAmerica/New_York',
+    'Nov 21st, 2026 8:36 AM utc',
+    'Nov 21st, 2026 8:36 AM, GMT+9',
+    'Nov 21st, 2026 8:36 AM Eastern Standard Time',
+    // 판정 F7: 소문자·섞어 쓴 시간대 약어와 이름
+    'Nov 21st, 2026 8:36 AM pst',
+    'Nov 21st, 2026 8:36 AM Pst',
+    'Nov 21st, 2026 8:36 AM, pdt',
+    'Nov 21st, 2026 8:36 AM kst.',
+    'Nov 21st, 2026 8:36 AM cest',
+    'Nov 21st, 2026 8:36 AM pacific time',
+    'Nov 21st, 2026 8:36 AM eastern daylight time',
+    // 판정 F9: 소문자 약어가 접미사로 홀로 붙은 경우는 계속 시각 모름
+    'Nov 21st, 2026 8:36 AM west',
+    'Nov 21st, 2026 8:36 AM west.',
+    'Nov 21st, 2026 8:36 AM pst, or upgrade to Pro.',
+    // 판정 F10: 약어 뒤에 안내가 바로 이어지는 꼴
+    'Nov 21st, 2026 8:36 AM pst or upgrade to Pro.',
+    'Nov 21st, 2026 8:36 AM kst and try later',
+    'Nov 21st, 2026 8:36 AM utc or later',
+    'Nov 21st, 2026 8:36 AM est or upgrade to Pro.',
+    // 문장 끝 부호에 바로 붙인 표기
+    'Nov 21st, 2026 8:36 AM.PST',
+    'Nov 21st, 2026 8:36 AM.utc',
+    // 제작자 결정(2026-11-26, 엄격한 규칙): 시각 뒤에 문장 끝이 아닌 글이 이어지면 시간대인지 안내인지 가리지 않고
+    // 시각을 모르는 것으로 본다. 틀린 시각을 적는 일을 없앤다(판정 F5~F10에서 가리는 규칙의 반례가 되풀이됐다)
+    'Nov 21st, 2026 8:36 AM, or upgrade to Pro.',
+    'Nov 21st, 2026 8:36 AM or upgrade to Pro (https://openai.com/chatgpt/pricing).',
+    'Nov 21st, 2026 8:36 AM; see the usage page',
+    'Nov 21st, 2026 8:36 AM, Upgrade to Pro.',
+    'Nov 21st, 2026 8:36 AM Upgrade to Pro',
+    'Nov 21st, 2026 8:36 AM, West Coast users should check their local time.',
+    'Nov 21st, 2026 8:36 AM, it may take a while',
+  ])
+    assert.equal(usageLimitOutput(`usage limit. try again at ${at}`), 'usage-limit', at);
+  // 시각 표기 바로 뒤가 글의 끝, 공백뿐, 또는 문장 끝(`.`·`!`·`?` 바로 뒤에 글자·숫자가 붙지 않는다)일 때만 시각을 읽는다.
+  // 실제 문구는 모두 마침표로 끝난다
+  for (const tail of [
+    '',
+    '.',
+    '. Upgrade to Pro.',
+    '. Visit https://chatgpt.com/settings/usage to purchase more credits.',
+    '!',
+    '?',
+    ' ',
+    ' \n',
+    '.\u0007 x',
+  ])
+    assert.equal(
+      usageLimitOutput(`usage limit. try again at Nov 21st, 2026 8:36 AM${tail}`),
+      'usage-limit@2026-11-21T08:36Z',
+      JSON.stringify(tail),
+    );
+  // 한도가 아니다
+  for (const m of [
+    'stream disconnected',
+    'rate limit exceeded',
+    'try again at Nov 21st, 2026 8:36 AM',
+    '',
+  ])
+    assert.equal(usageLimitOutput(m), null, m);
+});
+
+test('isUnavailableValue: 정한 형식이고 실재하는 시각일 때만 참이다', () => {
+  for (const v of ['usage-limit', 'usage-limit@2026-11-21T08:36Z', 'usage-limit@2028-02-29T23:59Z'])
+    assert.equal(isUnavailableValue(v), true, v);
+  for (const v of [
+    '',
+    ' usage-limit',
+    'usage-limit ',
+    'usage-limit\n',
+    'usage-limit@',
+    'usage-limit@2026-11-21T08:36',
+    'usage-limit@2026-11-21 08:36Z',
+    'usage-limit@2027-02-29T08:36Z',
+    'usage-limit@2026-11-21T24:00Z',
+    'usage-limit@2026-11-21T08:60Z',
+    'usage-limit@2026-13-01T08:36Z',
+    'usage-limit@2026-11-21T08:36Z\nx=1',
+    'rate-limit',
+    'Usage-limit',
+  ])
+    assert.equal(isUnavailableValue(v), false, JSON.stringify(v));
+});
+
+test('scanCodexRun: 마지막 turn.failed가 사용 한도면 실패 결과에 unavailable을 싣는다', () => {
+  const failed = (...messages: string[]) =>
+    scan([started, ...messages.map((message) => ({ type: 'turn.failed', error: { message } }))]);
+  const r = failed('stream disconnected', LIMIT);
+  assert.equal(r.ok, false);
+  assert.equal(!r.ok && r.unavailable, 'usage-limit@2026-11-21T08:36Z');
+  // 나머지 결과는 그대로다(오류 문구는 지금처럼 줄바꿈을 펴서 300자까지)
+  assert.equal(!r.ok && r.reason, '실행 오류(turn.failed, 판정 없음)');
+  assert.equal(!r.ok && r.errorText, LIMIT);
+  // 비밀 값이나 제어 문자가 섞여도 값은 정한 형식뿐이고, 원문은 지금처럼 가린다
+  const dirty = failed(`${LIMIT}\u0007 ${ACCESS}\nx=1`);
+  assert.equal(!dirty.ok && dirty.unavailable, 'usage-limit@2026-11-21T08:36Z');
+  assert.equal(!dirty.ok && dirty.errorText, '<redacted>');
+  // 마지막 turn.failed만 본다
+  const last = failed(LIMIT, 'stream disconnected');
+  assert.equal(!last.ok && 'unavailable' in last, false);
+  // 한도가 아닌 실패, 그 밖의 실패, 통과에는 싣지 않는다
+  for (const x of [
+    failed('stream disconnected'),
+    scan([started, cmd('cat x', 0, `token ${ACCESS}`), done]),
+    scan([started, { type: 'item.completed', item: { type: 'web_search' } }, done]),
+    scan([started, done], { last: 'not json' }),
+    scan([started, done]),
+  ])
+    assert.equal('unavailable' in x, false, JSON.stringify(x));
 });
 
 test('허용 밖 항목 종류(MCP 호출, 웹 검색, 파일 변경)가 있으면 실패', () => {

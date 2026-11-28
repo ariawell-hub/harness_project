@@ -152,6 +152,145 @@ for (const [name, scan] of [
   });
 }
 
+// 사용 한도(Issue #223): codex-scan은 한도 값을 --unavailable-out 파일에만 쓰고, codex-unavailable이 그 파일을 검사해
+// GITHUB_OUTPUT에 unavailable=을 쓴다. 실패로 끝나는 codex-scan은 지금처럼 job 출력을 쓰지 않는다(#143)
+const LIMIT_AT =
+  "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again at Nov 21st, 2026 8:36 AM.";
+const FAKE_TOKEN = ['tok', 'FAKEFAKE', 'fakefake', '0123456789'].join('-');
+
+interface LimitRun extends Run {
+  /** --unavailable-out 파일의 내용(없으면 null) */
+  unavailable: string | null;
+}
+
+/** codex-scan을 합성 이벤트로 실행한다. last는 마지막 메시지 파일 내용 */
+function codexEvents(events: unknown[], last: string): LimitRun {
+  let file = '';
+  const r = exec((dir) => {
+    const pr = path.join(dir, 'pr');
+    mkdirSync(pr, { recursive: true });
+    const ev = path.join(dir, 'events.jsonl');
+    const lastFile = path.join(dir, 'last.txt');
+    const auth = path.join(dir, 'auth.json');
+    file = path.join(dir, 'codex-unavailable.txt');
+    writeFileSync(ev, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    writeFileSync(lastFile, last);
+    writeFileSync(auth, JSON.stringify({ tokens: { access_token: FAKE_TOKEN } }));
+    return [
+      'codex-scan',
+      ...['--events', ev, '--last', lastFile, '--pr', pr, '--auth', auth],
+      ...['--unavailable-out', file],
+    ];
+  }, true);
+  return { ...r, unavailable: existsSync(file) ? readFileSync(file, 'utf8') : null };
+}
+const started = { type: 'thread.started', thread_id: 't' };
+const completed = { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 2 } };
+const turnFailed = (message: string) => ({ type: 'turn.failed', error: { message } });
+
+test('codex-scan --unavailable-out: 사용 한도면 값 한 줄을 파일에 쓰고 판정 없이 종료 코드 1이다 (Issue #223)', () => {
+  const cases: [string, string][] = [
+    [LIMIT_AT, 'usage-limit@2026-11-21T08:36Z'],
+    ['You have hit your usage limit. Try again later', 'usage-limit'],
+    ['usage limit. try again at Feb 30th, 2027 8:36 AM', 'usage-limit'],
+    ['usage limit. try again at Nov 21st, 2026 8:36 AM PST', 'usage-limit'],
+    // 비밀 값과 제어 문자가 섞여도 파일에는 정한 형식만 간다
+    [`${LIMIT_AT}\u0007\n${FAKE_TOKEN}\r\nunavailable=x`, 'usage-limit@2026-11-21T08:36Z'],
+  ];
+  for (const [message, value] of cases) {
+    const r = codexEvents([started, turnFailed(message)], JSON.stringify(approve));
+    assert.equal(r.code, 1, message);
+    assert.equal(r.verdictFile, false, message);
+    assert.deepEqual(r.output, ['earlier=1'], '실패로 끝나면 GITHUB_OUTPUT에 쓰지 않는다');
+    assert.equal(r.unavailable, `${value}\n`, message);
+  }
+});
+
+test('codex-scan --unavailable-out: 한도가 아닌 실패와 통과한 판정에는 파일을 만들지 않는다', () => {
+  const runs = [
+    codexEvents([started, turnFailed('stream disconnected')], JSON.stringify(approve)),
+    // 비밀 값
+    codexEvents(
+      [started, { type: 'item.completed', item: { type: 'agent_message', text: FAKE_TOKEN } }],
+      JSON.stringify(approve),
+    ),
+    // 허용 밖 항목
+    codexEvents(
+      [started, { type: 'item.completed', item: { type: 'web_search' } }, completed],
+      JSON.stringify(approve),
+    ),
+    // 판정 형식 오류
+    codexEvents([started, completed], JSON.stringify({ ...approve, risk: 'none' })),
+  ];
+  for (const r of runs) {
+    assert.equal(r.code, 1);
+    assert.equal(r.unavailable, null);
+    assert.deepEqual(r.output, ['earlier=1']);
+  }
+  const ok = codexEvents([started, completed], JSON.stringify(approve));
+  assert.equal(ok.code, 0);
+  assert.equal(ok.unavailable, null);
+  assert.deepEqual(ok.output, ['earlier=1', 'repro=false'], '통과 경로는 지금 그대로다');
+});
+
+/** codex-unavailable을 실행한다. content가 null이면 파일을 만들지 않는다 */
+function unavailable(content: string | null, o: { githubOutput?: boolean } = {}) {
+  const dir = tmp('codex-unavailable-');
+  const file = path.join(dir, 'codex-unavailable.txt');
+  const ghOut = path.join(dir, 'github-output');
+  if (content !== null) writeFileSync(file, content);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH };
+  if (o.githubOutput ?? true) {
+    writeFileSync(ghOut, 'earlier=1\n');
+    env.GITHUB_OUTPUT = ghOut;
+  }
+  const r = runSync(process.execPath, [HARNESS, 'codex-unavailable', '--file', file], {
+    cwd: dir,
+    env,
+  });
+  return {
+    code: r.code,
+    stdout: r.stdout,
+    output: existsSync(ghOut) ? readFileSync(ghOut, 'utf8').split('\n').filter(Boolean) : null,
+  };
+}
+
+test('codex-unavailable: 정한 형식의 값이면 GITHUB_OUTPUT에 unavailable= 한 줄을 덧붙인다', () => {
+  for (const [content, value] of [
+    ['usage-limit@2026-11-21T08:36Z\n', 'usage-limit@2026-11-21T08:36Z'],
+    ['usage-limit', 'usage-limit'],
+    // 앞뒤 공백·줄바꿈만 다른 것은 받는다
+    ['  usage-limit@2026-11-21T08:36Z \r\n', 'usage-limit@2026-11-21T08:36Z'],
+    ['\nusage-limit\n\n', 'usage-limit'],
+  ]) {
+    const r = unavailable(content);
+    assert.equal(r.code, 0);
+    assert.deepEqual(r.output, ['earlier=1', `unavailable=${value}`], JSON.stringify(content));
+    assert.match(r.stdout, new RegExp(`codex-unavailable: ${value}`));
+  }
+});
+
+test('codex-unavailable: 파일이 없거나 형식이 아니면 쓰지 않고, 종료 코드는 언제나 0이다', () => {
+  for (const content of [
+    null,
+    '',
+    'usage-limit\nunavailable=x',
+    'usage-limit@2026-11-21T08:36Z\nusage-limit',
+    'usage-limit@2027-02-29T08:36Z',
+    'usage-limit@2026-11-21T08:36',
+    'rate limit',
+    'You have hit your usage limit.',
+  ]) {
+    const r = unavailable(content);
+    assert.equal(r.code, 0, JSON.stringify(content));
+    assert.deepEqual(r.output, ['earlier=1'], JSON.stringify(content));
+  }
+  // GITHUB_OUTPUT이 없으면(로컬) 쓰지 않는다
+  const local = unavailable('usage-limit', { githubOutput: false });
+  assert.equal(local.code, 0);
+  assert.equal(local.output, null);
+});
+
 test('hasRepro: 내용이 빈 재현 테스트는 세지 않는다', () => {
   const v = (findings: { repro: { path: string; content: string } }[]) =>
     ({ findings }) as unknown as Verdict;
