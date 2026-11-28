@@ -115,6 +115,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 2026-11-28 제작자의 워크플로 커밋 `9bcbf6b`(부모 `7793e9a`, `.github/workflows/judge-codex.yml` 한 파일)를 받았다. `docs/SECURITY.md` "워크플로 변경 절차" 4번대로 기준 커밋 `7793e9a`에 `lab/codex-usage-limit/judge-codex.patch`를 적용한 트리와 받은 head의 트리를 통째로 견줬다: 둘 다 `cf063aa`로 같다.
 - 2026-11-28 `origin/main`(`abc4fa2`)을 병합했다. 충돌 셋: `scripts/ci/record.ts`의 `RecordReviewOptions`(#267의 `deferred`와 이 PR의 `unavailable`을 둘 다 둔다. 한도 설명은 판정이 없을 때, `deferred`는 판정이 있을 때 쓰여 겹치지 않는다), `scripts/test/record.test.ts`의 불러오기(둘을 합쳤다), 기술 부채 표(main의 TD-72·73과 이 PR의 TD-74·75를 둘 다 둔다. main은 TD-76·77로 건너뛰어 번호가 겹치지 않는다). `judge-codex.yml`은 main의 변경(#241의 `runs-on` 다섯 줄)과 제작자의 변경이 겹치지 않아 자동 병합됐고 그 결과가 main의 파일에 같은 패치를 적용한 것과 같았다(`cmp`). 그 병합에 구조 테스트와 완료 처리를 얹은 push(`6352eb9`, 로컬 `check`·AC 131건 통과)를 GitHub이 거부했다: `refusing to allow a Personal Access Token to create or update workflow .github/workflows/judge-codex.yml without workflow scope`. 병합한 파일이 두 부모 어디에도 없는 새 내용이기 때문으로 본다(#236에서 받아들여진 것은 PR이 바꾸지 않은 파일을 main 그대로 가져온 병합이다). 원격은 바뀌지 않았다.
 - 2026-11-28 병합을 다시 했다: `judge-codex.yml`만 main의 것으로 두고(제작자의 네 곳이 빠진다) 나머지 충돌은 위와 같이 풀었다(`d358aa6`. 거부된 병합과 그 파일만 다르다). 이 push의 head가 새 기준 커밋이다. 같은 패치가 새 기준 커밋에 `git apply --check`로 그대로 적용된다. 제작자에게 같은 패치를 다시 요청하고, 받은 뒤 새 기준 커밋으로 트리를 견준 다음 구조 테스트(거부된 로컬 기록의 `10820c0`)와 완료 처리를 올린다. 이 절차를 `docs/SECURITY.md` "워크플로 변경 절차"에 적었다.
+- 2026-11-28 제작자의 두 번째 워크플로 커밋 `93d7e62`(부모 `83603af`, `.github/workflows/judge-codex.yml` 한 파일)를 받았다. 새 기준 커밋 `83603af`에 같은 패치를 적용한 트리와 받은 head의 트리가 통째로 같다(`370d998`). push 2: 거부된 로컬 기록의 구조 테스트(`10820c0`)를 그대로 옮겼다(`5f7a63c`). step0의 AC(일곱 파일 131건) 통과. `origin/main`은 `abc4fa2` 그대로라 다시 병합하지 않는다.
 
 ## 의사결정 로그
 
@@ -142,8 +143,9 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 
 - step0의 AC 명령(로컬, 제작자의 워크플로 커밋과 구조 테스트가 함께 든 트리). 수용 기준 6의 잇는 테스트가 여기에 든다.
 - 워크플로 패치: 기준 커밋의 트리에 패치를 적용한 트리와 제작자가 올린 head의 트리가 같은지(`docs/SECURITY.md` 4번).
+- 결과(2026-11-28): 첫 커밋 `9bcbf6b` 트리 비교 같음(`cf063aa`), main 병합 뒤 다시 받은 `93d7e62` 트리 비교 같음(`370d998`). 그 트리에 구조 테스트를 더해 AC 131건 통과.
 - 병합 뒤: 다음 PR의 판정 워크플로가 정상으로 돌고 `review/codex`가 지금처럼 기록되는지. 실제 사용 한도는 일부러 만들 수 없으므로, 처음 한도에 걸린 실행에서 `review/codex` 설명에 한도와 시각이 나오는지 보고 TD-50 행에 적는다.
 
 ## 다음 할 일
 
-- 제작자에게 같은 패치(`lab/codex-usage-limit/judge-codex.patch`)를 새 기준 커밋에 다시 요청한다(Issue #223). 받으면 트리를 견주고 구조 테스트와 완료 처리를 올려(push 2) 판정을 받은 뒤 `pr-ready`로 제작자 head 승인을 요청한다. 병합 뒤 관찰은 Issue #223에 남긴다.
+- push 2의 판정을 받고 `pr-ready`로 제작자 head 승인을 요청한다. 병합 뒤 관찰(위 "검증 방법과 결과"의 병합 뒤 항목)을 Issue #223에 남긴다.
