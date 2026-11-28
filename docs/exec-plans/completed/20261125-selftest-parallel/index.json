@@ -1,0 +1,11 @@
+{
+  "plan": "20261125-selftest-parallel",
+  "steps": [
+    {
+      "step": 0,
+      "name": "parallel",
+      "status": "completed",
+      "completed_at": "2026-11-26T10:59:16+09:00"
+    }
+  ]
+}
