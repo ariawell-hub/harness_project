@@ -112,6 +112,9 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - 2026-11-26 구현 판정 5회차(head `22d3801`): Claude 승인(지적 없음), Codex 수정 요청(P1 하나, 재현됨. F9는 고쳐졌다고 적었다). F10: `8:36 AM pst or upgrade to Pro.`처럼 쉼표 없이 안내가 이어지면 `pst`를 시간대로 보지 않아 UTC로 읽는다. 맞는 지적이고 F9 수정이 만든 회귀다. 테스트를 먼저 더했다(`pst or upgrade to Pro.`, `kst and try later`, `utc or later`는 시각 모름). 고치기 전에 실패했다. 고침: 약어를 둘로 나눴다. 영어 낱말·흔한 줄임과 겹치지 않는 약어(`pst`, `kst`, `utc` 등. `TIME_ZONE_STRONG`)는 뒤에 무엇이 와도 낱말 하나로 시간대로 보고, 겹치는 약어(`west`, `wet`, `est`, `et`, `ct`, `mt`, `pt`, `ast`. `TIME_ZONE_WEAK`)만 홀로 붙었을 때 시간대로 본다. F6·F9의 꼬리는 그대로 시각을 지킨다. 29건 통과.
 - 2026-11-26 구현 판정 6회차(head `3c5b284`): Claude 승인(지적 없음), Codex 수정 요청(새 지적 없음). F10이 남았다: `est or upgrade to Pro.`의 `est`(영어 줄임과 겹쳐 홀로 붙었을 때만 보는 쪽)를 시간대로 보지 않는다. 가리는 규칙의 반례가 판정 F5·F6·F7·F9·F10에서 되풀이돼, 제작자에게 방향을 물었다(선택지: 엄격하게 / 약어 목록 계속 보강 / F10을 승인으로 닫기). 제작자가 "엄격하게"를 골랐다(2026-11-26 대화).
 - 2026-11-26 엄격한 규칙 테스트 먼저: 시각 뒤에 문장 끝이 아닌 글이 이어지는 꼴(`, or upgrade to Pro.`, `, West Coast users …`, `est or upgrade to Pro.`, 마침표에 붙인 `.PST` 등)을 모두 시각 모름으로, 글의 끝·공백뿐·문장 끝(`.`·`!`·`?` 바로 뒤에 글자·숫자가 붙지 않음)만 시각을 읽는 것으로 테스트를 고쳤다. 고치기 전에 실패했다. 고침: 시간대 판별 패턴(`TIME_ZONE_LIKE`·`TIME_ZONE_STRONG`·`TIME_ZONE_WEAK`)을 걷어내고 끝을 보는 정규식 하나(`TIME_END`)로 바꿨다. 실제 문구 둘(날짜가 있는 꼴, 시각만 있는 꼴)은 모두 마침표로 끝난다. 29건 통과.
+- 2026-11-28 제작자의 워크플로 커밋 `9bcbf6b`(부모 `7793e9a`, `.github/workflows/judge-codex.yml` 한 파일)를 받았다. `docs/SECURITY.md` "워크플로 변경 절차" 4번대로 기준 커밋 `7793e9a`에 `lab/codex-usage-limit/judge-codex.patch`를 적용한 트리와 받은 head의 트리를 통째로 견줬다: 둘 다 `cf063aa`로 같다.
+- 2026-11-28 `origin/main`(`abc4fa2`)을 병합했다. 충돌 셋: `scripts/ci/record.ts`의 `RecordReviewOptions`(#267의 `deferred`와 이 PR의 `unavailable`을 둘 다 둔다. 한도 설명은 판정이 없을 때, `deferred`는 판정이 있을 때 쓰여 겹치지 않는다), `scripts/test/record.test.ts`의 불러오기(둘을 합쳤다), 기술 부채 표(main의 TD-72·73과 이 PR의 TD-74·75를 둘 다 둔다. main은 TD-76·77로 건너뛰어 번호가 겹치지 않는다). `judge-codex.yml`은 main의 변경(#241의 `runs-on` 다섯 줄)과 제작자의 변경이 겹치지 않아 자동 병합됐고 그 결과가 main의 파일에 같은 패치를 적용한 것과 같았다(`cmp`). 그 병합에 구조 테스트와 완료 처리를 얹은 push(`6352eb9`, 로컬 `check`·AC 131건 통과)를 GitHub이 거부했다: `refusing to allow a Personal Access Token to create or update workflow .github/workflows/judge-codex.yml without workflow scope`. 병합한 파일이 두 부모 어디에도 없는 새 내용이기 때문으로 본다(#236에서 받아들여진 것은 PR이 바꾸지 않은 파일을 main 그대로 가져온 병합이다). 원격은 바뀌지 않았다.
+- 2026-11-28 병합을 다시 했다: `judge-codex.yml`만 main의 것으로 두고(제작자의 네 곳이 빠진다) 나머지 충돌은 위와 같이 풀었다(`d358aa6`. 거부된 병합과 그 파일만 다르다). 이 push의 head가 새 기준 커밋이다. 같은 패치가 새 기준 커밋에 `git apply --check`로 그대로 적용된다. 제작자에게 같은 패치를 다시 요청하고, 받은 뒤 새 기준 커밋으로 트리를 견준 다음 구조 테스트(거부된 로컬 기록의 `10820c0`)와 완료 처리를 올린다. 이 절차를 `docs/SECURITY.md` "워크플로 변경 절차"에 적었다.
 
 ## 의사결정 로그
 
@@ -131,6 +134,7 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 - Claude 판정 job이 세션에 없는 `Bash` 도구를 불러 유출 검사가 "허용 밖 도구를 호출했다"로 막는 일이 되풀이된다: 실행 44669039688(2026-11-20), 44885889572(2026-11-21), 45109695141(2026-11-23, 이 PR 2라운드). 셋 다 `session_tools=4`인데 `tool_uses`에 `Bash:1`, `other_tools=1`이다. 틀린 통과는 없지만(fail-closed) 그 head의 판정이 없어 다시 돌려야 한다. 기술 부채 표·Issue에 없다. → 처리: TD-75
 - Claude 판정 job에서 사용 한도가 어떻게 보이는지(수용 기준 8): `claude-scan`은 `result` 이벤트의 `is_error`로 "실행 오류(판정 없음)"를 내고 문구는 판정 job 로그에만 남아, `review/claude` 설명은 지금의 Codex와 같이 "판정 없음(판정 job 실패 또는 유출 검사 불통과)"뿐이다. `judge-claude`의 실패한 실행 5건 가운데 한도로 끝난 것은 없어 실제 문구는 확인하지 못했다. runner는 Claude 한도 문구를 `Claude AI usage limit reached|<유닉스 초>` 꼴로 가정한다(`scripts/runner/agents.ts`, `scripts/selftest/fake-agent.ts`). 같은 방식(`unavailable` 출력과 `why` 단계)으로 할지는 실제 문구를 본 뒤 정한다. → 처리: TD-74
 - 실제 Codex 한도 문구에는 날짜 없이 시각만 있는 꼴(`try again at 3:00 PM.`)이 있다(2026-11-25, 판정 실행 45545579256). 계획의 수용 기준 1이 든 꼴(`Nov 21st, 2026 8:36 AM`)과 다르다. 이 꼴은 어느 날의 시각인지 몰라 "풀리는 시각 모름"으로 적는다(상태와 알림은 맞고, 풀리는 시각만 빠진다). 시각만이라도 적을지는 수용 기준을 바꾸는 일이라 이 step에서 하지 않는다. → 처리: 해당 없음
+- main이 같은 워크플로 파일을 바꾼 뒤에는 제작자의 워크플로 커밋이 든 브랜치를 봇이 `origin/main` 병합으로 갱신할 수 없다(2026-11-28 push 거부). 절차서와 보안 문서에 이 경우가 없었다 → 처리: [docs/SECURITY.md](../../../SECURITY.md) "워크플로 변경 절차"에 거부되는 조건과 봇의 절차(그 파일을 main 쪽으로 두고 병합, 같은 패치를 다시 요청)를 적었다
 
 ## 열린 질문
 
@@ -142,4 +146,4 @@ Codex 계정이 사용 한도에 걸리면 `review/codex`가 "판정 없음(판�
 
 ## 다음 할 일
 
-- 계획만 담은 커밋을 초안 PR로 올려 계획 검증(G1)을 받는다. 승인 뒤 step0의 순서대로 한다.
+- 제작자에게 같은 패치(`lab/codex-usage-limit/judge-codex.patch`)를 새 기준 커밋에 다시 요청한다(Issue #223). 받으면 트리를 견주고 구조 테스트와 완료 처리를 올려(push 2) 판정을 받은 뒤 `pr-ready`로 제작자 head 승인을 요청한다. 병합 뒤 관찰은 Issue #223에 남긴다.
