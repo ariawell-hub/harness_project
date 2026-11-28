@@ -14,6 +14,7 @@ import {
   type Entry,
   type Ledger,
 } from '../ci/ledger.ts';
+import * as ledgerModule from '../ci/ledger.ts';
 import type { Finding, Resolution, Verdict } from '../ci/verdict.ts';
 
 const BASE = 'a'.repeat(40);
@@ -579,6 +580,42 @@ test('ledgerStatus(Issue #262): 범위 밖 P1은 막지 않고 동결과 따로 
   const f = ledgerStatus(bad);
   assert.equal(f.state, 'failure');
   assert.match(f.description, /범위 밖 P1 1/);
+});
+
+test('newEntryStatus(Issue #267): 원장 반영과 같은 규칙으로 새 지적의 등급·상태·처리 칸을 정한다', () => {
+  // 새 함수는 변경 전 코드에 없다: 단언으로 실패하게 한다
+  const f = (ledgerModule as Partial<typeof ledgerModule>).newEntryStatus;
+  assert.equal(typeof f, 'function', 'newEntryStatus 없음');
+  const st = (
+    over: Partial<Finding>,
+    o: { round?: number; changed?: string[]; outside?: string[]; repro?: '' | 'reproduced' } = {},
+  ) =>
+    f!(finding(over), {
+      round: o.round ?? 2,
+      changed: new Set(o.changed ?? ['src/fix.ts']),
+      outside: new Set(o.outside ?? ['src/main-only.ts']),
+      repro: o.repro ?? '',
+    });
+  const cases: [string, ReturnType<typeof st>, string, string, RegExp][] = [
+    ['바뀐 파일 P1', st({ file: 'src/fix.ts' }), 'P1', 'open', /^$/],
+    ['동결', st({ file: 'src/old.ts' }), 'P1', 'deferred', /^동결: /],
+    ['동결 예외: 재현됨', st({ file: 'src/old.ts' }, { repro: 'reproduced' }), 'P1', 'open', /^$/],
+    ['1라운드는 동결 없음', st({ file: 'src/old.ts' }, { round: 1 }), 'P1', 'open', /^$/],
+    [
+      '범위 밖',
+      st({ file: 'src/main-only.ts' }, { repro: 'reproduced' }),
+      'P1',
+      'deferred',
+      /^범위 밖: /,
+    ],
+    ['P0', st({ file: 'src/old.ts', severity: 'P0' }), 'P0', 'open', /^$/],
+    ['근거 없음', st({ file: 'src/fix.ts', evidence: ' ' }), 'P2', 'deferred', /^근거 없음: /],
+    ['P2', st({ file: 'src/fix.ts', severity: 'P2' }), 'P2', 'deferred', /^$/],
+  ];
+  for (const [name, r, severity, status, note] of cases) {
+    assert.deepEqual([r.severity, r.status], [severity, status], name);
+    assert.match(r.note, note, name);
+  }
 });
 
 // ---------- 계획 승인(G1, step4) ----------

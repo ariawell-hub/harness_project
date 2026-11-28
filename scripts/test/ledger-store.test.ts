@@ -410,10 +410,11 @@ test('writeRoundInput #262: main 병합으로만 바뀐 파일은 이 PR의 변�
   const md = readFileSync(path.join(dir, 'ledger.md'), 'utf8');
   assert.match(md, /round-main\.txt \(1개\)/);
   assert.match(md, /이 PR의 변경이 아니다/);
-  // 고정된 옛 프롬프트를 쓰는 PR에도 처리 규칙이 간다: 원래 등급으로 적는다(판정 F11)
-  assert.match(md, /원래 등급으로 적어라/);
-  assert.match(md, /P0은 그대로 막는다/);
+  // 기록 job의 처리를 사실로 적는다(판정 F11). 원장 파일은 데이터라 검증자에게 지시하지 않는다(PR #254 판정)
+  assert.match(md, /새 P1을 범위 밖으로 미루고/);
+  assert.match(md, /P0은 막는다/);
   assert.doesNotMatch(md, /이 PR의 지적이 아니다/);
+  assert.doesNotMatch(md, /적어라/);
 });
 
 test('writeRoundInput #262: 직전 판정 뒤 main 병합만 더했으면 changed와 diff가 비고 main 쪽 파일은 round-main.txt에만 있다', () => {
@@ -518,13 +519,24 @@ function unusedBits(v: string): string {
 
 test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모두 모르는 것으로 본다(계획 검증 F3)', () => {
   const parse = roundFn('parseRoundChanged');
-  assert.deepEqual(parse(b64(['src/a.ts'])), { changed: ['src/a.ts'], outside: [] });
+  assert.deepEqual(parse(b64(['src/a.ts'])), { changed: ['src/a.ts'], outside: [], round: null });
   assert.deepEqual(parse(b64({ changed: ['src/a.ts'], outside: ['src/b.ts'] })), {
     changed: ['src/a.ts'],
     outside: ['src/b.ts'],
+    round: null,
   });
-  assert.deepEqual(parse(b64({ changed: null, outside: [] })), { changed: null, outside: [] });
-  const unknown = { changed: null, outside: [] };
+  // 라운드 수(Issue #267): 1 이상의 정수면 그 값이다
+  assert.deepEqual(parse(b64({ changed: ['src/a.ts'], outside: [], round: 3 })), {
+    changed: ['src/a.ts'],
+    outside: [],
+    round: 3,
+  });
+  assert.deepEqual(parse(b64({ changed: null, outside: [] })), {
+    changed: null,
+    outside: [],
+    round: null,
+  });
+  const unknown = { changed: null, outside: [], round: null };
   const bad: [string, string][] = [
     ['빈 값', ''],
     ['base64가 아님', '%%%'],
@@ -538,6 +550,12 @@ test('parseRoundChanged #262: 배열 꼴과 객체 꼴을 읽고, 그 밖은 모
     ['changed에 숫자', b64({ changed: ['src/a.ts', 2], outside: [] })],
     ['changed 없음', b64({ outside: [] })],
     ['배열에 숫자', b64(['src/a.ts', 1])],
+    // 라운드 수가 있는데 1 이상의 정수가 아니면 깨진 값이다(Issue #267)
+    ['round 0', b64({ changed: [], outside: [], round: 0 })],
+    ['round 음수', b64({ changed: [], outside: [], round: -1 })],
+    ['round 소수', b64({ changed: [], outside: [], round: 1.5 })],
+    ['round 문자열', b64({ changed: [], outside: [], round: '2' })],
+    ['round null', b64({ changed: [], outside: [], round: null })],
     // 디코딩되는 JSON이어도 표준 base64가 아니면 모른다(판정 F10): 알파벳 밖 문자, 공백, 줄바꿈, 4의 배수가 아닌 길이
     [
       '알파벳 밖 문자',
@@ -573,20 +591,32 @@ test('encodeRoundChanged #262: 객체 꼴이 상한(120,000자) 안이면 그 �
   const parse = roundFn('parseRoundChanged');
   const long = (len: number) => 'x'.repeat(len);
   // 객체 꼴이 정확히 120,000자: 그대로 내고 되읽으면 같다
-  const at = sizedTo(120_000, (len) => ({ changed: [long(len)], outside: [] as string[] }));
+  const at = sizedTo(120_000, (len) => ({
+    changed: [long(len)],
+    outside: [] as string[],
+    round: 2,
+  }));
   assert.ok(at, '객체 꼴 120,000자');
   assert.equal(encode(at), b64(at));
   assert.deepEqual(parse(encode(at)), at);
   // base64 길이는 4의 배수다: 상한을 처음 넘는 120,004자면 빈 값(모른다)이다
-  const over = sizedTo(120_004, (len) => ({ changed: ['src/a.ts'], outside: [long(len)] }));
+  const over = sizedTo(120_004, (len) => ({
+    changed: ['src/a.ts'],
+    outside: [long(len)],
+    round: 2,
+  }));
   assert.ok(over, '객체 꼴 120,004자');
   assert.equal(encode(over), '');
   // 예전 배열 꼴로 정확히 100,000자인 목록(예전에는 전달됐다)을 나눠도 객체 꼴로 전달되고 범위 구분이 남는다
   const list = sizedTo(100_000, (len) => ['src/a.ts', long(len), 'src/main-only.ts']);
   assert.ok(list, '배열 꼴 100,000자');
-  const split = { changed: [list[0], list[1]], outside: [list[2]] };
+  const split = { changed: [list[0], list[1]], outside: [list[2]], round: 2 };
   assert.deepEqual(parse(encode(split)), split);
-  assert.deepEqual(parse(encode({ changed: null, outside: [] })), { changed: null, outside: [] });
+  assert.deepEqual(parse(encode({ changed: null, outside: [], round: 1 })), {
+    changed: null,
+    outside: [],
+    round: 1,
+  });
 });
 
 test('writeRoundInput: 직전 판정 head를 찾지 못하면 바뀐 파일을 모른다(null)', () => {

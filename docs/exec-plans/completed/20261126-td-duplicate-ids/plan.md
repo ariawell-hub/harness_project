@@ -1,0 +1,84 @@
+---
+id: 20261126-td-duplicate-ids
+issue: 251 # GitHub Issue 번호
+type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
+status: completed # draft | active | blocked | completed | abandoned
+size: medium # small | medium | large (4.3절)
+risk: high # low | normal | high (10.1절)
+author: claude-code # claude-code | codex | <사람>
+owner: mac-session # 선점한 runner 작업자 또는 사람
+claimed_at: 2026-11-26T13:01:00+09:00 # new-task가 채운다
+---
+
+# 기술 부채 표에 TD-70·TD-71이 두 번씩 있다 — 번호를 고치고 doc-lint가 겹친 id를 막는다
+
+## 목표와 수용 기준
+
+main의 `docs/exec-plans/tech-debt-tracker.md`에 같은 id가 두 행씩 있다. TD-70은 `lab/` 스크립트의 링크 경로 문제(#246, 76행)와 Windows `pnpm --version` 감지 문제(#236, 77행), TD-71은 `wrapper-options.test.ts` 시간 비율 테스트의 흔들림(#246, 78행)과 Windows 테스트 성능의 남은 몫(#236, 79행)이다. #236과 #246이 각자 `origin/main` 기준 다음 번호를 썼고, 행을 넣은 자리가 달라 git이 충돌 없이 합쳤다. 계획·변경 조각의 `TD-70`·`TD-71` 참조가 어느 행인지 가릴 수 없다(PR #242 Codex 판정 P2도 같은 지적). 새 행 번호가 겹치는 일 자체는 PR #242가 기술 부채로 등록한다(TD-72).
+
+수용 기준:
+
+1. 나중에 병합된 #246의 두 행을 TD-76(`lab/` 스크립트)·TD-77(시간 비율 테스트)로 옮긴다. TD-72~75는 열린 PR(#242: TD-72·73, #229: TD-74·75)이 쓰고 있어 건너뛴다. 먼저 병합된 #236의 TD-70·71은 그대로 둔다.
+2. #246이 남긴 참조를 새 번호로 맞춘다: 계획 `docs/exec-plans/completed/20261125-symlink-main/plan.md`의 발견 사항 두 줄(`→ 처리: TD-70`, `→ 처리: TD-71`), 변경 조각 `docs/harness/changes/20261125-symlink-main-s0.md`의 `TD-70`(과 `TD-71`이 있으면 그것). #236의 참조는 바꾸지 않는다.
+3. `doc-lint`가 기술 부채 표(`docs/exec-plans/tech-debt-tracker.md`)에서 같은 id(`| TD-<번호> |`로 시작하는 행의 첫 칸)가 두 번 이상 나오면 오류(`R8 기술 부채 id`)를 낸다. 오류 글에 그 id와 행 번호들이 있다. 표가 `doc-lint`의 검사 대상 목록(git이 나열한 Markdown 파일에서 `docLint.exclude`를 뺀 것)에 없으면(파일이 없거나 제외됐다) 보지 않는다.
+4. #236의 두 행(TD-70 Windows `pnpm --version`, TD-71 Windows 테스트 성능)과 그 참조(`docs/exec-plans/completed/20261123-windows-test-speed/`)는 그대로다. 변경 조각 `docs/harness/changes/20261125-symlink-main-s0.md`의 참조는 TD-76을 가리킨다(AC가 행의 내용과 기준 버전으로 확인한다).
+5. 고친 뒤 이 리포에서 `node scripts/harness.ts doc-lint`가 통과한다.
+
+## 범위 / 비범위
+
+범위: 기술 부채 표의 두 행 번호, #246의 계획·변경 조각 참조, `doc-lint`의 새 검사와 테스트, 이 PR의 변경 조각.
+
+비범위:
+
+- 새 행 번호를 정하는 방법을 바꾸는 일(TD-72, PR #242).
+- 표의 내용·상태를 고치는 일.
+- 다른 문서의 id 중복(ADR 번호 등).
+
+## 관련 파일·문서
+
+- `docs/exec-plans/tech-debt-tracker.md`
+- `docs/exec-plans/completed/20261125-symlink-main/plan.md`
+- `docs/harness/changes/20261125-symlink-main-s0.md`
+- `scripts/gates/doc-lint.ts`
+- `scripts/test/doc-lint-td-ids.test.ts`
+- `docs/harness/changes/20261126-td-duplicate-ids-s0.md`
+- `docs/exec-plans/active/20261126-td-duplicate-ids/**`
+- 읽기만: `scripts/test/changes.test.ts`(임시 리포 도우미 `lintRepo`), `scripts/test/helpers.ts`, `docs/exec-plans/completed/20261123-windows-test-speed/plan.md`
+
+## step 목록
+
+- step0 unique-ids: `doc-lint` 검사와 테스트를 먼저 쓰고, 두 행의 번호와 #246의 참조를 고친다.
+
+## 진행 로그
+
+- 2026-11-26 접수: 제작자가 대화에서 남은 지적을 Issue로 열어 고치라고 지시했고 봇이 Issue #251을 등록했다. `new-task --issue 251 --slug td-duplicate-ids --type fix --size medium --risk high`로 시작했다(main `4816af5`).
+- 2026-11-26 읽은 것: main의 표 76~79행(TD-70 둘, TD-71 둘). #246의 참조는 계획 92·93행과 변경 조각 한 곳, #236의 참조는 `windows-test-speed` 계획 113행. 열린 PR이 더한 행 번호는 #242 TD-72·73, #229 TD-74·75다(나머지 열린 PR은 새 행을 더하지 않는다).
+- 2026-11-26 계획 검증 1회차(head `fc7a1dc`): Claude 승인(지적 없음), Codex 수정 요청(P1 둘). 둘 다 받아들였다. F1(색인에 없는 표의 처리가 구현 지시와 맞지 않는다. `files`는 git이 나열한 Markdown에서 `docLint.exclude`만 뺀 것이라 색인 링크를 빼도 표가 남는다) → 조건을 "검사 대상 목록(`files`)에 없을 때(파일이 없거나 제외됐다)"로 통일하고 테스트 경우를 그 둘로 바꿨다(수용 기준 3, 작업 1). F2(변경 조각의 참조를 지우거나 잘못 바꿔도 AC가 통과하고, #236 쪽 보존을 확인하지 않는다) → 조각에 TD-76이 있는지, #236의 두 행이 내용 그대로 TD-70·71인지, `windows-test-speed` 계획이 기준 버전과 같은지 보는 AC 넷을 더했다(수용 기준 5). 그 사이 main에 #241이 병합돼 `origin/main`을 병합했다.
+- 2026-11-26 계획 검증 2회차(head `2a67e1d`): Claude 승인(지적 없음), Codex 수정 요청(P2 하나). 받아들였다. F2(표 파일이 없는 경우에도 중복 id 표를 두라고 읽힌다) → 두 경우의 준비를 갈랐다: 파일 부재는 표를 만들지 않고, 제외는 중복 id 표를 두고 `docLint.exclude`에 넣는다(작업 1).
+- 2026-11-26 계획 검증 3회차(head `08b91c4`): Claude 승인, Codex 수정 요청(F2 유지: 두 참조 번호를 서로 바꿔도 AC가 통과한다). 받아들였다. 계획 파일의 두 발견 사항과 변경 조각의 참조를 같은 줄에서 그 내용과 새 번호로 함께 확인하도록 AC 세 줄을 바꿨다(표 쪽은 이미 행 내용과 번호를 같은 줄에서 본다).
+- 2026-11-26 계획 검증 4회차(head `11aa397`): 두 검증자 승인(G1).
+- 2026-11-26 테스트 먼저: `scripts/test/doc-lint-td-ids.test.ts` 4건(겹친 id 하나, 둘, 겹침 없음과 표 밖의 글, 검사 대상 밖의 두 경우). 구현 전에 3건이 실패했다(겹침 없음 테스트는 규칙이 없어도 통과한다).
+- 2026-11-26 구현: `doc-lint` 7번 검사(`techDebtIdProblems`). 4건 통과. 이 리포에서 `doc-lint`를 돌리자 TD-70(76·77행)과 TD-71(78·79행)이 걸렸다. #246의 두 행(76행 `lab/` 스크립트, 78행 시간 비율 테스트)을 TD-76·TD-77로 옮기고 #246 계획 발견 사항 두 줄과 변경 조각의 참조를 맞추자 `doc-lint`가 통과했다.
+
+## 의사결정 로그
+
+- 결정: 나중에 병합된 #246의 행을 옮긴다. / 이유: 먼저 병합된 번호를 다른 PR·문서가 먼저 가리켰을 가능성이 크다.
+- 결정: 새 번호는 TD-76·77이다. / 이유: TD-72~75는 열린 PR이 쓰고 있다. 그 번호를 쓰면 바로 같은 충돌이 난다.
+- 결정: `doc-lint`에 중복 id 검사를 더한다(오류). / 이유: 이번 중복은 git이 충돌 없이 합쳐 아무 검사에도 걸리지 않았다. 병합 전 `check`(그리고 main 병합 뒤 `check`)에서 잡는다. 번호를 정하는 방법 자체(TD-72)는 다루지 않는다.
+
+## 발견 사항
+
+없음.
+
+## 열린 질문
+
+없음.
+
+## 검증 방법과 결과
+
+- step0의 AC 명령과 `node scripts/harness.ts check`.
+- 2026-11-26 head `aa9960e`: AC 15줄 모두 통과(`check` 포함: fmt·lint·test·test-effect·doc-lint·bypass-scan·secret-scan 통과, build 해당 없음). `doc-lint-td-ids.test.ts` 4건 통과.
+
+## 다음 할 일
+
+1. 구현 판정을 받고 승인을 요청한다.

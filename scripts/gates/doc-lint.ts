@@ -266,7 +266,33 @@ export function docLint(root: string, cfg: HarnessConfig, o: DocLintOptions = {}
     const r = parseFragment(f, readFileSync(path.join(root, f), 'utf8'));
     if (!r.ok) for (const what of r.problems) errors.push(fragmentProblem(f, what));
   }
+
+  // 7) 기술 부채 표의 id가 겹치지 않는다(Issue #251. 표가 문서 목록에 있을 때만)
+  if (files.includes(TECH_DEBT)) {
+    for (const p of techDebtIdProblems(readFileSync(path.join(root, TECH_DEBT), 'utf8'))) {
+      errors.push(p);
+    }
+  }
   return { errors, warnings };
+}
+
+const TECH_DEBT = 'docs/exec-plans/tech-debt-tracker.md';
+
+/** 표 행(`| TD-<번호> |`로 시작하는 줄)의 id가 두 번 이상 나오면 id마다 문제 하나. 행 번호는 1부터 */
+function techDebtIdProblems(text: string): Problem[] {
+  const rows = new Map<string, number[]>();
+  text.split(/\r?\n/).forEach((line, i) => {
+    const m = /^\| (TD-\d+) +\|/.exec(line);
+    if (m) rows.set(m[1], [...(rows.get(m[1]) ?? []), i + 1]);
+  });
+  return [...rows]
+    .filter(([, lines]) => lines.length > 1)
+    .map(([id, lines]) => ({
+      rule: 'R8 기술 부채 id',
+      what: `${TECH_DEBT}: id ${id}인 행이 ${lines.length}개다(${lines.join(', ')}행)`,
+      how: '나중에 더한 행을 다음 빈 번호로 옮기고 그 행을 가리키는 참조를 맞춰라',
+      doc: DOC,
+    }));
 }
 
 /**

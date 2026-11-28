@@ -185,12 +185,13 @@ export function highEntropy(text: string): boolean {
 
 /**
  * 원장(#55) 전의 판정 규칙: 승인이고 차단 지적(P0·P1)이 없을 때만 통과.
- * 범위 밖(Issue #262): 차단 지적이 모두 outside(main 병합으로만 바뀐 파일)의 P1이고 resolutions에 open이 없으면 통과다.
- * 원장은 그 P1을 미루고, 열린 지적은 review-ledger가 막는다(이 규칙이 없으면 미뤄도 review/*가 PR을 막는다)
+ * 원장이 미루는 P1(Issue #262 범위 밖, #267 동결·근거 없음): 차단 지적이 모두 P1이고 deferred(지적, 순번)가 참이며
+ * resolutions에 open이 없으면 통과다. 원장은 그 P1을 미루고, 열린 지적은 review-ledger가 막는다(이 규칙이 없으면 미뤄도
+ * review/*가 PR을 막는다). deferred는 원장의 등록 규칙(ledger.ts newEntryStatus)으로 만든다. 없으면 미루지 않는다
  */
 export function verdictStatus(
   v: Verdict,
-  outside: readonly string[] = [],
+  deferred: (f: Finding, index: number) => boolean = () => false,
 ): { state: 'success' | 'failure'; description: string } {
   const count = (s: Severity) => v.findings.filter((f) => f.severity === s).length;
   const counts = SEVERITIES.map((s) => [s, count(s)] as const).filter(([, n]) => n > 0);
@@ -198,16 +199,17 @@ export function verdictStatus(
   const blocking = count('P0') + count('P1');
   if (v.verdict === 'approve' && blocking === 0)
     return { state: 'success', description: `승인 (${tally})` };
-  const out = new Set(outside);
-  const blockers = v.findings.filter((f) => f.severity === 'P0' || f.severity === 'P1');
+  const blockers = [...v.findings.entries()].filter(
+    ([, f]) => f.severity === 'P0' || f.severity === 'P1',
+  );
   if (
     blockers.length > 0 &&
-    blockers.every((f) => f.severity === 'P1' && out.has(f.file)) &&
+    blockers.every(([i, f]) => f.severity === 'P1' && deferred(f, i)) &&
     !(v.resolutions ?? []).some((r) => r.status === 'open')
   )
     return {
       state: 'success',
-      description: `승인 (범위 밖 P1 ${blockers.length} 미룸, ${tally})`,
+      description: `승인 (미룬 P1 ${blockers.length}, ${tally})`,
     };
   return {
     state: 'failure',

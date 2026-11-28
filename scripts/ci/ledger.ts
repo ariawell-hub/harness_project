@@ -176,6 +176,47 @@ export function parkFor(l: Ledger, planOnly: boolean): Ledger {
 }
 
 /**
+ * 새로 등록하는 지적의 등급·상태·처리 칸(10.2절 (3)·(5)). 원장 반영(`applyVerdict`)과 검증자 상태(`review/*`, Issue #267)가
+ * 같은 규칙을 쓰도록 여기 둔다. 같은 지적의 재등록(이미 원장에 있음)은 이 함수가 아니라 원장 상태를 따른다.
+ * - 근거(실패 시나리오와 위치)가 없는 P1은 P2로 내린다. P0은 내리지 않는다
+ * - 범위 밖(Issue #262): main 병합으로만 바뀐 파일(outside)의 새 P1은 재현됐어도 deferred다
+ * - 동결: 그 검증자의 2라운드부터 바뀌지 않은 파일(changed에 없음)의 새 P1은 deferred다. 재현된 P1은 예외로 받는다
+ * - 그 밖의 P0·P1은 open, P2·P3은 deferred
+ */
+export function newEntryStatus(
+  f: Pick<Finding, 'severity' | 'file' | 'evidence'>,
+  o: {
+    round: number;
+    changed: ReadonlySet<string>;
+    outside: ReadonlySet<string>;
+    repro: ReproResult;
+  },
+): { severity: Severity; status: 'open' | 'deferred'; note: string } {
+  const unfounded = f.severity === 'P1' && (f.evidence.trim() === '' || f.file.trim() === '');
+  const severity: Severity = unfounded ? 'P2' : f.severity;
+  const blocking = BLOCKING.includes(severity);
+  const outside = severity === 'P1' && o.outside.has(f.file);
+  // "재현 안 됨"은 상태를 바꾸지 않는다
+  const frozen =
+    !outside &&
+    o.round >= 2 &&
+    severity === 'P1' &&
+    !o.changed.has(f.file) &&
+    o.repro !== 'reproduced';
+  return {
+    severity,
+    status: blocking && !frozen && !outside ? 'open' : 'deferred',
+    note: unfounded
+      ? '근거 없음: P1에서 P2로 내림(10.2절 (3))'
+      : outside
+        ? OUTSIDE_NOTE
+        : frozen
+          ? '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'
+          : '',
+  };
+}
+
+/**
  * 판정 하나를 원장에 반영한 새 원장을 돌려준다(입력은 바꾸지 않는다).
  * - 새 지적: P0·P1은 open, P2·P3은 deferred. 그 검증자의 2라운드부터는 바뀌지 않은 파일의 P1을 deferred로 등록한다(동결)
  * - 범위 밖: main 병합으로만 바뀐 파일(outsideSinceLastRound)의 새 P1은 재현됐어도 deferred다(Issue #262). P0은 그대로 받는다
@@ -192,6 +233,7 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
     ciFailures: [...l.ciFailures],
   };
   const round = roundsOf(l, o.reviewer) + 1;
+  // 바뀐 파일 목록을 모르면(null) 빈 목록처럼 본다: 2라운드부터 새 P1은 모두 동결된다
   const changed = new Set(o.changedSinceLastRound ?? []);
   const outsideFiles = new Set(o.outsideSinceLastRound ?? []);
 
@@ -233,19 +275,17 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
       }
       continue;
     }
-    // 근거(실패 시나리오와 위치)가 없는 P1은 P2로 내린다. P0은 내리지 않는다(10.2절 (3))
-    const unfounded = f.severity === 'P1' && (f.evidence.trim() === '' || f.file.trim() === '');
-    const severity: Severity = unfounded ? 'P2' : f.severity;
+    const { severity, status, note } = newEntryStatus(f, {
+      round,
+      changed,
+      outside: outsideFiles,
+      repro,
+    });
     const blocking = BLOCKING.includes(severity);
     if (!blocking && out.findings.length >= MAX_ENTRIES) {
       out.dropped++;
       continue;
     }
-    // 범위 밖(Issue #262): main 병합으로만 바뀐 파일의 새 P1은 재현됐어도 이 PR을 막지 않는다
-    const outside = severity === 'P1' && outsideFiles.has(f.file);
-    // 동결: 재현 job이 재현한 P1은 예외로 받는다(10.2절 (5)). "재현 안 됨"은 상태를 바꾸지 않는다
-    const frozen =
-      !outside && round >= 2 && severity === 'P1' && !changed.has(f.file) && repro !== 'reproduced';
     out.findings.push({
       id: `F${next++}`,
       severity,
@@ -254,14 +294,8 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
       line: f.line,
       title: oneLine(f.title, LIMITS.title),
       repro,
-      status: blocking && !frozen && !outside ? 'open' : 'deferred',
-      note: unfounded
-        ? '근거 없음: P1에서 P2로 내림(10.2절 (3))'
-        : outside
-          ? OUTSIDE_NOTE
-          : frozen
-            ? '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'
-            : '',
+      status,
+      note,
       round,
       rejectedBy: [],
       ...(o.planOnly ? { planRound: true as const } : {}),
