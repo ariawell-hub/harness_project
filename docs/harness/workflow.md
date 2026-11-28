@@ -159,7 +159,7 @@ node scripts/harness.ts plan-gate         # PR 모드 확인
   - `origin/main`을 병합해 최신이고 `check`가 통과했다.
   - 이 PR에 반영해야 하는 제작자 작업(App ID 같은 설정값)을 먼저 받아 반영했다.
   - `pr-ready`는 완료 처리, 커밋하지 않은 변경, push 여부, `origin/main` 병합 여부를 확인한다. 하나라도 안 되면 이유를 출력하고 PR은 그대로 둔다. 통과하면 초안을 해제하고 worktree에 승인 요청 표시(그때의 HEAD)를 남긴다.
-  - L1 훅이 순서를 지키게 한다: `gh pr ready` 직접 실행, 위험도 높음 계획의 초안 아닌 `gh pr create`, 승인 요청 표시가 있는 브랜치에 새 커밋을 올리는 push를 막는다. `origin/main` 병합 커밋만 더한 push는 막지 않는다.
+  - L1 훅이 순서를 지키게 한다: `gh pr ready` 직접 실행, 위험도 높음 계획의 초안 아닌 `gh pr create`, 승인 요청 표시가 있는 브랜치에 새 커밋을 올리는 push를 막는다. PR의 변경은 그대로 두고 `origin/main`만 병합한 push는 PR이 바꾼 파일을 main이 건드리지 않았으면 막지 않는다. 그사이 main이 PR 파일을 바꿨으면 막으므로 아래 `pr-ready --undo` 절차를 밟는다.
   - 승인 요청 뒤에 꼭 커밋을 올려야 하면 제작자에게 먼저 알리고 `node scripts/harness.ts pr-ready --undo`로 초안으로 되돌린 뒤 push한다. 끝나면 `pr-ready`로 다시 요청한다.
 - **운영 단계의 보호 경로 PR**: `harness.config.json`의 `stage`가 `operation`이면(이 리포는 2026-11-18부터) 보호 경로(`protectedPaths`)를 하나라도 바꾼 PR은 계획의 `risk`와 무관하게 위험도 높음이고 제작자 승인 대상이다.
   - `risk-gate`가 `위험도 높음: 제작자 head 승인 필요 — 보호 경로(operation): <파일>`로 실패한 채 남고, 코드 오너(제작자) 리뷰가 있어야 병합된다(`.github/CODEOWNERS`, 설계서 10.4절). 두 검증자가 모두 판정하고, main 병합 갱신 뒤에도 승인을 이어받지 않고 다시 판정한다.
