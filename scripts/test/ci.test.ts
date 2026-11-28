@@ -662,6 +662,41 @@ test('judge-codex.yml: 설정 → 사전 측정 → 판정 → 유출 검사 →
     assert.doesNotMatch(b, /node (\.\/)?pr\/|(bash|sh) (\.\/)?pr\//, b);
 });
 
+test('judge-codex.yml: 사용 한도 값은 scan 바로 뒤의 why 단계가 job 출력으로 넘기고 기록 job이 --unavailable로 받는다 (Issue #223)', () => {
+  const j = jobs(JUDGE_CODEX);
+  const judge = j.get('judge')!;
+  const steps = judge.split(/^(?= {6}- name: )/m).slice(1);
+  const at = (id: string) => steps.findIndex((s) => new RegExp(`^ {8}id: ${id}$`, 'm').test(s));
+  const [scan, why, seal] = [at('scan'), at('why'), at('seal')];
+  assert.ok(scan >= 0 && why >= 0 && seal >= 0, `${scan},${why},${seal}`);
+  // why는 scan 바로 뒤, 봉인 앞이다. 봉인은 지금처럼 always()로 마지막에 돈다
+  assert.equal(why, scan + 1);
+  assert.ok(why < seal);
+  assert.equal(seal, steps.length - 1);
+  assert.match(steps[seal], /^ {8}if: always\(\) && needs\.pubkey\.outputs\.key != ''$/m);
+  // scan: codex-scan이 값을 파일에만 쓴다(실패로 끝나는 단계의 출력에 기대지 않는다)
+  assert.match(
+    steps[scan],
+    /codex-scan [^\n]*(?:\\\n[^\n]*)*--unavailable-out "\$RUNNER_TEMP\/codex-unavailable\.txt"\n/,
+  );
+  // why: scan이 실패했을 때만, 비밀·환경 변수 없이 파일을 검사해 출력에 쓴다
+  assert.match(steps[why], /^ {8}if: always\(\) && steps\.scan\.outcome == 'failure'$/m);
+  assert.match(
+    steps[why],
+    /^ {8}run: node base\/scripts\/harness\.ts codex-unavailable --file "\$RUNNER_TEMP\/codex-unavailable\.txt"$/m,
+  );
+  assert.doesNotMatch(steps[why], /^ {8}env:|secrets\.|\$\{\{/m);
+  // judge job 출력: repro 바로 아래
+  assert.match(
+    judge,
+    /^ {6}repro: \$\{\{ steps\.scan\.outputs\.repro \}\}\n {6}unavailable: \$\{\{ steps\.why\.outputs\.unavailable \}\}$/m,
+  );
+  // record job: 환경 변수로 받아 --unavailable로 넘긴다
+  const record = j.get('record')!;
+  assert.match(record, /^ {10}UNAVAILABLE: \$\{\{ needs\.judge\.outputs\.unavailable \}\}$/m);
+  assert.match(record, /record-review [^\n]*(?:\\\n[^\n]*)*--unavailable "\$UNAVAILABLE"/);
+});
+
 // ---------- 승인 이어받기 연결 (10.3절) ----------
 
 test('judge-*.yml: 이어받으면 판정 job을 돌리지 않고 기록 job이 원래 SHA와 patch를 넘긴다', () => {
