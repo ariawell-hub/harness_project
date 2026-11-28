@@ -691,10 +691,22 @@ test('judge-codex.yml: 사용 한도 값은 scan 바로 뒤의 why 단계가 job
     judge,
     /^ {6}repro: \$\{\{ steps\.scan\.outputs\.repro \}\}\n {6}unavailable: \$\{\{ steps\.why\.outputs\.unavailable \}\}$/m,
   );
-  // record job: 환경 변수로 받아 --unavailable로 넘긴다
-  const record = j.get('record')!;
-  assert.match(record, /^ {10}UNAVAILABLE: \$\{\{ needs\.judge\.outputs\.unavailable \}\}$/m);
-  assert.match(record, /record-review [^\n]*(?:\\\n[^\n]*)*--unavailable "\$UNAVAILABLE"/);
+  // record job: record-review 단계가 자기 env로 받아 같은 단계의 run에서 --unavailable로 넘긴다.
+  // 단계의 env는 다른 단계에 이어지지 않는다(판정 F11: job 전체에서 찾으면 앞 단계로 옮겨도 통과한다)
+  const recordSteps = j
+    .get('record')!
+    .split(/^(?= {6}- name: )/m)
+    .slice(1);
+  const rr = recordSteps.filter((s) => /harness\.ts record-review /.test(s));
+  assert.equal(rr.length, 1, '`record-review`를 부르는 단계는 하나');
+  const runAt = rr[0].search(/^ {8}run: /m);
+  assert.ok(runAt > 0, rr[0]);
+  const [stepHead, stepRun] = [rr[0].slice(0, runAt), rr[0].slice(runAt)];
+  assert.match(
+    stepHead,
+    /^ {8}env:\n(?: {10}[^\n]*\n)*? {10}UNAVAILABLE: \$\{\{ needs\.judge\.outputs\.unavailable \}\}$/m,
+  );
+  assert.match(stepRun, /record-review [^\n]*(?:\\\n[^\n]*)*--unavailable "\$UNAVAILABLE"/);
 });
 
 // ---------- 승인 이어받기 연결 (10.3절) ----------
