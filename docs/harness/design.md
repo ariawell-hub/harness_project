@@ -142,8 +142,8 @@ review_cycle: quarterly
     - 기대하는 등록(`harness.config.json`의 `ci.requiredChecks`, 검증 App ID는 `ci.recorderAppId`)과 실제 등록은 `node scripts/harness.ts required-checks`로 비교한다. 읽기만 하고 바꾸지 않는다. 이미 다른 출처로 등록된 체크(1단계의 `plan-gate`)는 검증 App이 같은 이름을 보고한 뒤 제작자가 출처를 바꾸고, 그다음에 옛 job을 지운다. 순서가 바뀌면 그 체크를 아무도 채우지 못해 모든 PR이 막힌다(Issue #53)
   - 브랜치가 main 최신이어야 병합(10.3절 결속 기준과 함께)
   - 필수 승인 수는 0. 사람 승인이 필요한 경우(위험도 높음, 운영 단계의 보호 경로)는 `risk-gate`와 코드 오너 리뷰가 요구한다
-  - "Dismiss stale approvals"(새 커밋이 push되면 기존 승인 무효화)
-  - "Require approval of the most recent reviewable push"는 **끈다(구축·운영 단계 모두)**. 필수 승인이 0이어도 마지막 push를 다른 사람이 승인해야 병합되게 해서, 모든 PR의 자동 병합을 막는다(PR #2에서 확인). 제작자 승인을 head에 묶는 일은 위의 "Dismiss stale approvals"와 `risk-gate`(승인 커밋이 head인지 확인, 10.3절)가 맡는다
+  - **규칙 세트 `approval-dismiss-stale`**(Settings → Rules → Rulesets, 대상 기본 브랜치, 우회 없음): "Require a pull request before merging" + 필수 승인 0 + "Dismiss stale pull request approvals when new commits are pushed"(새 커밋이 push되면 기존 승인 철회). 기존 보호 규칙의 같은 설정은 관리자가 아닌 토큰으로 읽을 수 없어, 꺼져도 하네스가 알 수 없다. 규칙 세트의 규칙은 읽기 권한으로 `GET rules/branches/<브랜치>`에서 읽혀 `risk-gate`·`ops-check`가 확인한다(Issue #250). 절차는 docs/SECURITY.md "오래된 승인 철회 규칙 세트 (제작자)"
+  - "Require approval of the most recent reviewable push"는 **끈다(구축·운영 단계 모두)**. 필수 승인이 0이어도 마지막 push를 다른 사람이 승인해야 병합되게 해서, 모든 PR의 자동 병합을 막는다(PR #2에서 확인). 제작자 승인을 head에 묶는 일은 위의 규칙 세트(오래된 승인 철회)와 `risk-gate`(규칙 확인과 승인 커밋이 head인지 확인, 10.3절)가 맡는다
 - **Actions**
   - 워크플로 기본 권한은 읽기 전용
   - "Actions가 PR을 만들고 승인하도록 허용" 끔
@@ -891,12 +891,12 @@ pnpm test src/auth/login-guard.spec.ts
     - 기록 job이 편집 이력을 읽지 못하면 원장을 쓰지 않고 `review-ledger`를 `error`로 남긴다(fail-closed). plan job은 저장된 원장을 그대로 넘기고 로그에 적는다(관문은 기록 job이 정한다).
     - P1에도 쓴다(v0.7.71, Issue #178). 되돌릴 수 없는 절차에 대한 지적처럼 고칠 수 없는 P1이 교착이 되면 제작자가 풀 수 있어야 한다(PR #171의 F28: 지난 작성 순서에 대한 지적이 재판정 4회 뒤에도 열려 있었다). 승인을 인정하는 조건은 P0과 같다. P2·P3과 동결돼 `deferred`인 P1은 병합을 막지 않으므로 대상이 아니다. 봇과 검증자는 이 길을 쓸 수 없다(B11, R20). 절차는 `docs/harness/workflow.md` 8절 "제작자 승인".
   - `parked`: **구현 대기**다. 계획만 담은 head(`mode=plan`)에서는 그 head에 없는 코드에 대한 열린 지적을 판정할 수 없다. 기록 job이 계획 폴더 밖 파일에 대한 `open` 지적을 `parked`로 바꾸고(계획 전용 판정에서 등록된 지적은 빼고), 검증자는 그것을 판정하지 않으며 계획 승인(G1)과 그 head의 `review-ledger`를 막지 않는다. 코드가 섞인 head의 기록은 판정을 반영하기 전에 `parked`를 모두 `open`으로 되돌린다. 그래서 구현이 다시 올라오면 다시 판정받고, 해소되지 않으면 병합을 막는다(Issue #212).
-  - `deferred`: P2·P3이거나, (5)의 동결 규칙에 따라 후속 PR·tech-debt로 넘겼다.
+  - `deferred`: P2·P3이거나, (5)의 동결 규칙이나 범위 밖 규칙에 따라 후속 PR·tech-debt·Issue로 넘겼다.
   - `open`: 그 밖의 모든 경우.
 - **반박 형식**: 작성자의 반박은 지적 ID, 근거(커밋·테스트·로그 링크), 길이 제한을 지킨 정해진 형식으로만 받는다. 자유 글은 검증자에게 전달하지 않는다. 주입된 문장이 반박을 타고 검증자에게 가는 것을 막기 위해서다.
   - 구현(`scripts/ci/rebuttal.ts`): plan job이 PR 작성자 계정의 댓글에서 빈 줄로 구분된 세 줄 문단(`- 지적:`, `- 근거:`, `- 요지:`)만 고른다. 지적은 원장의 `open` 지적, 근거는 40자 커밋 SHA·리포 안 상대 경로·이 리포의 GitHub 링크 중 하나, 요지는 한 줄 300자 이내다. 요지에는 줄을 나누거나 보이지 않는 글자(제어 문자, 형식 문자, 줄·단락 구분자, 기본 무시 글자, 짝 없는 서러게이트, 사용자 정의 영역)를 받지 않는다(`validSummary`). 보이지 않는 글자는 검증자에게 숨은 글을 넘기는 길이다. 댓글에서 뽑은 요지는 앞뒤 공백을 떼기 전에 검사한다(떼는 과정에서 탭이나 U+FEFF가 사라져 검사를 비켜 가지 않게 한다). 지적 하나에 가장 최근 것 하나만 쓴다. 통과한 반박은 job 출력으로 판정 job에 넘어가 같은 규칙으로 다시 검사되고, `.harness-review/rebuttals.md`에 정해진 틀로 다시 쓰인다(원문은 붙이지 않는다). 반박은 원장 상태를 바꾸지 않는다.
   - runner가 만든 PR의 반박은 runner가 단다(PR 작성자가 runner의 봇 계정이다). 세션 출력에서 같은 함수로 문단을 고르고 근거가 실제로 있는지 확인한 뒤, 통과한 세 줄 문단만 댓글로 쓴다((6) "runner의 지적 대응").
-- 병합 조건: P0·P1 지적이 모두 `fixed`·`rejected`·`accepted` 가운데 하나다(`review-ledger`, R16). (5)의 동결 규칙으로 `deferred`로 등록된 P1은 후속으로 넘긴 것이라 막지 않고, 그 수를 상태 설명에 적는다.
+- 병합 조건: P0·P1 지적이 모두 `fixed`·`rejected`·`accepted` 가운데 하나다(`review-ledger`, R16). (5)의 동결 규칙으로 `deferred`로 등록된 P1은 후속으로 넘긴 것이라 막지 않고, 그 수를 상태 설명에 적는다. 범위 밖으로 `deferred`가 된 P1도 막지 않고 그 수를 따로 적는다(`그중 범위 밖 P1 N`. 실패할 때도 적는다).
 - **구현**(`scripts/ci/ledger.ts`, `ledger-store.ts`, 제작자 승인은 `owner-accept.ts`·`accept-load.ts`, 형식은 `scripts/cross-review/ledger.md`)
   - 원장 댓글은 사람이 읽는 표와 기계가 읽는 숨은 자료(base64 JSON)로 이뤄진다. 기계는 숨은 자료만 읽는다.
   - 원장으로 인정하는 댓글은 작성자가 검증 App 봇(`ci.recorderBot`)인 것뿐이다. 봇 PAT과 PR 작성자도 같은 표식의 댓글을 쓸 수 있기 때문이다(ADR-0003). 봇 원장이 여럿이면 가장 오래된 것을 쓴다.
@@ -915,6 +915,9 @@ pnpm test src/auth/login-guard.spec.ts
   - 테스트로 재현하기 어려운 보안·정적 분석 P1 중, 구체 근거가 있고 다른 검증자가 동의한 것
 - 나머지는 `deferred`로 등록한다. 이렇게 하면 뒤늦게 발견한 실제 결함은 놓치지 않으면서, 라운드마다 목표가 움직이는 것은 막는다.
 - 라운드는 검증자마다 센다(앞 라운드에 판정을 내지 못한 검증자의 첫 판정은 1라운드다). "바뀌지 않은 코드"는 그 검증자의 직전 판정 head 이후 바뀌지 않은 파일로 판정한다. 바뀐 파일 목록을 알 수 없으면(직전 head가 없어졌거나 목록이 너무 크다) 새 P1을 모두 동결한다.
+- "바뀐 파일"은 직전 판정 head 이후 바뀐 파일 가운데 이 PR의 파일이다. 이 PR의 파일은 지금 head와 직전 판정 head가 merge-base 대비 바꾼 파일을 합친 것이다(직전 판정 뒤 되돌린 파일도 이 PR의 것이다). 위험도 높음 PR은 `origin/main` 병합 갱신 뒤에도 다시 판정받는데(10.3절), 그 병합으로 들어온 다른 PR의 변경까지 "바뀐 파일"로 세면 검증자가 그 코드로 무관한 PR을 막는다(PR #254·#258). 그래서 직전 판정 이후 바뀌었지만 이 PR의 파일이 아닌 것(main 병합으로만 바뀐 파일)은 검증 입력에 따로 적고(`round-main.txt`, 이 PR의 변경이 아니다) 라운드 diff에서 뺀다.
+- **범위 밖**(Issue #262, 제작자 결정 2026-11-27): main 병합으로만 바뀐 파일의 새 P1은 재현됐어도 `deferred`로 등록한다(처리 칸 `범위 밖: …`). 이 PR을 막지 않고, `pr-state`가 번호를 알려 봇이 Issue로 넘긴다(`docs/harness/workflow.md` 8절). P0은 그대로 받는다(막는다). 그 판정의 `review/<검증자>`(필수 체크)도 막지 않는다: 차단 지적이 모두 범위 밖 P1이고 `resolutions`에 `open`이 없으면 success다(원장만 미루면 `review/*`가 PR을 막는다. 열린 지적은 `review-ledger`가 막는다). 검증자는 그 파일의 결함을 원래 등급으로 적는다(낮춰 적으면 Issue로 넘어가지 않는다). 나누지 못하면(merge-base가 없거나 diff를 읽지 못함, 전달 값이 깨짐) 범위 밖으로 미루지 않고 위의 동결 규칙만 쓴다. 범위 밖 규칙은 구현 판정에만 쓴다: 계획 전용 판정(G1, 4.1절)에서는 main 병합으로 같은 계획의 다른 step 파일이 바뀔 수 있고, 그 파일의 P1을 미루면 수정 요청이 계획 승인으로 기록된다. plan job은 두 목록과 이 검증자의 라운드 수를 출력 `round_changed`(`{ changed, outside, round }`의 base64 JSON)로 기록 job에 넘긴다(기록 job은 예전 배열 꼴과 `round`가 없는 꼴도 읽는다. 그때 라운드 수는 모른다). 그 값의 상한은 120,000자다(명령 인자·환경 변수 하나의 한도 안. 예전 배열 꼴 상한 100,000자 안에 들던 목록은 나눠도 늘 이 안이다). 넘으면 검증 입력부터 나누지 않고(`round-main.txt` 없음) 기록 job은 모르는 것으로 본다(예전에 상한을 넘는 목록과 같다).
+- **검증자 상태**(Issue #267): 구현 판정의 차단 지적이 모두 원장이 미루는 새 P1(동결, 범위 밖, 근거 없음으로 P2가 되는 것)이고 `resolutions`에 `open`이 없으면 `review/<검증자>`(필수 체크)도 success다. 원장만 미루면 `review/*`가 PR을 막아, 검증자가 다음 판정에서 그 지적을 다시 내지 않아야 풀렸다. 기록 job은 원장과 같은 등록 규칙(`newEntryStatus`)과 `round_changed`의 라운드 수를 쓴다(같은 실행의 plan job이 원장에서 센 값이라 실제보다 작을 수만 있고, 그때는 막는 쪽이다). 라운드 수나 바뀐 파일 목록을 모르면 동결로 통과시키지 않는다(목록을 모를 때 원장은 새 P1을 모두 동결하는데, 거기에는 바뀐 파일의 P1도 섞인다). 계획 전용 판정(G1)은 이 규칙을 쓰지 않는다(수정 요청이 계획 승인이 된다). 열린 지적은 `review-ledger`가 막는다.
 
 **(6) 수정 규칙**
 
@@ -977,7 +980,7 @@ pnpm test src/auth/login-guard.spec.ts
 | `plan-gate` | 계획 파일·필수 섹션·`size`·`risk`. 중·대는 코드 없는 커밋에서 받은 계획 검증 결과와 핵심 섹션 해시 일치. 이 PR이 맡은 step이 `completed`(마지막 step이면 계획 전체, 8.3절). 자기 step 파일의 작업·AC·금지사항을 바꾸지 않았는지, "발견 사항"마다 처리가 적혀 있는지(8.2~8.3절) | R1 |
 | `review/claude`, `review/codex` | 위험도에 맞는 검증자의 승인(아래 결속 기준) | R12 |
 | `review-ledger` | 원장의 P0·P1이 모두 `fixed` 또는 `rejected` | R16 |
-| `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고 승인 커밋이 head | R13, R20 |
+| `risk-gate` | 위험도 판정(10.1절). "높음"이면 제작자 승인 확인: 승인자가 제작자 계정이고, PR base 브랜치에 오래된 승인 철회 규칙 세트가 있고, 승인이 전환 시각(`github.dismissStaleSince`) 뒤이며, 승인 커밋이 head | R13, R20 |
 | `deps-guard` | lockfile 전체 변경 검사 | R17 |
 | `harness-guard` | 보호 경로 변경 시 체크리스트·변경 기록(`CHANGELOG` 또는 그 PR의 변경 조각. 설계서를 바꿨으면 설계서 기록도)·하네스 자체 테스트(`gates` 워크플로의 `selftest` job 결과를 기록 job이 합친다. 통과하지 못한 시나리오가 있거나 결과가 없으면 success가 아니다. 10.4절), PR 코드를 실행하는 job(재현, 자체 테스트)의 environment·비밀·쓰기 권한 탐지, 기존 자체 테스트 파일의 수정·삭제 표시, 샌드박스·권한 완화 설정 탐지, 비밀을 가진 job의 캐시 사용 탐지, 정해 둔 environment 밖의 이름 참조 표시, `stage` 값에 따른 단계별 검사(10.4절) | R9 |
 | `pr-size`, `scope` | PR 크기, 계획 범위 밖 변경(처음에는 경고) | R15, R18 |
@@ -996,7 +999,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 코드 검증(`review/*`) | merge-base 대비 diff의 `git patch-id --stable` | main 병합으로 갱신한 뒤 다음을 모두 만족하면 기록 job이 새 head로 승인을 옮기고 `check`만 다시 실행: patch-id가 같다, 위험도가 낮음·보통이다, 이전 base 이후 main에서 바뀐 파일이 PR이 바꾼 파일과 겹치지 않는다, PR이 바꾼 파일의 내용이 옛 head와 바이트 단위로 같다. 위험도 높음은 patch-id가 같아도 다시 검증 |
 | 계획 전용 커밋 | — | 진행 로그·상태·위치만 바뀌었으면 LLM 재검증 없이 `plan-gate`만 실행 |
 | 계획 검증(G1) | 목표·수용 기준·범위·관련 파일 섹션과 모든 step 파일의 작업·AC·금지사항 섹션의 해시 | 이 중 하나라도 바뀌면 계획을 다시 검증 |
-| 제작자 승인(위험도 높음) | head SHA (0.2절 설정 + `risk-gate`) | 없음. 새 커밋이 생기면 다시 승인 |
+| 제작자 승인(위험도 높음) | head SHA + GitHub의 오래된 승인 철회 규칙 세트(0.2절, `risk-gate`가 PR base 브랜치의 규칙을 확인) | 충돌 없이 `origin/main` 병합만 더한 갱신(PR 변경분이 그대로)은 GitHub이 승인을 유지하고 리뷰의 커밋을 새 head로 옮긴다(실측, `lab/approval-binding`, #253). 충돌을 풀며 PR 변경분이 바뀐 병합과 그 밖의 새 커밋은 GitHub이 승인을 철회할 수 있고(`DISMISSED`, 충돌 해결 병합은 재지 않았다), 철회되면 `risk-gate`가 실패하므로 현재 head를 다시 승인한다. 전환 시각(`github.dismissStaleSince`)보다 엄격히 뒤(초 단위)의 승인만 센다 |
 
 - "브랜치가 main 최신이어야 병합"을 켠다. 위 결속 기준 덕분에, 다른 PR이 병합되어 PR을 갱신할 때마다 LLM 재검증이 일어나지는 않는다.
 - **계획 검증(G1) 구현**(`scripts/ci/plan-hash.ts`, `scripts/gates/plan-gate.ts`)
@@ -1025,7 +1028,7 @@ pnpm test src/auth/login-guard.spec.ts
 1. 에이전트는 PR을 준비 완료로 바꾸고 GitHub 자동 병합(`gh pr merge --auto --squash`)을 켠다. PR 본문에는 마지막 step이면 `Closes #<issue>`, 아니면 `Refs #<issue>`를 넣는다(8.1절).
 2. 필수 체크가 모두 통과하면 GitHub이 squash merge 한다. 커밋 메시지에 계획 id를 넣는다.
 3. 위험도에 맞는 검증자가 모두 승인하면 계획 전용 커밋으로 계획을 완료 처리한다(8.3절). 위험도 높음이면 그 뒤에 제작자가 head를 승인한다.
-4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 5회 실패하면 병합을 취소한 채 `needs-human`으로 넘긴다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증하고, 위험도 높음이면 제작자도 새 head를 다시 승인한다.
+4. main이 앞서가면(충돌 포함) `origin/main`을 PR 브랜치에 병합해 일반 push로 갱신하고 다시 검사한다(force push 없음, ADR-0006). runner는 충돌이 아니면 필수 체크가 모두 통과한 뒤에 갱신한다(승인 이어받기, 4.5절). runner는 병합이 충돌하면 제작자 답을 기다리지 않고 충돌 해결 세션으로 풀고, 5회 실패하면 병합을 취소한 채 `needs-human`으로 넘긴다(4.5절). 위 결속 기준에 맞지 않으면 다시 검증한다. 위험도 높음의 제작자 승인은 충돌 없이 main 병합만 더한 갱신에서 유지되고(규칙 세트), 충돌 해결로 PR 변경분이 바뀌었거나 그 밖의 새 커밋이면 GitHub이 승인을 철회할 수 있어 그때는 다시 승인한다.
 5. 병합되면 head 브랜치는 리포 설정으로 삭제되고, worktree는 runner의 다음 바퀴나 다음 세션 시작 시 정리한다(4.5절, 7.1절). 마지막 step이 병합되면 Issue가 자동으로 닫히고 `claim/<issue>` 브랜치도 정리한다. 남은 step이 있으면 runner가 다음 step을 시작한다. `merge` 스크립트는 이 정리를 수동으로 할 때 쓰는 편의 도구이며 강제 장치가 아니다.
 
 **병합 후 main CI가 실패하면**
@@ -1062,6 +1065,7 @@ pnpm test src/auth/login-guard.spec.ts
 | 그 밖의 판정(`plan-gate`, `risk-gate`, `deps-guard`, `harness-guard`, `pr-size`, `scope`, `revert-check`) | `pull_request_target` (main 정의) | 실행하지 않는다 | 결과는 기록 job이 기록. 판정 job의 토큰은 읽기뿐이다(`contents`·`pull-requests`, `revert-check`가 대상 커밋의 check run을 읽는 `checks`) |
 
 - 기계 판정(`revert-check`·`plan-gate`·`risk-gate`·`deps-guard`·`harness-guard`)은 `gates` 워크플로의 판정 job(`evaluate`) 하나가 모두 돌려 결과 파일 하나(`scripts/ci/results.ts` 형식)를 job 출력으로 낸다. 검사 하나가 예외로 죽으면 그 체크만 `error`다. 기록 job(`record`)은 그 값을 환경 변수로만 받아 base 스크립트로 형식·head SHA를 검사한 뒤 커밋 상태를 쓰고, 결과가 없거나 깨지면 모든 기계 판정을 `error`로 쓴다(fail-closed).
+- `risk-gate`의 규칙 세트 확인(Issue #250, `scripts/ci/gates.ts`의 `readDismissRule`): 위험도 높음이고 제작자의 마지막 판정 리뷰가 승인일 때만, 판정 job의 읽기 토큰으로 PR(`GET pulls/<번호>`)의 실제 base 브랜치를 읽고 그 브랜치의 규칙(`GET rules/branches/<base>`, 쪽 번호)에 `dismiss_stale_reviews_on_push: true`인 `pull_request` 규칙이 있는지 본다. 규칙이 없으면 failure, 읽지 못하면 error다(fail-closed). 전환 시각(`github.dismissStaleSince`)은 main 설정이라(판정 job은 설정을 base에서 읽는다) PR이 바꿔도 판정에 쓰이지 않는다. 전환 시각은 기본 브랜치에서 잰 것이라, PR의 실제 base가 기본 브랜치가 아니면 위험도 높음 승인을 세지 않는다(failure). 같은 규칙을 `ops-check` 2번이 봇 토큰으로 확인한다.
   - **자체 테스트 합치기**(12.4절): 판정 job은 PR이 보호 경로를 바꿨는지를 job 출력 `selftest`(`true`·`false`. 판단하지 못하면 `true`)로 낸다. `true`면 `selftest` job이 `node base/scripts/harness.ts self-test --harness pr`로 main의 실행기·시나리오를 PR의 하네스에 대해 돌리고, 종료 코드와 무관하게 보고서(시나리오별 결과)를 job 출력으로 넘긴다. 이 job은 하네스의 의존성을 설치하지 않지만 gitleaks는 `check` 워크플로와 같은 버전·체크섬으로 설치한다. runner 시나리오가 샘플 리포에서 `check`를 돌리고 그 시크릿 스캔에 gitleaks가 필요하기 때문이다(없으면 그 시나리오들이 실패한다). 기록 job은 그 보고서를 형식·head SHA·시나리오 id 형식(`[a-z0-9-]{1,40}`)으로 검사해 `harness-guard` 결과에 합친다(`scripts/ci/selftest-result.ts`). 보고서가 없거나 깨졌거나 시나리오가 0개면 `error`, 통과하지 못한 시나리오가 있으면 `failure`, 모두 통과면 설명 끝에 `자체 테스트 통과 <N>`을 붙인다. `harness-guard` 자신의 실패·오류는 그대로 남는다. 판정 job이 `selftest` 값을 남기지 못했으면(빈 값) 필요한 것으로 본다. 보고서는 PR 코드를 실행한 job이 쓴 값이라, 상태 설명에는 형식 검사를 통과한 시나리오 id와 개수만 넣고 보고서의 글은 넣지 않는다.
   - **커밋 상태 쓰기의 다시 시도**: 기록 job은 커밋 상태 쓰기가 GitHub API의 일시 오류로 실패하면 같은 내용을 다시 보낸다(`scripts/ci/record.ts`의 `STATUS_RETRY`, Issue #220). 다시 보내는 오류는 HTTP 5xx와 응답 없음(연결 끊김, 요청의 시간 제한)이다. 요청은 상태 하나에 4번까지 보내고, 사이에 2초, 6초, 15초를 기다린다. 다시 시도가 더하는 시간(대기와 둘째부터의 요청)은 poster 하나에 60초까지다: 상한까지 남은 시간이 5초보다 적으면 보내지 않는다. 남은 시간은 대기 전과 대기 뒤에 본다(대기가 예정보다 길어질 수 있다). 다시 보내는 요청의 시간 제한은 30초와 남은 시간 가운데 작은 값이다. record job의 시간 제한(5분) 안에 끝나게 하는 값이다. 한 poster의 다시 시도(상한 확인부터 다시 보낸 요청이 끝날 때까지)는 한 번에 하나씩 한다: 같은 poster로 동시에 쓰는 상태들도 상한을 함께 쓴다. HTTP 4xx는 다시 보내지 않는다(권한·형식 오류는 다시 보내도 같고, 사용량 제한은 기다릴 시간이 상한을 넘는다). 모두 실패하면 전처럼 job이 실패한다(fail-closed): 필수 체크가 비고 실행을 다시 돌려야 풀린다. 다시 시도는 로그에 `record: 커밋 상태 기록 다시 시도(<context>): <HTTP 상태 코드 | 응답 없음(오류 이름)>, <N>초 뒤 <몇 번째>/4번째` 줄로 남는다. 이 줄에 토큰과 응답 본문은 넣지 않는다. 같은 상태가 두 번 기록돼도 해가 없다(GitHub은 context마다 가장 최근 상태를 쓰고 두 기록의 내용이 같다).
 
@@ -1082,7 +1086,7 @@ pnpm test src/auth/login-guard.spec.ts
     - Codex는 샌드박스 안에서 자기 실행 파일을 다시 실행한다. 그래서 Codex를 권한 프로필의 읽기 범위 안(시스템 경로 `/usr/local`)에 설치한다. `setup-node`의 전역 위치(`/opt/hostedtoolcache/…`)에 두면 샌드박스가 실행 파일을 찾지 못해 시작하지 못한다(Issue #70).
     - 셸 환경은 최소(`shell_environment_policy`의 `inherit = "core"`)로 준다.
     - LLM 실행 전에 같은 프로필로 `pr/` 읽기, 인증 파일·`base/` 읽기, 쓰기, 네트워크, sudo, 조상 프로세스 환경 읽기를 값 없이 종료 코드로만 측정한다. 하나라도 기대와 다르면 판정 없이 실패한다.
-  - **심볼릭 링크**: PR은 `pr/` 안에 밖을 가리키는 링크를 넣을 수 있다. Q20에서 Claude Code는 파일 링크 읽기를 거부했고, Codex 샌드박스는 해석된 경로 기준으로 거부 영역 읽기를 막았다(macOS). 디렉터리 링크를 검색 도구가 따라가는 경우와 Linux에서 링크를 거쳐 읽는 경우는 모델이 시도하지 않아 확인하지 못했다. 그래서 base 스크립트가 LLM 실행 전에 `pr/`의 심볼릭 링크를 없앤다(예: `core.symlinks=false`로 체크아웃하면 링크가 대상 경로를 담은 일반 파일이 된다).
+  - **심볼릭 링크**: PR은 `pr/` 안에 밖을 가리키는 링크를 넣을 수 있다. Q20에서 Claude Code는 파일 링크 읽기를 거부했고, Codex 샌드박스는 해석된 경로 기준으로 거부 영역 읽기를 막았다(macOS). 디렉터리 링크를 검색 도구가 따라가는 경우와 Linux에서 링크를 거쳐 읽는 경우는 모델이 시도하지 않아 확인하지 못했다. 그래서 base 스크립트가 LLM 실행 전에 `pr/`의 심볼릭 링크를 없앤다(예: `core.symlinks=false`로 체크아웃하면 링크가 대상 경로를 담은 일반 파일이 된다). 계획을 읽는 base 스크립트(`plan-gate`, `risk-gate`의 계획 위험도, 계획 해시, 검증자 계획의 작성자, 검증 입력)는 체크아웃 설정과 무관하게 계획 자리(계획 파일·폴더, `index.json`, step 파일과 그 위의 폴더)의 링크를 따라가지 않는다. 작업 트리의 각 자리를 `lstat`으로 보고 git 색인에 링크(120000)·서브모듈(160000)로 있는 자리도 거절하며, 그 자리를 읽어야 하는 판정은 실패 쪽으로 둔다(`scripts/lib/plan-read.ts`, Issue #194).
   - 도구 제한과 샌드박스로 위 범위를 지킬 수 없으면, base 스크립트가 입력을 모두 모아 프롬프트로 넘기고 도구를 끈 채 실행한다. 이것도 안 되면 그 도구를 CI 검증자로 쓰지 않고 제작자가 결정한다. Q20에서는 두 도구 모두 이 대안이 필요하지 않았다.
   - Claude와 Codex 판정은 서로 다른 job에서 자기 인증만 가지고 실행한다. 한쪽이 주입당해도 다른 쪽 인증은 노출되지 않는다.
 - **판정 시작과 입력**: 판정 워크플로(`judge-claude`, `judge-codex`)는 `check` 워크플로의 완료(`workflow_run`)로 시작하고, `check`가 성공한 같은 리포 PR에서만 돈다(R16, 실패할 커밋에 구독 한도를 쓰지 않는다). `workflow_run`도 main 정의로 돌고 main 전용 environment의 비밀을 받는다. 판정할 PR은 페이로드가 아니라 head SHA로 API를 다시 조회해 정한다.

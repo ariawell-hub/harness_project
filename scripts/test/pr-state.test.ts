@@ -735,3 +735,93 @@ test('pr-state 명령: 구현 대기인 지적이 여럿이면 번호를 ID 순�
     none.fx.cleanup();
   }
 });
+
+// ---------- 범위 밖 지적 (Issue #262) ----------
+
+/** 기록 job이 범위 밖 P1의 처리 칸에 적는 글(scripts/ci/ledger.ts의 OUTSIDE_NOTE와 같다) */
+const OUTSIDE_TEXT =
+  '범위 밖: 직전 판정 이후 main 병합으로만 바뀐 파일의 새 P1이다. 이 PR을 막지 않고 Issue로 넘긴다(10.2절 (5))';
+
+test('pr-state 명령: 범위 밖으로 미룬 지적의 번호를 한 줄로 알린다. 다른 미룸은 내지 않는다(읽기만 한다)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    const l = ledgerWithOpenP1(0);
+    const copy = (id: string, note: string) => ({
+      ...l.findings[0],
+      id,
+      title: `지적 ${id}`,
+      status: 'deferred' as const,
+      note,
+    });
+    gh.commentAs(
+      pr.number,
+      BOT,
+      renderLedger({
+        ...l,
+        findings: [
+          copy('F1', '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'),
+          copy('F10', OUTSIDE_TEXT),
+          copy('F6', OUTSIDE_TEXT),
+        ],
+      }),
+    );
+    const before = readFileSync(state, 'utf8');
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(
+      r.stdout,
+      /^- 범위 밖 지적: F6, F10 — main 병합으로 들어온 다른 PR의 코드에 대한 P1이라 이 PR을 막지 않는다\. Issue로 등록한다\(절차서 8절\)$/m,
+    );
+    assert.ok(!r.stdout.includes('지적 F6'), r.stdout);
+    assert.match(r.stdout.trimEnd().split('\n').at(-1)!, /^분류: /);
+    assert.equal(readFileSync(state, 'utf8'), before);
+  } finally {
+    fx.cleanup();
+  }
+  const none = await fixtureWithPR(CHECKS);
+  try {
+    none.gh.commentAs(none.pr.number, BOT, renderLedger(ledgerWithOpenP1(3)));
+    const r = cli(['pr-state'], none.t.worktree, none.state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(!r.stdout.includes('범위 밖'), r.stdout);
+  } finally {
+    none.fx.cleanup();
+  }
+});
+
+test('pr-state 명령: round-main.txt의 파일에 원래 등급(P1)으로 낸 판정이 원장에서 범위 밖이 되고 그 줄에 나온다(계획 검증 F2)', async () => {
+  const { fx, state, t, gh, pr } = await fixtureWithPR(CHECKS);
+  try {
+    const first = ledgerWithOpenP1(0);
+    const l = applyVerdict(first, {
+      reviewer: 'codex',
+      verdict: {
+        verdict: 'approve',
+        risk: 'normal',
+        summary: '요약',
+        findings: [
+          {
+            severity: 'P1',
+            file: 'src/main-only.ts',
+            line: 2,
+            title: 'main에서 온 결함',
+            evidence: '근거',
+            suggestion: '제안',
+            repro: { path: '', content: '' },
+          },
+        ],
+        resolutions: [{ id: 'F1', status: 'fixed', note: '' }],
+      },
+      headSha: '9'.repeat(40),
+      changedSinceLastRound: ['note.txt'],
+      outsideSinceLastRound: ['src/main-only.ts'],
+    });
+    gh.commentAs(pr.number, BOT, renderLedger(l));
+    const r = cli(['pr-state'], t.worktree, state);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^- 범위 밖 지적: F2 — /m);
+    assert.ok(!r.stdout.includes('main에서 온 결함'), r.stdout);
+  } finally {
+    fx.cleanup();
+  }
+});

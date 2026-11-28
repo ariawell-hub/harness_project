@@ -1,6 +1,7 @@
 // GitHub 연동 포트. 실제 구현은 gh CLI(봇 계정 GH_TOKEN, E1)를 쓰고,
 // 테스트·스모크 테스트에서는 HARNESS_FAKE_GH=<상태 파일>로 가짜 구현을 쓴다(github-fake.ts).
 import { runSync } from './exec.ts';
+import { readRulePagesSync } from './rules.ts';
 import { FakeGitHub } from './github-fake.ts';
 
 /** 내용(Issue 제목·본문, 댓글 본문)을 만들거나 바꾼 한 번. `by`는 계정 login(알 수 없으면 ''), `at`은 ISO 시각 */
@@ -242,6 +243,11 @@ export interface GitHubPort {
    */
   codeOwnerReviewRequired(branch: string): boolean | null;
   /**
+   * `GET repos/{repo}/rules/branches/{branch}` 원본의 쪽들(배열의 배열, Issue #250). 규칙 세트는 봇 토큰으로 읽힌다.
+   * 읽지 못하면 던진다
+   */
+  branchRules(branch: string): unknown;
+  /**
    * 지금 토큰의 권한 범위(응답 머리말 `x-oauth-scopes`). 머리말이 없으면 null이다(세분화 토큰).
    * 토큰 값은 읽지 않는다(R20)
    */
@@ -445,8 +451,11 @@ export class GhCli implements GitHubPort {
   private cwd: string;
   private login: string | null = null;
   private slug: string | null = null;
-  constructor(cwd: string) {
+  /** `gh` 실행(시험이 바꿔 끼운다. 지금은 branchRules만 쓴다) */
+  private run: (args: string[], cwd: string) => string;
+  constructor(cwd: string, run: (args: string[], cwd: string) => string = gh) {
     this.cwd = cwd;
+    this.run = run;
   }
   repoSlug(): string {
     this.slug ??= gh(
@@ -468,6 +477,14 @@ export class GhCli implements GitHubPort {
   branchInfo(branch: string): unknown {
     return JSON.parse(
       gh(['api', `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}`], this.cwd),
+    );
+  }
+  branchRules(branch: string): unknown {
+    // 판정 job과 같은 경로·쪽 모으기(lib/rules.ts): 쪽이 덜 찰 때까지 읽고, 끝까지 못 읽으면 던진다
+    return readRulePagesSync(
+      (p) => JSON.parse(this.run(['api', p], this.cwd)),
+      '{owner}/{repo}',
+      branch,
     );
   }
   codeOwnerReviewRequired(branch: string): boolean | null {

@@ -1,0 +1,11 @@
+{
+  "plan": "20261127-changes-nofollow",
+  "steps": [
+    {
+      "step": 0,
+      "name": "nofollow",
+      "status": "completed",
+      "completed_at": "2026-11-27T10:08:46+09:00"
+    }
+  ]
+}

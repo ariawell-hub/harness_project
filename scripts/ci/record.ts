@@ -9,6 +9,7 @@ import {
   secretNeedles,
   validateVerdict,
   verdictStatus,
+  type Finding,
   type Verdict,
 } from './verdict.ts';
 import {
@@ -118,6 +119,11 @@ export interface RecordReviewOptions {
   carriedFrom?: string;
   /** 형식 검사와 시크릿 스캔을 통과한 판정을 받는다(로그 출력용) */
   onVerdict?: (v: Verdict) => void;
+  /**
+   * 원장이 미루는 새 지적인가(Issue #262·#267, 원장의 등록 규칙으로 만든다). 차단 지적이 모두 미뤄지는 P1이고
+   * resolutions에 open이 없으면 통과다. 없으면 지금 규칙(승인이고 차단 지적이 없을 때만 통과)이다
+   */
+  deferred?: (f: Finding, index: number, v: Verdict) => boolean;
 }
 
 /** 검증자 판정을 검사한 뒤 review/* 상태 하나를 쓴다. 판정이 없거나 깨졌거나 비밀이 보이면 error(fail-closed) */
@@ -154,7 +160,8 @@ export async function recordReview(o: RecordReviewOptions): Promise<StatusPayloa
   if (highEntropy(text))
     return done('error', '판정에 토큰처럼 보이는 문자열이 있어 기록하지 않는다');
   o.onVerdict?.(v.value);
-  const s = verdictStatus(v.value);
+  const d = o.deferred;
+  const s = verdictStatus(v.value, d ? (f, i) => d(f, i, v.value) : undefined);
   // 승인에만 patch를 적는다. 다음 head가 같은 patch면 이 승인을 이어받는다
   return done(
     s.state,

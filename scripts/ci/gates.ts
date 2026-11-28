@@ -15,9 +15,13 @@ import {
   type RevertCheck,
   type TargetCheck,
 } from '../gates/revert-check.ts';
+import { dismissRuleOf, readRulePages } from '../lib/rules.ts';
 import {
+  assessRisk,
   changedFiles,
+  lastOwnerDecision,
   riskGate,
+  type DismissRule,
   type Review,
   type Risk,
   type RiskSignal,
@@ -60,6 +64,34 @@ export interface RunGatesOptions {
    * 주지 않으면 조회하지 못한 것(null)으로 본다
    */
   targetCheck?: () => Promise<TargetCheck>;
+  /**
+   * 그 PR base 브랜치의 "오래된 승인 철회" 규칙 세트(Issue #250, `readDismissRule`). 위험도 높음이고 제작자의 마지막 판정
+   * 리뷰가 승인일 때만 부른다. 예외는 null(확인하지 못함)로 본다. 주지 않으면(PR 번호를 모른다) 확인하지 못한 것이다
+   */
+  dismissRule?: () => Promise<DismissRule | null>;
+}
+
+/**
+ * PR의 실제 base 브랜치(`GET repos/{repo}/pulls/{pr}`의 `base.ref`)에 오래된 승인 철회 규칙이 있는가(Issue #250).
+ * 규칙은 `GET repos/{repo}/rules/branches/{base}`를 끝까지 읽는다(`lib/rules.ts`, 브랜치 이름은 경로 한 구간). 판정 job의
+ * 읽기 토큰으로 읽힌다(규칙 세트는 metadata 읽기로 보인다). 요청이 실패하거나 응답 꼴이 틀리면 null(fail-closed)
+ */
+export async function readDismissRule(o: {
+  api: (path: string) => Promise<unknown>;
+  repo: string;
+  pr: number;
+}): Promise<DismissRule | null> {
+  try {
+    const pr = (await o.api(`repos/${o.repo}/pulls/${o.pr}`)) as {
+      base?: { ref?: unknown };
+    } | null;
+    const base = pr?.base?.ref;
+    if (typeof base !== 'string' || !base) return null;
+    const on = dismissRuleOf(await readRulePages(o.api, o.repo, base));
+    return on === null ? null : { base, on };
+  } catch {
+    return null;
+  }
 }
 
 function firstLine(e: unknown): string {
@@ -203,12 +235,35 @@ export async function runGates(o: RunGatesOptions): Promise<GateResults> {
           });
         }
       },
-      'risk-gate': () =>
-        guarded('risk-gate', () => {
-          const r = riskGate({ ...o, signals, reviews: o.reviews ?? null });
-          risk = r.risk;
-          return { state: r.state, description: r.description, details: r.details };
-        }),
+      'risk-gate': async () => {
+        try {
+          const reviews = o.reviews ?? null;
+          const assessed = assessRisk({ ...o, signals });
+          // 규칙은 위험도 높음이고 제작자의 마지막 판정 리뷰가 승인일 때만 읽는다(판정 job 시간과 API 사용량)
+          let dismissRule: DismissRule | null | undefined;
+          if (
+            assessed.risk === 'high' &&
+            reviews &&
+            lastOwnerDecision(reviews, o.cfg.github.owner)?.state === 'APPROVED' &&
+            o.dismissRule
+          ) {
+            try {
+              dismissRule = await o.dismissRule();
+            } catch {
+              dismissRule = null;
+            }
+          }
+          return guarded('risk-gate', () => {
+            const r = riskGate({ ...o, signals, reviews, dismissRule, assessed });
+            risk = r.risk;
+            return { state: r.state, description: r.description, details: r.details };
+          });
+        } catch (e) {
+          return guarded('risk-gate', () => {
+            throw e;
+          });
+        }
+      },
     };
   const results: GateResult[] = [];
   for (const c of GATE_CONTEXTS) results.push(await byContext[c]());
