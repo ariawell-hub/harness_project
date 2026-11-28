@@ -14,6 +14,7 @@ import {
   riskGate,
   type Review,
 } from '../gates/risk-gate.ts';
+import { dismissRuleOf } from '../lib/rules.ts';
 import { commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
 const BRANCH = 'feat/20261114-demo-s0';
@@ -99,6 +100,9 @@ test('assessRisk: 바이너리 파일과 신호는 high', () => {
 });
 
 const H = 'a'.repeat(40);
+/** readDismissRule이 돌려주는 값: 기본 브랜치에 규칙이 켜져 있다 / 꺼져 있다(Issue #250) */
+const ON = { base: 'main', on: true };
+const OFF = { base: 'main', on: false };
 const rv = (user: string, state: string, commitId = H, at = '2026-11-14T00:00:00Z'): Review => ({
   user,
   state,
@@ -154,7 +158,9 @@ test('riskGate: 보통은 통과, 높음은 제작자 head 승인이 있어야 �
   assert.equal(a.state, 'success');
   assert.equal(a.risk, 'normal');
   const hi = repo({ 'migrations/1.sql': 'a\n' });
-  const o = { ...hi, branch: BRANCH, signals: [], headSha: hi.head };
+  // 승인은 규칙 세트(오래된 승인 철회)가 켜져 있고 전환 시각 뒤일 때만 head에 묶인다(Issue #250)
+  hi.cfg.github.dismissStaleSince = '2026-11-13T00:00:00Z';
+  const o = { ...hi, branch: BRANCH, signals: [], headSha: hi.head, dismissRule: ON };
   const none = riskGate({ ...o, reviews: [] });
   assert.equal(none.state, 'failure');
   assert.match(none.description, /제작자 head 승인 필요/);
@@ -319,4 +325,117 @@ test('resolvePr: workflow_run은 head SHA로 API를 조회해 열린 같은 리�
   });
   assert.ok('skip' in bad);
   assert.ok('skip' in (await resolvePr({ eventName: 'push', event: {}, repo: REPO, api: mk([]) })));
+});
+
+// ---------- 오래된 승인 철회 규칙 세트(Issue #250 step1) ----------
+
+const RULE_ON = { type: 'pull_request', parameters: { dismiss_stale_reviews_on_push: true } };
+
+test('dismissRuleOf: 쪽들 가운데 오래된 승인 철회가 켜진 pull_request 규칙이 있으면 true, 꼴이 틀리면 null', () => {
+  assert.equal(dismissRuleOf([[RULE_ON]]), true);
+  assert.equal(
+    dismissRuleOf([[{ type: 'deletion' }], [{ type: 'non_fast_forward' }, RULE_ON]]),
+    true,
+  );
+  assert.equal(
+    dismissRuleOf([
+      [{ type: 'pull_request', parameters: { dismiss_stale_reviews_on_push: false } }],
+    ]),
+    false,
+  );
+  assert.equal(dismissRuleOf([[]]), false);
+  assert.equal(dismissRuleOf([[{ type: 'deletion' }, { type: 'pull_request' }]]), false);
+  assert.equal(dismissRuleOf({ message: 'Not Found' }), null);
+  assert.equal(dismissRuleOf([{ message: 'x' }]), null);
+  assert.equal(dismissRuleOf([[{ parameters: {} }]]), null);
+  assert.equal(dismissRuleOf([[null]]), null);
+});
+
+test('riskGate: 위험도 높음은 승인 리뷰 → 규칙 → 전환 시각 → head 순으로 본다(Issue #250)', () => {
+  const hi = repo({ 'migrations/1.sql': 'a\n' });
+  const since = '2026-11-14T00:00:00Z';
+  hi.cfg.github.dismissStaleSince = since;
+  const o = { ...hi, branch: BRANCH, signals: [], headSha: hi.head };
+  const approve = (at: string, commit = hi.head) => [rv('maker', 'APPROVED', commit, at)];
+  const ok = approve('2026-11-14T01:00:00Z');
+  // 승인 리뷰가 없으면 규칙과 무관하게 failure
+  for (const dismissRule of [ON, OFF, null, undefined])
+    assert.equal(
+      riskGate({ ...o, reviews: [], dismissRule }).state,
+      'failure',
+      JSON.stringify(dismissRule),
+    );
+  // 규칙을 확인하지 못했다(없음·null) → error, 복구 방법은 SECURITY.md
+  for (const dismissRule of [null, undefined]) {
+    const r = riskGate({ ...o, reviews: ok, dismissRule });
+    assert.equal(r.state, 'error', JSON.stringify(dismissRule));
+    assert.equal(
+      r.description,
+      '위험도 높음: 오래된 승인 철회 규칙을 확인하지 못해 제작자 승인을 head에 묶을 수 없다',
+    );
+    assert.match(r.details.join('\n'), /docs\/SECURITY\.md/);
+  }
+  // 규칙이 없다 → failure, 고치는 법은 SECURITY.md의 절차
+  const off = riskGate({ ...o, reviews: ok, dismissRule: OFF });
+  assert.equal(off.state, 'failure');
+  assert.equal(
+    off.description,
+    '위험도 높음: 오래된 승인 철회 규칙이 없어 제작자 승인을 head에 묶을 수 없다',
+  );
+  assert.match(off.details.join('\n'), /고치는 법: .*docs\/SECURITY\.md/);
+  // 전환 시각이 없거나 시각이 아니다 → failure(설정 방법)
+  for (const bad of [undefined, '어제']) {
+    const cfg = { ...hi.cfg, github: { ...hi.cfg.github, dismissStaleSince: bad } };
+    const r = riskGate({ ...o, cfg, reviews: ok, dismissRule: ON });
+    assert.equal(r.state, 'failure', String(bad));
+    assert.match(r.description, /github\.dismissStaleSince/);
+  }
+  // 규칙을 켜기 전의 승인(리뷰 커밋이 head로 옮겨진 것)은 failure, 현재 head를 다시 승인하면 success(계획 검증 F23)
+  const before = approve('2026-11-13T23:59:59Z');
+  const old = riskGate({ ...o, reviews: before, dismissRule: ON });
+  assert.equal(old.state, 'failure');
+  assert.equal(
+    old.description,
+    '위험도 높음: 규칙을 켜기 전의 승인이라 현재 head를 다시 승인해야 한다',
+  );
+  const again = [...before, ...approve('2026-11-14T02:00:00Z')];
+  assert.equal(riskGate({ ...o, reviews: again, dismissRule: ON }).state, 'success');
+  // 경계: 전환 시각과 같은 초(소수 초 포함)는 failure, 1초 뒤는 success
+  for (const at of ['2026-11-14T00:00:00Z', '2026-11-14T00:00:00.900Z'])
+    assert.equal(riskGate({ ...o, reviews: approve(at), dismissRule: ON }).state, 'failure', at);
+  assert.equal(
+    riskGate({ ...o, reviews: approve('2026-11-14T00:00:01Z'), dismissRule: ON }).state,
+    'success',
+  );
+  // 제출 시각을 읽을 수 없으면 뒤라고 보지 않는다
+  assert.equal(riskGate({ ...o, reviews: approve(''), dismissRule: ON }).state, 'failure');
+  // 규칙·시각이 맞아도 리뷰의 커밋이 head가 아니면 failure(지금 판정)
+  const stale = riskGate({
+    ...o,
+    reviews: approve('2026-11-14T01:00:00Z', hi.base),
+    dismissRule: ON,
+  });
+  assert.equal(stale.state, 'failure');
+  assert.match(stale.description, /제작자 head 승인 필요/);
+  assert.equal(riskGate({ ...o, reviews: ok, dismissRule: ON }).state, 'success');
+  // base가 기본 브랜치가 아니면 그 브랜치에 규칙이 있고 승인이 main 전환 시각 뒤여도 failure(#258 판정 F25)
+  const rel = riskGate({ ...o, reviews: ok, dismissRule: { base: 'release', on: true } });
+  assert.equal(rel.state, 'failure');
+  assert.equal(
+    rel.description,
+    '위험도 높음: 기본 브랜치가 아닌 base(release)에는 승인 전환 시각이 없어 제작자 승인을 셀 수 없다',
+  );
+  // 위험도 보통은 규칙과 무관하게 success
+  const lo = repo({ 'src/a.ts': 'a\n' });
+  assert.equal(
+    riskGate({
+      ...lo,
+      branch: BRANCH,
+      signals: [],
+      headSha: lo.head,
+      reviews: [],
+      dismissRule: OFF,
+    }).state,
+    'success',
+  );
 });

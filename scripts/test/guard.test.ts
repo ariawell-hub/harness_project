@@ -2,13 +2,15 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
+import { approvalPending } from '../lib/approval.ts';
 import { DEFAULT_MCP_GUARD, type McpGuardConfig } from '../lib/config.ts';
 import { runSync } from '../lib/exec.ts';
 import { repoInfo } from '../lib/git.ts';
 import { findPlan } from '../lib/plan.ts';
 import { evaluate, type GuardContext } from '../hooks/rules.ts';
-import { buildContext, normalize } from '../hooks/guard.ts';
+import { buildContext, normalize } from '../hooks/decide.ts';
 import { HARNESS_ROOT, commitAll, gitInit, sh, tmp, write } from './helpers.ts';
+import { fixtureConfig } from './helpers.ts';
 import { readFileSync } from 'node:fs';
 
 const HOME = '/Users/someone';
@@ -640,6 +642,185 @@ test('승인 요청 규칙: 실제 worktree의 표시와 계획 위험도로 판
   assert.match(run(`git -C ${wtArg} push`)!.rule, /^R2/);
   // 다른 브랜치의 push는 영향을 받지 않는다
   assert.equal(run('git push origin feat/20261115-other-s0'), null);
+});
+
+/**
+ * 승인 요청 표시를 남긴 PR worktree를 만들고, 표시 뒤 원격 기본 브랜치에 다른 PR의 커밋(PR 파일이 아닌 파일)이
+ * 들어온 것을 PR 브랜치가 병합만 한 상태로 둔다(Issue #243). config가 있으면 메인 체크아웃의 harness.config.json이다.
+ * PR 파일은 계획 파일과 README.md(첫 줄을 바꿈)다
+ */
+function approvalRepo(remoteName: string, trunk: string, config?: Record<string, unknown>) {
+  const dir = tmp();
+  const remote = path.join(dir, 'remote.git');
+  sh('git', ['init', '-q', '--bare', '-b', trunk, remote], dir);
+  const main = path.join(dir, 'repo');
+  gitInit(main);
+  if (config) write(main, 'harness.config.json', JSON.stringify(config));
+  write(main, 'README.md', 'a\nb\nc\nd\ne\n');
+  commitAll(main);
+  sh('git', ['remote', 'add', remoteName, remote], main);
+  sh('git', ['push', '-q', remoteName, `main:${trunk}`], main);
+  const branch = 'feat/20261125-asked-s0';
+  const wt = path.join(dir, 'repo.worktrees', 'asked');
+  sh('git', ['worktree', 'add', '-q', '-b', branch, wt], main);
+  write(
+    wt,
+    'docs/exec-plans/active/20261125-asked/plan.md',
+    '---\nid: 20261125-asked\nowner: session\nrisk: high\n---\n',
+  );
+  write(wt, 'README.md', 'A\nb\nc\nd\ne\n');
+  const asked = commitAll(wt, 'plan');
+  const gitDir = sh('git', ['rev-parse', '--absolute-git-dir'], wt);
+  /** 승인 요청 표시를 worktree의 지금 HEAD로 쓴다(`pr-ready`가 하는 일) */
+  const mark = () =>
+    write(gitDir, 'harness/approval-requested', `${sh('git', ['rev-parse', 'HEAD'], wt)}\n`);
+  mark();
+  // 메인 체크아웃에서 커밋을 더해 원격 기본 브랜치로 올린다(다른 PR 병합)
+  const mainCommit = (file: string, content: string) => {
+    write(main, file, content);
+    commitAll(main, `main ${file}`);
+    sh('git', ['push', '-q', remoteName, `main:${trunk}`], main);
+  };
+  // PR 브랜치는 원격 기본 브랜치 병합만 더한다(절차서 5절)
+  const syncMain = () => {
+    sh('git', ['fetch', '-q', remoteName], wt);
+    sh('git', ['merge', '-q', '--no-ff', '--no-edit', `${remoteName}/${trunk}`], wt);
+  };
+  mainCommit('other.txt', 'o');
+  syncMain();
+  const c = buildContext(main);
+  const run = (cmd: string) => evaluate({ kind: 'bash', command: cmd, cwd: main }, c);
+  const pending = () => approvalPending(wt, null);
+  /** worktree에서 base로부터 브랜치를 내어 파일 하나를 더한 커밋을 만들고 PR 브랜치로 돌아온다 */
+  const sideBranch = (name: string, base: string, file: string) => {
+    sh('git', ['switch', '-q', '-c', name, base], wt);
+    write(wt, file, name);
+    commitAll(wt, name);
+    sh('git', ['switch', '-q', branch], wt);
+  };
+  return { main, wt, branch, asked, mark, mainCommit, syncMain, run, pending, sideBranch };
+}
+
+test('승인 요청 규칙: 표시 뒤 origin/main 병합 갱신은 막지 않고 PR의 변경이 달라지면 막는다(Issue #243)', () => {
+  const r = approvalRepo('origin', 'main');
+  assert.equal(r.pending(), 0);
+  assert.equal(r.run(`git push origin ${r.branch}`), null);
+  // main이 아닌 브랜치를 병합해 들어온 커밋은 센다
+  r.sideBranch('side', r.asked, 'side.txt');
+  sh('git', ['merge', '-q', '--no-ff', '--no-edit', 'side'], r.wt);
+  assert.equal(r.pending(), 1);
+  const p = r.run(`git push origin ${r.branch}`)!;
+  assert.match(p.rule, /^승인 요청/);
+  assert.match(p.what, /1개/);
+  // 직접 만든 커밋도 센다
+  write(r.wt, 'src/a.ts', 'export const a = 1;\n');
+  commitAll(r.wt, 'extra');
+  assert.equal(r.pending(), 2);
+  // 두 병합 부모가 공유하는 커밋은 한 번만 센다(C, A, B)
+  r.sideBranch('common', r.asked, 'c.txt');
+  r.sideBranch('topic-a', 'common', 'a.txt');
+  r.sideBranch('topic-b', 'common', 'b.txt');
+  sh('git', ['merge', '-q', '--no-ff', '--no-edit', 'topic-a', 'topic-b'], r.wt);
+  assert.equal(r.pending(), 5);
+  // 이름이 origin/main인 로컬 브랜치는 원격 추적 ref로 쓰지 않는다
+  sh('git', ['branch', 'origin/main', 'HEAD'], r.wt);
+  assert.equal(r.pending(), 5);
+  sh('git', ['branch', '-D', 'origin/main'], r.wt);
+  // PR 브랜치가 squash 아닌 병합으로 main에 들어간 뒤에도 막는다
+  sh('git', ['merge', '-q', '--no-ff', '--no-edit', r.branch], r.main);
+  sh('git', ['push', '-q', 'origin', 'main'], r.main);
+  sh('git', ['fetch', '-q', 'origin'], r.wt);
+  assert.ok(r.pending()! >= 1);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
+  r.syncMain();
+  assert.ok(r.pending()! >= 1);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
+});
+
+test('승인 요청 규칙: 기본 브랜치는 설정을 따르고, main이 PR 파일을 바꾼 병합은 막는다(Issue #243)', () => {
+  const cfg = fixtureConfig();
+  const github = {
+    ...(cfg.github as Record<string, unknown>),
+    remote: 'up',
+    defaultBranch: 'trunk',
+  };
+  const r = approvalRepo('up', 'trunk', { ...cfg, github });
+  assert.equal(r.pending(), 0);
+  assert.equal(r.run(`git push up ${r.branch}`), null);
+  // main이 PR 파일(README.md 마지막 줄)을 바꿨다. 충돌 없이 병합돼도 PR이 더하는 변경을 다시 봐야 한다
+  r.mainCommit('README.md', 'a\nb\nc\nd\nE\n');
+  r.syncMain();
+  assert.ok(r.pending()! >= 1);
+  assert.match(r.run(`git push up ${r.branch}`)!.rule, /^승인 요청/);
+});
+
+test('승인 요청 규칙: 토픽을 병합한 뒤 main이 그 토픽으로 fast-forward되면 PR의 변경이 그대로라 막지 않는다(Issue #243)', () => {
+  const r = approvalRepo('origin', 'main');
+  r.sideBranch('topic', 'origin/main', 't.txt');
+  sh('git', ['merge', '-q', '--no-ff', '--no-edit', 'topic'], r.wt);
+  assert.equal(r.pending(), 1);
+  sh('git', ['merge', '-q', '--ff-only', 'topic'], r.main);
+  sh('git', ['push', '-q', 'origin', 'main'], r.main);
+  sh('git', ['fetch', '-q', 'origin'], r.wt);
+  assert.equal(r.pending(), 0);
+});
+
+test('승인 요청 규칙: origin/main 병합 커밋 안에만 섞인 PR 파일 변경도 막는다(Issue #243)', () => {
+  const r = approvalRepo('origin', 'main');
+  r.mainCommit('other2.txt', 'p');
+  sh('git', ['fetch', '-q', 'origin'], r.wt);
+  sh('git', ['merge', '-q', '--no-ff', '--no-commit', 'origin/main'], r.wt);
+  write(r.wt, 'README.md', 'A\nB\nc\nd\ne\n');
+  commitAll(r.wt, 'merge origin/main');
+  // 새 병합 아닌 커밋은 없고 PR 파일 목록도 그대로다. 병합 커밋 안의 변경만 다르다
+  const fresh = sh(
+    'git',
+    ['rev-list', '--count', '--no-merges', 'HEAD', `^${r.asked}`, '^origin/main'],
+    r.wt,
+  );
+  assert.equal(fresh, '0');
+  assert.equal(r.pending(), 1);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
+});
+
+test('승인 요청 규칙: 기본 브랜치가 표시를 품은 뒤 fetch만 했으면 막지 않고, 그 뒤 갱신하면 막는다(Issue #243)', () => {
+  const r = approvalRepo('origin', 'main');
+  r.mark();
+  sh('git', ['merge', '-q', '--no-ff', '--no-edit', r.branch], r.main);
+  sh('git', ['push', '-q', 'origin', 'main'], r.main);
+  sh('git', ['fetch', '-q', 'origin'], r.wt);
+  assert.equal(r.pending(), 0);
+  assert.equal(r.run(`git push origin ${r.branch}`), null);
+  r.syncMain();
+  assert.equal(r.pending(), 1);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
+});
+
+test('승인 요청 규칙: 기본 브랜치와 공통 조상이 없어 비교하지 못하면 예전처럼 센다(Issue #243)', () => {
+  const r = approvalRepo('origin', 'main');
+  // 빈 트리(git이 늘 아는 객체)로 만든 커밋은 PR 브랜치와 공통 조상이 없다
+  const orphan = sh(
+    'git',
+    ['commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'orphan'],
+    r.wt,
+  );
+  sh('git', ['update-ref', 'refs/remotes/origin/main', orphan], r.wt);
+  write(r.wt, 'src/a.ts', 'export const a = 1;\n');
+  commitAll(r.wt, 'extra');
+  // 표시 뒤 병합 아닌 커밋: main의 other.txt 커밋과 직접 커밋
+  assert.equal(r.pending(), 2);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
+});
+
+test('승인 요청 규칙: 서브모듈 표시 설정과 상관없이 표시 뒤 gitlink를 더한 커밋을 막는다(Issue #243, F10)', () => {
+  const r = approvalRepo('origin', 'main');
+  // 사용자 설정이 diff에서 서브모듈 변경을 숨겨도 비교에는 넣는다
+  sh('git', ['config', 'diff.ignoreSubmodules', 'all'], r.wt);
+  sh('git', ['update-index', '--add', '--cacheinfo', `160000,${r.asked},vendor/component`], r.wt);
+  // commitAll(add -A)은 작업 트리에 없는 gitlink를 지우므로 색인을 그대로 커밋한다
+  sh('git', ['commit', '-q', '-m', 'add gitlink'], r.wt);
+  assert.equal(r.pending(), 1);
+  assert.match(r.run(`git push origin ${r.branch}`)!.rule, /^승인 요청/);
 });
 
 test('승인 요청 규칙은 같은 명령 안의 금지 규칙(R…)을 가리지 않는다', () => {

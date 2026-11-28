@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { STANDARD_COMMANDS, loadConfig, type StandardName } from './lib/config.ts';
 import { defaultBase, git, repoInfo } from './lib/git.ts';
 import { formatProblem, log } from './lib/util.ts';
-import { gatesOutput, runGates, selfTestNeeded } from './ci/gates.ts';
+import { gatesOutput, readDismissRule, runGates, selfTestNeeded } from './ci/gates.ts';
 import { planCarry } from './ci/binding.ts';
 import { scanClaudeRun } from './ci/claude-scan.ts';
 import {
@@ -29,7 +29,14 @@ import { RevertError, actRevert, parseRevertAction, planRevert } from './ci/reve
 import { compareRequiredChecks, toRequiredChecks } from './ci/protection.ts';
 import { parseReviews } from './gates/risk-gate.ts';
 import { readRoundLedger } from './ci/accept-load.ts';
-import { REVIEWERS, ledgerData, parseLedgerData, type Ledger, type Reviewer } from './ci/ledger.ts';
+import {
+  REVIEWERS,
+  ledgerData,
+  newEntryStatus,
+  parseLedgerData,
+  type Ledger,
+  type Reviewer,
+} from './ci/ledger.ts';
 import { githubLedgerApi, loadLedger, recordCiFailure, recordLedger } from './ci/ledger-store.ts';
 import { planHashes, planMode } from './ci/plan-hash.ts';
 import { PLAN_HASH_RE } from './ci/results.ts';
@@ -49,10 +56,17 @@ import {
 import { parseReproResults, reproOutputValue, reproResultsData, runRepro } from './ci/repro.ts';
 import { targetCheckOf } from './ci/revert-evidence.ts';
 import { decodeSelfTest } from './ci/selftest-result.ts';
-import { pinnedPrompt, promptFiles, writeRoundInput } from './ci/review-round.ts';
+import {
+  encodeRoundChanged,
+  parseRoundChanged,
+  pinnedPrompt,
+  promptFiles,
+  writeRoundInput,
+} from './ci/review-round.ts';
 import { validateVerdict, type Verdict } from './ci/verdict.ts';
 import { writeReviewInput } from './ci/review-input.ts';
 import { planReview } from './ci/review-plan.ts';
+import { runChangesCollect } from './commands/changes.ts';
 import { CHECK_STEPS, runCheck, type CheckStep } from './commands/check.ts';
 import { init } from './commands/init.ts';
 import { runActionsCost } from './commands/actions-cost.ts';
@@ -76,7 +90,7 @@ import { pickNext } from './runner/next.ts';
 import { runRunner } from './runner/run.ts';
 import { runWorkers, workerNames } from './runner/workers.ts';
 import { formatLive, LiveLaunchError, runLive } from './selftest/live.ts';
-import { formatSelfTest, runSelfTest } from './selftest/run.ts';
+import { formatSelfTest, runSelfTest, type SelfTestStats } from './selftest/run.ts';
 
 const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
 
@@ -93,6 +107,8 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   pr-ready [--undo]                        승인 요청 전 조건 확인 뒤 PR 초안 해제(--undo: 초안으로 되돌림)
   pr-state [--pr <번호>]                   PR의 필수 체크를 출처와 함께 보이고 분류한다(읽기만. 번호가 없으면 현재 브랜치의 PR)
   claim-heartbeat --issue <N>              선점 생존 확인
+  changes-collect                          변경 조각(docs/harness/changes/)을 CHANGELOG "다음 버전 (미배포)"와 설계서
+                                           변경 이력으로 옮기고 조각을 지운다(모으기 PR, 절차서 5절). git은 읽기만 쓴다
   run [--worker <이름> | --prefix runner] [--tool claude|codex] [--once] [--max-iterations N] [--no-wait]
                                            runner. --worker(또는 HARNESS_WORKER)가 없으면 limits.workers만큼
                                            작업자 프로세스(<접두어>-1, <접두어>-2 …)를 띄운다
@@ -101,9 +117,11 @@ const HELP = `하네스 명령 (node scripts/harness.ts <명령>)
   plan-gate [--repo <dir>] [--config-root <dir>] [--base <sha>] [--head-ref <브랜치>] [--mode pr|plan]
   doc-lint | bypass-scan [--ci] [--base <sha>] | secret-scan [--ci] [--base <sha>]
   test-effect [--ci] [--base <sha>]         R5: 추가·수정한 테스트 파일이 변경 전 코드에서 실패하는가(설정 testEffect)
-  self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>]
+  self-test [--harness <폴더>] [--only <id,id>] [--out <파일>] [--head-sha <sha>] [--jobs <N>]
                                            하네스 자체 테스트(12.4절): 대상 하네스(기본: 이 리포)를 임시 샘플 리포에 적용해
-                                           시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1
+                                           시나리오(scripts/selftest/scenarios/)를 돌린다. 하나라도 어긋나면 종료 코드 1.
+                                           --jobs: 동시에 돌리는 시나리오 수(기본: 코어 수). 나란히 돌 때 실패한
+                                           시나리오는 혼자 한 번 더 돌린다
   self-test --live [--harness <폴더>] [--runs <N>] [--only <id,id>] [--out <파일>]
                                            실제 세션 시나리오(scripts/selftest/live/): 대상 하네스 설정의 agents.claude로
                                            시나리오마다 N번(기본 3) 세션을 띄워 통과 수를 낸다. 구독 인증이 필요하다.
@@ -233,6 +251,7 @@ const OPTIONS: Record<string, { type: OptionKind }> = {
   write: { type: 'boolean' },
   live: { type: 'boolean' },
   runs: { type: 'string' },
+  jobs: { type: 'string' },
   base: { type: 'string' },
   only: { type: 'string' },
   harness: { type: 'string' },
@@ -496,6 +515,17 @@ async function main(argv: string[]): Promise<number> {
       const repo = str('repo-slug') ?? '';
       const targetUrl = str('target-url') ?? '';
       let seen: Verdict | null = null;
+      // 라운드 전달 값(Issue #262·#267): 판정 워크플로만 PR 번호와 함께 준다. 범위 밖 파일은 review/*와 원장 모두에 쓴다.
+      // 계획 전용 판정(G1, --mode plan)은 범위 밖으로 미루지 않는다: 미루면 수정 요청이 계획 승인이 된다(계획 검증 F5)
+      const round =
+        str('pr-number') !== undefined
+          ? parseRoundChanged(str('round-changed') ?? '')
+          : { changed: null, outside: [], round: null };
+      const planOnlyRecord = str('mode') === 'plan';
+      const outsideFiles = planOnlyRecord ? [] : round.outside;
+      // 계획 전용 판정은 지금 규칙 그대로다: 동결 검사에는 나누기 전 목록을 쓴다(빼면 그 파일의 P1이 동결된다, 계획 검증 F6)
+      const changedFiles =
+        planOnlyRecord && round.changed ? [...round.changed, ...round.outside] : round.changed;
       const p = await recordReview({
         context: str('context') ?? '',
         needed: needed === 'true',
@@ -519,6 +549,23 @@ async function main(argv: string[]): Promise<number> {
           seen = v;
           for (const line of reviewLogLines(v)) log(line);
         },
+        // 검증자 상태(Issue #267): 구현 판정은 원장이 미루는 새 P1(범위 밖, 동결, 근거 없음)만 있으면 통과다. 원장과 같은
+        // 등록 규칙(newEntryStatus)을 쓴다. 계획 전용 판정은 미루지 않는다. 라운드 수나 바뀐 파일 목록을 모르면 1라운드로
+        // 본다(동결로 통과시키지 않는다: 목록을 모르면 원장은 새 P1을 모두 동결하지만, 바뀐 파일의 P1까지 섞인다. 판정 F1)
+        deferred: planOnlyRecord
+          ? undefined
+          : (f, i, v) => {
+              const repro = parseReproResults(str('repro-results') ?? '', v.findings.length);
+              const result = repro?.find((x) => x.index === i)?.result ?? '';
+              return (
+                newEntryStatus(f, {
+                  round: round.round !== null && changedFiles !== null ? round.round : 1,
+                  changed: new Set(changedFiles ?? []),
+                  outside: new Set(outsideFiles),
+                  repro: result,
+                }).status === 'deferred'
+              );
+            },
       });
       log(`record-review: ${p.context} = ${p.state} — ${p.description}`);
       // 지적 원장(10.2절 (4)). 판정 워크플로만 PR 번호를 준다. 원장 실패는 review-ledger = error로 남고 이 job은 실패시키지 않는다
@@ -526,13 +573,7 @@ async function main(argv: string[]): Promise<number> {
         // 기록 job은 scripts와 설정 파일만 체크아웃한다. 설정 위치는 --config-root로 받는다
         const cfg = loadConfig(path.resolve(str('config-root') ?? '.'));
         const ledgerToken = process.env.LEDGER_TOKEN ?? '';
-        let changed: string[] | null = null;
-        try {
-          const raw = JSON.parse(Buffer.from(str('round-changed') ?? '', 'base64').toString());
-          if (Array.isArray(raw) && raw.every((x) => typeof x === 'string')) changed = raw;
-        } catch {
-          // 목록이 없거나 깨졌으면 모르는 것으로 본다(2라운드부터 새 P1은 동결된다)
-        }
+        const changed = changedFiles;
         // 재현 job 결과(10.2절 (3)). PR 코드가 만든 값이라 순번과 값만 받는다. 형식이 다르면 없는 것으로 본다
         const v = seen as Verdict | null;
         const outcomes = v ? parseReproResults(str('repro-results') ?? '', v.findings.length) : [];
@@ -574,6 +615,7 @@ async function main(argv: string[]): Promise<number> {
           },
           promptBase: str('prompt-base') ?? '',
           changedSinceLastRound: changed,
+          outsideSinceLastRound: outsideFiles,
           repro: reproMap,
           plan,
           // 구현 대기(Issue #212): --mode가 plan일 때만 계획만 담은 head다. 없거나 다른 값이면 코드가 섞인 것으로 본다
@@ -716,21 +758,18 @@ async function main(argv: string[]): Promise<number> {
           }
           rebuttals = parsed;
         }
-        const round = writeRoundInput({ root, ledger, reviewer: reviewer as Reviewer });
+        const round = writeRoundInput({ root, ledger, reviewer: reviewer as Reviewer, base });
         writeRebuttalInput(root, rebuttals);
         if (rebuttals.length)
           log(`review-plan: 반박 ${rebuttals.length}건(${rebuttals.map((r) => r.id).join(', ')})`);
-        // 명령 인자 하나의 길이 한도(약 128KB) 안에서만 넘긴다. 넘으면 모르는 것으로 본다(새 P1은 동결된다)
-        const encoded = round.changed
-          ? Buffer.from(JSON.stringify(round.changed)).toString('base64')
-          : '';
-        const changed = encoded.length <= 100_000 ? encoded : '';
+        // { changed, outside }의 base64 JSON(Issue #262). 상한을 넘으면 빈 값이라 모르는 것으로 본다(새 P1은 동결된다)
+        const changed = encodeRoundChanged(round);
         appendFileSync(
           output,
           `round=${round.round}\nprompt_base=${round.promptBase}\nround_changed=${changed}\n`,
         );
         log(
-          `review-plan: ${reviewer} ${round.round}라운드, 프롬프트 버전 ${round.promptBase.slice(0, 12) || '지금'}, 직전 판정 이후 바뀐 파일 ${round.changed ? round.changed.length : '알 수 없음'}`,
+          `review-plan: ${reviewer} ${round.round}라운드, 프롬프트 버전 ${round.promptBase.slice(0, 12) || '지금'}, 직전 판정 이후 바뀐 파일 ${round.changed ? round.changed.length : '알 수 없음'}, main 병합으로만 바뀐 파일 ${round.outside.length}`,
         );
       }
       log(
@@ -1084,6 +1123,17 @@ async function main(argv: string[]): Promise<number> {
               target,
             )
         : undefined;
+      // 오래된 승인 철회 규칙(Issue #250): PR의 실제 base 브랜치 규칙을 판정 job의 읽기 토큰으로 읽는다.
+      // PR 번호가 없으면 만들지 않는다(risk-gate는 위험도 높음 승인을 error로 낸다)
+      const dismissRule =
+        Number.isInteger(number) && number > 0
+          ? () =>
+              readDismissRule({
+                api: githubGet(process.env.GH_TOKEN ?? '', process.env.GITHUB_API_URL),
+                repo: process.env.GITHUB_REPOSITORY ?? '',
+                pr: number,
+              })
+          : undefined;
       const r = await runGates({
         root,
         cfg,
@@ -1094,6 +1144,7 @@ async function main(argv: string[]): Promise<number> {
         prBody,
         planReview,
         targetCheck,
+        dismissRule,
       });
       // 결과 파일에는 크기를 맞춘 결과를, 요약에는 원래 결과를 쓴다(ci/gates.ts의 gatesOutput)
       const output = gatesOutput(r);
@@ -1169,6 +1220,8 @@ async function main(argv: string[]): Promise<number> {
       );
       return 0;
     }
+    case 'changes-collect':
+      return runChangesCollect(repoInfo(cwd).root);
     case 'pr-ready': {
       const r = prReady(cwd, { undo: flag('undo') });
       log(
@@ -1267,12 +1320,24 @@ async function main(argv: string[]): Promise<number> {
           );
         return 0;
       }
+      // 파서가 strict: false라 값이 빠진 --jobs는 문자열로 남지 않는다. 옵션 토큰으로 주었는지 본다
+      const jobsGiven = tokens.some((t) => t.kind === 'option' && t.name === 'jobs');
+      const jobsArg = str('jobs');
+      if (jobsGiven && (jobsArg === undefined || !/^[1-9][0-9]*$/.test(jobsArg))) {
+        process.stderr.write(
+          `self-test: --jobs는 1 이상의 정수여야 한다(받은 값: ${jobsArg ?? '없음'})\n`,
+        );
+        return 2;
+      }
       let report;
+      let stats: SelfTestStats | undefined;
       try {
         report = await runSelfTest({
           harness: path.resolve(str('harness') ?? repoInfo(cwd).root),
           only: str('only')?.split(',').filter(Boolean),
           headSha: str('head-sha'),
+          jobs: jobsArg === undefined ? undefined : Number(jobsArg),
+          onStats: (s) => (stats = s),
         });
       } catch (e) {
         process.stderr.write(`self-test: ${(e as Error).message}\n`);
@@ -1282,7 +1347,12 @@ async function main(argv: string[]): Promise<number> {
       const out = str('out');
       if (out) writeFileSync(out, JSON.stringify(report, null, 2) + '\n');
       const bad = report.results.filter((r) => r.state !== 'pass').length;
-      log(`self-test: ${bad ? `실패 ${bad}건` : '통과'} (시나리오 ${report.results.length}개)`);
+      const run = stats
+        ? `, 나란히 ${stats.jobs}개, 다시 돌린 것 ${stats.reruns}개, ${(stats.ms / 1000).toFixed(1)}초`
+        : '';
+      log(
+        `self-test: ${bad ? `실패 ${bad}건` : '통과'} (시나리오 ${report.results.length}개${run})`,
+      );
       return bad ? 1 : 0;
     }
     case 'codeowners': {

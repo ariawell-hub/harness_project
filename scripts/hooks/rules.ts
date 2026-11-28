@@ -267,7 +267,7 @@ function gitRules(c: SimpleCommand, cwd: string, ctx: GuardContext): Problem | n
             `승인을 요청한 PR 브랜치(${branch ?? '현재 브랜치'})에 새 커밋 ${extra}개를 push하려 했다. head가 바뀌면 승인이 철회된다`,
             '미룰 수 있는 변경은 다음 PR에 넣어라. 꼭 올려야 하면 제작자에게 먼저 알리고 ' +
               '`node scripts/harness.ts pr-ready --undo`로 승인 요청을 거둔 뒤 push하고, 끝나면 `pr-ready`로 다시 요청하라. ' +
-              'main 병합 갱신(병합 커밋만 더함)은 막지 않는다',
+              'main 병합 갱신(PR이 바꾼 파일을 main이 건드리지 않았으면)은 막지 않는다',
             APPROVAL_DOC,
           );
         }

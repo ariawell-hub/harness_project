@@ -1,12 +1,11 @@
 // 어떤 검증자가 필요한가(10.1절 검증자 구성·위험도별 검증 수준).
 // 낮음: 작성 도구와 다른 도구 1명(B). 보통·높음: A + B. 실행하지 않는 검증자는 기록 job이 "해당 없음(통과)"으로 쓴다.
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
 import { harnessGuard } from '../gates/harness-guard.ts';
 import type { RevertCheck } from '../gates/revert-check.ts';
 import { assessRisk, type Risk, type RiskSignal } from '../gates/risk-gate.ts';
 import type { HarnessConfig } from '../lib/config.ts';
-import { findPlan, parseBranch, parseDoc } from '../lib/plan.ts';
+import { parseBranch, parseDoc } from '../lib/plan.ts';
+import { planReader } from '../lib/plan-read.ts';
 
 export function reviewersFor(risk: Risk, author: string): { claude: boolean; codex: boolean } {
   if (risk !== 'low') return { claude: true, codex: true };
@@ -14,14 +13,24 @@ export function reviewersFor(risk: Risk, author: string): { claude: boolean; cod
   return author === 'codex' ? { claude: true, codex: false } : { claude: false, codex: true };
 }
 
-/** PR 트리의 계획 frontmatter `author`. 없으면 '' */
+/**
+ * PR 트리의 계획 frontmatter `author`. 없거나 읽지 못하면 ''(작성자를 모른다, Issue #194): 계획 자리가
+ * 링크·서브모듈이거나 git 색인을 읽지 못한 경우다. 던지지 않는다. planReview가 위험도 계산의 catch(위험도 high)에
+ * 닿기 전에 부르기 때문이다. 같은 실패는 위험도 계산에서도 나서 high와 두 검증자가 된다
+ */
 export function planAuthor(root: string, branch: string): string {
   const b = parseBranch(branch);
-  const ref = b ? findPlan(root, b.id) : null;
-  if (!ref) return '';
-  const f = path.join(root, ref.file);
-  if (!existsSync(f)) return '';
-  const a = parseDoc(readFileSync(f, 'utf8')).frontmatter?.author;
+  if (!b) return '';
+  let text: string | null;
+  try {
+    const reader = planReader(root);
+    const ref = reader.find(b.id);
+    text = ref ? reader.read(ref.file) : null;
+  } catch {
+    return '';
+  }
+  if (text === null) return '';
+  const a = parseDoc(text).frontmatter?.author;
   return typeof a === 'string' ? a : '';
 }
 

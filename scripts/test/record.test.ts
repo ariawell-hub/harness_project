@@ -20,6 +20,7 @@ import {
   type GateResult,
   type StatusPayload,
 } from '../ci/results.ts';
+import * as reviewRound from '../ci/review-round.ts';
 import { decodeSelfTest, mergeSelfTest, validateSelfTest } from '../ci/selftest-result.ts';
 import { HARNESS_ROOT, commitAll, fixtureConfig, gitInit, sh, tmp, write } from './helpers.ts';
 
@@ -221,6 +222,339 @@ test('record-review: 판정을 원장 댓글에 반영하고 review/*와 review-
   assert.equal(state.gqlCalls, 1);
 });
 
+test('record-review(Issue #262): { changed, outside } 꼴을 읽어 main 병합으로만 바뀐 파일의 새 P1을 재현돼도 범위 밖으로 미룬다', async () => {
+  reset();
+  const v = verdictFile({ verdict: 'request_changes', findings: [finding()] });
+  const r = await run(recordArgs(v, ledgerArgs), tokens);
+  assert.equal(r.code, 0, r.out);
+  // 2라운드: F1은 고쳤고, main 병합으로만 바뀐 src/b.ts에 새 P1(재현됨)과 새 P0을 냈다
+  const v2 = verdictFile({
+    verdict: 'request_changes',
+    findings: [
+      finding({ file: 'src/b.ts', title: 'main에서 온 코드' }),
+      finding({ file: 'src/b.ts', title: 'main에서 온 P0', severity: 'P0' }),
+    ],
+    resolutions: [{ id: 'F1', status: 'fixed', note: 'a1b2c3d' }],
+  });
+  const round = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64');
+  const repro = round([{ index: 0, result: 'reproduced' }]);
+  const r2 = await run(
+    recordArgs(v2, [
+      ...ledgerArgs,
+      '--round-changed',
+      round({ changed: ['src/a.ts'], outside: ['src/b.ts'] }),
+      '--repro-results',
+      repro,
+    ]),
+    tokens,
+  );
+  assert.equal(r2.code, 0, r2.out);
+  const l = parseLedger(state.comments[0].body);
+  assert.deepEqual(
+    l?.findings.map((e) => [e.id, e.severity, e.repro, e.status]),
+    [
+      ['F1', 'P1', '', 'fixed'],
+      ['F2', 'P1', 'reproduced', 'deferred'],
+      ['F3', 'P0', '', 'open'],
+    ],
+  );
+  assert.match(l?.findings[1].note ?? '', /^범위 밖: /);
+  assert.match(state.statuses.at(-1)?.description ?? '', /1건: F3.*범위 밖 P1 1/);
+  // 꼴이 다른 값(outside가 배열이 아니다)은 모르는 것으로 본다: 2라운드의 새 P1은 동결된다
+  reset();
+  assert.equal((await run(recordArgs(v, ledgerArgs), tokens)).code, 0);
+  const v3 = verdictFile({
+    verdict: 'request_changes',
+    findings: [finding({ file: 'src/b.ts', title: 'main에서 온 코드' })],
+    resolutions: [{ id: 'F1', status: 'fixed', note: 'a1b2c3d' }],
+  });
+  const r3 = await run(
+    recordArgs(v3, [
+      ...ledgerArgs,
+      '--round-changed',
+      round({ changed: ['src/b.ts'], outside: 'src/b.ts' }),
+    ]),
+    tokens,
+  );
+  assert.equal(r3.code, 0, r3.out);
+  const l3 = parseLedger(state.comments[0].body);
+  assert.deepEqual(
+    l3?.findings.map((e) => [e.id, e.status]),
+    [
+      ['F1', 'fixed'],
+      ['F2', 'deferred'],
+    ],
+  );
+  assert.match(l3?.findings[1].note ?? '', /^동결: /);
+});
+
+test('record-review(Issue #262): 범위 밖 P1만 있는 판정은 review/*와 review-ledger가 모두 success, 범위 안 지적·P0·open이 있으면 막는다(계획 검증 F4)', async () => {
+  const round = Buffer.from(
+    JSON.stringify({ changed: ['src/a.ts'], outside: ['src/b.ts'] }),
+  ).toString('base64');
+  const out = finding({ file: 'src/b.ts', title: 'main에서 온 코드' });
+  const states = async (v2: Record<string, unknown>) => {
+    reset();
+    // 1라운드: 지적 없이 승인해 원장을 만든다(P2 하나)
+    const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
+    assert.equal((await run(recordArgs(v1, ledgerArgs), tokens)).code, 0);
+    const r = await run(
+      recordArgs(verdictFile(v2), [...ledgerArgs, '--round-changed', round]),
+      tokens,
+    );
+    assert.equal(r.code, 0, r.out);
+    return state.statuses.slice(2).map((s) => [s.context, s.state, s.description]);
+  };
+  const ok = await states({ verdict: 'request_changes', findings: [out] });
+  assert.deepEqual(
+    ok.map(([c, s]) => [c, s]),
+    [
+      ['review/claude', 'success'],
+      ['review-ledger', 'success'],
+    ],
+  );
+  assert.match(ok[0][2], /미룬 P1 1.*patch:b{40}/);
+  assert.match(ok[1][2], /그중 범위 밖 P1 1/);
+  const blocked: [string, Record<string, unknown>][] = [
+    [
+      '범위 안 P1',
+      { verdict: 'request_changes', findings: [out, finding({ title: '이 PR의 결함' })] },
+    ],
+    [
+      '범위 밖 P0',
+      {
+        verdict: 'request_changes',
+        findings: [out, finding({ file: 'src/b.ts', title: 'P0', severity: 'P0' })],
+      },
+    ],
+  ];
+  for (const [name, v2] of blocked)
+    assert.deepEqual(
+      (await states(v2)).map(([c, s]) => [c, s]),
+      [
+        ['review/claude', 'failure'],
+        ['review-ledger', 'failure'],
+      ],
+      name,
+    );
+  // resolutions에 open: 1라운드에 연 P1(F1)을 그대로 두고 범위 밖 P1만 새로 냈다
+  reset();
+  const v1 = verdictFile({ verdict: 'request_changes', findings: [finding()] });
+  assert.equal((await run(recordArgs(v1, ledgerArgs), tokens)).code, 0);
+  const v2 = verdictFile({
+    verdict: 'request_changes',
+    findings: [out],
+    resolutions: [{ id: 'F1', status: 'open', note: '그대로' }],
+  });
+  assert.equal(
+    (await run(recordArgs(v2, [...ledgerArgs, '--round-changed', round]), tokens)).code,
+    0,
+  );
+  assert.deepEqual(
+    state.statuses.slice(2).map((s) => [s.context, s.state]),
+    [
+      ['review/claude', 'failure'],
+      ['review-ledger', 'failure'],
+    ],
+  );
+});
+
+test('record-review(Issue #262): 계획 전용 판정(--mode plan)은 지금 규칙 그대로다. 범위 밖으로 미루지도 동결하지도 않고 계획 승인이 되지 않는다(계획 검증 F5·F6)', async () => {
+  reset();
+  const step1 = 'docs/exec-plans/active/x/step1.md';
+  const round = Buffer.from(
+    JSON.stringify({ changed: ['docs/exec-plans/active/x/step0.md'], outside: [step1] }),
+  ).toString('base64');
+  const planArgs = [...ledgerArgs, '--mode', 'plan', '--plan-hash', 'c'.repeat(64)];
+  // 1라운드: 계획 승인
+  const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
+  assert.equal((await run(recordArgs(v1, planArgs), tokens)).code, 0);
+  assert.deepEqual(parseLedger(state.comments[0].body)?.planReview?.approvals, ['claude']);
+  // 2라운드: main 병합으로 바뀐 같은 계획의 다른 step 파일에 P1 둘(재현 결과 없음, 재현됨)
+  const v2 = verdictFile({
+    verdict: 'request_changes',
+    findings: [
+      finding({ file: step1, title: '다른 step의 수용 기준 결함' }),
+      finding({ file: step1, title: '다른 step의 재현된 결함' }),
+    ],
+  });
+  const repro = Buffer.from(JSON.stringify([{ index: 1, result: 'reproduced' }])).toString(
+    'base64',
+  );
+  const r = await run(
+    recordArgs(v2, [...planArgs, '--round-changed', round, '--repro-results', repro]),
+    tokens,
+  );
+  assert.equal(r.code, 0, r.out);
+  const l = parseLedger(state.comments[0].body);
+  assert.deepEqual(
+    l?.findings.map((e) => [e.id, e.severity, e.status]),
+    [
+      ['F1', 'P2', 'deferred'],
+      ['F2', 'P1', 'open'],
+      ['F3', 'P1', 'open'],
+    ],
+  );
+  for (const e of l?.findings.slice(1) ?? []) assert.equal(e.note, '', e.id);
+  assert.deepEqual(
+    state.statuses.slice(2).map((x) => [x.context, x.state]),
+    [
+      ['review/claude', 'failure'],
+      ['review-ledger', 'failure'],
+    ],
+  );
+  assert.ok(!(l?.planReview?.approvals ?? []).includes('claude'), JSON.stringify(l?.planReview));
+});
+
+test('record-review(Issue #262): 예전 배열 꼴로 100,000자이던 목록은 나눠도 객체 꼴로 전달돼, 계획 전용 2라운드의 새 P1이 동결되지 않는다(계획 검증 F7)', async () => {
+  // 새 함수는 변경 전 코드에 없다: 단언으로 실패하게 한다
+  const encode = (reviewRound as Partial<typeof reviewRound>).encodeRoundChanged;
+  assert.equal(typeof encode, 'function', 'encodeRoundChanged 없음');
+  reset();
+  const step1 = 'docs/exec-plans/active/x/step1.md';
+  const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+  // 예전 배열 꼴이 정확히 100,000자인 목록: 계획의 step 파일과 긴 경로
+  let list: string[] = [];
+  for (let len = 74_900; len < 75_100; len++) {
+    list = [step1, `docs/${'y'.repeat(len)}`];
+    if (b64(list).length >= 100_000) break;
+  }
+  assert.equal(b64(list).length, 100_000);
+  const value = encode!({ changed: [step1], outside: [list[1]], round: 2 });
+  assert.ok(value.length > 0, '전달 값이 비었다');
+  const planArgs = [...ledgerArgs, '--mode', 'plan', '--plan-hash', 'c'.repeat(64)];
+  const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
+  assert.equal((await run(recordArgs(v1, planArgs), tokens)).code, 0);
+  const v2 = verdictFile({
+    verdict: 'request_changes',
+    findings: [finding({ file: step1, title: '수용 기준 결함' })],
+  });
+  const r = await run(recordArgs(v2, [...planArgs, '--round-changed', value]), tokens);
+  assert.equal(r.code, 0, r.out);
+  const l = parseLedger(state.comments[0].body);
+  assert.deepEqual(
+    l?.findings.map((e) => [e.id, e.status, e.note]),
+    [
+      ['F1', 'deferred', ''],
+      ['F2', 'open', ''],
+    ],
+  );
+});
+
+test('record-review(Issue #262): 예전 배열 꼴로 100,000자인 목록을 나눈 값도 범위 구분이 남는다. main 쪽 P1은 범위 밖, 이 PR 파일의 P1은 열린다(계획 검증 F9)', async () => {
+  const encode = (reviewRound as Partial<typeof reviewRound>).encodeRoundChanged;
+  assert.equal(typeof encode, 'function', 'encodeRoundChanged 없음');
+  reset();
+  const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+  // 예전 배열 꼴이 정확히 100,000자인 목록: 이 PR 파일 둘(하나는 긴 경로)과 main 쪽 파일
+  let list: string[] = [];
+  for (let len = 74_900; len < 75_100; len++) {
+    list = ['src/a.ts', `src/${'y'.repeat(len)}`, 'src/main-only.ts'];
+    if (b64(list).length >= 100_000) break;
+  }
+  assert.equal(b64(list).length, 100_000);
+  const value = encode!({ changed: [list[0], list[1]], outside: [list[2]], round: 2 });
+  assert.ok(value.length > 100_000, '나눈 값은 예전 상한보다 길다');
+  const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
+  assert.equal((await run(recordArgs(v1, ledgerArgs), tokens)).code, 0);
+  const v2 = verdictFile({
+    verdict: 'request_changes',
+    findings: [
+      finding({ file: 'src/main-only.ts', title: 'main에서 온 코드' }),
+      finding({ file: 'src/a.ts', title: '이 PR의 결함' }),
+    ],
+  });
+  const r = await run(recordArgs(v2, [...ledgerArgs, '--round-changed', value]), tokens);
+  assert.equal(r.code, 0, r.out);
+  const l = parseLedger(state.comments[0].body);
+  assert.deepEqual(
+    l?.findings.map((e) => [e.id, e.status]),
+    [
+      ['F1', 'deferred'],
+      ['F2', 'deferred'],
+      ['F3', 'open'],
+    ],
+  );
+  assert.match(l?.findings[1].note ?? '', /^범위 밖: /);
+  // 이 PR 파일의 P1이 열려 있어 두 체크가 막는다
+  assert.deepEqual(
+    state.statuses.slice(2).map((x) => [x.context, x.state]),
+    [
+      ['review/claude', 'failure'],
+      ['review-ledger', 'failure'],
+    ],
+  );
+});
+
+test('record-review(Issue #267): 2라운드 구현 판정의 차단 지적이 모두 동결된 P1이면 review/*와 review-ledger가 모두 success다', async () => {
+  const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
+  /** 1라운드(P2 하나로 원장을 만든다) 뒤 2라운드 기록의 [context, state, description] */
+  const second = async (extra: string[], v2: Record<string, unknown>, mode: string[] = []) => {
+    reset();
+    const v1 = verdictFile({ findings: [finding({ severity: 'P2', title: '이름' })] });
+    assert.equal((await run(recordArgs(v1, [...ledgerArgs, ...mode]), tokens)).code, 0);
+    const r = await run(recordArgs(verdictFile(v2), [...ledgerArgs, ...mode, ...extra]), tokens);
+    assert.equal(r.code, 0, r.out);
+    return state.statuses.slice(2).map((x) => [x.context, x.state, x.description]);
+  };
+  const frozenOnly = {
+    verdict: 'request_changes',
+    findings: [finding({ file: 'src/old.ts', title: '바뀌지 않은 파일의 결함' })],
+  };
+  const known = ['--round-changed', b64({ changed: ['src/a.ts'], outside: [], round: 2 })];
+  const ok = await second(known, frozenOnly);
+  assert.deepEqual(
+    ok.map(([c, st]) => [c, st]),
+    [
+      ['review/claude', 'success'],
+      ['review-ledger', 'success'],
+    ],
+  );
+  assert.match(ok[0][2], /미룬 P1 1.*patch:b{40}/);
+  assert.match(ok[1][2], /그중 동결 P1 1/);
+  assert.match(parseLedger(state.comments[0].body)?.findings[1].note ?? '', /^동결: /);
+  // 막는 경우: 재현됨, 바뀐 파일의 P1이 함께, 라운드 수를 모름, 1라운드라고 받음, 계획 전용 판정
+  const reproduced = Buffer.from(JSON.stringify([{ index: 0, result: 'reproduced' }])).toString(
+    'base64',
+  );
+  const blocked: [string, string[], Record<string, unknown>, string[]][] = [
+    ['재현됨', [...known, '--repro-results', reproduced], frozenOnly, []],
+    [
+      '바뀐 파일의 P1이 함께',
+      known,
+      {
+        verdict: 'request_changes',
+        findings: [...frozenOnly.findings, finding({ file: 'src/a.ts', title: '이 수정의 결함' })],
+      },
+      [],
+    ],
+    [
+      '라운드 수를 모름',
+      ['--round-changed', b64({ changed: ['src/a.ts'], outside: [] })],
+      frozenOnly,
+      [],
+    ],
+    [
+      '바뀐 파일 목록을 모름(라운드 수는 앎, 판정 F1)',
+      ['--round-changed', b64({ changed: null, outside: [], round: 2 })],
+      frozenOnly,
+      [],
+    ],
+    [
+      '1라운드라고 받음',
+      ['--round-changed', b64({ changed: ['src/a.ts'], outside: [], round: 1 })],
+      frozenOnly,
+      [],
+    ],
+    ['계획 전용 판정', known, frozenOnly, ['--mode', 'plan', '--plan-hash', 'c'.repeat(64)]],
+  ];
+  for (const [name, extra, v2, mode] of blocked) {
+    const got = await second(extra, v2, mode);
+    assert.equal(got[0][0], 'review/claude', name);
+    assert.equal(got[0][1], 'failure', name);
+  }
+});
+
 test('record-review: 열린 P1이 있는 원장에서 편집 이력을 읽지 못하면 원장을 쓰지 않고 review-ledger가 error다', async () => {
   reset();
   const v = verdictFile({ verdict: 'request_changes', findings: [finding()] });
@@ -330,8 +664,12 @@ test('review-plan: plan job은 원장을 읽어 출력으로 넘기고, 판정 j
   assert.equal(outputs.plan_hash, '');
   assert.equal(outputs.prompt_base, BASE);
   assert.deepEqual(parseLedgerData(outputs.ledger), stored);
-  // 직전 판정 head(HEAD)는 이 저장소에 없다: 바뀐 파일을 모른다
-  assert.equal(outputs.round_changed, '');
+  // 직전 판정 head(HEAD)는 이 저장소에 없다: 바뀐 파일을 모른다. 출력은 { changed, outside, round } 꼴이다(Issue #262·#267)
+  assert.deepEqual(JSON.parse(Buffer.from(outputs.round_changed, 'base64').toString()), {
+    changed: null,
+    outside: [],
+    round: 2,
+  });
   const md = path.join(root, '.harness-review/ledger.md');
   assert.match(readFileSync(md, 'utf8'), /F1 \| P1 \| claude \| open/);
 

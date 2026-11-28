@@ -130,6 +130,11 @@ export interface ApplyOptions {
   headSha: string;
   /** 이 검증자의 직전 판정 head 이후 바뀐 파일. 모르면 null(2라운드부터는 모두 동결한다) */
   changedSinceLastRound: readonly string[] | null;
+  /**
+   * 이 검증자의 직전 판정 head 이후 main 병합으로만 바뀐 파일(이 PR이 바꾸지 않았다, Issue #262). 그 파일의 새 P1은
+   * 재현 여부와 상관없이 범위 밖으로 미룬다. 모르면 비우거나 주지 않는다(미루지 않는다)
+   */
+  outsideSinceLastRound?: readonly string[];
   /** 재현 job 결과: 이 판정의 findings 순번 → 결과. PR 코드가 조작할 수 있는 값이다(10.4절) */
   repro?: ReadonlyMap<number, ReproResult>;
   /** 계획 전용 판정(mode=plan)인가. 참이면 이 판정에서 새로 등록하는 지적에 planRound를 적는다 */
@@ -137,6 +142,11 @@ export interface ApplyOptions {
 }
 
 export const PARK_NOTE = '구현 대기: 계획만 담은 head에서는 판정하지 않는다';
+/** 범위 밖으로 미룬 새 P1의 처리 칸(Issue #262). pr-state가 이 글로 가려 알린다 */
+export const OUTSIDE_NOTE =
+  '범위 밖: 직전 판정 이후 main 병합으로만 바뀐 파일의 새 P1이다. 이 PR을 막지 않고 Issue로 넘긴다(10.2절 (5))';
+/** 범위 밖으로 미룬 지적인가 */
+export const isOutside = (e: Entry): boolean => e.status === 'deferred' && e.note === OUTSIDE_NOTE;
 export const UNPARK_NOTE = '구현이 올라와 다시 열림';
 
 /**
@@ -166,8 +176,50 @@ export function parkFor(l: Ledger, planOnly: boolean): Ledger {
 }
 
 /**
+ * 새로 등록하는 지적의 등급·상태·처리 칸(10.2절 (3)·(5)). 원장 반영(`applyVerdict`)과 검증자 상태(`review/*`, Issue #267)가
+ * 같은 규칙을 쓰도록 여기 둔다. 같은 지적의 재등록(이미 원장에 있음)은 이 함수가 아니라 원장 상태를 따른다.
+ * - 근거(실패 시나리오와 위치)가 없는 P1은 P2로 내린다. P0은 내리지 않는다
+ * - 범위 밖(Issue #262): main 병합으로만 바뀐 파일(outside)의 새 P1은 재현됐어도 deferred다
+ * - 동결: 그 검증자의 2라운드부터 바뀌지 않은 파일(changed에 없음)의 새 P1은 deferred다. 재현된 P1은 예외로 받는다
+ * - 그 밖의 P0·P1은 open, P2·P3은 deferred
+ */
+export function newEntryStatus(
+  f: Pick<Finding, 'severity' | 'file' | 'evidence'>,
+  o: {
+    round: number;
+    changed: ReadonlySet<string>;
+    outside: ReadonlySet<string>;
+    repro: ReproResult;
+  },
+): { severity: Severity; status: 'open' | 'deferred'; note: string } {
+  const unfounded = f.severity === 'P1' && (f.evidence.trim() === '' || f.file.trim() === '');
+  const severity: Severity = unfounded ? 'P2' : f.severity;
+  const blocking = BLOCKING.includes(severity);
+  const outside = severity === 'P1' && o.outside.has(f.file);
+  // "재현 안 됨"은 상태를 바꾸지 않는다
+  const frozen =
+    !outside &&
+    o.round >= 2 &&
+    severity === 'P1' &&
+    !o.changed.has(f.file) &&
+    o.repro !== 'reproduced';
+  return {
+    severity,
+    status: blocking && !frozen && !outside ? 'open' : 'deferred',
+    note: unfounded
+      ? '근거 없음: P1에서 P2로 내림(10.2절 (3))'
+      : outside
+        ? OUTSIDE_NOTE
+        : frozen
+          ? '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'
+          : '',
+  };
+}
+
+/**
  * 판정 하나를 원장에 반영한 새 원장을 돌려준다(입력은 바꾸지 않는다).
  * - 새 지적: P0·P1은 open, P2·P3은 deferred. 그 검증자의 2라운드부터는 바뀌지 않은 파일의 P1을 deferred로 등록한다(동결)
+ * - 범위 밖: main 병합으로만 바뀐 파일(outsideSinceLastRound)의 새 P1은 재현됐어도 deferred다(Issue #262). P0은 그대로 받는다
  * - resolutions: 자기 지적의 fixed·rejected·open만 반영한다. 남의 P0에 대한 rejected는 동의로 기록한다
  * - accepted(제작자 승인)와 parked(구현 대기)인 지적은 deferred처럼 판정으로 바뀌지 않는다
  * - 계획 전용 판정(planOnly)에서 새로 등록하는 지적에는 planRound를 적는다. 등록 상태를 정하는 규칙은 같다
@@ -181,7 +233,9 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
     ciFailures: [...l.ciFailures],
   };
   const round = roundsOf(l, o.reviewer) + 1;
+  // 바뀐 파일 목록을 모르면(null) 빈 목록처럼 본다: 2라운드부터 새 P1은 모두 동결된다
   const changed = new Set(o.changedSinceLastRound ?? []);
+  const outsideFiles = new Set(o.outsideSinceLastRound ?? []);
 
   for (const r of o.verdict.resolutions) {
     const e = out.findings.find((x) => x.id === r.id);
@@ -221,17 +275,17 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
       }
       continue;
     }
-    // 근거(실패 시나리오와 위치)가 없는 P1은 P2로 내린다. P0은 내리지 않는다(10.2절 (3))
-    const unfounded = f.severity === 'P1' && (f.evidence.trim() === '' || f.file.trim() === '');
-    const severity: Severity = unfounded ? 'P2' : f.severity;
+    const { severity, status, note } = newEntryStatus(f, {
+      round,
+      changed,
+      outside: outsideFiles,
+      repro,
+    });
     const blocking = BLOCKING.includes(severity);
     if (!blocking && out.findings.length >= MAX_ENTRIES) {
       out.dropped++;
       continue;
     }
-    // 동결: 재현 job이 재현한 P1은 예외로 받는다(10.2절 (5)). "재현 안 됨"은 상태를 바꾸지 않는다
-    const frozen =
-      round >= 2 && severity === 'P1' && !changed.has(f.file) && repro !== 'reproduced';
     out.findings.push({
       id: `F${next++}`,
       severity,
@@ -240,12 +294,8 @@ export function applyVerdict(l: Ledger, o: ApplyOptions): Ledger {
       line: f.line,
       title: oneLine(f.title, LIMITS.title),
       repro,
-      status: blocking && !frozen ? 'open' : 'deferred',
-      note: unfounded
-        ? '근거 없음: P1에서 P2로 내림(10.2절 (3))'
-        : frozen
-          ? '동결: 직전 라운드 이후 바뀌지 않은 파일의 새 지적(10.2절 (5))'
-          : '',
+      status,
+      note,
       round,
       rejectedBy: [],
       ...(o.planOnly ? { planRound: true as const } : {}),
@@ -288,6 +338,7 @@ export function applyPlanReview(l: Ledger, o: PlanReviewOptions): Ledger {
 /**
  * review-ledger 판정(R16): open인 P0·P1이 없어야 한다.
  * 동결돼 deferred로 등록된 P1은 막지 않는다(10.2절 (5): 후속 PR·tech-debt로 넘긴다). 수를 description에 적는다.
+ * 범위 밖으로 미룬 P1(Issue #262)도 막지 않고, 동결과 따로 수를 적는다(실패할 때도).
  * accepted(제작자 승인)인 P0·P1도 막지 않고 수를 적는다.
  * parked(구현 대기)도 막지 않고 수를 적는다: 계획만 담은 head에만 있고, 코드가 섞인 head의 기록은 판정 전에 open으로 되돌린다
  */
@@ -295,13 +346,14 @@ export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; descrip
   const open = l.findings.filter((e) => BLOCKING.includes(e.severity) && e.status === 'open');
   const parkedCount = l.findings.filter((e) => e.status === 'parked').length;
   const parked = parkedCount ? `, 구현 대기 ${parkedCount}` : '';
+  const outsideCount = l.findings.filter((e) => e.severity === 'P1' && isOutside(e)).length;
   if (open.length === 0) {
     const deferred = l.findings.filter((e) => e.status === 'deferred');
-    const frozen = deferred.filter((e) => e.severity === 'P1').length;
+    const frozen = deferred.filter((e) => e.severity === 'P1' && !isOutside(e)).length;
     const accepted = l.findings.filter((e) => e.status === 'accepted').length;
     return {
       state: 'success',
-      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''}${accepted ? `, 제작자 승인 ${accepted}` : ''}${parked})`,
+      description: `차단 지적 없음 (전체 ${l.findings.length}, 미룸 ${deferred.length}${frozen ? `, 그중 동결 P1 ${frozen}` : ''}${outsideCount ? `, 그중 범위 밖 P1 ${outsideCount}` : ''}${accepted ? `, 제작자 승인 ${accepted}` : ''}${parked})`,
     };
   }
   let ids = open.map((e) => e.id).join(', ');
@@ -310,7 +362,7 @@ export function ledgerStatus(l: Ledger): { state: 'success' | 'failure'; descrip
   const accepted = l.findings.filter((e) => e.status === 'accepted').length;
   return {
     state: 'failure',
-    description: `열린 차단 지적 ${open.length}건: ${ids}${accepted ? `, 제작자 승인 ${accepted}` : ''}${parked}`,
+    description: `열린 차단 지적 ${open.length}건: ${ids}${accepted ? `, 제작자 승인 ${accepted}` : ''}${outsideCount ? `, 범위 밖 P1 ${outsideCount}` : ''}${parked}`,
   };
 }
 

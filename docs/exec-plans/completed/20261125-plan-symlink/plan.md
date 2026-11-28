@@ -1,0 +1,125 @@
+---
+id: 20261125-plan-symlink
+issue: 194 # GitHub Issue 번호
+type: fix # 브랜치 접두어: feat | fix | chore | docs | refactor | test
+status: completed # draft | active | blocked | completed | abandoned
+size: medium # small | medium | large (4.3절)
+risk: high # low | normal | high (10.1절)
+author: claude-code # claude-code | codex | <사람>
+owner: mac-session # 선점한 runner 작업자 또는 사람
+claimed_at: 2026-11-25T12:54:22+09:00 # new-task가 채운다
+---
+
+# PR 트리의 계획을 읽는 판정·검증 코드가 계획 자리의 심볼릭 링크를 따라가지 않게 한다(작업 트리에서 읽되 링크를 거절한다)
+
+## 목표와 수용 기준
+
+PR 트리의 계획을 데이터로 읽는 판정 코드(`plan-gate`, `risk-gate`의 계획 위험도, 계획 해시, 검증자 계획의 작성자, 검증 입력)는 `findPlan`(`existsSync`)으로 계획을 찾고 `readFileSync`·`readdirSync`로 읽는다. 셋 다 심볼릭 링크를 따라간다. 계획 자리(계획 파일, `index.json`, step 파일, 그 위의 폴더)에 링크가 있으면 링크 대상, 곧 PR 트리 밖의 파일이나 다른 계획을 그 PR의 계획으로 읽는다(Issue #194, PR #189의 계획 검증 지적 F1). 예를 들어 위험도 high 계획 자리를 `risk: low`인 파일로 가리키게 할 수 있다.
+
+착수 때 확인한 것: 계획을 읽는 CI job(`gates`의 `evaluate`·`selftest`, 두 판정 워크플로의 `plan`·`judge`)은 PR 트리를 받기 전에 `git config --global core.symlinks false`를 설정한다. 그래서 지금 CI에서는 링크가 링크 대상 경로를 글로 담은 일반 파일로 체크아웃되고, 위 코드가 링크를 따라가지 않는다. 보호는 워크플로의 설정 한 줄에만 있고 코드에는 없다(설정이 빠진 체크아웃이나 로컬에서 PR 트리를 읽으면 따라간다). `scope`는 계획을 HEAD 커밋의 일반 파일로만 읽어 이미 막는다(`readPlanAtHead`).
+
+이 계획은 계획을 읽는 코드가 체크아웃 설정과 무관하게 링크를 따라가지 않게 한다. HEAD 커밋이 아니라 작업 트리에서 읽되 링크를 거절한다: `plan-gate`와 계획 해시는 로컬(`plan-gate --mode plan`을 커밋 전에 돌린다)과 runner도 쓰므로, HEAD에서 읽으면 커밋하지 않은 계획을 보지 못한다(의사결정 로그).
+
+수용 기준:
+
+1. 새 파일 `scripts/lib/plan-read.ts`의 세 함수는 링크를 따라가지 않는다.
+   - `findPlanSafe(root, id)`: `findPlan`과 같은 후보 순서로 계획을 찾는다. `readPlanFile(root, rel)`: 계획 안 파일의 글(없으면 `null`). `listPlanDir(root, rel)`: 계획 폴더의 이름 목록(없으면 `[]`). 한 판정 안에서 여러 자리를 읽을 때는 색인을 한 번만 읽는 `planReader(root)`(`find`·`read`·`list`)를 쓴다.
+   - 먼저 색인을 본다(`root`가 git 작업 트리 안일 때): 그 경로나 위 폴더 자리가 색인에 심볼릭 링크(모드 120000)나 서브모듈(160000)로 있으면 그 자리를 적은 `PlanPathError`를 던진다. 작업 트리에 그 자리가 없어도 던진다(색인에만 링크로 있는 자리). 폴더를 읽을 때(`listPlanDir`)는 작업 트리의 이름에, 작업 트리에는 없고 색인에만 링크·서브모듈로 있는 그 폴더 바로 아래 항목의 이름도 더해 돌려준다(목록만으로는 던지지 않는다. 그 이름을 읽는 쪽이 읽을 때 던진다). 그래서 색인에만 있는 step 링크는 계획 해시가 읽다가 거절하고, 해시가 읽지 않는 같은 폴더의 다른 링크는 결과를 바꾸지 않는다. `core.symlinks=false`로 받아 링크가 일반 파일이 된 체크아웃을 잡는다. 색인을 읽지 못하면 던진다. git 작업 트리가 아니면 색인은 보지 않는다(색인이 없다).
+   - 그다음 `root`부터 그 경로까지의 각 자리를 `lstat`으로 본다. 어느 자리든 심볼릭 링크이면 `PlanPathError`를 던진다. 폴더 자리는 폴더, 파일 자리는 일반 파일이어야 한다(아니면 던진다). 자리가 없으면 없는 것으로 돌려준다.
+   - 색인은 경로 인자 없이 통째로 읽어(`git ls-files -s -z`) 경로를 git에 넘기지 않는다(테스트: 위 경우마다 던짐·없음·글을 단언).
+2. 계획을 읽는 판정 코드가 이 함수로 읽는다: `scripts/gates/plan-gate.ts`(계획 찾기, 계획·`index.json`·step 파일 읽기), `scripts/gates/risk-gate.ts`의 `planRisk`, `scripts/ci/plan-hash.ts`(`planHash`, `planHashes`, `planMode`), `scripts/ci/review-plan.ts`의 `planAuthor`, `scripts/ci/review-input.ts`의 계획·step 파일 찾기. 함수마다 자기가 읽는 자리에 링크가 있으면(링크 자체, `core.symlinks=false`로 받은 일반 파일 모두) 실패 쪽이다. 읽지 않는 자리의 링크는 그 함수의 결과를 바꾸지 않는다.
+   - 계획 파일이나 계획 폴더의 링크: 아래 모두.
+   - `index.json`이나 step 파일의 링크(작업 트리에는 없고 색인에만 링크로 있는 step 파일 포함): `planGate`, `planHash`·`planHashes`·`planMode`, `writeReviewInput`의 step 줄. `planRisk`·`planAuthor`는 `plan.md`만 읽으므로 정상 계획의 값을 낸다(`risk: high`, `author: claude-code`).
+   - `planGate`는 통과가 아니다: 문제 하나가 "계획 자리가 일반 파일·폴더가 아니다(심볼릭 링크·서브모듈)"와 그 자리를 적는다.
+   - `riskGate`(`gates`의 `guarded` 안)는 통과가 아니다(`assessRisk`가 던져 `error`). `planReview`는 위험도 high다(이미 있는 `catch`).
+   - `planHash`·`planHashes`는 던지고, `planMode`는 `{ mode: 'code', hash: '' }`다.
+   - `planAuthor`는 `''`이다(작성자를 모르면 위험도 낮음에서도 Codex가 판정한다).
+   - `writeReviewInput`의 `context.md`는 그 자리를 "읽지 않음(일반 파일·폴더가 아니다)"으로 적는다(계획 줄 또는 step 줄).
+   - 어느 결과에도 링크 대상의 글(테스트가 링크 대상에 넣은 표식, `risk: low`, `author: codex`)이 나오지 않는다(테스트).
+3. 링크의 꼴: 계획 파일(`plan.md`) 링크, 계획 폴더 링크, `index.json` 링크, step 파일 링크, 계획 파일·계획 폴더 링크를 커밋한 뒤 `core.symlinks=false`로 받은 체크아웃, 그리고 step 파일이 작업 트리에는 없고 색인에만 링크로 있는 꼴(이름을 숫자로 바꾸면 달라지는 step 이름 포함: 계획 해시는 원래 경로를 적어 거절한다). 링크 대상은 리포 밖의 "그럴듯한 계획"(`risk: low`, `author: codex`, 표식 글)이다(테스트, 새 파일 `scripts/test/plan-symlink.test.ts`. 변경 전 코드에서는 링크 대상을 읽어 단언으로 실패한다).
+4. 기존 동작이 그대로다: 기존 테스트(`plan-gate.test.ts`, `plan-hash.test.ts`, `risk-gate.test.ts`, `gates.test.ts`, `ci.test.ts`, `scope.test.ts`, `runner-plan-review.test.ts`, `task.test.ts`)가 단언을 고치지 않고 통과한다. 이 리포의 `docs/exec-plans/`에 있는 계획 폴더마다 새 읽기로 계산한 `planHash`가 그 커밋의 `planHashAt(root, 'HEAD', …)`와 같다(테스트). 커밋하지 않은(추적되지 않은) 계획 파일도 전처럼 읽어 `plan-gate --mode plan`이 통과한다(테스트).
+5. 설계서 10.4절 "심볼릭 링크" 항목에 계획을 읽는 base 스크립트가 체크아웃 설정과 무관하게 링크를 따라가지 않는다는 것을 적는다. `docs/harness/architecture.md`의 라이브러리 목록과 변경 조각이 맞다. `node scripts/harness.ts check`가 통과하고, 그 안의 `test-effect`가 새 테스트(`scripts/test/plan-symlink.test.ts`)를 변경 전 코드에서 "단언 실패"로 판정한다.
+
+## 범위 / 비범위
+
+범위:
+
+- `scripts/lib/plan-read.ts`(새 파일): `findPlanSafe`, `readPlanFile`, `listPlanDir`, `planReader`, `PlanPathError`.
+- 판정 코드의 계획 읽기를 바꾼다: `scripts/gates/plan-gate.ts`, `scripts/gates/risk-gate.ts`, `scripts/ci/plan-hash.ts`, `scripts/ci/review-plan.ts`, `scripts/ci/review-input.ts`. 읽는 자리만 바꾸고 판정 규칙은 그대로다.
+- 테스트: 새 파일 `scripts/test/plan-symlink.test.ts`, `scripts/test/plan-read.test.ts`.
+- 문서: 설계서 10.4절, `docs/harness/architecture.md`, 변경 조각.
+
+비범위:
+
+- `scripts/gates/scope.ts`. 이유: 이미 HEAD 커밋의 일반 파일로만 읽는다. 읽는 방식을 하나로 합치는 일은 동작을 바꾸지 않는 정리라 이 계획에 넣지 않는다.
+- 로컬 명령과 L1 훅의 계획 읽기(`findPlan`을 쓰는 `task.ts`, `approval.ts`, `hooks/decide.ts` 등). 이유: 자기 worktree를 읽는다(Issue #194의 대상이 아니다). `findPlan`은 그대로 둔다.
+- 워크플로의 `core.symlinks false` 설정. 이유: 그대로 둔다(LLM 검증자가 `pr/`를 읽을 때의 보호이기도 하다, 10.4절). 재현 job 두 곳(`judge-*.yml`의 `repro`)은 이 설정이 없지만 계획을 읽지 않고 PR 코드를 실행하는 job이다(비밀·쓰기 권한 없음).
+- base 쪽 읽기(`findPlanAt`, `planHashAt`, `showFile`): git 객체를 읽으므로 작업 트리의 링크와 무관하다.
+
+## 관련 파일·문서
+
+- `scripts/lib/plan-read.ts`, `scripts/gates/plan-gate.ts`, `scripts/gates/risk-gate.ts`, `scripts/ci/plan-hash.ts`, `scripts/ci/review-plan.ts`, `scripts/ci/review-input.ts`
+- `scripts/test/plan-symlink.test.ts`, `scripts/test/plan-read.test.ts`
+- `docs/harness/design.md`, `docs/harness/architecture.md`, `docs/harness/changes/20261125-plan-symlink-s0.md`
+- `docs/exec-plans/active/20261125-plan-symlink/**`
+- 읽기만: `scripts/lib/plan.ts`, `scripts/lib/git.ts`, `scripts/gates/scope.ts`, `scripts/ci/gates.ts`, `scripts/test/helpers.ts`, `scripts/test/plan-gate.test.ts`, `scripts/test/plan-hash.test.ts`, `scripts/test/risk-gate.test.ts`, `.github/workflows/gates.yml`, `.github/workflows/judge-claude.yml`, `.github/workflows/judge-codex.yml`
+
+## step 목록
+
+- step0 safe-read: 링크를 따라가지 않는 계획 읽기(`plan-read.ts`)를 만들고 판정 코드 다섯 곳의 계획 읽기를 그것으로 바꾼다. 테스트 먼저.
+
+## 진행 로그
+
+- 2026-11-25 접수: 제작자가 대화에서 "다른 세션의 작업과 겹치지 않게 작업 가능한 것을 파악하고 진행"을 지시했다. #237(PR #246)이 제작자 승인 대기에 들어가 다음으로 선점되지 않은 #194를 맡았다. 열린 PR 8개 가운데 이 계획의 코드 파일을 고치는 PR은 없다(PR #217은 `scripts/ci/ledger*.ts`·`review-round.ts`, PR #229는 `scripts/ci/record.ts`·`codex-scan.ts`).
+- 2026-11-25 확인(읽기만): Issue가 꼽은 호출자 다섯이 `findPlan`(`existsSync`) 뒤에 `readFileSync`·`readdirSync`로 읽는다. `review-input`은 계획의 경로 이름만 쓰고 글은 읽지 않는다. 계획을 읽는 CI job의 체크아웃 여섯 곳은 모두 `core.symlinks false`를 먼저 설정한다(재현 job 두 곳만 없다). 판정 코드가 던지면 `gates`의 `guarded`가 `error`로 적고, `planReview`는 위험도 high로 둔다.
+- 2026-11-25 계획만 담은 초안 PR #249를 열었다. 계획 검증 1회차: Claude 승인(지적 없음), Codex 수정 요청(P1 셋, P2 하나). 넷 다 맞는 지적이라 계획을 고쳤다.
+  - F1: `index.json`·step 파일만 링크인 꼴에서도 `assessRisk`가 던지고 `planAuthor`가 `''`라고 적었지만, 두 함수는 `plan.md`만 읽어 그렇게 할 검사 단계가 없다. → 함수마다 "자기가 읽는 자리의 링크면 실패, 읽지 않는 자리는 결과를 바꾸지 않는다"로 기대를 나눴다(수용 기준 2). 검증 입력은 step 파일 자리도 확인해 링크면 그 경로를 안내하지 않는다.
+  - F2: 계획 해시는 `plan.md`와 step 파일만 읽어 `index.json` 링크를 거절할 단계가 없다. → `planHash`가 `index.json` 자리도 확인하되 해시 입력은 그대로 둔다(step0 작업 3).
+  - F3: 작업 트리에 자리가 없으면 색인을 보기 전에 "없음"으로 돌아가, 색인에만 링크로 있는 자리를 놓친다. → 색인을 먼저 본다. 단위 테스트에 그 꼴을 넣었다(수용 기준 1, step0 작업 1·2).
+  - F4(P2): 제목이 "HEAD 커밋 읽기로 맞춘다"라 작업 트리에서 읽는 설계와 어긋난다. → 제목을 고쳤다.
+- 2026-11-25 계획 검증 2회차: Claude 승인(지적 없음), Codex는 F2·F3을 닫고 F1을 남겼으며 새 지적 하나(F5, P1)를 냈다. 맞는 지적이라 계획을 고쳤다. 그동안 로컬에서 구현했고(올리지 않았다) AC의 테스트 목록이 통과했다(테스트 146개).
+  - F1(남음): 수용 기준은 `index.json` 링크에서도 검증 입력의 step 줄이 "읽지 않음"이라 했는데 step0 작업 3은 step 파일 자리만 확인하라고 적었다. → `index.json` 자리와 step 파일 자리를 모두 확인한다고 적었다(구현은 이미 둘 다 본다).
+  - F5: 계획 해시는 폴더 목록으로 step 파일을 찾으므로, step 파일이 작업 트리에는 없고 색인에만 링크로 있으면 그 자리를 검사하지 않아 step이 빠진 해시를 낸다. → 폴더 읽기가 그 폴더 아래의 색인 링크·서브모듈도 거절한다(수용 기준 1). 링크의 꼴 (사)와 단위 테스트를 더했다(수용 기준 3, step0 작업 1·2).
+  - 구현과 어긋나던 문구 하나를 함께 고쳤다: 색인은 경로 인자 없이 통째로 읽는다(`--literal-pathspecs`로 경로를 넘기지 않는다).
+- 2026-11-25 계획 검증 3회차(head `daf6035`): Claude 승인, Codex는 사용 한도로 판정 없음(`review/codex` error, "You've hit your usage limit … try again at 3:00 PM"). 2026-11-26에 그 판정 실행(Actions run 45544969695)의 실패한 job을 다시 돌렸다: Codex가 F1·F5를 닫고 새 지적 하나(F6, P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
+  - F6: 폴더 읽기가 그 폴더 아래의 색인 링크를 모두 거절하면, 계획 해시가 읽지 않는 같은 폴더의 참고 파일 링크도 해시·모드를 바꾼다(수용 기준 2의 "읽지 않는 자리의 링크는 결과를 바꾸지 않는다"와 어긋난다). → 폴더 읽기는 던지지 않고 색인에만 있는 바로 아래 항목의 이름을 목록에 더한다. 그 이름을 읽는 쪽이 거절한다(수용 기준 1, step0 작업 2). 읽지 않는 참고 파일 링크의 대조 테스트를 더했다(step0 작업 1).
+  - 같은 push에 `origin/main` 병합(#217)을 함께 올린다.
+- 2026-11-26 계획 검증 4회차(head `b4d6cfa`): Claude 승인, Codex는 F6을 닫고 새 지적 하나(F7, P1)를 냈다. 맞는 지적이라 계획을 고쳤다.
+  - F7: 해시 계산기는 step 이름의 번호를 숫자로 바꿔 경로를 다시 만든다. 색인에만 있는 `step9007199254740993.md` 링크는 목록에 들어가지만 계산기는 반올림된 `step9007199254740992.md`를 읽어, 원래 링크를 거절하지 못한다. → 해시를 계산하기 전에 목록의 원래 이름으로 step 파일 자리를 확인한다(해시 입력은 그대로, step0 작업 3). 그 꼴의 테스트를 더했다(step0 작업 1, 수용 기준 3).
+- 2026-11-26 계획 검증 5회차(head `91a498b`): Claude·Codex 승인(지적 없음). 원장에 `계획 검증(G1): 해시 88815ead7ee4 · 승인: claude, codex`가 남았다(미룸 1: F4, P2). 로컬 구현(F5~F7 반영)을 올린다.
+- 2026-11-26T09:50:32+09:00 step0 재작업: 구현 검증 1회차(Codex P1 셋): F8 root 자체의 링크, F9 색인 읽기 실패 때 planReview가 high로 떨어지게, F10 검증 결과를 계획에 적는다
+- 2026-11-26 구현 검증 1회차(head `431b0ef`): Claude 승인(지적 없음), Codex 수정 요청(P1 셋). 셋 다 맞는 지적이라 고쳤다.
+  - F8: `root` 자체가 심볼릭 링크면 그 아래 자리의 `lstat`이 링크를 따라간다. → `root`(`path.resolve`로 끝의 `/`를 뗀다)도 `lstat`해 링크이거나 폴더가 아니면 자리 `.`로 `PlanPathError`. 단위 테스트(끝에 `/`가 붙은 꼴 포함)와, 링크인 `root`에서 `planGate`가 막히는 통합 테스트를 더했다.
+  - F9: 색인을 읽지 못한 오류(링크가 아닌 일반 오류)를 `planAuthor`가 다시 던져, `planReview`가 위험도 계산의 `catch`(high)에 닿기 전에 멈췄다. → `planAuthor`는 어떤 오류든 `''`이다. 같은 실패가 위험도 계산에서도 나서 high와 두 검증자가 된다. 깨진 색인에서 `planReview`가 `{ risk: high, author: '', claude: true, codex: true }`인 테스트를 더했다.
+  - F10: 검증자 입력(계획 파일)에 지금 구현의 AC·`check`·`test-effect` 결과가 없었다. → 아래 "검증 방법과 결과"에 이번 구현의 실제 결과를 적었다.
+- 2026-11-26T10:17:35+09:00 step0 재작업: 구현 검증 2회차(Codex): F8 root 검사를 git 색인 읽기보다 앞에, F10 실제 check 결과를 커밋 SHA와 함께 적는다
+- 2026-11-26 구현 검증 2회차(head `bae12c8`): Claude 승인, Codex는 F9를 닫고 F8·F10을 열어 둔 채 수정 요청(새 지적 없음).
+  - F8(남음): `root` 검사가 git 색인 읽기 뒤에 있어, `root`가 링크이고 링크 대상의 색인이 깨졌으면 자리 `.` 대신 일반 git 오류가 났다. → `root` 검사를 git을 부르기 전으로 옮겼다. 링크 대상의 색인이 깨진 꼴을 단위·통합 테스트에 더했다(옛 순서에서는 git 오류로 실패한다).
+  - F10(남음): `check`를 "완료 처리 직전에 돌린다"고만 적어 통과 근거가 없었다(`complete-step`은 `check`를 확인하지 않는다). → 아래 "검증 방법과 결과"에 코드 커밋의 SHA와 함께 실제로 돌린 `check` 결과를 적는다. 그 뒤로는 계획 파일만 바뀌므로 `check --only fmt,doc-lint,bypass-scan,secret-scan`을 다시 돌린다.
+
+## 의사결정 로그
+
+- 결정: HEAD 커밋이 아니라 작업 트리에서 읽되 링크를 거절한다(`lstat`으로 각 자리 + git 색인의 모드) / 이유: `planGate`와 `planHash`는 CI뿐 아니라 로컬 `plan-gate`(커밋 전에 돌린다)와 runner도 부른다. HEAD에서 읽으면 커밋하지 않은 계획을 보지 못해 로컬 동작이 바뀐다. 색인을 함께 보면 `core.symlinks=false`로 받아 링크가 일반 파일이 된 CI 체크아웃에서도 "링크였다"를 알아 분명한 오류로 막는다 / 버린 대안: (가) Issue의 제안대로 HEAD 커밋에서만 읽는다(`scope`의 `readPlanAtHead`. 로컬의 커밋 전 검사가 달라진다). (나) CI 호출에만 HEAD 읽기를 넘기는 선택지를 둔다(같은 함수가 부르는 곳에 따라 다른 것을 읽어 판정이 갈린다). (다) `lstat`만 본다(`core.symlinks=false` 체크아웃에서 링크 대상 경로를 담은 글을 계획으로 읽는다. 따라가지는 않지만 오류가 흐려진다).
+- 결정: 링크를 만나면 판정을 실패 쪽으로 둔다(`plan-gate` 문제, `risk-gate` error, 위험도 high, 작성자 모름) / 이유: 링크인 계획은 정상 작업에서 생기지 않고, 무엇을 읽어야 하는지 정할 수 없다 / 버린 대안: 링크를 없는 계획으로 본다(`plan-gate`는 "계획 없음"으로 막지만 `risk-gate`는 계획 위험도를 빼고 판정한다).
+
+## 발견 사항
+
+- 지금 CI에서는 계획을 읽는 job이 모두 `core.symlinks false`로 PR 트리를 받아, 위 코드가 실제로 링크를 따라간 적은 없다(보호가 워크플로 설정 한 줄에만 있었다). 이 계획은 코드에도 같은 보호를 둔다. → 처리: [설계서 10.4절 "심볼릭 링크"](../../../harness/design.md)
+- 재현 job 두 곳(`judge-claude.yml`·`judge-codex.yml`의 `repro`)은 `core.symlinks false` 없이 PR 트리를 받는다. 계획을 읽지 않고 PR 코드를 실행하는 job이고 비밀·쓰기 권한이 없다(10.4절). → 처리: 해당 없음
+- 계획 해시 계산기(`hashFrom`)는 step 이름의 번호를 숫자로 바꿔 경로를 다시 만들어, 숫자로 바꾸면 달라지는 이름(`step9007199254740993.md`)의 글은 해시에 묶이지 않는다. step 파일은 `index.json`의 순서(0부터 n-1)로만 읽히므로(`plan-gate`, runner) 그런 이름의 step은 실행되지 않는다. 링크 판정은 원래 이름으로 한다(F7). → 처리: 해당 없음
+
+## 열린 질문
+
+없음.
+
+## 검증 방법과 결과
+
+- step0의 AC 명령(새 테스트 두 파일, 기존 판정 테스트, `test-effect` 판정 줄, `check`).
+- 결과(2026-11-26, macOS, Node 22.23.3). 코드·테스트의 마지막 커밋 `a49158c`(구현 검증 F8~F10 반영)에서 돌렸다. 그 뒤의 커밋은 이 계획 파일만 바꾼다.
+  - AC의 `node --test` 열 파일: 테스트 153개 통과(새 테스트 `plan-read.test.ts` 10개, `plan-symlink.test.ts` 14개 포함). 기존 판정 테스트의 단언은 고치지 않았다. 앞선 커밋 `d82e4b7`에서 머신 부하 평균이 24일 때 한 번 돌린 실행에서는 `scope.test.ts`의 시간 제한 테스트 둘(`scopePaths`의 긴 글 읽기, 8.6초·5.8초)이 시간을 넘겼다. 그 파일만 따로 돌리면 27개가 통과했다. 이 변경은 `scope.ts`를 바꾸지 않았다.
+  - `test-effect`: `scripts/test/plan-symlink.test.ts: effective(base에서 단언 실패, 종료 코드 1)`. `scripts/test/plan-read.test.ts: effective(base에서 실패(단언 실패 아님: 모듈 없음 등), 종료 코드 1)`: 새 모듈의 단위 테스트라 변경 전 코드에서는 불러오기에서 실패한다. 그 파일의 단언(경우마다 던짐·자리·없음·글)은 직접 확인했다.
+  - `node scripts/harness.ts check`(커밋 `a49158c`, 부하 평균 2~7): 통과. fmt·lint·test(테스트 파일 전체)·test-effect·doc-lint·bypass-scan·secret-scan 모두 통과, build는 해당 없음. 이 계획 파일을 고친 뒤에는 `check --only fmt,doc-lint,bypass-scan,secret-scan`을 다시 돌렸다.
+
+## 다음 할 일
+
+- 구현 커밋 → AC·`check` → `complete-step` → push → 두 검증자 판정 → `pr-ready`로 제작자 승인 요청(위험도 high).

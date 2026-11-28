@@ -168,6 +168,8 @@ export interface RecordLedgerOptions extends Where {
   promptBase: string;
   /** 이 검증자의 직전 판정 head 이후 바뀐 파일(plan job이 계산). 모르면 null */
   changedSinceLastRound: readonly string[] | null;
+  /** 직전 판정 head 이후 main 병합으로만 바뀐 파일(plan job이 계산, Issue #262). 모르면 빈 목록이나 없음 */
+  outsideSinceLastRound?: readonly string[];
   /** 재현 job 결과(판정 findings 순번 → 결과). 없으면 재현 표시 없이 등록한다 */
   repro?: ReadonlyMap<number, ReproResult>;
   /**
@@ -249,6 +251,7 @@ export async function recordLedger(o: RecordLedgerOptions): Promise<StatusPayloa
         verdict,
         headSha: o.headSha,
         changedSinceLastRound: o.changedSinceLastRound,
+        outsideSinceLastRound: o.outsideSinceLastRound,
         repro: o.repro,
         planOnly: o.planOnly,
       });

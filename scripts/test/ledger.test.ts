@@ -14,6 +14,7 @@ import {
   type Entry,
   type Ledger,
 } from '../ci/ledger.ts';
+import * as ledgerModule from '../ci/ledger.ts';
 import type { Finding, Resolution, Verdict } from '../ci/verdict.ts';
 
 const BASE = 'a'.repeat(40);
@@ -478,6 +479,143 @@ test('재현 결과를 원장에 적는다. 재현된 P1은 동결하지 않고,
     repro: new Map([[0, 'reproduced']]),
   });
   assert.deepEqual([byId(again, 'F3').repro, byId(again, 'F3').status], ['reproduced', 'open']);
+});
+
+/** 범위 밖 미룸의 처리 칸(Issue #262). 새 상수를 정적으로 가져오면 변경 전 코드에서 파일이 단언 전에 죽는다 */
+const OUTSIDE = /^범위 밖: 직전 판정 이후 main 병합으로만 바뀐 파일의 새 P1이다/;
+
+test('범위 밖(Issue #262): main 병합으로만 바뀐 파일의 새 P1은 재현돼도 deferred, P0은 open, 그 밖은 지금 규칙', () => {
+  const l = applyVerdict(round1([]), {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P1, 재현됨' }),
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P1, 재현 안 됨' }),
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P0', severity: 'P0' }),
+      finding({ file: 'src/main-only.ts', title: '범위 밖 근거 없음', evidence: '' }),
+      finding({ file: 'src/fix.ts', title: '바뀐 파일 P1' }),
+      finding({ file: 'src/old.ts', title: '바뀌지 않은 파일, 재현됨' }),
+      finding({ file: 'src/old.ts', title: '바뀌지 않은 파일, 재현 안 됨' }),
+    ]),
+    headSha: H2,
+    changedSinceLastRound: ['src/fix.ts'],
+    outsideSinceLastRound: ['src/main-only.ts'],
+    repro: new Map([
+      [0, 'reproduced'],
+      [1, 'not-reproduced'],
+      [5, 'reproduced'],
+    ]),
+  });
+  assert.deepEqual(
+    l.findings.map((e) => [e.title, e.severity, e.status, OUTSIDE.test(e.note)]),
+    [
+      ['범위 밖 P1, 재현됨', 'P1', 'deferred', true],
+      ['범위 밖 P1, 재현 안 됨', 'P1', 'deferred', true],
+      ['범위 밖 P0', 'P0', 'open', false],
+      ['범위 밖 근거 없음', 'P2', 'deferred', false],
+      ['바뀐 파일 P1', 'P1', 'open', false],
+      ['바뀌지 않은 파일, 재현됨', 'P1', 'open', false],
+      ['바뀌지 않은 파일, 재현 안 됨', 'P1', 'deferred', false],
+    ],
+  );
+  assert.match(byId(l, 'F4').note, /근거 없음/);
+  assert.match(byId(l, 'F7').note, /동결/);
+  // 라운드와 상관없다: 그 검증자의 첫 판정이어도 목록에 있으면 범위 밖이다
+  const first = applyVerdict(l, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ file: 'src/main-only.ts', title: 'codex 첫 판정' })]),
+    headSha: H2,
+    changedSinceLastRound: null,
+    outsideSinceLastRound: ['src/main-only.ts'],
+  });
+  assert.equal(first.findings.at(-1)?.status, 'deferred');
+  assert.match(first.findings.at(-1)?.note ?? '', OUTSIDE);
+  // 목록을 주지 않으면 지금 규칙: 첫 판정의 P1은 open
+  const none = applyVerdict(l, {
+    reviewer: 'codex',
+    verdict: verdict([finding({ file: 'src/main-only.ts', title: 'codex 목록 없음' })]),
+    headSha: H2,
+    changedSinceLastRound: null,
+  });
+  assert.equal(none.findings.at(-1)?.status, 'open');
+  // 이미 있는 지적은 바꾸지 않는다: 열린 F3(P0)·F5(P1)를 다시 내도 open 그대로다
+  const again = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/main-only.ts', title: '범위 밖 P0', severity: 'P0' }),
+      finding({ file: 'src/fix.ts', title: '바뀐 파일 P1' }),
+    ]),
+    headSha: H3,
+    changedSinceLastRound: [],
+    outsideSinceLastRound: ['src/fix.ts', 'src/main-only.ts'],
+  });
+  assert.deepEqual([byId(again, 'F3').status, byId(again, 'F5').status], ['open', 'open']);
+  assert.equal(again.findings.length, l.findings.length);
+});
+
+test('ledgerStatus(Issue #262): 범위 밖 P1은 막지 않고 동결과 따로 센다', () => {
+  const l = applyVerdict(round1([]), {
+    reviewer: 'claude',
+    verdict: verdict([
+      finding({ file: 'src/main-only.ts', title: '범위 밖' }),
+      finding({ file: 'src/old.ts', title: '동결' }),
+    ]),
+    headSha: H2,
+    changedSinceLastRound: [],
+    outsideSinceLastRound: ['src/main-only.ts'],
+    repro: new Map([[0, 'reproduced']]),
+  });
+  const ok = ledgerStatus(l);
+  assert.equal(ok.state, 'success');
+  assert.equal(
+    ok.description,
+    '차단 지적 없음 (전체 2, 미룸 2, 그중 동결 P1 1, 그중 범위 밖 P1 1)',
+  );
+  // 열린 지적이 있어 실패할 때도 적는다
+  const bad = applyVerdict(l, {
+    reviewer: 'claude',
+    verdict: verdict([finding({ file: 'src/fix.ts', title: '열림' })]),
+    headSha: H3,
+    changedSinceLastRound: ['src/fix.ts'],
+  });
+  const f = ledgerStatus(bad);
+  assert.equal(f.state, 'failure');
+  assert.match(f.description, /범위 밖 P1 1/);
+});
+
+test('newEntryStatus(Issue #267): 원장 반영과 같은 규칙으로 새 지적의 등급·상태·처리 칸을 정한다', () => {
+  // 새 함수는 변경 전 코드에 없다: 단언으로 실패하게 한다
+  const f = (ledgerModule as Partial<typeof ledgerModule>).newEntryStatus;
+  assert.equal(typeof f, 'function', 'newEntryStatus 없음');
+  const st = (
+    over: Partial<Finding>,
+    o: { round?: number; changed?: string[]; outside?: string[]; repro?: '' | 'reproduced' } = {},
+  ) =>
+    f!(finding(over), {
+      round: o.round ?? 2,
+      changed: new Set(o.changed ?? ['src/fix.ts']),
+      outside: new Set(o.outside ?? ['src/main-only.ts']),
+      repro: o.repro ?? '',
+    });
+  const cases: [string, ReturnType<typeof st>, string, string, RegExp][] = [
+    ['바뀐 파일 P1', st({ file: 'src/fix.ts' }), 'P1', 'open', /^$/],
+    ['동결', st({ file: 'src/old.ts' }), 'P1', 'deferred', /^동결: /],
+    ['동결 예외: 재현됨', st({ file: 'src/old.ts' }, { repro: 'reproduced' }), 'P1', 'open', /^$/],
+    ['1라운드는 동결 없음', st({ file: 'src/old.ts' }, { round: 1 }), 'P1', 'open', /^$/],
+    [
+      '범위 밖',
+      st({ file: 'src/main-only.ts' }, { repro: 'reproduced' }),
+      'P1',
+      'deferred',
+      /^범위 밖: /,
+    ],
+    ['P0', st({ file: 'src/old.ts', severity: 'P0' }), 'P0', 'open', /^$/],
+    ['근거 없음', st({ file: 'src/fix.ts', evidence: ' ' }), 'P2', 'deferred', /^근거 없음: /],
+    ['P2', st({ file: 'src/fix.ts', severity: 'P2' }), 'P2', 'deferred', /^$/],
+  ];
+  for (const [name, r, severity, status, note] of cases) {
+    assert.deepEqual([r.severity, r.status], [severity, status], name);
+    assert.match(r.note, note, name);
+  }
 });
 
 // ---------- 계획 승인(G1, step4) ----------
